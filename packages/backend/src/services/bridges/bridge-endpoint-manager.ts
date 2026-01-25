@@ -86,7 +86,9 @@ export class BridgeEndpointManager extends Service {
         } catch (e) {
           if (e instanceof InvalidDeviceError) {
             const reason = (e as Error).message;
-            this.log.warn(`Invalid device detected. Entity: ${entityId} Reason: ${reason}`);
+            this.log.warn(
+              `Invalid device detected. Entity: ${entityId} Reason: ${reason}`,
+            );
             this._failedEntities.push({ entityId, reason });
             continue;
           } else {

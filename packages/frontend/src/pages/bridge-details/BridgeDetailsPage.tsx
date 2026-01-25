@@ -29,7 +29,11 @@ import { BridgeMoreMenu } from "./BridgeMoreMenu.tsx";
 const MemoizedBridgeDetails = memo(BridgeDetails);
 const MemoizedEndpointList = memo(EndpointList);
 
-const FailedEntitiesAlert = ({ failedEntities }: { failedEntities: FailedEntity[] }) => {
+const FailedEntitiesAlert = ({
+  failedEntities,
+}: {
+  failedEntities: FailedEntity[];
+}) => {
   const [expanded, setExpanded] = useState(false);
 
   if (!failedEntities || failedEntities.length === 0) {
@@ -43,8 +47,10 @@ const FailedEntitiesAlert = ({ failedEntities }: { failedEntities: FailedEntity[
       onClick={() => setExpanded(!expanded)}
     >
       <Typography variant="body2">
-        <strong>{failedEntities.length} entity/entities could not be loaded.</strong>
-        {" "}Click to {expanded ? "hide" : "show"} details.
+        <strong>
+          {failedEntities.length} entity/entities could not be loaded.
+        </strong>{" "}
+        Click to {expanded ? "hide" : "show"} details.
       </Typography>
       <Collapse in={expanded}>
         <List dense sx={{ mt: 1 }}>
@@ -56,7 +62,10 @@ const FailedEntitiesAlert = ({ failedEntities }: { failedEntities: FailedEntity[
               <ListItemText
                 primary={entity.entityId}
                 secondary={entity.reason}
-                primaryTypographyProps={{ variant: "body2", fontWeight: "bold" }}
+                primaryTypographyProps={{
+                  variant: "body2",
+                  fontWeight: "bold",
+                }}
                 secondaryTypographyProps={{ variant: "caption" }}
               />
             </ListItem>
