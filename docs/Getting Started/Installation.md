@@ -22,7 +22,7 @@ This application can be installed in different ways:
 
 Simply add the following GitHub Repository URL to your Home Assistant AddOn Store.
 
-> https://github.com/t0bst4r/home-assistant-addons
+> https://github.com/riddix/home-assistant-addons
 
 1. Open the UI of your Home Assistant instance
 2. Go to `Settings` -> `Add-Ons` -> `Add-On Store`
@@ -46,7 +46,7 @@ This repository builds a docker image for every release. You can simply run it b
 ```yaml
 services:
   matter-hub:
-    image: ghcr.io/t0bst4r/home-assistant-matter-hub:latest
+    image: ghcr.io/riddix/home-assistant-matter-hub:latest
     restart: unless-stopped
     network_mode: host
     environment: # more options can be found in the configuration section
@@ -81,7 +81,7 @@ docker run -d \
   -v $PWD/home-assistant-matter-hub:/data \
   # required due to restrictions in matter
   --network=host \
-  ghcr.io/t0bst4r/home-assistant-matter-hub:latest
+  ghcr.io/riddix/home-assistant-matter-hub:latest
 ```
 
 See 2.3 for more configuration options.

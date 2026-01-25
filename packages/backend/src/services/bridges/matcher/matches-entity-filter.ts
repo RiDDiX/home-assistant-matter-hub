@@ -28,8 +28,12 @@ export function testMatcher(
       return entity?.platform === matcher.value;
     case "pattern":
       return patternToRegex(matcher.value).test(entity.entity_id);
+    case "regex":
+      return testRegex(matcher.value, entity.entity_id);
     case "area":
       return (entity?.area_id ?? device?.area_id) === matcher.value;
+    case "device_name":
+      return testDeviceName(matcher.value, device);
   }
   return false;
 }
@@ -44,4 +48,32 @@ function patternToRegex(pattern: string): RegExp {
     .map((part) => escapeRegExp(part))
     .join(".*");
   return new RegExp(`^${regex}$`);
+}
+
+function testRegex(pattern: string, value: string): boolean {
+  try {
+    const regex = new RegExp(pattern);
+    return regex.test(value);
+  } catch {
+    return false;
+  }
+}
+
+function testDeviceName(
+  pattern: string,
+  device: HomeAssistantDeviceRegistry | undefined,
+): boolean {
+  if (!device) {
+    return false;
+  }
+  const deviceName = device.name_by_user ?? device.name ?? device.default_name;
+  if (!deviceName) {
+    return false;
+  }
+  const lowerPattern = pattern.toLowerCase();
+  const lowerDeviceName = deviceName.toLowerCase();
+  if (lowerPattern.includes("*")) {
+    return patternToRegex(lowerPattern).test(lowerDeviceName);
+  }
+  return lowerDeviceName.includes(lowerPattern);
 }

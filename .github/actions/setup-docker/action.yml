@@ -1,4 +1,5 @@
 name: Setup Docker
+description: Setup Docker with QEMU and Buildx for multi-architecture builds
 
 runs:
   using: composite

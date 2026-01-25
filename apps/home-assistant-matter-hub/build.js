@@ -35,7 +35,7 @@ fs.cpSync(
  */
 function packageDir(packageName, directory) {
   const packageJsonPath = fileURLToPath(
-    import.meta.resolve(path.join(packageName, "package.json")),
+    import.meta.resolve(`${packageName}/package.json`),
   );
   const packagePath = path.dirname(packageJsonPath);
   return path.join(packagePath, directory);

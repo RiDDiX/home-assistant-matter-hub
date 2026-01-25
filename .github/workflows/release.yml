@@ -2,12 +2,10 @@ name: Release
 
 on:
   workflow_dispatch:
-#  push:
-#    branches:
-#      - main
-#      - beta
-#  schedule:
-#    - cron: "0 2 * * *"
+  push:
+    branches:
+      - main
+      - beta
 
 permissions:
   contents: read
@@ -134,17 +132,17 @@ jobs:
       - name: Deploy documentation to GitHub Pages
         uses: actions/deploy-pages@v4
 
-  dispatch-repositories:
-    name: "Dispatch Repositories"
+  dispatch-addon:
+    name: "Dispatch Addon Repository"
     runs-on: ubuntu-latest
     needs: [release, docker]
-    if: false && needs.release.outputs.release-version != ''
+    if: needs.release.outputs.release-version != ''
     steps:
       - name: Dispatch Addon Repository
         uses: peter-evans/repository-dispatch@v4
         with:
           token: ${{ secrets.ADDON_REPOSITORY_PAT }}
-          repository: "t0bst4r/home-assistant-addons"
+          repository: "riddix/home-assistant-addons"
           event-type: release
           client-payload: |
             {

@@ -1,4 +1,5 @@
 name: Build and push docker
+description: Build and push Docker images for the application
 
 inputs:
   dockerfile:
@@ -25,7 +26,7 @@ runs:
       id: meta
       shell: bash
       env:
-        DOCKER_IMAGE_BASENAME: ghcr.io/t0bst4r/home-assistant-matter-hub
+        DOCKER_IMAGE_BASENAME: ghcr.io/riddix/home-assistant-matter-hub
       run: |
         CONTEXT=$(dirname "${{inputs.dockerfile}}")
         DOCKER_TYPE=$(basename "${{inputs.dockerfile}}" .Dockerfile)

@@ -1,4 +1,5 @@
 name: Find Dockerfiles
+description: Find all Dockerfiles in the project for multi-architecture builds
 
 outputs:
   dockerfiles:

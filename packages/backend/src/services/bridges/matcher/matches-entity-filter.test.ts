@@ -26,6 +26,19 @@ const deviceRegistry: HomeAssistantDeviceRegistry = {
   area_id: "area_id",
 };
 
+const deviceRegistryWithName: HomeAssistantDeviceRegistry = {
+  id: "device4711",
+  area_id: "area_id",
+  name: "Living Room Light",
+};
+
+const deviceRegistryWithUserName: HomeAssistantDeviceRegistry = {
+  id: "device4711",
+  area_id: "area_id",
+  name: "Living Room Light",
+  name_by_user: "My Custom Light Name",
+};
+
 describe("matchEntityFilter.testMatcher", () => {
   it("should match the domain", () => {
     expect(
@@ -219,6 +232,140 @@ describe("matchEntityFilter.testMatcher", () => {
           value: "light.my_en*z*",
         },
         undefined,
+        registry,
+      ),
+    ).toBeFalsy();
+  });
+
+  it("should match the regex", () => {
+    expect(
+      testMatcher(
+        {
+          type: HomeAssistantMatcherType.Regex,
+          value: "^light\\.my_.*$",
+        },
+        undefined,
+        registry,
+      ),
+    ).toBeTruthy();
+  });
+  it("should match a complex regex", () => {
+    expect(
+      testMatcher(
+        {
+          type: HomeAssistantMatcherType.Regex,
+          value: "^(light|switch)\\..*entity$",
+        },
+        undefined,
+        registry,
+      ),
+    ).toBeTruthy();
+  });
+  it("should not match the regex", () => {
+    expect(
+      testMatcher(
+        {
+          type: HomeAssistantMatcherType.Regex,
+          value: "^switch\\..*$",
+        },
+        undefined,
+        registry,
+      ),
+    ).toBeFalsy();
+  });
+  it("should return false for invalid regex", () => {
+    expect(
+      testMatcher(
+        {
+          type: HomeAssistantMatcherType.Regex,
+          value: "[invalid(regex",
+        },
+        undefined,
+        registry,
+      ),
+    ).toBeFalsy();
+  });
+
+  it("should match the device name", () => {
+    expect(
+      testMatcher(
+        {
+          type: HomeAssistantMatcherType.DeviceName,
+          value: "Living Room",
+        },
+        deviceRegistryWithName,
+        registry,
+      ),
+    ).toBeTruthy();
+  });
+  it("should match the device name case-insensitively", () => {
+    expect(
+      testMatcher(
+        {
+          type: HomeAssistantMatcherType.DeviceName,
+          value: "living room",
+        },
+        deviceRegistryWithName,
+        registry,
+      ),
+    ).toBeTruthy();
+  });
+  it("should prefer name_by_user over name", () => {
+    expect(
+      testMatcher(
+        {
+          type: HomeAssistantMatcherType.DeviceName,
+          value: "Custom Light",
+        },
+        deviceRegistryWithUserName,
+        registry,
+      ),
+    ).toBeTruthy();
+  });
+  it("should not match if name_by_user doesn't contain the value", () => {
+    expect(
+      testMatcher(
+        {
+          type: HomeAssistantMatcherType.DeviceName,
+          value: "Living Room",
+        },
+        deviceRegistryWithUserName,
+        registry,
+      ),
+    ).toBeFalsy();
+  });
+  it("should match the device name with wildcard pattern", () => {
+    expect(
+      testMatcher(
+        {
+          type: HomeAssistantMatcherType.DeviceName,
+          value: "Living*Light",
+        },
+        deviceRegistryWithName,
+        registry,
+      ),
+    ).toBeTruthy();
+  });
+  it("should not match if device is undefined", () => {
+    expect(
+      testMatcher(
+        {
+          type: HomeAssistantMatcherType.DeviceName,
+          value: "Living Room",
+        },
+        undefined,
+        registry,
+      ),
+    ).toBeFalsy();
+  });
+  it("should not match if device has no name", () => {
+    expect(
+      testMatcher(
+        {
+          type: HomeAssistantMatcherType.DeviceName,
+          value: "Living Room",
+        },
+        deviceRegistry,
         registry,
       ),
     ).toBeFalsy();

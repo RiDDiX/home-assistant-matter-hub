@@ -2,7 +2,7 @@
 version: 1
 project:
   id: d11d5cfb-20bb-476f-ae19-14c66a03d139
-  github: https://github.com/t0bst4r/home-assistant-matter-hub
+  github: https://github.com/riddix/home-assistant-matter-hub
   toc:
     - file: README.md
     - title: Getting Started
@@ -30,4 +30,4 @@ site:
     logo: assets/hamh-logo-large.png
   nav:
     - title: GitHub
-      url: https://github.com/t0bst4r/home-assistant-matter-hub
+      url: https://github.com/riddix/home-assistant-matter-hub

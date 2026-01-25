@@ -136,10 +136,10 @@ Exposed via Express (`matterApi`):
 
 - [Matter Protocol Specification](https://csa-iot.org/all-solutions/matter/)
 - [Home Assistant Developer Docs](https://developers.home-assistant.io/)
-- [HAMH User Documentation](https://t0bst4r.github.io/home-assistant-matter-hub)
+- [HAMH User Documentation](https://riddix.github.io/home-assistant-matter-hub)
 
 ---
 
 ## Contact & Maintainer
 
-See [GitHub Discussions](https://github.com/t0bst4r/home-assistant-matter-hub/discussions/825) for handover or maintainer inquiries.
+This project is maintained by [riddix](https://github.com/riddix). For questions or contributions, please open an issue or discussion on GitHub.

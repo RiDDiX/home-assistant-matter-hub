@@ -1,4 +1,5 @@
 name: Setup Environment
+description: Setup Node.js and pnpm environment for building
 
 outputs:
   node-version:

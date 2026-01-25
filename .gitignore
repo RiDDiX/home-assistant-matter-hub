@@ -27,3 +27,6 @@ apps/home-assistant-matter-hub/LICENSE
 
 *.tsbuildinfo
 tmp/
+
+# Nested repositories
+home-assistant-addons/
