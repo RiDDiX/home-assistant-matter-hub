@@ -24,7 +24,7 @@ ARG PACKAGE_VERSION="unknown"
 LABEL \
   io.hass.version="$PACKAGE_VERSION" \
   io.hass.type="addon" \
-  io.hass.arch="armhf|aarch64|i386|amd64"
+  io.hass.arch="aarch64|amd64"
 
 RUN mkdir /install
 COPY package.tgz /install/package.tgz
