@@ -2,7 +2,7 @@ ARG NODE_VERSION="22"
 ARG PACKAGE_VERSION="unknown"
 
 FROM node:${NODE_VERSION}-alpine
-RUN apk add --no-cache netcat-openbsd
+RUN apk add --no-cache netcat-openbsd tini
 
 ENV HAMH_STORAGE_LOCATION="/data"
 VOLUME /data
