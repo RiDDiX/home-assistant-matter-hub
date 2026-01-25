@@ -10,3 +10,4 @@ export * from "./home-assistant-entity-state.js";
 export * from "./home-assistant-filter.js";
 export * from "./schemas/index.js";
 export * from "./utils/index.js";
+export * from "./websocket-message.js";

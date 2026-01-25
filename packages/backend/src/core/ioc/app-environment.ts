@@ -75,7 +75,12 @@ export class AppEnvironment extends EnvironmentBase {
 
     this.set(
       WebApi,
-      new WebApi(logger, await this.load(BridgeService), this.options.webApi),
+      new WebApi(
+        logger,
+        await this.load(BridgeService),
+        await this.load(HomeAssistantClient),
+        this.options.webApi,
+      ),
     );
 
     this.runtime.add({

@@ -6,15 +6,19 @@ import nocache from "nocache";
 import type { BetterLogger, LoggerService } from "../core/app/logger.js";
 import { Service } from "../core/ioc/service.js";
 import type { BridgeService } from "../services/bridges/bridge-service.js";
+import type { HomeAssistantClient } from "../services/home-assistant/home-assistant-client.js";
 import { accessLogger } from "./access-log.js";
+import { healthApi } from "./health-api.js";
 import { matterApi } from "./matter-api.js";
 import { supportIngress, supportProxyLocation } from "./proxy-support.js";
 import { webUi } from "./web-ui.js";
+import { WebSocketApi } from "./websocket-api.js";
 
 export interface WebApiProps {
   readonly port: number;
   readonly whitelist: string[] | undefined;
   readonly webUiDist?: string;
+  readonly version: string;
   readonly auth?: {
     username: string;
     password: string;
@@ -24,6 +28,8 @@ export interface WebApiProps {
 export class WebApi extends Service {
   private readonly log: BetterLogger;
   private readonly accessLogger: express.RequestHandler;
+  private readonly startTime: number;
+  private readonly wsApi: WebSocketApi;
 
   private app!: express.Application;
   private server?: http.Server;
@@ -31,11 +37,21 @@ export class WebApi extends Service {
   constructor(
     logger: LoggerService,
     private readonly bridgeService: BridgeService,
+    private readonly haClient: HomeAssistantClient,
     private readonly props: WebApiProps,
   ) {
     super("WebApi");
     this.log = logger.get(this);
     this.accessLogger = accessLogger(this.log.createChild("Access Log"));
+    this.startTime = Date.now();
+    this.wsApi = new WebSocketApi(
+      this.log.createChild("WebSocket"),
+      bridgeService,
+    );
+  }
+
+  get websocket(): WebSocketApi {
+    return this.wsApi;
   }
 
   protected override async initialize() {
@@ -43,7 +59,16 @@ export class WebApi extends Service {
     api
       .use(express.json())
       .use(nocache())
-      .use("/matter", matterApi(this.bridgeService));
+      .use("/matter", matterApi(this.bridgeService))
+      .use(
+        "/health",
+        healthApi(
+          this.bridgeService,
+          this.haClient,
+          this.props.version,
+          this.startTime,
+        ),
+      );
 
     const middlewares: express.Handler[] = [
       this.accessLogger,
@@ -82,6 +107,7 @@ export class WebApi extends Service {
   }
 
   override async dispose() {
+    this.wsApi.close();
     await new Promise<void>((resolve, reject) => {
       this.server?.close((error) => {
         if (error) {
@@ -105,5 +131,6 @@ export class WebApi extends Service {
         resolve(server);
       });
     });
+    this.wsApi.attach(this.server);
   }
 }

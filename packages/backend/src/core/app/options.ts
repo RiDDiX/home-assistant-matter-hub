@@ -57,6 +57,7 @@ export class Options {
         item.toString(),
       ),
       webUiDist: this.startOptions.webUiDist,
+      version: process.env.APP_VERSION ?? "0.0.0-dev",
       auth,
     };
   }
