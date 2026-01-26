@@ -38,20 +38,29 @@ of port forwarding etc.
 | **Stable** | ![GitHub Release](https://img.shields.io/github/v/release/RiDDiX/home-assistant-matter-hub?label=stable) | Production-ready, recommended for most users |
 | **Alpha** | ![GitHub Release](https://img.shields.io/github/v/release/RiDDiX/home-assistant-matter-hub?include_prereleases&label=alpha) | Pre-release with new features, for testing |
 
-### Stable Features (v1.3.x)
+### Stable Features (v1.5.x)
 
 - **Matter Bridge** - Expose Home Assistant entities to Matter controllers
 - **Multi-Fabric Support** - Connect to multiple ecosystems (Apple, Google, Alexa)
 - **Graceful Error Handling** - Skips problematic entities without crashing
 - **Failed Entity Reporting** - Shows which entities couldn't be loaded and why
+- **Health Monitoring Dashboard** - Real-time bridge and fabric status monitoring
+- **Automatic Recovery** - Auto-restart failed bridges with configurable intervals
+- **Bridge Wizard** - Guided setup for creating multiple bridges with automatic port assignment
+- **AirQuality Sensors** - Support for AQI, PM2.5, PM10, CO2, and VOC sensors
+- **Improved Fan Control** - Better speed control compatibility with Matter controllers
+- **Media Player Playback** - Play/Pause/Stop/Next/Previous track controls
 - **Node.js 24** - Latest LTS runtime
 - **64-bit Only** - Supports `amd64` and `arm64` (aarch64)
 
-### Alpha Features (v1.4.0-alpha) 🧪
+### Alpha Features (v2.0.0-alpha) 🧪
 
 > [!WARNING]
 > Alpha versions are for testing only and may contain bugs!
 
+All stable features plus:
+
+- **Water Valve Support** - Control water valves via Matter
 - **Health Check API** (`/api/health`)
   - System status, uptime, and service information
   - Kubernetes-ready probes (`/live`, `/ready`)
@@ -76,9 +85,10 @@ of port forwarding etc.
 | `climate` | Thermostat |
 | `fan` | Fan |
 | `binary_sensor` | Contact Sensor, Occupancy Sensor |
-| `sensor` | Temperature, Humidity, Pressure, Light Sensor |
+| `sensor` | Temperature, Humidity, Pressure, Light, AirQuality Sensor |
 | `button`, `input_button` | Generic Switch |
-| `media_player` | Speaker, On/Off Switch |
+| `media_player` | Speaker with Volume and Playback Controls |
+| `valve` | Water Valve (Alpha only) |
 | `vacuum` | Robot Vacuum Cleaner |
 | `humidifier` | Humidifier/Dehumidifier |
 | `automation`, `script`, `scene` | On/Off Switch |
