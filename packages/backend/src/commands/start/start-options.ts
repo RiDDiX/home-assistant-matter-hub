@@ -3,6 +3,7 @@ export interface StartOptions {
   "http-port": number;
   "http-ip-whitelist": (string | number)[] | undefined;
   "disable-log-colors": boolean;
+  "json-logs": boolean;
   "storage-location": string | undefined;
   "mdns-network-interface": string | undefined;
   "home-assistant-url": string;

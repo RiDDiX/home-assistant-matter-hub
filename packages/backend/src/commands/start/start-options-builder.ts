@@ -27,6 +27,12 @@ export function startOptionsBuilder(yargs: Argv): Argv<StartOptions> {
       type: "boolean",
       default: false,
     })
+    .option("json-logs", {
+      type: "boolean",
+      default: false,
+      description:
+        "Output logs in JSON format for structured logging (useful for log aggregation systems)",
+    })
     .option("storage-location", {
       type: "string",
       description:

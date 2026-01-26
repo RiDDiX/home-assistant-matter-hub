@@ -1,4 +1,3 @@
-import type { Logger } from "@matter/general";
 import {
   type Connection,
   createConnection,
@@ -7,8 +6,9 @@ import {
   ERR_INVALID_AUTH,
   getConfig,
 } from "home-assistant-js-websocket";
-import type { LoggerService } from "../../core/app/logger.js";
+import type { BetterLogger, LoggerService } from "../../core/app/logger.js";
 import { Service } from "../../core/ioc/service.js";
+import { withRetry } from "../../utils/retry.js";
 
 export interface HomeAssistantClientProps {
   readonly url: string;
@@ -20,7 +20,7 @@ export class HomeAssistantClient extends Service {
   static Options = Symbol.for("HomeAssistantClientProps");
 
   private _connection!: Connection;
-  private readonly log: Logger;
+  private readonly log: BetterLogger;
 
   get connection(): Connection {
     return this._connection;
@@ -64,13 +64,19 @@ export class HomeAssistantClient extends Service {
     props: HomeAssistantClientProps,
   ): Promise<Connection> {
     if (reason === ERR_CANNOT_CONNECT) {
-      this.log.error(
-        `Unable to connect to home assistant with url: ${props.url}. Retrying in 5 seconds...`,
-      );
+      this.log.warnCtx("Unable to connect to Home Assistant, retrying...", {
+        url: props.url,
+        retryDelayMs: 5000,
+      });
       await new Promise((resolve) => setTimeout(resolve, 5000));
       return this.createConnection(props);
     }
     if (reason === ERR_INVALID_AUTH) {
+      this.log.errorCtx(
+        "Authentication failed",
+        new Error("Invalid authentication credentials"),
+        { url: props.url },
+      );
       throw new Error(
         "Authentication failed while connecting to home assistant",
       );
@@ -81,22 +87,33 @@ export class HomeAssistantClient extends Service {
   private async waitForHomeAssistantToBeUpAndRunning(
     connection: Connection,
   ): Promise<void> {
-    this.log.info(
-      "Waiting for Home Assistant to be up and running - the application will be available once a connection to Home Assistant could be established.",
-    );
+    this.log.infoCtx("Waiting for Home Assistant to be up and running", {
+      message: "Application will be available once connection is established",
+    });
 
     const getState = async () => {
-      const s = await getConfig(connection).then((config) => config.state);
-      this.log.debug(
-        `Got an update from Home Assistant. System state is '${s}'.`,
+      const state = await withRetry(
+        () => getConfig(connection).then((config) => config.state),
+        {
+          maxAttempts: 3,
+          baseDelayMs: 1000,
+          onRetry: (attempt, error) => {
+            this.log.debugCtx("Retrying Home Assistant state check", {
+              attempt,
+              error: error.message,
+            });
+          },
+        },
       );
-      return s;
+      this.log.debugCtx("Home Assistant state update", { state });
+      return state;
     };
+
     let state: string | undefined;
     while (state !== "RUNNING") {
       await new Promise((resolve) => setTimeout(resolve, 5000));
       state = await getState();
     }
-    this.log.info("Home assistant reported to be up and running");
+    this.log.infoCtx("Home Assistant is up and running", { state });
   }
 }

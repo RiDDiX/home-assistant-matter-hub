@@ -26,6 +26,7 @@ export class Options {
     return {
       level: this.startOptions.logLevel,
       disableColors: this.startOptions.disableLogColors ?? false,
+      jsonOutput: this.startOptions.jsonLogs ?? false,
     };
   }
 
