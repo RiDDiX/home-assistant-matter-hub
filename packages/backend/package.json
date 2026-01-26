@@ -16,7 +16,7 @@
     "@matter/main": "0.16.7",
     "@matter/nodejs": "0.16.7",
     "ajv": "8.17.1",
-    "archiver": "^7.0.1",
+    "archiver": "7.0.1",
     "color": "5.0.3",
     "debounce": "3.0.0",
     "express": "5.2.1",
@@ -27,7 +27,7 @@
     "nocache": "4.0.0",
     "rxjs": "7.8.2",
     "strip-color": "0.1.0",
-    "unzipper": "^0.12.3",
+    "unzipper": "0.12.3",
     "ws": "8.19.0",
     "yargs": "18.0.0"
   },
