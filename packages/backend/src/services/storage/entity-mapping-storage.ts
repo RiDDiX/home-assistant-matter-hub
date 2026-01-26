@@ -29,11 +29,12 @@ export class EntityMappingStorage extends Service {
   }
 
   private async load(): Promise<void> {
-    const stored = await this.storage.get<StorageObjectType | undefined>(
+    const stored = await this.storage.get<StorageObjectType>(
       "data",
+      { version: CURRENT_VERSION, mappings: {} } as unknown as StorageObjectType,
     );
 
-    if (!stored) {
+    if (!stored || Object.keys(stored).length === 0) {
       return;
     }
 
