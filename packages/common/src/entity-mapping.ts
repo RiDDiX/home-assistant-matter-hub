@@ -25,7 +25,9 @@ export type MatterDeviceType =
   | "generic_switch"
   | "speaker"
   | "robot_vacuum_cleaner"
-  | "humidifier_dehumidifier";
+  | "humidifier_dehumidifier"
+  | "smoke_co_alarm"
+  | "water_leak_detector";
 
 export interface EntityMappingConfig {
   readonly entityId: string;
@@ -73,6 +75,8 @@ export const matterDeviceTypeLabels: Record<MatterDeviceType, string> = {
   speaker: "Speaker",
   robot_vacuum_cleaner: "Robot Vacuum Cleaner",
   humidifier_dehumidifier: "Humidifier/Dehumidifier",
+  smoke_co_alarm: "Smoke/CO Alarm",
+  water_leak_detector: "Water Leak Detector",
 };
 
 export const domainToDefaultMatterTypes: Partial<
