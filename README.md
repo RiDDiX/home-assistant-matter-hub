@@ -169,6 +169,6 @@ ghcr.io/riddix/home-assistant-matter-hub:latest
 
 Your volume mounts stay the same - no data migration needed.
 
-> For detailed instructions, see the [full Migration Guide](https://riddix.github.io/home-assistant-matter-hub/Guides/Migration%20from%20t0bst4r/).
+> For detailed instructions, see the [full Migration Guide](https://riddix.github.io/home-assistant-matter-hub/migration-from-t0bst4r/).
 
 ---
