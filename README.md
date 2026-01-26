@@ -18,6 +18,8 @@
 > - ✅ Community support
 >
 > Thank you to **t0bst4r** for the original work on this amazing project! ❤️
+>
+> **📦 Migrating from t0bst4r's version?** See our [Migration Guide](https://riddix.github.io/home-assistant-matter-hub/migration-from-t0bst4r) - your existing configuration and paired devices will continue to work!
 
 ---
 
