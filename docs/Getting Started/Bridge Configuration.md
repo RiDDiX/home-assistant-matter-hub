@@ -54,16 +54,39 @@ include an `include` (array) and an `exclude` (array) property.
 ```
 
 A include- or exclude-item is an object having a `type` and a `value` property.
-The `type` can be one of:
 
-- `pattern` - a pattern matching your entity ids
-- `domain` - the domain you want to include or exclude
-- `platform` - the integration you want to include or exclude
-- `entity_category` -
-  the [entity category](https://developers.home-assistant.io/docs/core/entity/#registry-properties) (`config` /
-  `diagnostic`) you want to include or exclude
-- `label` - the slug of a label you want to include or exclude
-- `area` - the slug of an area you want to include or exclude
+## Filter Types
+
+| Type | Description | Example Value |
+|------|-------------|---------------|
+| `pattern` | Wildcard pattern matching entity IDs. Use `*` as wildcard. | `light.living_room_*` |
+| `regex` | Regular expression matching entity IDs. Full regex support. | `^light\.(kitchen\|bedroom)_.*` |
+| `domain` | Match entities by their domain (the part before the dot). | `light`, `switch`, `sensor` |
+| `platform` | Match entities by their integration/platform. | `hue`, `zwave`, `mqtt` |
+| `label` | Match entities by their label slug. | `voice_control` |
+| `area` | Match entities by their area slug. | `living_room` |
+| `entity_category` | Match entities by their category. | `config`, `diagnostic` |
+| `device_name` | Match entities by their device name (case-insensitive, supports wildcards). | `Living Room*` |
+
+### Pattern vs Regex
+
+**Pattern** uses simple wildcard matching:
+- `*` matches any characters (zero or more)
+- All other characters are matched literally
+- Example: `light.living_room_*` matches `light.living_room_lamp`, `light.living_room_ceiling`
+
+**Regex** uses full JavaScript regular expressions:
+- More powerful and flexible
+- Can match complex patterns
+- Example: `^(light|switch)\.kitchen_.*` matches all lights and switches in the kitchen
+
+### Device Name Filter
+
+The `device_name` filter matches against the device's name (not the entity ID):
+- Case-insensitive matching
+- Supports `*` wildcard for pattern matching
+- Matches against: user-defined name → device name → default name
+- Example: `*Philips*` matches all devices with "Philips" in their name
 
 The `value` property is a string containing the corresponding value. You can add multiple include or exclude rules which
 are then combined.
@@ -76,7 +99,9 @@ Labels have to be applied at an entity level, not under device.
 > When performing changes on entities, like adding or removing a label, you need to refresh the matter-hub application
 > for the changes to take effect (e.g. edit the bridge or restart the addon).
 
-Example configuration:
+## Examples
+
+### Basic Configuration
 
 ```json
 {
@@ -110,6 +135,100 @@ Example configuration:
   }
 }
 ```
+
+### Using Regex for Complex Matching
+
+Match all lights and switches that start with "kitchen" or "living_room":
+
+```json
+{
+  "name": "Main Rooms",
+  "port": 5540,
+  "filter": {
+    "include": [
+      {
+        "type": "regex",
+        "value": "^(light|switch)\\.(kitchen|living_room)_.*"
+      }
+    ],
+    "exclude": []
+  }
+}
+```
+
+### Using Device Name Filter
+
+Include all entities from Philips devices, exclude IKEA devices:
+
+```json
+{
+  "name": "Brand Filter",
+  "port": 5541,
+  "filter": {
+    "include": [
+      {
+        "type": "device_name",
+        "value": "*Philips*"
+      }
+    ],
+    "exclude": [
+      {
+        "type": "device_name",
+        "value": "*IKEA*"
+      }
+    ]
+  }
+}
+```
+
+### Combining Multiple Filter Types
+
+A comprehensive example using multiple filter types:
+
+```json
+{
+  "name": "Living Room Hub",
+  "port": 5542,
+  "filter": {
+    "include": [
+      {
+        "type": "area",
+        "value": "living_room"
+      },
+      {
+        "type": "label",
+        "value": "voice_control"
+      },
+      {
+        "type": "pattern",
+        "value": "light.guest_*"
+      }
+    ],
+    "exclude": [
+      {
+        "type": "entity_category",
+        "value": "diagnostic"
+      },
+      {
+        "type": "entity_category",
+        "value": "config"
+      },
+      {
+        "type": "regex",
+        "value": ".*_battery$"
+      },
+      {
+        "type": "device_name",
+        "value": "*Test*"
+      }
+    ]
+  }
+}
+```
+
+This configuration:
+- **Includes**: All entities in the "living_room" area, entities with the "voice_control" label, and all lights starting with "guest_"
+- **Excludes**: Diagnostic and config entities, any entity ending with "_battery", and any device with "Test" in its name
 
 ## Issues with labels
 
