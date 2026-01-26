@@ -10,6 +10,7 @@ import { IdentifyServer } from "../../../behaviors/identify-server.js";
 import type { LevelControlFeatures } from "../../../behaviors/level-control-server.js";
 import { MediaPlayerLevelControlServer } from "./behaviors/media-player-level-control-server.js";
 import { MediaPlayerMediaInputServer } from "./behaviors/media-player-media-input-server.js";
+import { MediaPlayerMediaPlaybackServer } from "./behaviors/media-player-media-playback-server.js";
 import { MediaPlayerOnOffServer } from "./behaviors/media-player-on-off-server.js";
 import { MediaPlayerPowerOnOffServer } from "./behaviors/media-player-power-on-off-server.js";
 
@@ -57,5 +58,19 @@ export function MediaPlayerDevice(
   if (testBit(supportedFeatures, MediaPlayerDeviceFeature.SELECT_SOURCE)) {
     device = device.with(MediaPlayerMediaInputServer);
   }
+
+  // Add playback controls if play or pause is supported
+  const supportsPlay = testBit(
+    supportedFeatures,
+    MediaPlayerDeviceFeature.PLAY,
+  );
+  const supportsPause = testBit(
+    supportedFeatures,
+    MediaPlayerDeviceFeature.PAUSE,
+  );
+  if (supportsPlay || supportsPause) {
+    device = device.with(MediaPlayerMediaPlaybackServer);
+  }
+
   return device.set({ homeAssistantEntity });
 }

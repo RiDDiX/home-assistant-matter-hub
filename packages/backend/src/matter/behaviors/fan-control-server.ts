@@ -11,7 +11,9 @@ import type { ValueGetter, ValueSetter } from "./utils/cluster-config.js";
 
 import AirflowDirection = FanControl.AirflowDirection;
 
-const defaultStepSize = 10;
+const defaultStepSize = 33.33;
+const minSpeedMax = 3;
+const maxSpeedMax = 10;
 
 const FeaturedBase = Base.with(
   "Step",
@@ -62,10 +64,18 @@ export class FanControlServerBase extends FeaturedBase {
   private update(entity: HomeAssistantEntityInformation) {
     const config = this.state.config;
     const percentage = config.getPercentage(entity.state, this.agent) ?? 0;
-    const speedMax = Math.round(
-      100 / (config.getStepSize(entity.state, this.agent) ?? defaultStepSize),
+    const stepSize = config.getStepSize(entity.state, this.agent);
+    const effectiveStepSize =
+      stepSize != null && stepSize > 0 ? stepSize : defaultStepSize;
+    const calculatedSpeedMax = Math.round(100 / effectiveStepSize);
+    const speedMax = Math.max(
+      minSpeedMax,
+      Math.min(maxSpeedMax, calculatedSpeedMax),
     );
-    const speed = Math.ceil(speedMax * (percentage / 100));
+    const speed =
+      percentage === 0
+        ? 0
+        : Math.max(1, Math.ceil(speedMax * (percentage / 100)));
 
     const fanModeSequence = this.getFanModeSequence();
     const fanMode = config.isInAutoMode(entity.state, this.agent)
