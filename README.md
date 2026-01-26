@@ -19,7 +19,7 @@
 >
 > Thank you to **t0bst4r** for the original work on this amazing project! ❤️
 >
-> **📦 Migrating from t0bst4r's version?** See our [Migration Guide](https://riddix.github.io/home-assistant-matter-hub/migration-from-t0bst4r) - your existing configuration and paired devices will continue to work!
+> **📦 Migrating from t0bst4r's version?** See [Migration](#migration-from-t0bst4r) below - your existing configuration and paired devices will continue to work!
 
 ---
 
@@ -123,5 +123,52 @@ For alpha versions, use tag `alpha` instead of `latest`.
 
 Please see the [documentation](https://riddix.github.io/home-assistant-matter-hub) for detailed installation instructions,
 configuration options, known issues, limitations and guides.
+
+---
+
+## Migration from t0bst4r
+
+Migrating from the original `t0bst4r/home-assistant-matter-hub` is straightforward. **Your Matter fabric connections and paired devices will be preserved!**
+
+### Home Assistant Add-on
+
+1. **Backup your data:**
+   ```bash
+   # SSH into Home Assistant and find your add-on folder
+   ls /addon_configs/
+   # Look for folder ending with _hamh (e.g., a0c_hamh)
+   
+   cp -r /addon_configs/*_hamh /config/hamh-backup
+   ```
+
+2. **Uninstall the old add-on** (Settings → Add-ons → Uninstall)
+
+3. **Add the new repository:**
+   ```
+   https://github.com/RiDDiX/home-assistant-addons
+   ```
+
+4. **Install new add-on** and restore backup before starting:
+   ```bash
+   ls /addon_configs/  # Find new _hamh folder
+   cp -r /config/hamh-backup/* /addon_configs/*_hamh/
+   ```
+
+5. **Start the add-on** - your devices should reconnect automatically
+
+### Docker / Docker Compose
+
+Simply change the image from:
+```
+ghcr.io/t0bst4r/home-assistant-matter-hub:latest
+```
+to:
+```
+ghcr.io/riddix/home-assistant-matter-hub:latest
+```
+
+Your volume mounts stay the same - no data migration needed.
+
+> For detailed instructions, see the [full Migration Guide](https://riddix.github.io/home-assistant-matter-hub/Guides/Migration%20from%20t0bst4r/).
 
 ---
