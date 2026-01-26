@@ -30,7 +30,8 @@ export function StatusIndicator() {
   useEffect(() => {
     const fetchHealth = async () => {
       try {
-        const res = await fetch("/api/health");
+        // Use relative URL to support Home Assistant ingress
+        const res = await fetch("api/health");
         if (res.ok) {
           const data = (await res.json()) as HealthStatus;
           setHealth(data);
