@@ -88,5 +88,21 @@ export function matterApi(bridgeService: BridgeService): express.Router {
     }
   });
 
+  router.post("/bridges/:bridgeId/actions/restart", async (req, res) => {
+    const bridgeId = req.params.bridgeId;
+    const success = await bridgeService.restartBridge(bridgeId);
+    if (success) {
+      const bridge = bridgeService.get(bridgeId);
+      res.status(200).json(bridge?.data);
+    } else {
+      res.status(404).send("Not Found");
+    }
+  });
+
+  router.get("/next-port", (_, res) => {
+    const port = bridgeService.getNextAvailablePort();
+    res.status(200).json({ port });
+  });
+
   return router;
 }

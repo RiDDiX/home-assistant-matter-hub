@@ -9,6 +9,7 @@ import type { BridgeService } from "../services/bridges/bridge-service.js";
 import type { BridgeStorage } from "../services/storage/bridge-storage.js";
 import { accessLogger } from "./access-log.js";
 import { bridgeExportApi } from "./bridge-export-api.js";
+import { healthApi } from "./health-api.js";
 import { matterApi } from "./matter-api.js";
 import { supportIngress, supportProxyLocation } from "./proxy-support.js";
 import { webUi } from "./web-ui.js";
@@ -43,11 +44,14 @@ export class WebApi extends Service {
 
   protected override async initialize() {
     const api = express.Router();
+    const startTime = Date.now();
+    const version = process.env.npm_package_version ?? "unknown";
     api
       .use(express.json())
       .use(nocache())
       .use("/matter", matterApi(this.bridgeService))
-      .use("/bridges", bridgeExportApi(this.bridgeStorage));
+      .use("/bridges", bridgeExportApi(this.bridgeStorage))
+      .use("/health", healthApi(this.bridgeService, version, startTime));
 
     const middlewares: express.Handler[] = [
       this.accessLogger,

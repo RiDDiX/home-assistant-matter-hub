@@ -1,4 +1,4 @@
-import { Add, Download, Upload } from "@mui/icons-material";
+import { Add, AutoFixHigh, Download, Upload } from "@mui/icons-material";
 import Backdrop from "@mui/material/Backdrop";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
@@ -9,6 +9,7 @@ import { Link } from "react-router";
 import { exportAllBridges } from "../../api/bridge-export.js";
 import { BridgeImportDialog } from "../../components/bridge/BridgeImportDialog.js";
 import { BridgeList } from "../../components/bridge/BridgeList";
+import { BridgeWizard } from "../../components/bridge/BridgeWizard.js";
 import { useNotifications } from "../../components/notifications/use-notifications.ts";
 import { useBridges } from "../../hooks/data/bridges";
 import { navigation } from "../../routes.tsx";
@@ -22,6 +23,7 @@ export const BridgesPage = () => {
   const { content: bridges, isLoading, error: bridgeError } = useBridges();
   const [importFile, setImportFile] = useState<File | null>(null);
   const [importDialogOpen, setImportDialogOpen] = useState(false);
+  const [wizardOpen, setWizardOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleExport = useCallback(async () => {
@@ -103,6 +105,13 @@ export const BridgesPage = () => {
                 Export All
               </Button>
               <Button
+                onClick={() => setWizardOpen(true)}
+                startIcon={<AutoFixHigh />}
+                variant="outlined"
+              >
+                Wizard
+              </Button>
+              <Button
                 component={Link}
                 to={navigation.createBridge}
                 endIcon={<Add />}
@@ -129,6 +138,12 @@ export const BridgesPage = () => {
         file={importFile}
         onClose={handleImportClose}
         onImported={handleImported}
+      />
+
+      <BridgeWizard
+        open={wizardOpen}
+        onClose={() => setWizardOpen(false)}
+        onComplete={() => dispatch(loadBridges())}
       />
     </>
   );
