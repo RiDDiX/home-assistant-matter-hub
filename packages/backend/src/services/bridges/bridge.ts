@@ -88,7 +88,16 @@ export class Bridge {
     reason = "Manually stopped",
   ) {
     this.endpointManager.stopObserving();
-    await this.server.cancel();
+    try {
+      await this.server.cancel();
+    } catch (e) {
+      // Ignore mutex-closed errors during shutdown - this is expected
+      // when the environment is being disposed
+      const errorMessage = e instanceof Error ? e.message : String(e);
+      if (!errorMessage.includes("mutex-closed")) {
+        this.log.warn("Error stopping bridge server:", e);
+      }
+    }
     this.status = { code, reason };
   }
 
