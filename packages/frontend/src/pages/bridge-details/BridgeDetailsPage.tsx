@@ -17,6 +17,7 @@ import { BridgeDetails } from "../../components/bridge/BridgeDetails.tsx";
 import { BridgeStatusHint } from "../../components/bridge/BridgeStatusHint.tsx";
 import { BridgeStatusIcon } from "../../components/bridge/BridgeStatusIcon.tsx";
 import { EndpointList } from "../../components/endpoints/EndpointList.tsx";
+import { EntityMappingSection } from "../../components/entity-mapping/EntityMappingSection.js";
 import { useNotifications } from "../../components/notifications/use-notifications.ts";
 import { useBridge } from "../../hooks/data/bridges.ts";
 import { useDevices } from "../../hooks/data/devices.ts";
@@ -140,6 +141,8 @@ export const BridgeDetailsPage = () => {
       )}
 
       <MemoizedBridgeDetails bridge={bridge} />
+
+      <EntityMappingSection bridgeId={bridgeId} />
 
       {devices && (
         <Stack spacing={2}>

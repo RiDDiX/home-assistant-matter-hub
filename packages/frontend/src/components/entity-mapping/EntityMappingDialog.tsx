@@ -37,28 +37,35 @@ export function EntityMappingDialog({
   onSave,
   onClose,
 }: EntityMappingDialogProps) {
+  const [editEntityId, setEditEntityId] = useState(entityId);
   const [matterDeviceType, setMatterDeviceType] = useState<
     MatterDeviceType | ""
   >("");
   const [customName, setCustomName] = useState("");
   const [disabled, setDisabled] = useState(false);
 
+  const isNewMapping = !entityId;
+
   useEffect(() => {
     if (open) {
+      setEditEntityId(entityId);
       setMatterDeviceType(currentMapping?.matterDeviceType || "");
       setCustomName(currentMapping?.customName || "");
       setDisabled(currentMapping?.disabled || false);
     }
-  }, [open, currentMapping]);
+  }, [open, entityId, currentMapping]);
+
+  const currentDomain = editEntityId.split(".")[0] || domain;
 
   const handleSave = useCallback(() => {
+    if (!editEntityId.trim()) return;
     onSave({
-      entityId,
+      entityId: editEntityId.trim(),
       matterDeviceType: matterDeviceType || undefined,
       customName: customName.trim() || undefined,
       disabled,
     });
-  }, [entityId, matterDeviceType, customName, disabled, onSave]);
+  }, [editEntityId, matterDeviceType, customName, disabled, onSave]);
 
   const availableTypes = Object.entries(matterDeviceTypeLabels) as [
     MatterDeviceType,
@@ -66,13 +73,27 @@ export function EntityMappingDialog({
   ][];
   const suggestedTypes =
     domainToDefaultMatterTypes[
-      domain as keyof typeof domainToDefaultMatterTypes
+      currentDomain as keyof typeof domainToDefaultMatterTypes
     ] || [];
 
   return (
     <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
-      <DialogTitle>Entity Mapping: {entityId}</DialogTitle>
+      <DialogTitle>
+        {isNewMapping ? "Add Entity Mapping" : `Edit: ${entityId}`}
+      </DialogTitle>
       <DialogContent>
+        {isNewMapping && (
+          <TextField
+            fullWidth
+            margin="normal"
+            label="Entity ID"
+            placeholder="light.living_room"
+            value={editEntityId}
+            onChange={(e) => setEditEntityId(e.target.value)}
+            helperText="Enter the Home Assistant entity ID (e.g., light.living_room)"
+            required
+          />
+        )}
         <FormControl fullWidth margin="normal">
           <InputLabel id="matter-device-type-label">
             Matter Device Type
@@ -131,7 +152,11 @@ export function EntityMappingDialog({
       </DialogContent>
       <DialogActions>
         <Button onClick={onClose}>Cancel</Button>
-        <Button onClick={handleSave} variant="contained">
+        <Button
+          onClick={handleSave}
+          variant="contained"
+          disabled={!editEntityId.trim()}
+        >
           Save
         </Button>
       </DialogActions>
