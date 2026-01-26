@@ -175,8 +175,24 @@ export class FanControlServerBase extends FeaturedBase {
     if (percentage === 0) {
       homeAssistant.callAction(this.state.config.turnOff(void 0, this.agent));
     } else {
+      // Round percentage to nearest valid step if percentage_step is defined.
+      // Note: Many controllers (including Apple Home) ignore step constraints
+      // and allow arbitrary percentage values in their UI, so we handle it here.
+      const stepSize = this.state.config.getStepSize(
+        homeAssistant.entity.state,
+        this.agent,
+      );
+      const roundedPercentage =
+        stepSize && stepSize > 0
+          ? Math.round(percentage / stepSize) * stepSize
+          : percentage;
+      const clampedPercentage = Math.max(
+        stepSize ?? 1,
+        Math.min(100, roundedPercentage),
+      );
+
       homeAssistant.callAction(
-        this.state.config.turnOn(percentage, this.agent),
+        this.state.config.turnOn(clampedPercentage, this.agent),
       );
     }
   }
