@@ -20,7 +20,12 @@ The storage format is fully compatible between both versions. Your Matter fabric
 1. Access your Home Assistant via SSH or Terminal
 2. Copy the storage directory:
    ```bash
-   cp -r /addon_configs/*/home-assistant-matter-hub /config/hamh-backup
+   # Find the correct folder name first
+   ls /addon_configs/
+   # Look for a folder ending with _hamh (e.g., a]c_hamh or similar)
+   
+   # Then copy it (replace *_hamh with the actual folder name if needed)
+   cp -r /addon_configs/*_hamh /config/hamh-backup
    ```
 
 #### Step 2: Uninstall Old Add-on
@@ -42,7 +47,12 @@ The storage format is fully compatible between both versions. Your Matter fabric
 2. Click **Install**
 3. **Before starting**, restore the backup:
    ```bash
-   cp -r /config/hamh-backup/* /addon_configs/*/home-assistant-matter-hub/
+   # Find the new add-on folder name
+   ls /addon_configs/
+   # Look for the new _hamh folder
+   
+   # Then restore (replace *_hamh with the actual folder name if needed)
+   cp -r /config/hamh-backup/* /addon_configs/*_hamh/
    ```
 
 #### Step 5: Configure and Start
