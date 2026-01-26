@@ -188,14 +188,16 @@ export class WindowCoveringServerBase extends FeaturedBase {
   private handleGoToLiftPosition(targetPercent100ths: number) {
     const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);
     const config = this.state.config;
-    const currentPosition = config.getCurrentLiftPosition(
-      homeAssistant.entity.state,
-      this.agent,
-    );
-    const targetPosition = targetPercent100ths / 100;
-    if (targetPosition === currentPosition) {
+    // Compare in Matter space (both values should be in same coordinate system)
+    const currentPositionMatter = this.state.currentPositionLiftPercent100ths;
+    // Skip if already at target (with small tolerance for rounding)
+    if (
+      currentPositionMatter != null &&
+      Math.abs(targetPercent100ths - currentPositionMatter) < 100
+    ) {
       return;
     }
+    const targetPosition = targetPercent100ths / 100;
     homeAssistant.callAction(
       config.setLiftPosition(targetPosition, this.agent),
     );
@@ -218,14 +220,16 @@ export class WindowCoveringServerBase extends FeaturedBase {
   private handleGoToTiltPosition(targetPercent100ths: number) {
     const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);
     const config = this.state.config;
-    const currentPosition = config.getCurrentTiltPosition(
-      homeAssistant.entity.state,
-      this.agent,
-    );
-    const targetPosition = targetPercent100ths / 100;
-    if (targetPosition === currentPosition) {
+    // Compare in Matter space (both values should be in same coordinate system)
+    const currentPositionMatter = this.state.currentPositionTiltPercent100ths;
+    // Skip if already at target (with small tolerance for rounding)
+    if (
+      currentPositionMatter != null &&
+      Math.abs(targetPercent100ths - currentPositionMatter) < 100
+    ) {
       return;
     }
+    const targetPosition = targetPercent100ths / 100;
     homeAssistant.callAction(
       config.setTiltPosition(targetPosition, this.agent),
     );

@@ -77,27 +77,39 @@ export class ThermostatServerBase extends FeaturedBase {
   }
 
   private update(entity: HomeAssistantEntityInformation) {
+    const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);
     const config = this.state.config;
-    const minSetpointLimit = config
-      .getMinTemperature(entity.state, this.agent)
-      ?.celsius(true);
-    const maxSetpointLimit = config
-      .getMaxTemperature(entity.state, this.agent)
-      ?.celsius(true);
-    const localTemperature = config
-      .getCurrentTemperature(entity.state, this.agent)
-      ?.celsius(true);
-    const targetHeatingTemperature =
-      config
-        .getTargetHeatingTemperature(entity.state, this.agent)
-        ?.celsius(true) ?? this.state.occupiedHeatingSetpoint;
-    const targetCoolingTemperature =
-      config
-        .getTargetCoolingTemperature(entity.state, this.agent)
-        ?.celsius(true) ?? this.state.occupiedCoolingSetpoint;
 
-    const systemMode = this.getSystemMode(entity);
-    const runningMode = config.getRunningMode(entity.state, this.agent);
+    // When unavailable, keep last known values but report offline via BasicInformation.reachable
+    // Only update temperatures if entity is available to prevent null/invalid values
+    const isAvailable = homeAssistant.isAvailable;
+
+    const minSetpointLimit = isAvailable
+      ? config.getMinTemperature(entity.state, this.agent)?.celsius(true)
+      : (this.state.minHeatSetpointLimit ?? this.state.minCoolSetpointLimit);
+    const maxSetpointLimit = isAvailable
+      ? config.getMaxTemperature(entity.state, this.agent)?.celsius(true)
+      : (this.state.maxHeatSetpointLimit ?? this.state.maxCoolSetpointLimit);
+    const localTemperature = isAvailable
+      ? config.getCurrentTemperature(entity.state, this.agent)?.celsius(true)
+      : this.state.localTemperature;
+    const targetHeatingTemperature = isAvailable
+      ? (config
+          .getTargetHeatingTemperature(entity.state, this.agent)
+          ?.celsius(true) ?? this.state.occupiedHeatingSetpoint)
+      : this.state.occupiedHeatingSetpoint;
+    const targetCoolingTemperature = isAvailable
+      ? (config
+          .getTargetCoolingTemperature(entity.state, this.agent)
+          ?.celsius(true) ?? this.state.occupiedCoolingSetpoint)
+      : this.state.occupiedCoolingSetpoint;
+
+    const systemMode = isAvailable
+      ? this.getSystemMode(entity)
+      : (this.state.systemMode ?? Thermostat.SystemMode.Off);
+    const runningMode = isAvailable
+      ? config.getRunningMode(entity.state, this.agent)
+      : Thermostat.ThermostatRunningMode.Off;
 
     // When autoMode is enabled, Matter spec requires:
     // minHeatSetpointLimit <= minCoolSetpointLimit - minSetpointDeadBand
