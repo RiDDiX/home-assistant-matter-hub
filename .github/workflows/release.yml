@@ -70,7 +70,9 @@ jobs:
         if: steps.release.outputs.release-version != '' && steps.release.outputs.release-channel == 'latest'
         env:
           BASE_URL: /home-assistant-matter-hub
-        run: pnpm --filter @home-assistant-matter-hub/documentation run build
+        run: |
+          pnpm --filter @home-assistant-matter-hub/documentation run build
+          cp docs/.nojekyll docs/_build/html/.nojekyll
 
       - name: Upload Documentation
         if: steps.release.outputs.release-version != '' && steps.release.outputs.release-channel == 'latest'
