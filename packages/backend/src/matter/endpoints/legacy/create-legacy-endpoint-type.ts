@@ -6,6 +6,7 @@ import type {
 } from "@home-assistant-matter-hub/common";
 import type { EndpointType } from "@matter/main";
 import type { HomeAssistantEntityBehavior } from "../../behaviors/home-assistant-entity-behavior.js";
+import { AlarmControlPanelDevice } from "./alarm-control-panel/index.js";
 import { AutomationDevice } from "./automation/index.js";
 import { BinarySensorDevice } from "./binary-sensor/index.js";
 import { ButtonDevice } from "./button/index.js";
@@ -77,6 +78,7 @@ const deviceCtrs: Partial<
   humidifier: HumidifierDevice,
   vacuum: VacuumDevice,
   valve: ValveDevice,
+  alarm_control_panel: AlarmControlPanelDevice,
 };
 
 const matterDeviceTypeFactories: Partial<
