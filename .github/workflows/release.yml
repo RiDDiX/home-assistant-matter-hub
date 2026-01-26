@@ -135,8 +135,12 @@ jobs:
     permissions:
       id-token: write
       pages: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - name: Deploy documentation to GitHub Pages
+        id: deployment
         uses: actions/deploy-pages@v4
 
   dispatch-addon:
