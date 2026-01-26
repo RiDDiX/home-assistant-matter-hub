@@ -5,6 +5,7 @@ FROM node:${NODE_VERSION}-alpine
 RUN apk add --no-cache netcat-openbsd tini
 
 ENV HAMH_STORAGE_LOCATION="/data"
+ENV APP_VERSION="${PACKAGE_VERSION}"
 VOLUME /data
 
 LABEL package.version="$PACKAGE_VERSION"

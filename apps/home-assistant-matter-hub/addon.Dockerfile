@@ -21,6 +21,7 @@ COPY addon.docker-entrypoint.sh /docker-entrypoint.sh
 RUN chmod +x /docker-entrypoint.sh
 
 ARG PACKAGE_VERSION="unknown"
+ENV APP_VERSION="${PACKAGE_VERSION}"
 LABEL \
   io.hass.version="$PACKAGE_VERSION" \
   io.hass.type="addon" \
