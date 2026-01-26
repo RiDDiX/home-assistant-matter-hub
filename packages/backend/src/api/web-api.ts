@@ -11,6 +11,7 @@ import type { HomeAssistantRegistry } from "../services/home-assistant/home-assi
 import type { BridgeStorage } from "../services/storage/bridge-storage.js";
 import type { EntityMappingStorage } from "../services/storage/entity-mapping-storage.js";
 import { accessLogger } from "./access-log.js";
+import { backupApi } from "./backup-api.js";
 import { bridgeExportApi } from "./bridge-export-api.js";
 import { entityMappingApi } from "./entity-mapping-api.js";
 import { healthApi } from "./health-api.js";
@@ -78,7 +79,8 @@ export class WebApi extends Service {
         ),
       )
       .use("/bridges", bridgeExportApi(this.bridgeStorage))
-      .use("/entity-mappings", entityMappingApi(this.mappingStorage));
+      .use("/entity-mappings", entityMappingApi(this.mappingStorage))
+      .use("/backup", backupApi(this.bridgeStorage, this.mappingStorage));
 
     const middlewares: express.Handler[] = [
       this.accessLogger,

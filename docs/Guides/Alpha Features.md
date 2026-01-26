@@ -31,7 +31,62 @@ docker run -d \
 
 ## New Features in Alpha
 
-### 1. Health Monitoring Dashboard
+### 1. Full Backup & Restore System
+
+Create complete backups of your configuration as ZIP files, including all bridges and entity mappings.
+
+**Features:**
+- Download complete backup as ZIP file
+- Includes bridge configurations and entity mappings
+- Selective restore - choose which bridges to restore
+- Option to overwrite existing bridges
+- Preview backup contents before restoring
+
+**Using Backup:**
+1. Go to the Bridges page
+2. Click **Download Backup** to create a ZIP backup
+3. To restore, click **Restore from Backup** and select a ZIP file
+4. Preview the contents and select which bridges to restore
+5. Choose options (overwrite existing, include mappings)
+6. Click **Restore**
+
+### 2. Filter Preview
+
+Preview which entities will match your filter configuration before saving.
+
+**Features:**
+- Test filters without saving changes
+- See matching entity count
+- View entity names and domains
+- Identify included/excluded entities
+
+### 3. Smoke/CO Detector Support
+
+Binary sensors with `smoke`, `carbon_monoxide`, or `gas` device class are now mapped to Matter Smoke CO Alarm devices.
+
+**Supported Device Classes:**
+- `smoke` - Smoke detector
+- `carbon_monoxide` - CO detector  
+- `gas` - Gas detector
+
+### 4. Dark Mode Toggle
+
+Switch between light and dark themes directly from the UI.
+
+**Using Dark Mode:**
+- Click the sun/moon icon in the top navigation bar
+- Theme preference is saved in your browser
+
+### 5. Device List Sorting
+
+Sort the endpoint/device list by different criteria.
+
+**Sort Options:**
+- **Name** - Alphabetical by device name
+- **Endpoint ID** - Numerical by Matter endpoint ID
+- **Type** - Grouped by device type
+
+### 6. Health Monitoring Dashboard
 
 The Health Dashboard provides real-time monitoring of your bridges and fabric connections.
 

@@ -53,6 +53,11 @@ of port forwarding etc.
 - **Node.js 24** - Latest LTS runtime
 - **64-bit Only** - Supports `amd64` and `arm64` (aarch64)
 
+### Stable Features (v1.7.x) - NEW! 🎉
+
+- **Dark Mode Toggle** - Switch between light and dark theme
+- **Device List Sorting** - Sort endpoints by name, type, or ID
+
 ### Alpha Features (v2.0.0-alpha) 🧪
 
 > [!WARNING]
@@ -61,6 +66,9 @@ of port forwarding etc.
 All stable features plus:
 
 - **Water Valve Support** - Control water valves via Matter
+- **Smoke/CO Detector** - Binary sensors for smoke and carbon monoxide alarms
+- **Pressure Sensor** - Atmospheric pressure measurements
+- **Flow Sensor** - Volume flow rate measurements
 - **Health Check API** (`/api/health`)
   - System status, uptime, and service information
   - Kubernetes-ready probes (`/live`, `/ready`)
@@ -71,6 +79,10 @@ All stable features plus:
   - Override Matter device types per entity
   - Custom names for entities in Matter
   - Disable specific entities from bridge
+- **Full Backup/Restore** - Download complete backups as ZIP including entity mappings
+- **Filter Preview** - Preview which entities match your filter before saving
+- **Dark Mode Toggle** - Switch between light and dark theme
+- **Device List Sorting** - Sort endpoints by name, type, or ID
 
 ---
 
@@ -84,8 +96,8 @@ All stable features plus:
 | `cover` | Window Covering |
 | `climate` | Thermostat |
 | `fan` | Fan |
-| `binary_sensor` | Contact Sensor, Occupancy Sensor |
-| `sensor` | Temperature, Humidity, Pressure, Light, AirQuality Sensor |
+| `binary_sensor` | Contact, Occupancy, Smoke/CO Alarm, Water Leak Sensor |
+| `sensor` | Temperature, Humidity, Pressure, Flow, Light, AirQuality Sensor |
 | `button`, `input_button` | Generic Switch |
 | `media_player` | Speaker with Volume and Playback Controls |
 | `valve` | Water Valve (Alpha only) |
