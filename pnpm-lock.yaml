@@ -120,6 +120,9 @@ importers:
       lodash-es:
         specifier: 4.17.23
         version: 4.17.23
+      multer:
+        specifier: 2.0.2
+        version: 2.0.2
       nocache:
         specifier: 4.0.0
         version: 4.0.0
@@ -199,6 +202,9 @@ importers:
       lodash-es:
         specifier: 4.17.23
         version: 4.17.23
+      multer:
+        specifier: 2.0.2
+        version: 2.0.2
       nocache:
         specifier: 4.0.0
         version: 4.0.0
@@ -248,9 +254,6 @@ importers:
       '@types/yargs':
         specifier: ^17.0.35
         version: 17.0.35
-      multer:
-        specifier: ^2.0.2
-        version: 2.0.2
 
   packages/common:
     dependencies:
