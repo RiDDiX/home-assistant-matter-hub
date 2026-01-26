@@ -3,6 +3,23 @@
 Using the User Interface you can set up multiple bridges and configure each to use different filters for your entities.
 Each bridge will be completely independent of the others and uses its own port for matter.
 
+## Quick Start with Bridge Wizard
+
+The easiest way to create bridges is using the **Bridge Wizard**:
+
+1. Open the web UI and go to the Bridges page
+2. Click the **Wizard** button in the top right
+3. Follow the guided steps:
+   - Enter a name for your bridge
+   - Configure entity filters (by area, label, domain, etc.)
+   - Port is automatically assigned (starting from 5540)
+4. Add multiple bridges in one session
+5. Review and confirm to create all bridges
+
+The wizard automatically handles port assignment and prevents conflicts.
+
+## Manual Configuration
+
 You can access the bridge configuration by opening the web UI:
 
 - If you are running the Home Assistant Add On: click on `Open Web UI`

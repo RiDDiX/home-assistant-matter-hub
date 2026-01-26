@@ -44,6 +44,28 @@ Many users report connection issues when using VLANs or firewalls, where HAMH an
 Home, ...) are not placed in the same network segment. Please make sure to review the
 [common connectivity issues](./Guides/Connectivity%20Issues.md).
 
+## What's New
+
+### Stable (v1.5.x)
+
+- **Health Monitoring Dashboard** - Real-time bridge and fabric status monitoring
+- **Automatic Recovery** - Auto-restart failed bridges
+- **Bridge Wizard** - Guided setup for creating multiple bridges
+- **AirQuality Sensors** - Support for AQI, PM2.5, PM10, CO2, and VOC sensors
+- **Improved Fan Control** - Better speed control compatibility with Matter controllers
+- **Media Player Playback** - Play/Pause/Stop/Next/Previous track controls
+
+### Alpha (v2.0.0-alpha)
+
+All stable features plus:
+
+- **Water Valve Support** - Control water valves via Matter
+- **Health Check API** - REST endpoints for monitoring (`/api/health`)
+- **WebSocket Live Updates** - Real-time status updates (`/api/ws`)
+- **Entity Mapping** - Override Matter device types per entity
+
+See the [Alpha Features Guide](./Guides/Alpha%20Features.md) for detailed documentation.
+
 ## Getting started
 
 To get things up and running, please follow the [installation guide](./Getting%20Started/Installation.md).

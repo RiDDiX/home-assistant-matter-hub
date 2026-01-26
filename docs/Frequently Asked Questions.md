@@ -47,3 +47,52 @@ Ensure that **all** home hubs in the Apple Home app are updated to **iOS/tvOS/Au
 2. **Install any pending updates**, then **restart** each hub.
 
 3. **Relaunch** the Home app and confirm the vacuum now appears under your accessories.
+
+## How do I access the Health Dashboard?
+
+Click the heart icon (❤️) in the top navigation bar of the web UI, or navigate directly to `/health`.
+
+## My bridge keeps failing and restarting
+
+The automatic recovery feature will restart failed bridges. If a bridge keeps failing:
+
+1. Check the logs for specific error messages
+2. Reduce the number of devices in the bridge
+3. Verify all entities in the bridge are valid
+4. Try factory resetting the bridge
+
+## How do I use the Bridge Wizard?
+
+1. Go to the Bridges page
+2. Click the **Wizard** button
+3. Follow the guided steps to create bridges
+4. Ports are automatically assigned starting from 5540
+
+## What sensors are supported?
+
+Currently supported sensor types:
+- Temperature
+- Humidity
+- Pressure
+- Flow
+- Illuminance (Light)
+- Air Quality (AQI, PM2.5, PM10, CO2, VOC)
+
+## How do I control Media Player playback?
+
+Media players now support Play, Pause, Stop, Next Track, and Previous Track controls through Matter. However, not all controllers support these features yet. Volume control is also available.
+
+## What's the difference between Stable and Alpha?
+
+- **Stable**: Production-ready, recommended for daily use
+- **Alpha**: New features for testing, may contain bugs
+
+See the [Alpha Features Guide](./Guides/Alpha%20Features.md) for details on alpha features.
+
+## How do I report an Alpha bug?
+
+When reporting Alpha issues, include:
+- Alpha version number (visible in Health Dashboard)
+- Full logs from the add-on/container
+- Steps to reproduce
+- Controller type (Google, Apple, Alexa)

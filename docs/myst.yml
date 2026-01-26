@@ -11,6 +11,7 @@ project:
         - file: "Getting Started/Bridge Configuration.md"
     - title: Guides
       children:
+        - file: "Guides/Alpha Features.md"
         - file: "Guides/Migration from t0bst4r.md"
         - file: Guides/Connectivity Issues.md
         - file: "Guides/Connect Multiple Fabrics.md"
