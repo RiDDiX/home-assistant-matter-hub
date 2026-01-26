@@ -101,8 +101,8 @@ export class ThermostatServerBase extends FeaturedBase {
 
     // When autoMode is enabled, Matter spec requires:
     // minHeatSetpointLimit <= minCoolSetpointLimit - minSetpointDeadBand
-    // We use a deadband of 250 (2.5°C) to ensure the constraint is satisfied
-    const deadBand = this.features.autoMode ? 250 : 0;
+    // minSetpointDeadBand is int8 (max 127), unit is 0.1°C, so 25 = 2.5°C
+    const deadBand = this.features.autoMode ? 25 : 0;
     const minCoolLimit =
       minSetpointLimit != null ? minSetpointLimit + deadBand : undefined;
     const maxHeatLimit =
