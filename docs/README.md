@@ -83,3 +83,11 @@ If you need more assistance on the topic, please have a look at the following ex
 #### YouTube-Video on "Alexa et Google Home dans Home Assistant GRATUITEMENT grâce à Matter" (🇫🇷)
 
 [![Alexa et Google Home dans Home Assistant GRATUITEMENT grâce à Matter](https://img.youtube.com/vi/-TMzuHFo_-g/mqdefault.jpg)](https://www.youtube.com/watch?v=-TMzuHFo_-g)
+
+## Support the Project
+
+If you find this project useful and want to support its development, consider buying me a coffee! ☕
+
+[![PayPal](https://img.shields.io/badge/PayPal-Donate-blue?logo=paypal)](https://www.paypal.me/RiDDiX93)
+
+Every contribution helps to keep this project alive and maintained. Thank you! ❤️
