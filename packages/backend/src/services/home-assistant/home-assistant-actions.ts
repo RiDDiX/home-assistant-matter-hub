@@ -34,7 +34,13 @@ export class HomeAssistantActions extends Service {
     const action = calls[0].action;
     const data = Object.assign({}, ...calls.map((c) => c.data));
     const [domain, actionName] = action.split(".");
-    void this.callAction(domain, actionName, data, { entity_id }, false);
+    this.callAction(domain, actionName, data, { entity_id }, false).catch(
+      (error) => {
+        this.log.error(
+          `Failed to call action '${action}' for entity '${entity_id}': ${error}`,
+        );
+      },
+    );
   }
 
   call(action: HomeAssistantAction, entityId: string) {
