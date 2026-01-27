@@ -26,8 +26,8 @@ async function buildBackend() {
     format: "esm",
     minify: false,
     sourcemap: "linked",
-    external: ["bun", "bun:sqlite"],
     plugins: [
+      stubBunImports(),
       externalizeAllPackagesExcept([
         "@home-assistant-matter-hub/common",
         "@matter/general",
@@ -67,6 +67,24 @@ function doNotBundleFile(sourcesRoot, files) {
           return;
         }
         return { path: args.path, external: true };
+      });
+    },
+  };
+}
+
+function stubBunImports() {
+  return {
+    name: "stubBunImports",
+    setup(build) {
+      // Stub out bun: protocol imports with empty modules
+      build.onResolve({ filter: /^bun(:|$)/ }, (args) => {
+        return { path: args.path, namespace: "bun-stub" };
+      });
+      build.onLoad({ filter: /.*/, namespace: "bun-stub" }, () => {
+        return {
+          contents: "export default {}; export const Database = class {};",
+          loader: "js",
+        };
       });
     },
   };
