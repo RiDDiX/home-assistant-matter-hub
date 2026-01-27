@@ -60,6 +60,12 @@ of port forwarding etc.
 
 ### Stable Features (v1.8.x) - NEW! 🎉
 
+- **Graceful Crash Handler** - Failed entities no longer crash the bridge
+  - Problematic entities are automatically skipped during boot
+  - Failed entities are displayed in the UI with detailed error messages
+  - Bridge continues to run with remaining healthy entities
+- **PM2.5/PM10 Numeric Sensors** - Real concentration values in µg/m³ (not just quality levels)
+- **Access Control Fix** - Fixed attribute write issues using `asLocalActor` ([Matter.js #3105](https://github.com/matter-js/matter.js/issues/3105))
 - **Water Valve Support** - Control water valves via Matter
 - **Smoke/CO Detector** - Binary sensors for smoke and carbon monoxide alarms (separate device types)
 - **Pressure Sensor** - Atmospheric pressure measurements
@@ -203,10 +209,15 @@ Your volume mounts stay the same - no data migration needed.
 
 ## Support the Project
 
+> [!NOTE]
+> **This is completely optional!** The project will continue regardless of donations.
+> I maintain this in my free time because I believe in open source and helping the community.
+
 If you find this project useful and want to support its development, consider buying me a coffee! ☕
 
 [![PayPal](https://img.shields.io/badge/PayPal-Donate-blue?logo=paypal)](https://www.paypal.me/RiDDiX93)
 
-Every contribution helps to keep this project alive and maintained. Thank you! ❤️
+Maintaining this project takes time and effort - from fixing bugs, adding new features, to helping users in issues.
+Your support is appreciated but never expected. Thank you for using Home-Assistant-Matter-Hub! ❤️
 
 ---

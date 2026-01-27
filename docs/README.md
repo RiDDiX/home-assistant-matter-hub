@@ -55,20 +55,26 @@ Home, ...) are not placed in the same network segment. Please make sure to revie
 - **Improved Fan Control** - Better speed control compatibility with Matter controllers
 - **Media Player Playback** - Play/Pause/Stop/Next/Previous track controls
 
-### Alpha (v2.0.0-alpha)
-
-All stable features plus:
+### Stable (v1.8.x) - NEW! 🎉
 
 - **Graceful Crash Handler** - Failed entities no longer crash the bridge
   - Problematic entities are automatically skipped during boot
   - Failed entities are displayed in the UI with detailed error messages
   - Bridge continues to run with remaining healthy entities
 - **PM2.5/PM10 Numeric Sensors** - Real concentration values in µg/m³
-- **Access Control Fix** - Fixed attribute write issues using `asLocalActor` ([Matter.js #3105](https://github.com/matter-js/matter.js/issues/3105))
+- **Access Control Fix** - Fixed attribute write issues ([Matter.js #3105](https://github.com/matter-js/matter.js/issues/3105))
 - **Water Valve Support** - Control water valves via Matter
+- **Smoke/CO Detector** - Binary sensors for smoke and CO alarms
+- **Pressure/Flow Sensors** - Atmospheric pressure and flow measurements
+
+### Alpha (v2.0.0-alpha)
+
+All stable features plus:
+
 - **Health Check API** - REST endpoints for monitoring (`/api/health`)
 - **WebSocket Live Updates** - Real-time status updates (`/api/ws`)
 - **Entity Mapping** - Override Matter device types per entity
+- **Full Backup/Restore** - Download complete backups as ZIP
 
 See the [Alpha Features Guide](./Guides/Alpha%20Features.md) for detailed documentation.
 
@@ -92,8 +98,12 @@ If you need more assistance on the topic, please have a look at the following ex
 
 ## Support the Project
 
+> **This is completely optional!** The project will continue regardless of donations.
+> I maintain this in my free time because I believe in open source and helping the community.
+
 If you find this project useful and want to support its development, consider buying me a coffee! ☕
 
 [![PayPal](https://img.shields.io/badge/PayPal-Donate-blue?logo=paypal)](https://www.paypal.me/RiDDiX93)
 
-Every contribution helps to keep this project alive and maintained. Thank you! ❤️
+Maintaining this project takes time and effort - from fixing bugs, adding new features, to helping users in issues.
+Your support is appreciated but never expected. Thank you for using Home-Assistant-Matter-Hub! ❤️
