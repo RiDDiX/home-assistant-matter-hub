@@ -65,6 +65,7 @@ of port forwarding etc.
 - **Pressure Sensor** - Atmospheric pressure measurements
 - **Flow Sensor** - Volume flow rate measurements
 - **Air Purifier** - Map fans to Air Purifier device type via entity mapping
+- **Pump Device** - Map switches/valves to Pump device type via entity mapping
 
 ### Alpha Features (v2.0.0-alpha) 🧪
 
