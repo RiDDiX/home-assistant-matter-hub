@@ -59,6 +59,12 @@ Home, ...) are not placed in the same network segment. Please make sure to revie
 
 All stable features plus:
 
+- **Graceful Crash Handler** - Failed entities no longer crash the bridge
+  - Problematic entities are automatically skipped during boot
+  - Failed entities are displayed in the UI with detailed error messages
+  - Bridge continues to run with remaining healthy entities
+- **PM2.5/PM10 Numeric Sensors** - Real concentration values in µg/m³
+- **Access Control Fix** - Fixed attribute write issues using `asLocalActor` ([Matter.js #3105](https://github.com/matter-js/matter.js/issues/3105))
 - **Water Valve Support** - Control water valves via Matter
 - **Health Check API** - REST endpoints for monitoring (`/api/health`)
 - **WebSocket Live Updates** - Real-time status updates (`/api/ws`)

@@ -73,6 +73,12 @@ of port forwarding etc.
 > Alpha versions are for testing only and may contain bugs!
 
 All stable features plus:
+- **Graceful Crash Handler** - Failed entities no longer crash the bridge
+  - Problematic entities are automatically skipped during boot
+  - Failed entities are displayed in the UI with detailed error messages
+  - Bridge continues to run with remaining healthy entities
+- **PM2.5/PM10 Numeric Sensors** - Real concentration values in µg/m³ (not just quality levels)
+- **Access Control Fix** - Fixed attribute write issues using `asLocalActor` ([Matter.js #3105](https://github.com/matter-js/matter.js/issues/3105))
 - **Health Check API** (`/api/health`)
   - System status, uptime, and service information
   - Kubernetes-ready probes (`/live`, `/ready`)
