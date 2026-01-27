@@ -53,10 +53,19 @@ of port forwarding etc.
 - **Node.js 24** - Latest LTS runtime
 - **64-bit Only** - Supports `amd64` and `arm64` (aarch64)
 
-### Stable Features (v1.7.x) - NEW! 🎉
+### Stable Features (v1.7.x)
 
 - **Dark Mode Toggle** - Switch between light and dark theme
 - **Device List Sorting** - Sort endpoints by name, type, or ID
+
+### Stable Features (v1.8.x) - NEW! 🎉
+
+- **Water Valve Support** - Control water valves via Matter
+- **Smoke/CO Detector** - Binary sensors for smoke and carbon monoxide alarms (separate device types)
+- **Pressure Sensor** - Atmospheric pressure measurements
+- **Flow Sensor** - Volume flow rate measurements
+- **Air Purifier** - Map fans to Air Purifier device type via entity mapping
+- **Pump Device** - Map switches/valves to Pump device type via entity mapping
 
 ### Alpha Features (v2.0.0-alpha) 🧪
 
@@ -64,11 +73,6 @@ of port forwarding etc.
 > Alpha versions are for testing only and may contain bugs!
 
 All stable features plus:
-
-- **Water Valve Support** - Control water valves via Matter
-- **Smoke/CO Detector** - Binary sensors for smoke and carbon monoxide alarms
-- **Pressure Sensor** - Atmospheric pressure measurements
-- **Flow Sensor** - Volume flow rate measurements
 - **Health Check API** (`/api/health`)
   - System status, uptime, and service information
   - Kubernetes-ready probes (`/live`, `/ready`)
@@ -100,7 +104,7 @@ All stable features plus:
 | `sensor` | Temperature, Humidity, Pressure, Flow, Light, AirQuality Sensor |
 | `button`, `input_button` | Generic Switch |
 | `media_player` | Speaker with Volume and Playback Controls |
-| `valve` | Water Valve (Alpha only) |
+| `valve` | Water Valve |
 | `vacuum` | Robot Vacuum Cleaner |
 | `humidifier` | Humidifier/Dehumidifier |
 | `automation`, `script`, `scene` | On/Off Switch |
