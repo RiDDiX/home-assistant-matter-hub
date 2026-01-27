@@ -72,7 +72,7 @@ export function matterApi(
     res.status(204).send();
   });
 
-  router.get("/bridges/:bridgeId/actions/factory-reset", async (req, res) => {
+  router.post("/bridges/:bridgeId/actions/factory-reset", async (req, res) => {
     const bridgeId = req.params.bridgeId;
     const bridge = bridgeService.bridges.find((b) => b.id === bridgeId);
     if (bridge) {
@@ -100,6 +100,39 @@ export function matterApi(
     if (success) {
       const bridge = bridgeService.get(bridgeId);
       res.status(200).json(bridge?.data);
+    } else {
+      res.status(404).send("Not Found");
+    }
+  });
+
+  router.post("/bridges/:bridgeId/actions/start", async (req, res) => {
+    const bridgeId = req.params.bridgeId;
+    const bridge = bridgeService.bridges.find((b) => b.id === bridgeId);
+    if (bridge) {
+      await bridge.start();
+      res.status(200).json(bridge.data);
+    } else {
+      res.status(404).send("Not Found");
+    }
+  });
+
+  router.post("/bridges/:bridgeId/actions/stop", async (req, res) => {
+    const bridgeId = req.params.bridgeId;
+    const bridge = bridgeService.bridges.find((b) => b.id === bridgeId);
+    if (bridge) {
+      await bridge.stop();
+      res.status(200).json(bridge.data);
+    } else {
+      res.status(404).send("Not Found");
+    }
+  });
+
+  router.post("/bridges/:bridgeId/actions/refresh", async (req, res) => {
+    const bridgeId = req.params.bridgeId;
+    const bridge = bridgeService.bridges.find((b) => b.id === bridgeId);
+    if (bridge) {
+      await bridge.refreshDevices();
+      res.status(200).json(bridge.data);
     } else {
       res.status(404).send("Not Found");
     }

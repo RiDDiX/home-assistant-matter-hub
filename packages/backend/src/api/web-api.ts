@@ -15,7 +15,10 @@ import { backupApi } from "./backup-api.js";
 import { bridgeExportApi } from "./bridge-export-api.js";
 import { entityMappingApi } from "./entity-mapping-api.js";
 import { healthApi } from "./health-api.js";
+import { homeAssistantApi } from "./home-assistant-api.js";
+import { logsApi } from "./logs-api.js";
 import { matterApi } from "./matter-api.js";
+import { metricsApi } from "./metrics-api.js";
 import { supportIngress, supportProxyLocation } from "./proxy-support.js";
 import { webUi } from "./web-ui.js";
 import { WebSocketApi } from "./websocket-api.js";
@@ -33,6 +36,7 @@ export interface WebApiProps {
 
 export class WebApi extends Service {
   private readonly log: BetterLogger;
+  private readonly logger: LoggerService;
   private readonly accessLogger: express.RequestHandler;
   private readonly startTime: number;
   private readonly wsApi: WebSocketApi;
@@ -50,6 +54,7 @@ export class WebApi extends Service {
     private readonly props: WebApiProps,
   ) {
     super("WebApi");
+    this.logger = logger;
     this.log = logger.get(this);
     this.accessLogger = accessLogger(this.log.createChild("Access Log"));
     this.startTime = Date.now();
@@ -80,7 +85,18 @@ export class WebApi extends Service {
       )
       .use("/bridges", bridgeExportApi(this.bridgeStorage))
       .use("/entity-mappings", entityMappingApi(this.mappingStorage))
-      .use("/backup", backupApi(this.bridgeStorage, this.mappingStorage));
+      .use("/backup", backupApi(this.bridgeStorage, this.mappingStorage))
+      .use("/home-assistant", homeAssistantApi(this.haRegistry, this.haClient))
+      .use("/logs", logsApi(this.logger))
+      .use(
+        "/metrics",
+        metricsApi(
+          this.bridgeService,
+          this.haClient,
+          this.haRegistry,
+          this.startTime,
+        ),
+      );
 
     const middlewares: express.Handler[] = [
       this.accessLogger,
