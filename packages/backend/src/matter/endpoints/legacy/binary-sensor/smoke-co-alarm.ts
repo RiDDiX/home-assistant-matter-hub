@@ -7,12 +7,10 @@ import { BasicInformationServer } from "../../../behaviors/basic-information-ser
 import { HomeAssistantEntityBehavior } from "../../../behaviors/home-assistant-entity-behavior.js";
 import { IdentifyServer } from "../../../behaviors/identify-server.js";
 
-const SmokeCoAlarmServerWithFeatures = Base.with(
-  SmokeCoAlarm.Feature.SmokeAlarm,
-  SmokeCoAlarm.Feature.CoAlarm,
-);
+const SmokeAlarmServerWithFeature = Base.with(SmokeCoAlarm.Feature.SmokeAlarm);
+const CoAlarmServerWithFeature = Base.with(SmokeCoAlarm.Feature.CoAlarm);
 
-class SmokeCoAlarmServerImpl extends SmokeCoAlarmServerWithFeatures {
+class SmokeAlarmServerImpl extends SmokeAlarmServerWithFeature {
   override async initialize() {
     await super.initialize();
     const homeAssistant = await this.agent.load(HomeAssistantEntityBehavior);
@@ -24,35 +22,44 @@ class SmokeCoAlarmServerImpl extends SmokeCoAlarmServerWithFeatures {
     const isOn =
       this.agent.get(HomeAssistantEntityBehavior).isAvailable &&
       entity.state.state === "on";
-    const deviceClass = entity.state.attributes?.device_class;
-
-    if (deviceClass === "smoke") {
-      applyPatchState(this.state, {
-        smokeState: isOn
-          ? SmokeCoAlarm.AlarmState.Warning
-          : SmokeCoAlarm.AlarmState.Normal,
-        coState: SmokeCoAlarm.AlarmState.Normal,
-      });
-    } else if (deviceClass === "carbon_monoxide" || deviceClass === "gas") {
-      applyPatchState(this.state, {
-        coState: isOn
-          ? SmokeCoAlarm.AlarmState.Warning
-          : SmokeCoAlarm.AlarmState.Normal,
-        smokeState: SmokeCoAlarm.AlarmState.Normal,
-      });
-    } else {
-      applyPatchState(this.state, {
-        smokeState: isOn
-          ? SmokeCoAlarm.AlarmState.Warning
-          : SmokeCoAlarm.AlarmState.Normal,
-      });
-    }
+    applyPatchState(this.state, {
+      smokeState: isOn
+        ? SmokeCoAlarm.AlarmState.Warning
+        : SmokeCoAlarm.AlarmState.Normal,
+    });
   }
 }
 
-export const SmokeCoAlarmType = SmokeCoAlarmDevice.with(
+class CoAlarmServerImpl extends CoAlarmServerWithFeature {
+  override async initialize() {
+    await super.initialize();
+    const homeAssistant = await this.agent.load(HomeAssistantEntityBehavior);
+    this.update(homeAssistant.entity);
+    this.reactTo(homeAssistant.onChange, this.update);
+  }
+
+  private update(entity: HomeAssistantEntityInformation) {
+    const isOn =
+      this.agent.get(HomeAssistantEntityBehavior).isAvailable &&
+      entity.state.state === "on";
+    applyPatchState(this.state, {
+      coState: isOn
+        ? SmokeCoAlarm.AlarmState.Warning
+        : SmokeCoAlarm.AlarmState.Normal,
+    });
+  }
+}
+
+export const SmokeAlarmType = SmokeCoAlarmDevice.with(
   BasicInformationServer,
   IdentifyServer,
   HomeAssistantEntityBehavior,
-  SmokeCoAlarmServerImpl,
+  SmokeAlarmServerImpl,
+);
+
+export const CoAlarmType = SmokeCoAlarmDevice.with(
+  BasicInformationServer,
+  IdentifyServer,
+  HomeAssistantEntityBehavior,
+  CoAlarmServerImpl,
 );
