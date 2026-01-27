@@ -7,7 +7,11 @@ import { OccupancySensing } from "@matter/main/clusters";
 import { applyPatchState } from "../../utils/apply-patch-state.js";
 import { HomeAssistantEntityBehavior } from "./home-assistant-entity-behavior.js";
 
-export class OccupancySensingServer extends Base {
+const OccupancySensingServerBase = Base.with(
+  OccupancySensing.Feature.PhysicalContact,
+);
+
+export class OccupancySensingServer extends OccupancySensingServerBase {
   override async initialize() {
     await super.initialize();
     const homeAssistant = await this.agent.load(HomeAssistantEntityBehavior);
