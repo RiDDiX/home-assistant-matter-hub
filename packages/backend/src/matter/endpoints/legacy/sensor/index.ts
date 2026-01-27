@@ -8,6 +8,8 @@ import { AirQualitySensorType } from "./devices/air-quality-sensor.js";
 import { FlowSensorType } from "./devices/flow-sensor.js";
 import { HumiditySensorType } from "./devices/humidity-sensor.js";
 import { IlluminanceSensorType } from "./devices/illuminance-sensor.js";
+import { Pm10SensorType } from "./devices/pm10-sensor.js";
+import { Pm25SensorType } from "./devices/pm25-sensor.js";
 import { PressureSensorType } from "./devices/pressure-sensor.js";
 import { TemperatureSensorType } from "./devices/temperature-sensor.js";
 
@@ -36,11 +38,15 @@ export function SensorDevice(
   if (deviceClass === SensorDeviceClass.volume_flow_rate) {
     return FlowSensorType.set({ homeAssistantEntity });
   }
+  if (deviceClass === SensorDeviceClass.pm25) {
+    return Pm25SensorType.set({ homeAssistantEntity });
+  }
+  if (deviceClass === SensorDeviceClass.pm10) {
+    return Pm10SensorType.set({ homeAssistantEntity });
+  }
   if (
     deviceClass === SensorDeviceClass.aqi ||
     deviceClass === SensorDeviceClass.carbon_dioxide ||
-    deviceClass === SensorDeviceClass.pm25 ||
-    deviceClass === SensorDeviceClass.pm10 ||
     deviceClass === SensorDeviceClass.volatile_organic_compounds ||
     deviceClass === SensorDeviceClass.volatile_organic_compounds_parts
   ) {
