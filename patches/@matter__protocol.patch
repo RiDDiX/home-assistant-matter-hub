@@ -1,0 +1,13 @@
+diff --git a/src/interaction/FabricAccessControl.ts b/src/interaction/FabricAccessControl.ts
+index 1234567..abcdefg 100644
+--- a/src/interaction/FabricAccessControl.ts
++++ b/src/interaction/FabricAccessControl.ts
+@@ -124,7 +124,7 @@ export class FabricAccessControl {
+     ): AccessLevel[] {
+         if (location.cluster === undefined) {
+             // Without a cluster, internal behaviors are only accessible internally, so this is an irrelevant placeholder
+-            logger.warn("Access control check without cluster, returning View access level");
++            logger.warn("Access control check without cluster, returning View access level", JSON.stringify(location), new Error());
+             return [AccessLevel.View];
+         }
+         if (endpoint === undefined) {
