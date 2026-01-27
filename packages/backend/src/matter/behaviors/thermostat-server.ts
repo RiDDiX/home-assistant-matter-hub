@@ -114,13 +114,17 @@ export class ThermostatServerBase extends FeaturedBase {
       ? config.getRunningMode(entity.state, this.agent)
       : Thermostat.ThermostatRunningMode.Off;
 
-    // When autoMode is enabled, Matter spec requires:
+    // When autoMode is enabled AND currently in Auto mode, Matter spec requires:
     // - minHeatSetpointLimit <= minCoolSetpointLimit - minSetpointDeadBand
     // - maxHeatSetpointLimit <= maxCoolSetpointLimit - minSetpointDeadBand
     // minSetpointDeadBand: int8 (max 127), unit 0.1°C → 25 = 2.5°C
     // Temperature limits: int16, unit 0.01°C → offset 250 = 2.5°C
-    const deadBandAttr = this.features.autoMode ? 25 : 0;
-    const deadBandOffset = this.features.autoMode ? 250 : 0;
+    // Only apply deadband when CURRENTLY in Auto mode, not just when feature is supported
+    // This fixes the 2.5°C offset issue when user is in Heat/Cool only mode (#21)
+    const isCurrentlyInAutoMode =
+      this.features.autoMode && systemMode === SystemMode.Auto;
+    const deadBandAttr = isCurrentlyInAutoMode ? 25 : 0;
+    const deadBandOffset = isCurrentlyInAutoMode ? 250 : 0;
     const minCoolLimit =
       minSetpointLimit != null ? minSetpointLimit + deadBandOffset : undefined;
     const maxHeatLimit =
