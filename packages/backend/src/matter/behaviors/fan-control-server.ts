@@ -109,7 +109,32 @@ export class FanControlServerBase extends FeaturedBase {
 
   override step(request: FanControl.StepRequest) {
     const fanSpeed = new FanSpeed(this.state.speedCurrent, this.state.speedMax);
-    this.targetSpeedSettingChanged(fanSpeed.step(request).currentSpeed);
+    const newSpeed = fanSpeed.step(request).currentSpeed;
+    const percentSetting = Math.floor((newSpeed / this.state.speedMax) * 100);
+
+    const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);
+    if (!homeAssistant.isAvailable) {
+      return;
+    }
+    if (percentSetting === 0) {
+      homeAssistant.callAction(this.state.config.turnOff(void 0, this.agent));
+    } else {
+      const stepSize = this.state.config.getStepSize(
+        homeAssistant.entity.state,
+        this.agent,
+      );
+      const roundedPercentage =
+        stepSize && stepSize > 0
+          ? Math.round(percentSetting / stepSize) * stepSize
+          : percentSetting;
+      const clampedPercentage = Math.max(
+        stepSize ?? 1,
+        Math.min(100, roundedPercentage),
+      );
+      homeAssistant.callAction(
+        this.state.config.turnOn(clampedPercentage, this.agent),
+      );
+    }
   }
 
   private targetSpeedSettingChanged(
