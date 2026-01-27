@@ -111,12 +111,17 @@ export class ThermostatServerBase extends FeaturedBase {
       ? config.getRunningMode(entity.state, this.agent)
       : Thermostat.ThermostatRunningMode.Off;
 
-    // When autoMode is enabled, Matter spec requires minSetpointDeadBand between
-    // heating and cooling setpoints. This is enforced by Matter.js at runtime,
-    // we just need to set the attribute. The limits should NOT be reduced by the
-    // deadband - that would unnecessarily restrict the user's temperature range.
+    // When autoMode is enabled, Matter spec requires:
+    // - minHeatSetpointLimit <= minCoolSetpointLimit - minSetpointDeadBand
+    // - maxHeatSetpointLimit <= maxCoolSetpointLimit - minSetpointDeadBand
     // minSetpointDeadBand: int8 (max 127), unit 0.1°C → 25 = 2.5°C
+    // Temperature limits: int16, unit 0.01°C → offset 250 = 2.5°C
     const deadBandAttr = this.features.autoMode ? 25 : 0;
+    const deadBandOffset = this.features.autoMode ? 250 : 0;
+    const minCoolLimit =
+      minSetpointLimit != null ? minSetpointLimit + deadBandOffset : undefined;
+    const maxHeatLimit =
+      maxSetpointLimit != null ? maxSetpointLimit - deadBandOffset : undefined;
 
     applyPatchState(this.state, {
       localTemperature: localTemperature,
@@ -132,17 +137,17 @@ export class ThermostatServerBase extends FeaturedBase {
         ? {
             occupiedHeatingSetpoint: targetHeatingTemperature,
             minHeatSetpointLimit: minSetpointLimit,
-            maxHeatSetpointLimit: maxSetpointLimit,
+            maxHeatSetpointLimit: maxHeatLimit ?? maxSetpointLimit,
             absMinHeatSetpointLimit: minSetpointLimit,
-            absMaxHeatSetpointLimit: maxSetpointLimit,
+            absMaxHeatSetpointLimit: maxHeatLimit ?? maxSetpointLimit,
           }
         : {}),
       ...(this.features.cooling
         ? {
             occupiedCoolingSetpoint: targetCoolingTemperature,
-            minCoolSetpointLimit: minSetpointLimit,
+            minCoolSetpointLimit: minCoolLimit ?? minSetpointLimit,
             maxCoolSetpointLimit: maxSetpointLimit,
-            absMinCoolSetpointLimit: minSetpointLimit,
+            absMinCoolSetpointLimit: minCoolLimit ?? minSetpointLimit,
             absMaxCoolSetpointLimit: maxSetpointLimit,
           }
         : {}),
