@@ -34,6 +34,14 @@ export function FilterPreview({ filter }: FilterPreviewProps) {
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState(false);
 
+  const tryParseJson = (text: string): unknown => {
+    try {
+      return JSON.parse(text);
+    } catch {
+      return undefined;
+    }
+  };
+
   const fetchPreview = async () => {
     setLoading(true);
     setError(null);
@@ -43,11 +51,19 @@ export function FilterPreview({ filter }: FilterPreviewProps) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(filter),
       });
+
+      const text = await response.text();
+      const parsed = tryParseJson(text);
+
       if (!response.ok) {
-        const data = await response.json();
-        throw new Error(data.error || "Failed to fetch preview");
+        const errorMessage =
+          typeof parsed === "object" && parsed !== null && "error" in parsed
+            ? String((parsed as { error?: unknown }).error)
+            : text || "Failed to fetch preview";
+        throw new Error(errorMessage);
       }
-      const data = (await response.json()) as PreviewResult;
+
+      const data = (parsed ?? tryParseJson(text)) as PreviewResult;
       setResult(data);
       setExpanded(true);
     } catch (e) {

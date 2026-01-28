@@ -48,6 +48,8 @@ export class ThermostatServerBase extends FeaturedBase {
   declare state: ThermostatServerBase.State;
 
   override async initialize() {
+    await super.initialize();
+
     if (this.features.autoMode) {
       this.state.minSetpointDeadBand = 0;
     }
@@ -57,8 +59,6 @@ export class ThermostatServerBase extends FeaturedBase {
         : this.features.cooling
           ? Thermostat.ControlSequenceOfOperation.CoolingOnly
           : Thermostat.ControlSequenceOfOperation.HeatingOnly;
-
-    await super.initialize();
 
     const homeAssistant = await this.agent.load(HomeAssistantEntityBehavior);
     this.update(homeAssistant.entity);
@@ -154,16 +154,17 @@ export class ThermostatServerBase extends FeaturedBase {
       "cool",
     );
 
+    if (this.features.autoMode) {
+      applyPatchState(this.state, {
+        minSetpointDeadBand: deadBandAttr,
+        thermostatRunningMode: runningMode,
+      });
+    }
+
     applyPatchState(this.state, {
       localTemperature: localTemperature,
       systemMode: systemMode,
       thermostatRunningState: this.getRunningState(systemMode, runningMode),
-      ...(this.features.autoMode
-        ? {
-            minSetpointDeadBand: deadBandAttr,
-            thermostatRunningMode: runningMode,
-          }
-        : {}),
       ...(this.features.heating
         ? {
             occupiedHeatingSetpoint: clampedHeatingSetpoint,
