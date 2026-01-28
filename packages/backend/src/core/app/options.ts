@@ -1,4 +1,6 @@
 import { createRequire } from "node:module";
+import os from "node:os";
+import path from "node:path";
 import { VendorId } from "@matter/main";
 import type { ArgumentsCamelCase } from "yargs";
 import type { WebApiProps } from "../../api/web-api.js";
@@ -80,8 +82,17 @@ export class Options {
       ),
       webUiDist: this.startOptions.webUiDist,
       version: resolveAppVersion(),
+      storageLocation: this.resolveStorageLocation(),
       auth,
     };
+  }
+
+  private resolveStorageLocation(): string {
+    const storageLocation = notEmpty(this.startOptions.storageLocation);
+    const homedir = os.homedir();
+    return storageLocation
+      ? path.resolve(storageLocation.replace(/^~\//, `${homedir}/`))
+      : path.join(homedir, ".home-assistant-matter-hub");
   }
 
   get bridgeService(): BridgeServiceProps {

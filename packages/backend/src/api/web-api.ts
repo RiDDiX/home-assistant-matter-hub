@@ -28,6 +28,7 @@ export interface WebApiProps {
   readonly whitelist: string[] | undefined;
   readonly webUiDist?: string;
   readonly version: string;
+  readonly storageLocation: string;
   readonly auth?: {
     username: string;
     password: string;
@@ -85,7 +86,14 @@ export class WebApi extends Service {
       )
       .use("/bridges", bridgeExportApi(this.bridgeStorage))
       .use("/entity-mappings", entityMappingApi(this.mappingStorage))
-      .use("/backup", backupApi(this.bridgeStorage, this.mappingStorage))
+      .use(
+        "/backup",
+        backupApi(
+          this.bridgeStorage,
+          this.mappingStorage,
+          this.props.storageLocation,
+        ),
+      )
       .use("/home-assistant", homeAssistantApi(this.haRegistry, this.haClient))
       .use("/logs", logsApi(this.logger))
       .use(

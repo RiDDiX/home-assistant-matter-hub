@@ -1,3 +1,5 @@
+import fs from "node:fs";
+import path from "node:path";
 import type {
   BridgeData,
   EntityMappingConfig,
@@ -22,17 +24,20 @@ export interface BackupData {
   createdAt: string;
   bridges: BridgeData[];
   entityMappings: Record<string, unknown[]>;
+  includesIdentity?: boolean;
 }
 
 export function backupApi(
   bridgeStorage: BridgeStorage,
   mappingStorage: EntityMappingStorage,
+  storageLocation: string,
   _bridgeService?: BridgeService,
 ): express.Router {
   const router = express.Router();
 
-  router.get("/download", async (_, res) => {
+  router.get("/download", async (req, res) => {
     try {
+      const includeIdentity = req.query.includeIdentity === "true";
       const bridges = bridgeStorage.bridges as BridgeData[];
       const entityMappings: Record<string, unknown[]> = {};
 
@@ -44,19 +49,23 @@ export function backupApi(
       }
 
       const backupData: BackupData = {
-        version: 1,
+        version: 2,
         createdAt: new Date().toISOString(),
         bridges,
         entityMappings,
+        includesIdentity: includeIdentity,
       };
 
       const archive = archiver("zip", { zlib: { level: 9 } });
       const dateStr = new Date().toISOString().split("T")[0];
+      const filename = includeIdentity
+        ? `hamh-full-backup-${dateStr}.zip`
+        : `hamh-backup-${dateStr}.zip`;
 
       res.setHeader("Content-Type", "application/zip");
       res.setHeader(
         "Content-Disposition",
-        `attachment; filename="hamh-backup-${dateStr}.zip"`,
+        `attachment; filename="${filename}"`,
       );
 
       archive.pipe(res);
@@ -64,9 +73,18 @@ export function backupApi(
         name: "backup.json",
       });
       archive.append(
-        `Home Assistant Matter Hub Backup\nCreated: ${backupData.createdAt}\nBridges: ${bridges.length}\n`,
+        `Home Assistant Matter Hub Backup\nCreated: ${backupData.createdAt}\nBridges: ${bridges.length}\nIncludes Identity: ${includeIdentity}\n\nWARNING: ${includeIdentity ? "This backup contains sensitive Matter identity data (keypairs, fabric credentials). Keep it secure!" : "This backup does NOT include Matter identity data. Bridges will need to be re-commissioned after restore."}\n`,
         { name: "README.txt" },
       );
+
+      if (includeIdentity) {
+        for (const bridge of bridges) {
+          const bridgeStoragePath = path.join(storageLocation, bridge.id);
+          if (fs.existsSync(bridgeStoragePath)) {
+            archive.directory(bridgeStoragePath, `identity/${bridge.id}`);
+          }
+        }
+      }
 
       await archive.finalize();
     } catch (error) {
@@ -86,13 +104,14 @@ export function backupApi(
           return;
         }
 
-        const backupData = await extractBackupData(req.file.buffer);
+        const { backupData } = await extractBackupData(req.file.buffer);
         const existingIds = new Set(bridgeStorage.bridges.map((b) => b.id));
 
         const preview = {
           version: backupData.version,
           createdAt: backupData.createdAt,
-          bridges: backupData.bridges.map((bridge) => ({
+          includesIdentity: backupData.includesIdentity ?? false,
+          bridges: backupData.bridges.map((bridge: BridgeData) => ({
             id: bridge.id,
             name: bridge.name,
             port: bridge.port,
@@ -127,9 +146,12 @@ export function backupApi(
           bridgeIds?: string[];
           overwriteExisting?: boolean;
           includeMappings?: boolean;
+          restoreIdentity?: boolean;
         };
 
-        const backupData = await extractBackupData(req.file.buffer);
+        const { backupData, zipDirectory } = await extractBackupData(
+          req.file.buffer,
+        );
         const existingIds = new Set(bridgeStorage.bridges.map((b) => b.id));
 
         const bridgesToRestore = options.bridgeIds
@@ -139,6 +161,7 @@ export function backupApi(
         let bridgesRestored = 0;
         let bridgesSkipped = 0;
         let mappingsRestored = 0;
+        let identitiesRestored = 0;
         const errors: Array<{ bridgeId: string; error: string }> = [];
 
         for (const bridge of bridgesToRestore) {
@@ -168,6 +191,20 @@ export function backupApi(
                 }
               }
             }
+
+            if (
+              options.restoreIdentity !== false &&
+              backupData.includesIdentity
+            ) {
+              const identityRestored = await restoreIdentityFiles(
+                zipDirectory,
+                bridge.id,
+                storageLocation,
+              );
+              if (identityRestored) {
+                identitiesRestored++;
+              }
+            }
           } catch (e) {
             errors.push({
               bridgeId: bridge.id,
@@ -180,8 +217,9 @@ export function backupApi(
           bridgesRestored,
           bridgesSkipped,
           mappingsRestored,
+          identitiesRestored,
           errors,
-          restartRequired: bridgesRestored > 0,
+          restartRequired: bridgesRestored > 0 || identitiesRestored > 0,
         });
       } catch (error) {
         const message =
@@ -202,7 +240,12 @@ export function backupApi(
   return router;
 }
 
-async function extractBackupData(buffer: Buffer): Promise<BackupData> {
+interface ExtractedBackup {
+  backupData: BackupData;
+  zipDirectory: unzipper.CentralDirectory;
+}
+
+async function extractBackupData(buffer: Buffer): Promise<ExtractedBackup> {
   const directory = await unzipper.Open.buffer(buffer);
   const backupFile = directory.files.find(
     (f: { path: string }) => f.path === "backup.json",
@@ -212,5 +255,37 @@ async function extractBackupData(buffer: Buffer): Promise<BackupData> {
   }
   const content = await backupFile.buffer();
   const data = JSON.parse(content.toString()) as BackupData;
-  return data;
+  return { backupData: data, zipDirectory: directory };
+}
+
+async function restoreIdentityFiles(
+  zipDirectory: unzipper.CentralDirectory,
+  bridgeId: string,
+  storageLocation: string,
+): Promise<boolean> {
+  const identityPrefix = `identity/${bridgeId}/`;
+  const identityFiles = zipDirectory.files.filter(
+    (f: { path: string; type: string }) =>
+      f.path.startsWith(identityPrefix) && f.type === "File",
+  );
+
+  if (identityFiles.length === 0) {
+    return false;
+  }
+
+  const targetDir = path.join(storageLocation, bridgeId);
+  fs.mkdirSync(targetDir, { recursive: true });
+
+  for (const file of identityFiles) {
+    const relativePath = file.path.substring(identityPrefix.length);
+    const targetPath = path.join(targetDir, relativePath);
+    const targetDirPath = path.dirname(targetPath);
+
+    fs.mkdirSync(targetDirPath, { recursive: true });
+
+    const content = await file.buffer();
+    fs.writeFileSync(targetPath, content);
+  }
+
+  return true;
 }
