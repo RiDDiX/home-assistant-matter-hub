@@ -2,6 +2,14 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import express from "express";
 
+export interface NetworkInterface {
+  name: string;
+  address: string;
+  family: string;
+  mac: string;
+  internal: boolean;
+}
+
 export interface SystemInfo {
   version: string;
   nodeVersion: string;
@@ -9,22 +17,27 @@ export interface SystemInfo {
   platform: string;
   arch: string;
   uptime: number;
+  cpuCount: number;
+  loadAvg: number[];
   memory: {
     total: number;
     used: number;
     free: number;
+    usagePercent: number;
   };
   network: {
-    interfaces: Array<{
-      name: string;
-      address: string;
-      family: string;
-    }>;
+    interfaces: NetworkInterface[];
   };
   storage: {
     total: number;
     used: number;
     free: number;
+    usagePercent: number;
+  };
+  process: {
+    pid: number;
+    uptime: number;
+    memoryUsage: number;
   };
 }
 
@@ -33,6 +46,11 @@ export function systemApi(): express.Router {
 
   router.get("/info", async (_req, res) => {
     try {
+      const totalMem = os.totalmem();
+      const freeMem = os.freemem();
+      const usedMem = totalMem - freeMem;
+      const storageInfo = await getStorageInfo();
+
       const systemInfo: SystemInfo = {
         version: process.env.npm_package_version || "unknown",
         nodeVersion: process.version,
@@ -40,33 +58,29 @@ export function systemApi(): express.Router {
         platform: os.platform(),
         arch: os.arch(),
         uptime: os.uptime(),
+        cpuCount: os.cpus().length,
+        loadAvg: os.loadavg(),
         memory: {
-          total: os.totalmem(),
-          used: os.totalmem() - os.freemem(),
-          free: os.freemem(),
+          total: totalMem,
+          used: usedMem,
+          free: freeMem,
+          usagePercent: Math.round((usedMem / totalMem) * 100),
         },
         network: {
-          interfaces: Object.entries(os.networkInterfaces())
-            .filter(([, iface]) => {
-              // Type assertion to access NetworkInterfaceInfo properties
-              const networkInterface = iface as any;
-              return (
-                networkInterface &&
-                !networkInterface.internal &&
-                networkInterface.family !== "IPv6"
-              );
-            })
-            .map(([name, iface]) => {
-              // Type assertion to access NetworkInterfaceInfo properties
-              const networkInterface = iface as any;
-              return {
-                name,
-                address: networkInterface.address,
-                family: networkInterface.family,
-              };
-            }),
+          interfaces: getNetworkInterfaces(),
         },
-        storage: await getStorageInfo(),
+        storage: {
+          ...storageInfo,
+          usagePercent:
+            storageInfo.total > 0
+              ? Math.round((storageInfo.used / storageInfo.total) * 100)
+              : 0,
+        },
+        process: {
+          pid: process.pid,
+          uptime: process.uptime(),
+          memoryUsage: process.memoryUsage().heapUsed,
+        },
       };
 
       res.json(systemInfo);
@@ -77,6 +91,31 @@ export function systemApi(): express.Router {
   });
 
   return router;
+}
+
+function getNetworkInterfaces(): NetworkInterface[] {
+  const interfaces: NetworkInterface[] = [];
+  const networkInterfaces = os.networkInterfaces();
+
+  for (const [name, ifaceList] of Object.entries(networkInterfaces)) {
+    if (!ifaceList) continue;
+
+    for (const iface of ifaceList) {
+      // Only include IPv4 addresses for simplicity
+      const family = String(iface.family);
+      if (family === "IPv4" || family === "4") {
+        interfaces.push({
+          name,
+          address: iface.address,
+          family: family === "4" ? "IPv4" : family,
+          mac: iface.mac,
+          internal: iface.internal,
+        });
+      }
+    }
+  }
+
+  return interfaces;
 }
 
 async function getStorageInfo(): Promise<{

@@ -11,6 +11,14 @@ import Stack from "@mui/material/Stack";
 import Typography from "@mui/material/Typography";
 import { useEffect, useState } from "react";
 
+interface NetworkInterface {
+  name: string;
+  address: string;
+  family: string;
+  mac: string;
+  internal: boolean;
+}
+
 interface SystemInfo {
   version: string;
   nodeVersion: string;
@@ -18,22 +26,27 @@ interface SystemInfo {
   platform: string;
   arch: string;
   uptime: number;
+  cpuCount: number;
+  loadAvg: number[];
   memory: {
     total: number;
     used: number;
     free: number;
+    usagePercent: number;
   };
   network: {
-    interfaces: Array<{
-      name: string;
-      address: string;
-      family: string;
-    }>;
+    interfaces: NetworkInterface[];
   };
   storage: {
     total: number;
     used: number;
     free: number;
+    usagePercent: number;
+  };
+  process: {
+    pid: number;
+    uptime: number;
+    memoryUsage: number;
   };
 }
 
