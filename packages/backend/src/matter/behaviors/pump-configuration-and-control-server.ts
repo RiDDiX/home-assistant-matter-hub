@@ -4,7 +4,7 @@ import { PumpConfigurationAndControl } from "@matter/main/clusters";
 import { applyPatchState } from "../../utils/apply-patch-state.js";
 import { HomeAssistantEntityBehavior } from "./home-assistant-entity-behavior.js";
 
-class PumpConfigurationAndControlServerBase extends Base {
+export class PumpConfigurationAndControlServerBase extends Base {
   declare state: PumpConfigurationAndControlServerBase.State;
 
   override async initialize() {
@@ -33,7 +33,7 @@ class PumpConfigurationAndControlServerBase extends Base {
   }
 }
 
-namespace PumpConfigurationAndControlServerBase {
+export namespace PumpConfigurationAndControlServerBase {
   export class State extends Base.State {}
 }
 

@@ -11,7 +11,7 @@ export interface FlowMeasurementConfig {
   getValue: ValueGetter<number | undefined>;
 }
 
-class FlowMeasurementServerBase extends Base {
+export class FlowMeasurementServerBase extends Base {
   declare state: FlowMeasurementServerBase.State;
 
   override async initialize() {
@@ -40,7 +40,7 @@ class FlowMeasurementServerBase extends Base {
   }
 }
 
-namespace FlowMeasurementServerBase {
+export namespace FlowMeasurementServerBase {
   export class State extends Base.State {
     config!: FlowMeasurementConfig;
   }

@@ -11,7 +11,7 @@ export interface PressureMeasurementConfig {
   getValue: ValueGetter<number | undefined>;
 }
 
-class PressureMeasurementServerBase extends Base {
+export class PressureMeasurementServerBase extends Base {
   declare state: PressureMeasurementServerBase.State;
 
   override async initialize() {
@@ -43,7 +43,7 @@ class PressureMeasurementServerBase extends Base {
   }
 }
 
-namespace PressureMeasurementServerBase {
+export namespace PressureMeasurementServerBase {
   export class State extends Base.State {
     config!: PressureMeasurementConfig;
   }
