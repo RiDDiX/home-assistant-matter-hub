@@ -63,26 +63,47 @@ const formatUptime = (seconds: number): string => {
 export const SystemInfo = () => {
   const [systemInfo, setSystemInfo] = useState<SystemInfo | null>(null);
   const [loading, setLoading] = useState(true);
+  const [apiAvailable, setApiAvailable] = useState(true);
 
   useEffect(() => {
+    let intervalId: ReturnType<typeof setInterval> | null = null;
+
     const fetchSystemInfo = async () => {
       try {
         const res = await fetch("/api/system/info");
         if (res.ok) {
           const data = await res.json();
           setSystemInfo(data);
+          setApiAvailable(true);
+        } else if (res.status === 404) {
+          // API not available in this version - stop polling
+          setApiAvailable(false);
+          if (intervalId) {
+            clearInterval(intervalId);
+            intervalId = null;
+          }
         }
-      } catch (error) {
-        console.error("Failed to fetch system info:", error);
+      } catch {
+        // Network error - don't spam console
       } finally {
         setLoading(false);
       }
     };
 
     fetchSystemInfo();
-    const interval = setInterval(fetchSystemInfo, 30000); // Update every 30 seconds
-    return () => clearInterval(interval);
+    intervalId = setInterval(fetchSystemInfo, 30000);
+
+    return () => {
+      if (intervalId) {
+        clearInterval(intervalId);
+      }
+    };
   }, []);
+
+  // Don't render if API is not available
+  if (!apiAvailable) {
+    return null;
+  }
 
   if (loading) {
     return (
