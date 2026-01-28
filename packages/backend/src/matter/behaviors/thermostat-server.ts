@@ -389,5 +389,22 @@ export namespace ThermostatServerBase {
 }
 
 export function ThermostatServer(config: ThermostatServerConfig) {
-  return ThermostatServerBase.set({ config });
+  // Provide default values for mandatory attributes to prevent conformance errors
+  // during endpoint construction. These will be updated in initialize() based on
+  // actual features and HA entity state.
+  return ThermostatServerBase.set({
+    config,
+    // Mandatory attribute - must be set before endpoint validation runs
+    controlSequenceOfOperation:
+      Thermostat.ControlSequenceOfOperation.CoolingAndHeating,
+    // Provide reasonable defaults for setpoints to prevent undefined->NaN issues
+    // These will be overwritten with actual HA values during initialize()
+    occupiedHeatingSetpoint: 2000, // 20°C in 0.01°C units
+    occupiedCoolingSetpoint: 2400, // 24°C in 0.01°C units
+    minHeatSetpointLimit: 700, // 7°C
+    maxHeatSetpointLimit: 3000, // 30°C
+    minCoolSetpointLimit: 1600, // 16°C
+    maxCoolSetpointLimit: 3200, // 32°C
+    localTemperature: 2100, // 21°C - reasonable room temperature default
+  });
 }
