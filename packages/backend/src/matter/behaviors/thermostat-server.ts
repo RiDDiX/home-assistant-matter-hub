@@ -223,11 +223,12 @@ export class ThermostatServerBase extends FeaturedBase {
     if (!next) {
       return;
     }
-    // Use asLocalActor to avoid access control issues when accessing state
-    this.agent.asLocalActor(() => {
+    // Use setImmediate to call HA action outside the transaction to avoid conflicts
+    const coolingSetpoint = this.state.occupiedCoolingSetpoint;
+    setImmediate(() => {
       this.setTemperature(
         next,
-        Temperature.celsius(this.state.occupiedCoolingSetpoint / 100)!,
+        Temperature.celsius(coolingSetpoint / 100)!,
         Thermostat.SetpointRaiseLowerMode.Heat,
       );
     });
@@ -245,10 +246,11 @@ export class ThermostatServerBase extends FeaturedBase {
     if (!next) {
       return;
     }
-    // Use asLocalActor to avoid access control issues when accessing state
-    this.agent.asLocalActor(() => {
+    // Use setImmediate to call HA action outside the transaction to avoid conflicts
+    const heatingSetpoint = this.state.occupiedHeatingSetpoint;
+    setImmediate(() => {
       this.setTemperature(
-        Temperature.celsius(this.state.occupiedHeatingSetpoint / 100)!,
+        Temperature.celsius(heatingSetpoint / 100)!,
         next,
         Thermostat.SetpointRaiseLowerMode.Cool,
       );
