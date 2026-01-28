@@ -64,6 +64,13 @@ export class ThermostatServerBase extends FeaturedBase {
     const homeAssistant = await this.agent.load(HomeAssistantEntityBehavior);
     this.update(homeAssistant.entity);
 
+    // Use $Changing (pre-commit) to update thermostatRunningMode BEFORE the internal
+    // Matter.js reactor #handleSystemModeChange fires. This prevents the "Permission denied"
+    // error because we set the value while we still have write permissions.
+    // The internal reactor will then see the value is already correct and won't need to change it.
+    if (this.features.autoMode) {
+      this.reactTo(this.events.systemMode$Changing, this.preUpdateRunningMode);
+    }
     this.reactTo(this.events.systemMode$Changed, this.systemModeChanged);
     if (this.features.cooling) {
       this.reactTo(
@@ -279,6 +286,48 @@ export class ThermostatServerBase extends FeaturedBase {
       action = config.setTargetTemperature(both, this.agent);
     }
     homeAssistant.callAction(action);
+  }
+
+  /**
+   * Pre-commit handler to update thermostatRunningMode BEFORE the internal Matter.js
+   * reactor fires. This is called during $Changing (before commit) when we still
+   * have write permissions. The internal #handleSystemModeChange reactor will then
+   * see the value is already set correctly and won't throw a permission error.
+   */
+  private preUpdateRunningMode(
+    systemMode: Thermostat.SystemMode,
+    _oldValue: Thermostat.SystemMode,
+    context?: ActionContext,
+  ) {
+    if (transactionIsOffline(context)) {
+      return;
+    }
+    // Map systemMode to the corresponding runningMode
+    const runningMode = this.systemModeToRunningMode(systemMode);
+    // Set thermostatRunningMode while we still have write permissions (pre-commit)
+    this.state.thermostatRunningMode = runningMode;
+  }
+
+  /**
+   * Maps SystemMode to ThermostatRunningMode.
+   * This mirrors the logic in Matter.js's internal #handleSystemModeChange reactor.
+   */
+  private systemModeToRunningMode(
+    systemMode: Thermostat.SystemMode,
+  ): Thermostat.ThermostatRunningMode {
+    switch (systemMode) {
+      case SystemMode.Heat:
+      case SystemMode.EmergencyHeat:
+        return RunningMode.Heat;
+      case SystemMode.Cool:
+      case SystemMode.Precooling:
+        return RunningMode.Cool;
+      case SystemMode.Auto:
+        // In Auto mode, keep current running mode or default to Off
+        return this.state.thermostatRunningMode ?? RunningMode.Off;
+      default:
+        return RunningMode.Off;
+    }
   }
 
   private systemModeChanged(
