@@ -224,11 +224,15 @@ export class ThermostatServerBase extends FeaturedBase {
     if (!next) {
       return;
     }
-    this.setTemperature(
-      next,
-      Temperature.celsius(this.state.occupiedCoolingSetpoint / 100)!,
-      Thermostat.SetpointRaiseLowerMode.Heat,
-    );
+    // Use setImmediate to call HA action outside the transaction to avoid conflicts
+    const coolingSetpoint = this.state.occupiedCoolingSetpoint;
+    setImmediate(() => {
+      this.setTemperature(
+        next,
+        Temperature.celsius(coolingSetpoint / 100)!,
+        Thermostat.SetpointRaiseLowerMode.Heat,
+      );
+    });
   }
 
   private coolingSetpointChanged(
@@ -243,11 +247,15 @@ export class ThermostatServerBase extends FeaturedBase {
     if (!next) {
       return;
     }
-    this.setTemperature(
-      Temperature.celsius(this.state.occupiedHeatingSetpoint / 100)!,
-      next,
-      Thermostat.SetpointRaiseLowerMode.Cool,
-    );
+    // Use setImmediate to call HA action outside the transaction to avoid conflicts
+    const heatingSetpoint = this.state.occupiedHeatingSetpoint;
+    setImmediate(() => {
+      this.setTemperature(
+        Temperature.celsius(heatingSetpoint / 100)!,
+        next,
+        Thermostat.SetpointRaiseLowerMode.Cool,
+      );
+    });
   }
 
   private setTemperature(
@@ -281,10 +289,15 @@ export class ThermostatServerBase extends FeaturedBase {
     if (transactionIsOffline(context)) {
       return;
     }
+    // CRITICAL: Use setImmediate to call the HA action OUTSIDE the current transaction.
+    // This ensures the action is called even if Matter.js's internal reactor
+    // (#handleSystemModeChange) fails with a "Permission denied" error during post-commit.
+    // Without this, Heat↔Cool mode changes from Apple Home would silently fail.
     const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);
-    homeAssistant.callAction(
-      this.state.config.setSystemMode(systemMode, this.agent),
-    );
+    const action = this.state.config.setSystemMode(systemMode, this.agent);
+    setImmediate(() => {
+      homeAssistant.callAction(action);
+    });
   }
 
   private getSystemMode(entity: HomeAssistantEntityInformation) {
