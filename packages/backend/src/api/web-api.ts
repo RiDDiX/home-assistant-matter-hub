@@ -20,6 +20,7 @@ import { logsApi } from "./logs-api.js";
 import { matterApi } from "./matter-api.js";
 import { metricsApi } from "./metrics-api.js";
 import { supportIngress, supportProxyLocation } from "./proxy-support.js";
+import { systemApi } from "./system-api.js";
 import { webUi } from "./web-ui.js";
 import { WebSocketApi } from "./websocket-api.js";
 
@@ -96,6 +97,7 @@ export class WebApi extends Service {
       )
       .use("/home-assistant", homeAssistantApi(this.haRegistry, this.haClient))
       .use("/logs", logsApi(this.logger))
+      .use("/system", systemApi())
       .use(
         "/metrics",
         metricsApi(
