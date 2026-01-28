@@ -38,6 +38,17 @@ function applyPatch<T extends object>(state: T, patch: Partial<T>): Partial<T> {
       }
     }
   } catch (e) {
+    const errorMessage = e instanceof Error ? e.message : String(e);
+    // Suppress transient Matter.js errors that occur when an endpoint is still
+    // being constructed/attached to a node. The state update will be retried
+    // once the endpoint is fully initialized and receives its first HA update.
+    if (
+      errorMessage.includes(
+        "Endpoint storage inaccessible because endpoint is not a node and is not owned by another endpoint",
+      )
+    ) {
+      return actualPatch;
+    }
     throw new Error(
       `Failed to patch the following properties: ${JSON.stringify(actualPatch, null, 2)}`,
       { cause: e },
