@@ -181,12 +181,12 @@ Migrating from the original `t0bst4r/home-assistant-matter-hub` is straightforwa
    ls /addon_configs/
    ```
 
-5. **Restore the backup:**
+5. **Stop the add-on** and restore your backup:
    ```bash
    cp -r /config/hamh-backup/* /addon_configs/*_hamh/
    ```
 
-6. **Start the add-on** - your devices should reconnect automatically
+6. **Start the add-on again** - your devices should reconnect automatically
 
 ### Docker / Docker Compose
 
