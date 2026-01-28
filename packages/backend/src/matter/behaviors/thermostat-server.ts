@@ -48,19 +48,18 @@ export class ThermostatServerBase extends FeaturedBase {
   declare state: ThermostatServerBase.State;
 
   override async initialize() {
-    await super.initialize();
+    // CRITICAL: Set controlSequenceOfOperation BEFORE super.initialize() runs
+    // because the value depends on which features are enabled, and Matter.js
+    // validates conformance during initialization. Setting a wrong default in
+    // the factory function would break single-mode thermostats (heat-only or cool-only).
+    this.state.controlSequenceOfOperation =
+      this.features.cooling && this.features.heating
+        ? Thermostat.ControlSequenceOfOperation.CoolingAndHeating
+        : this.features.cooling
+          ? Thermostat.ControlSequenceOfOperation.CoolingOnly
+          : Thermostat.ControlSequenceOfOperation.HeatingOnly;
 
-    // Update controlSequenceOfOperation based on actual features
-    // (defaults were set in ThermostatServer function for conformance)
-    applyPatchState(this.state, {
-      controlSequenceOfOperation:
-        this.features.cooling && this.features.heating
-          ? Thermostat.ControlSequenceOfOperation.CoolingAndHeating
-          : this.features.cooling
-            ? Thermostat.ControlSequenceOfOperation.CoolingOnly
-            : Thermostat.ControlSequenceOfOperation.HeatingOnly,
-      ...(this.features.autoMode ? { minSetpointDeadBand: 0 } : {}),
-    });
+    await super.initialize();
 
     const homeAssistant = await this.agent.load(HomeAssistantEntityBehavior);
     this.update(homeAssistant.entity);
@@ -394,9 +393,10 @@ export namespace ThermostatServerBase {
 }
 
 export function ThermostatServer(config: ThermostatServerConfig) {
-  // Provide default values for mandatory attributes to prevent conformance errors
-  // during endpoint construction. These will be updated in initialize() based on
-  // actual features and HA entity state.
+  // Provide default values for attributes to prevent conformance errors.
+  // NOTE: controlSequenceOfOperation is NOT set here because its valid values
+  // depend on which features (Heating, Cooling) are enabled. It MUST be set
+  // in initialize() BEFORE super.initialize() runs.
   //
   // CRITICAL: These defaults must satisfy Matter.js constraints:
   // - minHeatSetpointLimit <= minCoolSetpointLimit - minSetpointDeadBand
@@ -404,9 +404,6 @@ export function ThermostatServer(config: ThermostatServerConfig) {
   // With minSetpointDeadBand=0, we just need minHeat <= minCool and maxHeat <= maxCool
   return ThermostatServerBase.set({
     config,
-    // Mandatory attribute - must be set before endpoint validation runs
-    controlSequenceOfOperation:
-      Thermostat.ControlSequenceOfOperation.CoolingAndHeating,
     // CRITICAL: Set deadband to 0 to prevent constraint validation failures
     // Matter.js default is 25 (2.5°C) which can cause limit constraint errors
     // when HA reports the same min/max for both heating and cooling
