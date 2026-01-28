@@ -79,12 +79,6 @@ of port forwarding etc.
 > Alpha versions are for testing only and may contain bugs!
 
 All stable features plus:
-- **Graceful Crash Handler** - Failed entities no longer crash the bridge
-  - Problematic entities are automatically skipped during boot
-  - Failed entities are displayed in the UI with detailed error messages
-  - Bridge continues to run with remaining healthy entities
-- **PM2.5/PM10 Numeric Sensors** - Real concentration values in µg/m³ (not just quality levels)
-- **Access Control Fix** - Fixed attribute write issues using `asLocalActor` ([Matter.js #3105](https://github.com/matter-js/matter.js/issues/3105))
 - **Health Check API** (`/api/health`)
   - System status, uptime, and service information
   - Kubernetes-ready probes (`/live`, `/ready`)
@@ -182,13 +176,17 @@ Migrating from the original `t0bst4r/home-assistant-matter-hub` is straightforwa
    https://github.com/RiDDiX/home-assistant-addons
    ```
 
-4. **Install new add-on** and restore backup before starting:
+4. **Install and start the new add-on**, then check the new _hamh folder:
    ```bash
-   ls /addon_configs/  # Find new _hamh folder
+   ls /addon_configs/
+   ```
+
+5. **Stop the add-on** and restore your backup:
+   ```bash
    cp -r /config/hamh-backup/* /addon_configs/*_hamh/
    ```
 
-5. **Start the add-on** - your devices should reconnect automatically
+6. **Start the add-on again** - your devices should reconnect automatically
 
 ### Docker / Docker Compose
 
