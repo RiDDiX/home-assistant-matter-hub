@@ -224,9 +224,9 @@ export class ThermostatServerBase extends FeaturedBase {
     if (!next) {
       return;
     }
-    // Use setImmediate to call HA action outside the transaction to avoid conflicts
-    const coolingSetpoint = this.state.occupiedCoolingSetpoint;
-    setImmediate(() => {
+    // Use asLocalActor to avoid access control issues when accessing state
+    this.agent.asLocalActor(() => {
+      const coolingSetpoint = this.state.occupiedCoolingSetpoint;
       this.setTemperature(
         next,
         Temperature.celsius(coolingSetpoint / 100)!,
@@ -247,9 +247,9 @@ export class ThermostatServerBase extends FeaturedBase {
     if (!next) {
       return;
     }
-    // Use setImmediate to call HA action outside the transaction to avoid conflicts
-    const heatingSetpoint = this.state.occupiedHeatingSetpoint;
-    setImmediate(() => {
+    // Use asLocalActor to avoid access control issues when accessing state
+    this.agent.asLocalActor(() => {
+      const heatingSetpoint = this.state.occupiedHeatingSetpoint;
       this.setTemperature(
         Temperature.celsius(heatingSetpoint / 100)!,
         next,
@@ -289,13 +289,10 @@ export class ThermostatServerBase extends FeaturedBase {
     if (transactionIsOffline(context)) {
       return;
     }
-    // CRITICAL: Use setImmediate to call the HA action OUTSIDE the current transaction.
-    // This ensures the action is called even if Matter.js's internal reactor
-    // (#handleSystemModeChange) fails with a "Permission denied" error during post-commit.
-    // Without this, Heat↔Cool mode changes from Apple Home would silently fail.
-    const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);
-    const action = this.state.config.setSystemMode(systemMode, this.agent);
-    setImmediate(() => {
+    // Use asLocalActor to avoid access control issues when accessing HomeAssistantEntityBehavior
+    this.agent.asLocalActor(() => {
+      const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);
+      const action = this.state.config.setSystemMode(systemMode, this.agent);
       homeAssistant.callAction(action);
     });
   }
