@@ -72,16 +72,18 @@ export class ThermostatServerBase extends FeaturedBase {
       this.reactTo(this.events.systemMode$Changing, this.preUpdateRunningMode);
     }
     this.reactTo(this.events.systemMode$Changed, this.systemModeChanged);
+    // Use $Changing (pre-commit) for setpoint changes to avoid access control issues
+    // The $Changed event fires in post-commit where we lose write permissions
     if (this.features.cooling) {
       this.reactTo(
-        this.events.occupiedCoolingSetpoint$Changed,
-        this.coolingSetpointChanged,
+        this.events.occupiedCoolingSetpoint$Changing,
+        this.coolingSetpointChanging,
       );
     }
     if (this.features.heating) {
       this.reactTo(
-        this.events.occupiedHeatingSetpoint$Changed,
-        this.heatingSetpointChanged,
+        this.events.occupiedHeatingSetpoint$Changing,
+        this.heatingSetpointChanging,
       );
     }
     this.reactTo(homeAssistant.onChange, this.update);
@@ -219,7 +221,12 @@ export class ThermostatServerBase extends FeaturedBase {
     this.setTemperature(adjustedHeat, adjustedCool, request.mode);
   }
 
-  private heatingSetpointChanged(
+  /**
+   * Pre-commit handler for heating setpoint changes.
+   * Using $Changing instead of $Changed to ensure we have write permissions
+   * when calling the Home Assistant action.
+   */
+  private heatingSetpointChanging(
     value: number,
     _oldValue: number,
     context?: ActionContext,
@@ -231,18 +238,20 @@ export class ThermostatServerBase extends FeaturedBase {
     if (!next) {
       return;
     }
-    // Use asLocalActor to avoid access control issues when accessing state
-    this.agent.asLocalActor(() => {
-      const coolingSetpoint = this.state.occupiedCoolingSetpoint;
-      this.setTemperature(
-        next,
-        Temperature.celsius(coolingSetpoint / 100)!,
-        Thermostat.SetpointRaiseLowerMode.Heat,
-      );
-    });
+    const coolingSetpoint = this.state.occupiedCoolingSetpoint;
+    this.setTemperature(
+      next,
+      Temperature.celsius(coolingSetpoint / 100)!,
+      Thermostat.SetpointRaiseLowerMode.Heat,
+    );
   }
 
-  private coolingSetpointChanged(
+  /**
+   * Pre-commit handler for cooling setpoint changes.
+   * Using $Changing instead of $Changed to ensure we have write permissions
+   * when calling the Home Assistant action.
+   */
+  private coolingSetpointChanging(
     value: number,
     _oldValue: number,
     context?: ActionContext,
@@ -254,15 +263,12 @@ export class ThermostatServerBase extends FeaturedBase {
     if (!next) {
       return;
     }
-    // Use asLocalActor to avoid access control issues when accessing state
-    this.agent.asLocalActor(() => {
-      const heatingSetpoint = this.state.occupiedHeatingSetpoint;
-      this.setTemperature(
-        Temperature.celsius(heatingSetpoint / 100)!,
-        next,
-        Thermostat.SetpointRaiseLowerMode.Cool,
-      );
-    });
+    const heatingSetpoint = this.state.occupiedHeatingSetpoint;
+    this.setTemperature(
+      Temperature.celsius(heatingSetpoint / 100)!,
+      next,
+      Thermostat.SetpointRaiseLowerMode.Cool,
+    );
   }
 
   private setTemperature(
