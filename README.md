@@ -1,29 +1,31 @@
+<div align="center">
+
 # Home-Assistant-Matter-Hub
 
 !["Home-Assistant-Matter-Hub"](./docs/assets/hamh-logo-small.png)
 
+**Expose your Home Assistant devices to Matter controllers like Apple Home, Google Home, and Alexa**
+
+[![GitHub Release](https://img.shields.io/github/v/release/RiDDiX/home-assistant-matter-hub?label=stable&color=green)](https://github.com/RiDDiX/home-assistant-matter-hub/releases)
+[![GitHub Pre-Release](https://img.shields.io/github/v/release/RiDDiX/home-assistant-matter-hub?include_prereleases&label=alpha&color=orange)](https://github.com/RiDDiX/home-assistant-matter-hub/releases)
+[![GitHub Issues](https://img.shields.io/github/issues/RiDDiX/home-assistant-matter-hub)](https://github.com/RiDDiX/home-assistant-matter-hub/issues)
+[![GitHub Stars](https://img.shields.io/github/stars/RiDDiX/home-assistant-matter-hub)](https://github.com/RiDDiX/home-assistant-matter-hub/stargazers)
+[![License](https://img.shields.io/github/license/RiDDiX/home-assistant-matter-hub)](LICENSE)
+
+[📖 Documentation](https://riddix.github.io/home-assistant-matter-hub) • [🐛 Report Bug](https://github.com/RiDDiX/home-assistant-matter-hub/issues/new?labels=bug) • [💡 Request Feature](https://github.com/RiDDiX/home-assistant-matter-hub/issues/new?labels=enhancement)
+
+</div>
+
 ---
 
 > [!NOTE]
-> 🔀 **This is a Community Fork**
+> 🔀 **Community Fork** - This is a fork of the original [t0bst4r/home-assistant-matter-hub](https://github.com/t0bst4r/home-assistant-matter-hub), which was discontinued in January 2026. We continue active development with bug fixes, new features, and community support. Thank you **t0bst4r** for the original work! ❤️
 >
-> This repository is a fork of the original [t0bst4r/home-assistant-matter-hub](https://github.com/t0bst4r/home-assistant-matter-hub), 
-> which was discontinued by its original maintainer in January 2026.
->
-> I have decided to continue development of this project to keep it alive and maintained for the community.
->
-> **Current Status:**
-> - ✅ Active development and maintenance
-> - ✅ Bug fixes and updates
-> - ✅ Community support
->
-> Thank you to **t0bst4r** for the original work on this amazing project! ❤️
->
-> **📦 Migrating from t0bst4r's version?** See [Migration](#migration-from-t0bst4r) below - your existing configuration and paired devices will continue to work!
+> **📦 Migrating?** See [Migration Guide](#migration-from-t0bst4r) - your paired devices will continue to work!
 
 ---
 
-## About
+## 📝 About
 
 This project simulates bridges to publish your entities from Home Assistant to any Matter-compatible controller like
 Alexa, Apple Home or Google Home. Using Matter, those can be connected easily using local communication without the need
@@ -31,7 +33,7 @@ of port forwarding etc.
 
 ---
 
-## Releases & Branches
+## 📦 Releases & Branches
 
 | Channel | Branch | Current Version | Description |
 |---------|--------|-----------------|-------------|
@@ -230,17 +232,47 @@ Your volume mounts stay the same - no data migration needed.
 
 ---
 
-## Support the Project
+## 🙏 Contributors & Acknowledgments
+
+This project thrives thanks to the amazing community! Special thanks to everyone who contributes by reporting bugs, suggesting features, and helping others.
+
+### 🏆 Top Contributors
+
+| Contributor | Contributions |
+|-------------|---------------|
+| [@codyc1515](https://github.com/codyc1515) | 🐛 Extensive bug reports, detailed issue descriptions, testing feedback for climate/thermostat fixes |
+| [@depahk](https://github.com/depahk) | 📝 Migration documentation improvements ([#32](https://github.com/RiDDiX/home-assistant-matter-hub/pull/32)) |
+
+### 💖 Sponsors
+
+A huge thank you to our sponsors who help keep this project alive!
+
+| Sponsor | |
+|---------|---|
+| [@thorsten-gehrig](https://github.com/thorsten-gehrig) | 🥇 **First Sponsor!** Thank you for believing in this project! |
+
+### 🌟 Original Author
+
+- **[@t0bst4r](https://github.com/t0bst4r)** - Creator of the original Home-Assistant-Matter-Hub project
+
+---
+
+## ☕ Support the Project
 
 > [!NOTE]
-> **This is completely optional!** The project will continue regardless of donations.
-> I maintain this in my free time because I believe in open source and helping the community.
+> **Completely optional!** This project will continue regardless of donations.
+> I maintain this in my free time because I believe in open source.
 
-If you find this project useful and want to support its development, consider buying me a coffee! ☕
+If you find this project useful, consider supporting its development:
 
-[![PayPal](https://img.shields.io/badge/PayPal-Donate-blue?logo=paypal)](https://www.paypal.me/RiDDiX93)
+[![PayPal](https://img.shields.io/badge/PayPal-Donate-blue?logo=paypal&style=for-the-badge)](https://www.paypal.me/RiDDiX93)
 
-Maintaining this project takes time and effort - from fixing bugs, adding new features, to helping users in issues.
-Your support is appreciated but never expected. Thank you for using Home-Assistant-Matter-Hub! ❤️
+Your support helps cover hosting costs and motivates continued development. Thank you! ❤️
+
+---
+
+## 📊 Project Stats
+
+![Alt](https://repobeats.axiom.co/api/embed/placeholder.svg "Repobeats analytics image")
 
 ---
