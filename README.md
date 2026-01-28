@@ -240,8 +240,22 @@ This project thrives thanks to the amazing community! Special thanks to everyone
 
 | Contributor | Contributions |
 |-------------|---------------|
-| [@codyc1515](https://github.com/codyc1515) | 🐛 Extensive bug reports, detailed issue descriptions, testing feedback for climate/thermostat fixes |
-| [@depahk](https://github.com/depahk) | 📝 Migration documentation improvements ([#32](https://github.com/RiDDiX/home-assistant-matter-hub/pull/32)) |
+| [@codyc1515](https://github.com/codyc1515) | 🥇 **Top Reporter** - Climate/thermostat bugs (#24, #21, #20), extensive testing feedback |
+| [@depahk](https://github.com/depahk) | 📝 Migration documentation fix ([#32](https://github.com/RiDDiX/home-assistant-matter-hub/pull/32)) |
+| [@Fettkeewl](https://github.com/Fettkeewl) | 🐛 Script import bug (#26), Alias feature request (#25) |
+| [@razzietheman](https://github.com/razzietheman) | 💡 Feature requests: Preserve commissioned state (#31), alphabetical sorting (#30) |
+
+### 📋 Issue Tracker - All Contributors
+
+Thank you to everyone who helps improve this project by reporting issues!
+
+| User | Issues | Type |
+|------|--------|------|
+| [@chromaxx7](https://github.com/chromaxx7) | [#29](https://github.com/RiDDiX/home-assistant-matter-hub/issues/29) | 🐛 Climate crash |
+| [@Tomyk9991](https://github.com/Tomyk9991) | [#28](https://github.com/RiDDiX/home-assistant-matter-hub/issues/28) | � Heat/Cool startup |
+| [@datvista](https://github.com/datvista) | [#27](https://github.com/RiDDiX/home-assistant-matter-hub/issues/27) | 🐛 Add-on start |
+| [@bwynants](https://github.com/bwynants) | [#23](https://github.com/RiDDiX/home-assistant-matter-hub/issues/23) | 🐛 OccupancySensor |
+| [@Pozzi831](https://github.com/Pozzi831) | [#22](https://github.com/RiDDiX/home-assistant-matter-hub/issues/22) | 🐛 AC problems |
 
 ### 💖 Sponsors
 
