@@ -1,5 +1,5 @@
-import { VendorId } from "@matter/main";
 import { createRequire } from "node:module";
+import { VendorId } from "@matter/main";
 import type { ArgumentsCamelCase } from "yargs";
 import type { WebApiProps } from "../../api/web-api.js";
 import type { StartOptions } from "../../commands/start/start-options.js";
