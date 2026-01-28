@@ -31,12 +31,27 @@ of port forwarding etc.
 
 ---
 
-## Releases
+## Releases & Branches
 
-| Channel | Version | Description |
-|---------|---------|-------------|
-| **Stable** | ![GitHub Release](https://img.shields.io/github/v/release/RiDDiX/home-assistant-matter-hub?label=stable) | Production-ready, recommended for most users |
-| **Alpha** | ![GitHub Release](https://img.shields.io/github/v/release/RiDDiX/home-assistant-matter-hub?include_prereleases&label=alpha) | Pre-release with new features, for testing |
+| Channel | Branch | Current Version | Description |
+|---------|--------|-----------------|-------------|
+| **Stable** | `main` | v1.7.x | Production-ready, recommended for most users |
+| **Alpha** | `alpha` | v2.0.0-alpha.x | Pre-release with new features, for early adopters |
+| **Testing** | `testing` | v2.0.0-testing.x | ⚠️ **Highly unstable!** Experimental features, may break |
+
+### Semantic Versioning
+
+We use [Semantic Release](https://semantic-release.gitbook.io/) for automatic versioning:
+
+- `fix:` commits → Patch version bump (1.7.**x**)
+- `feat:` commits → Minor version bump (1.**x**.0)
+- `BREAKING CHANGE:` → Major version bump (**x**.0.0)
+
+### Which version should I use?
+
+- **Most users**: Use **Stable** (`main` branch) - thoroughly tested
+- **Early adopters**: Use **Alpha** (`alpha` branch) - new features, occasional bugs
+- **Developers/Testers**: Use **Testing** (`testing` branch) - bleeding edge, expect breakage
 
 ### Stable Features (v1.5.x)
 
@@ -76,7 +91,7 @@ of port forwarding etc.
 ### Alpha Features (v2.0.0-alpha) 🧪
 
 > [!WARNING]
-> Alpha versions are for testing only and may contain bugs!
+> Alpha versions are for early adopters and may contain bugs!
 
 All stable features plus:
 - **Health Check API** (`/api/health`)
@@ -93,6 +108,16 @@ All stable features plus:
 - **Filter Preview** - Preview which entities match your filter before saving
 - **Dark Mode Toggle** - Switch between light and dark theme
 - **Device List Sorting** - Sort endpoints by name, type, or ID
+- **Full Backup with Identity** - Preserve Matter commissioning across reinstalls
+- **Alphabetical Bridge Sorting** - Bridges sorted by name in UI
+
+### Testing Features (v2.0.0-testing) ⚠️
+
+> [!CAUTION]
+> Testing versions are **highly unstable** and intended for developers only!
+> Features may be incomplete, broken, or removed without notice.
+
+All alpha features plus experimental changes being actively developed.
 
 ---
 
