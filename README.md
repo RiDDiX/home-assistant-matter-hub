@@ -287,6 +287,14 @@ Your support helps cover hosting costs and motivates continued development. Than
 
 ## 📊 Project Stats
 
-![Alt](https://repobeats.axiom.co/api/embed/placeholder.svg "Repobeats analytics image")
+<div align="center">
+
+![GitHub commit activity](https://img.shields.io/github/commit-activity/m/RiDDiX/home-assistant-matter-hub)
+![GitHub last commit](https://img.shields.io/github/last-commit/RiDDiX/home-assistant-matter-hub)
+![GitHub issues](https://img.shields.io/github/issues/RiDDiX/home-assistant-matter-hub)
+![GitHub closed issues](https://img.shields.io/github/issues-closed/RiDDiX/home-assistant-matter-hub)
+![GitHub pull requests](https://img.shields.io/github/issues-pr/RiDDiX/home-assistant-matter-hub)
+
+</div>
 
 ---
