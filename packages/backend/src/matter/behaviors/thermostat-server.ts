@@ -392,19 +392,34 @@ export function ThermostatServer(config: ThermostatServerConfig) {
   // Provide default values for mandatory attributes to prevent conformance errors
   // during endpoint construction. These will be updated in initialize() based on
   // actual features and HA entity state.
+  //
+  // CRITICAL: These defaults must satisfy Matter.js constraints:
+  // - minHeatSetpointLimit <= minCoolSetpointLimit - minSetpointDeadBand
+  // - maxHeatSetpointLimit <= maxCoolSetpointLimit - minSetpointDeadBand
+  // With minSetpointDeadBand=0, we just need minHeat <= minCool and maxHeat <= maxCool
   return ThermostatServerBase.set({
     config,
     // Mandatory attribute - must be set before endpoint validation runs
     controlSequenceOfOperation:
       Thermostat.ControlSequenceOfOperation.CoolingAndHeating,
+    // CRITICAL: Set deadband to 0 to prevent constraint validation failures
+    // Matter.js default is 25 (2.5°C) which can cause limit constraint errors
+    // when HA reports the same min/max for both heating and cooling
+    minSetpointDeadBand: 0,
     // Provide reasonable defaults for setpoints to prevent undefined->NaN issues
     // These will be overwritten with actual HA values during initialize()
+    localTemperature: 2100, // 21°C - reasonable room temperature default
     occupiedHeatingSetpoint: 2000, // 20°C in 0.01°C units
     occupiedCoolingSetpoint: 2400, // 24°C in 0.01°C units
+    // Limits must satisfy: minHeat <= minCool (when deadband=0)
     minHeatSetpointLimit: 700, // 7°C
     maxHeatSetpointLimit: 3000, // 30°C
-    minCoolSetpointLimit: 1600, // 16°C
+    minCoolSetpointLimit: 700, // 7°C - same as heat to satisfy constraint
     maxCoolSetpointLimit: 3200, // 32°C
-    localTemperature: 2100, // 21°C - reasonable room temperature default
+    // Absolute limits
+    absMinHeatSetpointLimit: 700,
+    absMaxHeatSetpointLimit: 3000,
+    absMinCoolSetpointLimit: 700,
+    absMaxCoolSetpointLimit: 3200,
   });
 }
