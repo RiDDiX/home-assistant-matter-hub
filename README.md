@@ -37,9 +37,9 @@ of port forwarding etc.
 
 | Channel | Branch | Current Version | Description |
 |---------|--------|-----------------|-------------|
-| **Stable** | `main` | v1.7.x | Production-ready, recommended for most users |
-| **Alpha** | `alpha` | v2.0.0-alpha.x | Pre-release with new features, for early adopters |
-| **Testing** | `testing` | v2.0.0-testing.x | ⚠️ **Highly unstable!** Experimental features, may break |
+| **Stable** | `main` | v2.0.x | Production-ready, recommended for most users |
+| **Alpha** | `alpha` | v2.1.0-alpha.x | Pre-release with new features, for early adopters |
+| **Testing** | `testing` | v2.1.0-testing.x | ⚠️ **Highly unstable!** Experimental features, may break |
 
 ### Semantic Versioning
 
@@ -90,36 +90,49 @@ We use [Semantic Release](https://semantic-release.gitbook.io/) for automatic ve
 - **Air Purifier** - Map fans to Air Purifier device type via entity mapping
 - **Pump Device** - Map switches/valves to Pump device type via entity mapping
 
-### Alpha Features (v2.0.0-alpha) 🧪
+### Stable Features (v2.0.0) - MAJOR RELEASE! 🚀
+
+All previous features plus:
+
+**🎨 Bridge Icons & UI**
+- **Custom Bridge Icons** - Upload your own PNG, JPG, GIF, WebP, or SVG icons (max 5MB)
+- **Domain-based Icons** - Automatic icon assignment based on bridge domain (light, climate, etc.)
+- **Name-based Icon Fallback** - Icons derived from bridge names ("Lamps" → 💡)
+- **20 Preset Icons** - Quick selection dropdown in bridge editor
+- **Entity Mapping Button** - Quick access to entity mapping from bridge card view
+- **Improved Status Labels** - Cleaner spacing and layout
+
+**📺 Media & Devices**
+- **Basic Video Player** - TV and media player support for Apple Home ([#45](https://github.com/RiDDiX/home-assistant-matter-hub/issues/45))
+- **Alexa Deduplication** - UniqueId in BridgedDeviceBasicInformation prevents duplicate devices ([#53](https://github.com/RiDDiX/home-assistant-matter-hub/issues/53))
+
+**🌡️ Thermostat Improvements**
+- **Auto-only Thermostat Support** - Thermostats with only "auto" mode now work correctly ([#54](https://github.com/RiDDiX/home-assistant-matter-hub/issues/54))
+- **Heating+Cooling Constraint Fixes** - Proper handling of Matter.js deadband requirements
+- **Google Home Fix** - Handle null transitionTime from Google Home ([#41](https://github.com/RiDDiX/home-assistant-matter-hub/issues/41))
+- **Temperature Range Detection** - Check HVAC mode for range support ([#9](https://github.com/RiDDiX/home-assistant-matter-hub/issues/9))
+
+**🔧 Infrastructure**
+- **Health Check API** (`api/health`) - System status and Kubernetes-ready probes
+- **WebSocket Live Updates** (`api/ws`) - Real-time bridge status, no polling
+- **Ingress Compatibility** - Fixed WebSocket and API routing for Home Assistant Ingress
+- **Full Backup/Restore** - Complete backups including entity mappings and Matter identity
+- **Filter Preview** - Preview entity matches before saving
+
+### Alpha Features (v2.1.0-alpha) 🧪
 
 > [!WARNING]
 > Alpha versions are for early adopters and may contain bugs!
 
-All stable features plus:
-- **Health Check API** (`/api/health`)
-  - System status, uptime, and service information
-  - Kubernetes-ready probes (`/live`, `/ready`)
-- **WebSocket Live Updates** (`/api/ws`)
-  - Real-time bridge status updates
-  - No more polling required
-- **Entity Mapping Customization**
-  - Override Matter device types per entity
-  - Custom names for entities in Matter
-  - Disable specific entities from bridge
-- **Full Backup/Restore** - Download complete backups as ZIP including entity mappings
-- **Filter Preview** - Preview which entities match your filter before saving
-- **Dark Mode Toggle** - Switch between light and dark theme
-- **Device List Sorting** - Sort endpoints by name, type, or ID
-- **Full Backup with Identity** - Preserve Matter commissioning across reinstalls
-- **Alphabetical Bridge Sorting** - Bridges sorted by name in UI
+All stable features plus experimental changes being actively developed.
 
-### Testing Features (v2.0.0-testing) ⚠️
+### Testing Features (v2.1.0-testing) ⚠️
 
 > [!CAUTION]
 > Testing versions are **highly unstable** and intended for developers only!
 > Features may be incomplete, broken, or removed without notice.
 
-All alpha features plus experimental changes being actively developed.
+Experimental features being actively developed before promotion to alpha.
 
 ---
 
@@ -136,7 +149,7 @@ All alpha features plus experimental changes being actively developed.
 | `binary_sensor` | Contact, Occupancy, Smoke/CO Alarm, Water Leak Sensor |
 | `sensor` | Temperature, Humidity, Pressure, Flow, Light, AirQuality Sensor |
 | `button`, `input_button` | Generic Switch |
-| `media_player` | Speaker with Volume and Playback Controls |
+| `media_player` | Speaker, Basic Video Player (TV) |
 | `valve` | Water Valve |
 | `vacuum` | Robot Vacuum Cleaner |
 | `humidifier` | Humidifier/Dehumidifier |
