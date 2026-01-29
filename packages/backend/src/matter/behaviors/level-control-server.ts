@@ -1,10 +1,13 @@
 import type { HomeAssistantEntityInformation } from "@home-assistant-matter-hub/common";
+import { Logger } from "@matter/general";
 import { LevelControlServer as Base } from "@matter/main/behaviors";
 import type { LevelControl } from "@matter/main/clusters/level-control";
 import { applyPatchState } from "../../utils/apply-patch-state.js";
 import type { FeatureSelection } from "../../utils/feature-selection.js";
 import { HomeAssistantEntityBehavior } from "./home-assistant-entity-behavior.js";
 import type { ValueGetter, ValueSetter } from "./utils/cluster-config.js";
+
+const logger = Logger.get("LevelControlServer");
 
 export interface LevelControlConfig {
   getValuePercent: ValueGetter<number | null>;
@@ -42,15 +45,26 @@ export class LevelControlServerBase extends FeaturedBase {
       currentLevel = Math.min(Math.max(minLevel, currentLevel), maxLevel);
     }
 
-    // Only update onLevel when the device is actually ON and has a valid brightness.
-    // When the device is OFF, keep the previous onLevel so that turning on
-    // restores the last known brightness level instead of resetting to minimum.
-    // This fixes the issue where Alexa resets lights to 100% after being off.
-    const isOn = state?.state === "on";
+    // Only update onLevel when the entity is ON and has a valid brightness above minimum.
+    // This preserves the last known brightness level when the light is turned off,
+    // so controllers like Alexa can restore it on the next turn-on.
+    const isEntityOn = state.state !== "off" && state.state !== "unavailable";
+    const hasValidBrightness = currentLevel != null && currentLevel > minLevel;
+    const previousOnLevel = this.state.onLevel;
     const newOnLevel =
-      isOn && currentLevel != null && currentLevel > minLevel
+      isEntityOn && hasValidBrightness
         ? currentLevel
-        : this.state.onLevel;
+        : (this.state.onLevel ?? currentLevel);
+
+    // Debug logging to help investigate brightness persistence issues
+    if (previousOnLevel !== newOnLevel) {
+      const entityId = this.agent.get(HomeAssistantEntityBehavior).entity
+        .entity_id;
+      logger.debug(
+        `[${entityId}] onLevel changed: ${previousOnLevel} -> ${newOnLevel} ` +
+          `(state=${state.state}, currentLevel=${currentLevel}, isOn=${isEntityOn})`,
+      );
+    }
 
     applyPatchState(this.state, {
       minLevel: minLevel,
