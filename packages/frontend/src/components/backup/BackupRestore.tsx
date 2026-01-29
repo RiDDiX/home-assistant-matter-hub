@@ -65,8 +65,8 @@ export function BackupRestore() {
     setError(null);
     try {
       const downloadUrl = withIdentity
-        ? "/api/backup/download?includeIdentity=true"
-        : "/api/backup/download";
+        ? "api/backup/download?includeIdentity=true"
+        : "api/backup/download";
       const response = await fetch(downloadUrl);
       if (!response.ok) {
         throw new Error("Failed to create backup");
@@ -105,7 +105,7 @@ export function BackupRestore() {
       const formData = new FormData();
       formData.append("file", file);
 
-      const response = await fetch("/api/backup/restore/preview", {
+      const response = await fetch("api/backup/restore/preview", {
         method: "POST",
         body: formData,
       });
@@ -148,7 +148,7 @@ export function BackupRestore() {
         }),
       );
 
-      const response = await fetch("/api/backup/restore", {
+      const response = await fetch("api/backup/restore", {
         method: "POST",
         body: formData,
       });
@@ -202,7 +202,7 @@ export function BackupRestore() {
   const handleRestart = async () => {
     setLoading(true);
     try {
-      await fetch("/api/backup/restart", { method: "POST" });
+      await fetch("api/backup/restart", { method: "POST" });
       // The app will restart, so we just wait
       setSuccess("Application is restarting...");
     } catch (e) {

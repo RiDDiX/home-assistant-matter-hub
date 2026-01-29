@@ -83,7 +83,7 @@ export const SystemInfo = () => {
 
     const fetchSystemInfo = async () => {
       try {
-        const res = await fetch("/api/system/info");
+        const res = await fetch("api/system/info");
         if (res.ok) {
           const data = await res.json();
           setSystemInfo(data);
