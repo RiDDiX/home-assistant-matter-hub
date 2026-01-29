@@ -18,7 +18,9 @@ export interface SystemInfo {
   arch: string;
   uptime: number;
   cpuCount: number;
+  cpuModel: string;
   loadAvg: number[];
+  environment: string;
   memory: {
     total: number;
     used: number;
@@ -38,10 +40,34 @@ export interface SystemInfo {
     pid: number;
     uptime: number;
     memoryUsage: number;
+    heapTotal: number;
+    heapUsed: number;
+    external: number;
   };
 }
 
-export function systemApi(): express.Router {
+function detectEnvironment(): string {
+  // Check for Home Assistant Add-on environment
+  if (process.env.SUPERVISOR_TOKEN || process.env.HASSIO_TOKEN) {
+    return "Home Assistant Add-on";
+  }
+  // Check for Docker environment
+  if (process.env.DOCKER_ENV === "true" || process.env.container === "docker") {
+    return "Docker";
+  }
+  // Check for common Docker indicators
+  try {
+    const fs = require("node:fs");
+    if (fs.existsSync("/.dockerenv")) {
+      return "Docker";
+    }
+  } catch {
+    // ignore
+  }
+  return "Standalone";
+}
+
+export function systemApi(version: string): express.Router {
   const router = express.Router();
 
   router.get("/info", async (_req, res) => {
@@ -51,15 +77,20 @@ export function systemApi(): express.Router {
       const usedMem = totalMem - freeMem;
       const storageInfo = await getStorageInfo();
 
+      const cpus = os.cpus();
+      const memUsage = process.memoryUsage();
+
       const systemInfo: SystemInfo = {
-        version: process.env.npm_package_version || "unknown",
+        version,
         nodeVersion: process.version,
         hostname: os.hostname(),
         platform: os.platform(),
         arch: os.arch(),
         uptime: os.uptime(),
-        cpuCount: os.cpus().length,
+        cpuCount: cpus.length,
+        cpuModel: cpus[0]?.model || "Unknown",
         loadAvg: os.loadavg(),
+        environment: detectEnvironment(),
         memory: {
           total: totalMem,
           used: usedMem,
@@ -79,7 +110,10 @@ export function systemApi(): express.Router {
         process: {
           pid: process.pid,
           uptime: process.uptime(),
-          memoryUsage: process.memoryUsage().heapUsed,
+          memoryUsage: memUsage.heapUsed,
+          heapTotal: memUsage.heapTotal,
+          heapUsed: memUsage.heapUsed,
+          external: memUsage.external,
         },
       };
 

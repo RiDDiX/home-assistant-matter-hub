@@ -27,7 +27,9 @@ interface SystemInfo {
   arch: string;
   uptime: number;
   cpuCount: number;
+  cpuModel: string;
   loadAvg: number[];
+  environment: string;
   memory: {
     total: number;
     used: number;
@@ -47,6 +49,9 @@ interface SystemInfo {
     pid: number;
     uptime: number;
     memoryUsage: number;
+    heapTotal: number;
+    heapUsed: number;
+    external: number;
   };
 }
 
@@ -179,9 +184,28 @@ export const SystemInfo = () => {
                   <Box
                     sx={{ display: "flex", justifyContent: "space-between" }}
                   >
+                    <Typography variant="body2">Environment:</Typography>
+                    <Chip
+                      label={systemInfo.environment}
+                      size="small"
+                      variant="outlined"
+                      color={systemInfo.environment === "Home Assistant Add-on" ? "success" : "default"}
+                    />
+                  </Box>
+                  <Box
+                    sx={{ display: "flex", justifyContent: "space-between" }}
+                  >
                     <Typography variant="body2">Node.js:</Typography>
                     <Typography variant="body2" color="text.secondary">
                       {systemInfo.nodeVersion}
+                    </Typography>
+                  </Box>
+                  <Box
+                    sx={{ display: "flex", justifyContent: "space-between" }}
+                  >
+                    <Typography variant="body2">Process Uptime:</Typography>
+                    <Typography variant="body2" color="text.secondary">
+                      {formatUptime(systemInfo.process.uptime)}
                     </Typography>
                   </Box>
                 </Stack>
@@ -211,7 +235,15 @@ export const SystemInfo = () => {
                   <Box
                     sx={{ display: "flex", justifyContent: "space-between" }}
                   >
-                    <Typography variant="body2">Uptime:</Typography>
+                    <Typography variant="body2">CPU:</Typography>
+                    <Typography variant="body2" color="text.secondary" sx={{ maxWidth: 200, textAlign: "right" }} noWrap title={systemInfo.cpuModel}>
+                      {systemInfo.cpuCount}x {systemInfo.cpuModel.split("@")[0].trim()}
+                    </Typography>
+                  </Box>
+                  <Box
+                    sx={{ display: "flex", justifyContent: "space-between" }}
+                  >
+                    <Typography variant="body2">System Uptime:</Typography>
                     <Typography variant="body2" color="text.secondary">
                       {formatUptime(systemInfo.uptime)}
                     </Typography>
