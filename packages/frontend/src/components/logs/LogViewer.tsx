@@ -61,7 +61,7 @@ export const LogViewer = ({ open, onClose }: LogViewerProps) => {
         limit: "500",
         ...(search && { search }),
       });
-      const res = await fetch(`/api/logs?${params}`);
+      const res = await fetch(`api/logs?${params}`);
       if (res.ok) {
         const data = (await res.json()) as { entries: LogEntry[] };
         setLogs(data.entries);
@@ -100,7 +100,7 @@ export const LogViewer = ({ open, onClose }: LogViewerProps) => {
 
   const handleClearLogs = async () => {
     try {
-      await fetch("/api/logs", { method: "DELETE" });
+      await fetch("api/logs", { method: "DELETE" });
       setLogs([]);
     } catch (error) {
       console.error("Failed to clear logs:", error);
