@@ -146,11 +146,26 @@ export class ThermostatServerBase extends FeaturedBase {
     let maxCoolLimit = maxSetpointLimit;
 
     if (this.features.heating && this.features.cooling) {
-      // To satisfy: minHeat <= minCool - deadband
-      // We lower minHeat instead of raising minCool, so user can still set cool to HA's min_temp
-      const requiredMinHeat = (minSetpointLimit ?? 700) - INTERNAL_DEADBAND;
-      minHeatLimit = Math.max(requiredMinHeat, 700); // Don't go below 7°C absolute minimum
-      minCoolLimit = minSetpointLimit; // Keep cool min at HA's actual min_temp
+      // Matter.js constraint: minCool >= minHeat + deadband
+      // We need to ensure this is satisfied regardless of what HA reports
+      const MATTER_MIN_HEAT_ABSOLUTE = 700; // 7°C - Matter.js absolute minimum for heating
+      const MATTER_MIN_COOL_ABSOLUTE = 1600; // 16°C - Matter.js absolute minimum for cooling
+
+      // Start with HA's reported min, but ensure minimums are within Matter.js absolute limits
+      minHeatLimit = Math.max(
+        minSetpointLimit ?? 700,
+        MATTER_MIN_HEAT_ABSOLUTE,
+      );
+      minCoolLimit = Math.max(
+        minSetpointLimit ?? 1600,
+        MATTER_MIN_COOL_ABSOLUTE,
+      );
+
+      // Now ensure the constraint: minCool >= minHeat + deadband
+      const requiredMinCool = minHeatLimit + INTERNAL_DEADBAND;
+      if (minCoolLimit < requiredMinCool) {
+        minCoolLimit = requiredMinCool;
+      }
 
       // To satisfy: maxHeat <= maxCool - deadband
       // Strategy: Try to raise maxCool first, but if that exceeds 35°C, we must also clamp maxHeat
