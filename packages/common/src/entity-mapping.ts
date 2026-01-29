@@ -110,7 +110,7 @@ export const domainToDefaultMatterTypes: Partial<
   ],
   lock: ["door_lock"],
   media_player: [
-    "on_off_switch"
+    "on_off_switch",
     "speaker",
   ],
   scene: ["on_off_switch"],
