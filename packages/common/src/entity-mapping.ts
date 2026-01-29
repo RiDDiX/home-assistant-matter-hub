@@ -85,13 +85,13 @@ export const domainToDefaultMatterTypes: Partial<
   Record<HomeAssistantDomain, MatterDeviceType[]>
 > = {
   automation: ["on_off_switch"],
-  binary_sensor: ["contact_sensor","occupancy_sensor",],
+  binary_sensor: ["contact_sensor", "occupancy_sensor"],
   button: ["generic_switch"],
   climate: ["thermostat"],
   cover: ["window_covering"],
-  fan: ["air_purifier","fan",],
+  fan: ["air_purifier", "fan"],
   humidifier: ["humidifier_dehumidifier"],
-  input_boolean: ["on_off_plugin_unit","on_off_switch",],
+  input_boolean: ["on_off_plugin_unit", "on_off_switch"],
   input_button: ["generic_switch"],
   light: [
     "color_temperature_light",
@@ -100,7 +100,7 @@ export const domainToDefaultMatterTypes: Partial<
     "on_off_light",
   ],
   lock: ["door_lock"],
-  media_player: ["on_off_switch","speaker",],
+  media_player: ["on_off_switch", "speaker"],
   scene: ["on_off_switch"],
   script: ["on_off_switch"],
   sensor: [
@@ -110,6 +110,6 @@ export const domainToDefaultMatterTypes: Partial<
     "pressure_sensor",
     "temperature_sensor",
  ], 
-  switch: ["on_off_plugin_unit","on_off_switch",],
+  switch: ["on_off_plugin_unit", "on_off_switch"],
   vacuum: ["robot_vacuum_cleaner"],
 };
