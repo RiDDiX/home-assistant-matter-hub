@@ -2,6 +2,7 @@ import type { HomeAssistantFilter } from "./home-assistant-filter.js";
 
 interface AllBridgeFeatureFlags {
   readonly coverDoNotInvertPercentage: boolean;
+  readonly coverUseHomeAssistantPercentage: boolean;
   readonly includeHiddenEntities: boolean;
 }
 

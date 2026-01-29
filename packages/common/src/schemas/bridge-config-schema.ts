@@ -51,6 +51,17 @@ const featureFlagSchema: JSONSchema7 = {
       default: false,
     },
 
+    coverUseHomeAssistantPercentage: {
+      title: "Use Home Assistant Percentage for Covers (Alexa-friendly)",
+      description:
+        "Display cover percentages matching Home Assistant values in Matter controllers like Alexa. " +
+        "This makes the displayed percentage match what you see in Home Assistant, but the semantic meaning differs: " +
+        "in HA, higher percentage = more open; in Alexa, higher percentage is typically interpreted as more closed. " +
+        "Open/Close commands will still work correctly.",
+      type: "boolean",
+      default: false,
+    },
+
     includeHiddenEntities: {
       title: "Include Hidden Entities",
       description:
