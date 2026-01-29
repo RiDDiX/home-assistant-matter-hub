@@ -75,6 +75,25 @@ export class LevelControlServerBase extends FeaturedBase {
     });
   }
 
+  // Fix for Google Home: it sends moveToLevel/moveToLevelWithOnOff without transitionTime field.
+  // According to Matter spec, transitionTime is nullable, but Google Home omits it entirely.
+  // We provide a default value of 0 (instant transition) to prevent validation errors.
+  override async moveToLevel(request: LevelControl.MoveToLevelRequest) {
+    if (request.transitionTime === undefined) {
+      request.transitionTime = 0;
+    }
+    return super.moveToLevel(request);
+  }
+
+  override async moveToLevelWithOnOff(
+    request: LevelControl.MoveToLevelRequest,
+  ) {
+    if (request.transitionTime === undefined) {
+      request.transitionTime = 0;
+    }
+    return super.moveToLevelWithOnOff(request);
+  }
+
   override moveToLevelLogic(level: number) {
     const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);
     const config = this.state.config;
