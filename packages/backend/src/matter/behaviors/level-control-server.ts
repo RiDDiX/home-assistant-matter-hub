@@ -42,12 +42,22 @@ export class LevelControlServerBase extends FeaturedBase {
       currentLevel = Math.min(Math.max(minLevel, currentLevel), maxLevel);
     }
 
+    // Only update onLevel when the device is actually ON and has a valid brightness.
+    // When the device is OFF, keep the previous onLevel so that turning on
+    // restores the last known brightness level instead of resetting to minimum.
+    // This fixes the issue where Alexa resets lights to 100% after being off.
+    const isOn = state?.state === "on";
+    const newOnLevel =
+      isOn && currentLevel != null && currentLevel > minLevel
+        ? currentLevel
+        : this.state.onLevel;
+
     applyPatchState(this.state, {
       minLevel: minLevel,
       maxLevel: maxLevel,
       currentLevel: currentLevel,
       currentLevelPercent: currentLevelPercent,
-      onLevel: currentLevel ?? this.state.onLevel,
+      onLevel: newOnLevel,
     });
   }
 

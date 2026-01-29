@@ -242,6 +242,27 @@ export class ThermostatServerBase extends FeaturedBase {
     }
     // Use asLocalActor to avoid access control issues when accessing HomeAssistantEntityBehavior
     this.agent.asLocalActor(() => {
+      const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);
+      const config = this.state.config;
+      const supportsRange = config.supportsTemperatureRange(
+        homeAssistant.entity.state,
+        this.agent,
+      );
+
+      // For single-temperature thermostats, only update HA when heating setpoint changes
+      // if we're in heating mode (or auto/heat_cool). This prevents Apple Home's deadband
+      // enforcement from sending the wrong temperature when both setpoints are updated.
+      if (!supportsRange) {
+        const currentMode = this.state.systemMode;
+        const isHeatingMode =
+          currentMode === Thermostat.SystemMode.Heat ||
+          currentMode === Thermostat.SystemMode.EmergencyHeat ||
+          currentMode === Thermostat.SystemMode.Auto;
+        if (!isHeatingMode) {
+          return; // Let coolingSetpointChanging handle this
+        }
+      }
+
       const coolingSetpoint = this.state.occupiedCoolingSetpoint;
       this.setTemperature(
         next,
@@ -270,6 +291,26 @@ export class ThermostatServerBase extends FeaturedBase {
     }
     // Use asLocalActor to avoid access control issues when accessing HomeAssistantEntityBehavior
     this.agent.asLocalActor(() => {
+      const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);
+      const config = this.state.config;
+      const supportsRange = config.supportsTemperatureRange(
+        homeAssistant.entity.state,
+        this.agent,
+      );
+
+      // For single-temperature thermostats, only update HA when cooling setpoint changes
+      // if we're in cooling mode. This prevents Apple Home's deadband enforcement from
+      // sending the wrong temperature when both setpoints are updated.
+      if (!supportsRange) {
+        const currentMode = this.state.systemMode;
+        const isCoolingMode =
+          currentMode === Thermostat.SystemMode.Cool ||
+          currentMode === Thermostat.SystemMode.Precooling;
+        if (!isCoolingMode) {
+          return; // Let heatingSetpointChanging handle this
+        }
+      }
+
       const heatingSetpoint = this.state.occupiedHeatingSetpoint;
       this.setTemperature(
         Temperature.celsius(heatingSetpoint / 100)!,
