@@ -238,12 +238,15 @@ export class ThermostatServerBase extends FeaturedBase {
     if (!next) {
       return;
     }
-    const coolingSetpoint = this.state.occupiedCoolingSetpoint;
-    this.setTemperature(
-      next,
-      Temperature.celsius(coolingSetpoint / 100)!,
-      Thermostat.SetpointRaiseLowerMode.Heat,
-    );
+    // Use asLocalActor to avoid access control issues when accessing HomeAssistantEntityBehavior
+    this.agent.asLocalActor(() => {
+      const coolingSetpoint = this.state.occupiedCoolingSetpoint;
+      this.setTemperature(
+        next,
+        Temperature.celsius(coolingSetpoint / 100)!,
+        Thermostat.SetpointRaiseLowerMode.Heat,
+      );
+    });
   }
 
   /**
@@ -263,12 +266,15 @@ export class ThermostatServerBase extends FeaturedBase {
     if (!next) {
       return;
     }
-    const heatingSetpoint = this.state.occupiedHeatingSetpoint;
-    this.setTemperature(
-      Temperature.celsius(heatingSetpoint / 100)!,
-      next,
-      Thermostat.SetpointRaiseLowerMode.Cool,
-    );
+    // Use asLocalActor to avoid access control issues when accessing HomeAssistantEntityBehavior
+    this.agent.asLocalActor(() => {
+      const heatingSetpoint = this.state.occupiedHeatingSetpoint;
+      this.setTemperature(
+        Temperature.celsius(heatingSetpoint / 100)!,
+        next,
+        Thermostat.SetpointRaiseLowerMode.Cool,
+      );
+    });
   }
 
   private setTemperature(
