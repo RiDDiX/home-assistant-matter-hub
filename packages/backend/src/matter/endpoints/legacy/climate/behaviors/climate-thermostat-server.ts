@@ -70,11 +70,20 @@ const hvacModeToSystemMode: Record<ClimateHvacMode, Thermostat.SystemMode> = {
 };
 
 const config: ThermostatServerConfig = {
-  supportsTemperatureRange: (entity) =>
-    testBit(
+  // Temperature range (target_temp_low/high) only works in heat_cool mode.
+  // In heat or cool mode, HA expects a single "temperature" value.
+  // We must check BOTH the feature flag AND the current HVAC mode.
+  supportsTemperatureRange: (entity) => {
+    const hasFeature = testBit(
       entity.attributes.supported_features ?? 0,
       ClimateDeviceFeature.TARGET_TEMPERATURE_RANGE,
-    ),
+    );
+    const currentMode = entity.state as ClimateHvacMode;
+    const isRangeMode =
+      currentMode === ClimateHvacMode.heat_cool ||
+      currentMode === ClimateHvacMode.auto;
+    return hasFeature && isRangeMode;
+  },
   getMinTemperature: (entity, agent) => getTemp(agent, entity, "min_temp"),
   getMaxTemperature: (entity, agent) => getTemp(agent, entity, "max_temp"),
   getCurrentTemperature: (entity, agent) =>
