@@ -6,13 +6,13 @@ import type {
 } from "@home-assistant-matter-hub/common";
 import type { EndpointType } from "@matter/main";
 import type { HomeAssistantEntityBehavior } from "../../behaviors/home-assistant-entity-behavior.js";
+import { AirPurifierEndpoint } from "./air-purifier/index.js";
 import { AlarmControlPanelDevice } from "./alarm-control-panel/index.js";
 import { AutomationDevice } from "./automation/index.js";
 import { BinarySensorDevice } from "./binary-sensor/index.js";
 import { ButtonDevice } from "./button/index.js";
 import { ClimateDevice } from "./climate/index.js";
 import { CoverDevice } from "./cover/index.js";
-import { AirPurifierEndpoint } from "./air-purifier/index.js";
 import { FanDevice } from "./fan/index.js";
 import { HumidifierDevice } from "./humidifier/index.js";
 import { InputButtonDevice } from "./input-button/index.js";

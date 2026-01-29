@@ -7,13 +7,13 @@ import type { HomeAssistantEntityBehavior } from "../../../behaviors/home-assist
 import { AirQualitySensorType } from "./devices/air-quality-sensor.js";
 import { Co2SensorType } from "./devices/co2-sensor.js";
 import { FlowSensorType } from "./devices/flow-sensor.js";
-import { TvocSensorType } from "./devices/tvoc-sensor.js";
 import { HumiditySensorType } from "./devices/humidity-sensor.js";
 import { IlluminanceSensorType } from "./devices/illuminance-sensor.js";
 import { Pm10SensorType } from "./devices/pm10-sensor.js";
 import { Pm25SensorType } from "./devices/pm25-sensor.js";
 import { PressureSensorType } from "./devices/pressure-sensor.js";
 import { TemperatureSensorType } from "./devices/temperature-sensor.js";
+import { TvocSensorType } from "./devices/tvoc-sensor.js";
 
 export function SensorDevice(
   homeAssistantEntity: HomeAssistantEntityBehavior.State,
