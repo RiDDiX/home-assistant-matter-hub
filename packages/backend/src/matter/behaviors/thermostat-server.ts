@@ -126,10 +126,27 @@ export class ThermostatServerBase extends FeaturedBase {
       ? config.getRunningMode(entity.state, this.agent)
       : Thermostat.ThermostatRunningMode.Off;
 
-    // Without AutoMode feature, we don't need deadband calculations
-    // AutoMode was removed due to Matter.js permission issues with thermostatRunningMode
-    const minCoolLimit = minSetpointLimit;
-    const maxHeatLimit = maxSetpointLimit;
+    // IMPORTANT: Even without AutoMode feature, Matter.js still enforces internal constraints:
+    // minHeatSetpointLimit <= minCoolSetpointLimit - minSetpointDeadBand (default 200 = 2°C)
+    // maxHeatSetpointLimit <= maxCoolSetpointLimit - minSetpointDeadBand
+    // We must ensure our limits satisfy this constraint to prevent initialization errors.
+    const INTERNAL_DEADBAND = 200; // Matter.js default is 2.0°C (200 in 0.01°C units)
+
+    // Adjust cool limits to be at least INTERNAL_DEADBAND higher than heat limits
+    const minCoolLimit =
+      this.features.heating && this.features.cooling
+        ? Math.max(
+            minSetpointLimit ?? 700,
+            (minSetpointLimit ?? 700) + INTERNAL_DEADBAND,
+          )
+        : minSetpointLimit;
+    const maxHeatLimit =
+      this.features.heating && this.features.cooling
+        ? Math.min(
+            maxSetpointLimit ?? 3000,
+            (maxSetpointLimit ?? 3200) - INTERNAL_DEADBAND,
+          )
+        : maxSetpointLimit;
 
     // Calculate actual limits for clamping setpoints
     const effectiveMinHeatLimit = minSetpointLimit;
@@ -396,23 +413,22 @@ export function ThermostatServer(config: ThermostatServerConfig) {
   // in initialize() BEFORE super.initialize() runs.
   //
   // CRITICAL: These defaults must satisfy Matter.js constraints:
-  // - minHeatSetpointLimit <= minCoolSetpointLimit - minSetpointDeadBand
-  // - maxHeatSetpointLimit <= maxCoolSetpointLimit - minSetpointDeadBand
-  // With minSetpointDeadBand=0, we just need minHeat <= minCool and maxHeat <= maxCool
+  // - minHeatSetpointLimit <= minCoolSetpointLimit - minSetpointDeadBand (default 200)
+  // - maxHeatSetpointLimit <= maxCoolSetpointLimit - minSetpointDeadBand (default 200)
+  // Without AutoMode, we can't set minSetpointDeadBand, so we must ensure limits satisfy
+  // the constraint with the default 200 (2°C) deadband.
   return ThermostatServerBase.set({
     config,
-    // CRITICAL: Set deadband to 0 to prevent constraint validation failures
-    // Note: minSetpointDeadBand removed - AutoMode feature not included due to Matter.js permission issues
     // Provide reasonable defaults for setpoints to prevent undefined->NaN issues
     // These will be overwritten with actual HA values during initialize()
     localTemperature: 2100, // 21°C - reasonable room temperature default
     occupiedHeatingSetpoint: 2000, // 20°C in 0.01°C units
     occupiedCoolingSetpoint: 2400, // 24°C in 0.01°C units
-    // Limits must satisfy: minHeat <= minCool (when deadband=0)
+    // Limits must satisfy: minHeat <= minCool - 200 and maxHeat <= maxCool - 200
     minHeatSetpointLimit: 700, // 7°C
     maxHeatSetpointLimit: 3000, // 30°C
-    minCoolSetpointLimit: 700, // 7°C - same as heat to satisfy constraint
-    maxCoolSetpointLimit: 3200, // 32°C
+    minCoolSetpointLimit: 900, // 9°C - must be >= minHeat + 200 (2°C deadband)
+    maxCoolSetpointLimit: 3200, // 32°C - must be >= maxHeat + 200
     // Absolute limits
     absMinHeatSetpointLimit: 700,
     absMaxHeatSetpointLimit: 3000,
