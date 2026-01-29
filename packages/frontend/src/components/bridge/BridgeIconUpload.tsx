@@ -61,12 +61,17 @@ export const BridgeIconUpload = ({
 
   useEffect(() => {
     if (bridgeId) {
-      checkBridgeIconExists(bridgeId).then((exists) => {
-        setHasCustomIcon(exists);
-        if (exists) {
-          setCustomIconUrl(`${getBridgeIconUrl(bridgeId)}?t=${Date.now()}`);
-        }
-      });
+      checkBridgeIconExists(bridgeId)
+        .then((exists) => {
+          setHasCustomIcon(exists);
+          if (exists) {
+            setCustomIconUrl(`${getBridgeIconUrl(bridgeId)}?t=${Date.now()}`);
+          }
+        })
+        .catch(() => {
+          // Icon doesn't exist or API error - ignore
+          setHasCustomIcon(false);
+        });
     }
   }, [bridgeId]);
 
