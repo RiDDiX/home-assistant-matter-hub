@@ -1,12 +1,18 @@
 import {
   type BridgeDataWithMetadata,
+  type BridgeIconType,
   HomeAssistantMatcherType,
 } from "@home-assistant-matter-hub/common";
 import AcUnit from "@mui/icons-material/AcUnit";
+import Battery from "@mui/icons-material/Battery80";
 import Blinds from "@mui/icons-material/Blinds";
+import Bolt from "@mui/icons-material/Bolt";
+import Cameraswitch from "@mui/icons-material/Cameraswitch";
 import CleaningServices from "@mui/icons-material/CleaningServices";
 import DeviceHub from "@mui/icons-material/DeviceHub";
 import Devices from "@mui/icons-material/Devices";
+import DirectionsRun from "@mui/icons-material/DirectionsRun";
+import DoorFront from "@mui/icons-material/DoorFront";
 import ElectricalServices from "@mui/icons-material/ElectricalServices";
 import EventNote from "@mui/icons-material/EventNote";
 import Garage from "@mui/icons-material/Garage";
@@ -21,6 +27,7 @@ import Toys from "@mui/icons-material/Toys";
 import Tv from "@mui/icons-material/Tv";
 import WaterDrop from "@mui/icons-material/WaterDrop";
 import Wifi from "@mui/icons-material/Wifi";
+import Window from "@mui/icons-material/Window";
 import Avatar from "@mui/material/Avatar";
 import Box from "@mui/material/Box";
 import Card from "@mui/material/Card";
@@ -36,6 +43,29 @@ import { BridgeStatusIcon } from "../bridge/BridgeStatusIcon.tsx";
 export interface DeviceCardProps {
   bridge: BridgeDataWithMetadata;
 }
+
+const iconTypeMap: Record<BridgeIconType, React.ElementType> = {
+  light: Lightbulb,
+  switch: PowerSettingsNew,
+  climate: Thermostat,
+  cover: Blinds,
+  fan: Toys,
+  lock: Lock,
+  sensor: Sensors,
+  media_player: Tv,
+  vacuum: CleaningServices,
+  remote: SettingsRemote,
+  humidifier: WaterDrop,
+  speaker: Speaker,
+  garage: Garage,
+  door: DoorFront,
+  window: Window,
+  motion: DirectionsRun,
+  battery: Battery,
+  power: Bolt,
+  camera: Cameraswitch,
+  default: DeviceHub,
+};
 
 const domainIconMap: Record<string, React.ElementType> = {
   light: Lightbulb,
@@ -121,10 +151,17 @@ const getIconFromBridgeName = (name: string): React.ElementType | null => {
 };
 
 const getDeviceIcon = (bridge: BridgeDataWithMetadata): React.ElementType => {
+  // 1. Check if bridge has a configured icon
+  if (bridge.icon && iconTypeMap[bridge.icon]) {
+    return iconTypeMap[bridge.icon];
+  }
+  // 2. Try to get icon from domain filter
   const domain = getDomainFromBridge(bridge);
   if (domain && domainIconMap[domain]) return domainIconMap[domain];
+  // 3. Try to infer from bridge name
   const nameIcon = getIconFromBridgeName(bridge.name);
   if (nameIcon) return nameIcon;
+  // 4. Fallback
   if (bridge.deviceCount === 0) return Devices;
   return DeviceHub;
 };
