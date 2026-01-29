@@ -45,6 +45,13 @@ export class BasicInformationServer extends Base {
       // we're keeping it as the entity ID for now to avoid breaking existing
       // deployments.
       serialNumber: hash(32, entity.entity_id),
+      // UniqueId helps controllers (especially Alexa) identify devices across
+      // multiple fabric connections. Using MD5 hash of entity_id for stability.
+      uniqueId: crypto
+        .createHash("md5")
+        .update(entity.entity_id)
+        .digest("hex")
+        .substring(0, 32),
     });
   }
 }
