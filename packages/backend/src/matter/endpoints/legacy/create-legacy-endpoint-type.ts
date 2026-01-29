@@ -22,6 +22,7 @@ import { ExtendedColorLightType } from "./light/devices/extended-color-light.js"
 import { OnOffLightType } from "./light/devices/on-off-light-device.js";
 import { LightDevice } from "./light/index.js";
 import { LockDevice } from "./lock/index.js";
+import { VideoPlayerDevice } from "./media-player/basic-video-player.js";
 import { MediaPlayerDevice } from "./media-player/index.js";
 import { SceneDevice } from "./scene/index.js";
 import { ScriptDevice } from "./script/index.js";
@@ -105,4 +106,6 @@ const matterDeviceTypeFactories: Partial<
   air_purifier: AirPurifierEndpoint,
   robot_vacuum_cleaner: VacuumDevice,
   humidifier_dehumidifier: HumidifierDevice,
+  speaker: MediaPlayerDevice,
+  basic_video_player: VideoPlayerDevice,
 };

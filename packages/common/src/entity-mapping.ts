@@ -3,6 +3,7 @@ import type { HomeAssistantDomain } from "./home-assistant-domain.js";
 export type MatterDeviceType =
   | "air_purifier"
   | "air_quality_sensor"
+  | "basic_video_player"
   | "color_dimmer_switch"
   | "color_temperature_light"
   | "contact_sensor"
@@ -53,6 +54,7 @@ export interface EntityMappingResponse {
 export const matterDeviceTypeLabels: Record<MatterDeviceType, string> = {
   air_purifier: "Air Purifier",
   air_quality_sensor: "Air Quality Sensor",
+  basic_video_player: "Basic Video Player (TV)",
   color_dimmer_switch: "Color Dimmer Switch",
   color_temperature_light: "Color Temperature Light",
   contact_sensor: "Contact Sensor",
@@ -100,7 +102,7 @@ export const domainToDefaultMatterTypes: Partial<
     "on_off_light",
   ],
   lock: ["door_lock"],
-  media_player: ["on_off_switch", "speaker"],
+  media_player: ["basic_video_player", "on_off_switch", "speaker"],
   scene: ["on_off_switch"],
   script: ["on_off_switch"],
   sensor: [
