@@ -80,22 +80,6 @@ class AirQualitySensorServerImpl extends AirQualityServerWithFeatures {
         } else {
           airQuality = AirQuality.AirQualityEnum.VeryPoor;
         }
-      } else if (
-        deviceClass === "volatile_organic_compounds" ||
-        deviceClass === "volatile_organic_compounds_parts"
-      ) {
-        // VOC index or ppb
-        if (value <= 100) {
-          airQuality = AirQuality.AirQualityEnum.Good;
-        } else if (value <= 200) {
-          airQuality = AirQuality.AirQualityEnum.Fair;
-        } else if (value <= 300) {
-          airQuality = AirQuality.AirQualityEnum.Moderate;
-        } else if (value <= 400) {
-          airQuality = AirQuality.AirQualityEnum.Poor;
-        } else {
-          airQuality = AirQuality.AirQualityEnum.VeryPoor;
-        }
       }
     }
 
