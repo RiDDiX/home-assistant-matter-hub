@@ -14,7 +14,6 @@ import { ButtonDevice } from "./button/index.js";
 import { ClimateDevice } from "./climate/index.js";
 import { CoverDevice } from "./cover/index.js";
 import { FanDevice } from "./fan/index.js";
-import { GarageDoorDevice } from "./garage-door/index.js";
 import { HumidifierDevice } from "./humidifier/index.js";
 import { InputButtonDevice } from "./input-button/index.js";
 import { ColorTemperatureLightType } from "./light/devices/color-temperature-light.js";
@@ -100,7 +99,6 @@ const matterDeviceTypeFactories: Partial<
   on_off_plugin_unit: SwitchDevice,
   on_off_switch: SwitchDevice,
   door_lock: LockDevice,
-  garage_door: GarageDoorDevice,
   window_covering: CoverDevice,
   thermostat: ClimateDevice,
   fan: FanDevice,

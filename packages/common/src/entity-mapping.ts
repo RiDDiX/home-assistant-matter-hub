@@ -13,7 +13,6 @@ export type MatterDeviceType =
   | "extended_color_light"
   | "fan"
   | "flow_sensor"
-  | "garage_door"
   | "generic_switch"
   | "humidifier_dehumidifier"
   | "humidity_sensor"
@@ -64,7 +63,6 @@ export const matterDeviceTypeLabels: Record<MatterDeviceType, string> = {
   extended_color_light: "Extended Color Light",
   fan: "Fan",
   flow_sensor: "Flow Sensor",
-  garage_door: "Garage Door (CarPlay)",
   generic_switch: "Generic Switch (Button)",
   humidifier_dehumidifier: "Humidifier/Dehumidifier",
   humidity_sensor: "Humidity Sensor",
@@ -90,7 +88,7 @@ export const domainToDefaultMatterTypes: Partial<
   binary_sensor: ["contact_sensor", "occupancy_sensor"],
   button: ["generic_switch"],
   climate: ["thermostat"],
-  cover: ["garage_door", "window_covering"],
+  cover: ["window_covering"],
   fan: ["air_purifier", "fan"],
   humidifier: ["humidifier_dehumidifier"],
   input_boolean: ["on_off_plugin_unit", "on_off_switch"],
