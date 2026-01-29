@@ -1,6 +1,10 @@
 import type { HomeAssistantEntityInformation } from "@home-assistant-matter-hub/common";
+import { Logger } from "@matter/general";
 import { ThermostatServer as Base } from "@matter/main/behaviors";
 import { Thermostat } from "@matter/main/clusters";
+
+const logger = Logger.get("ThermostatServer");
+
 import type { HomeAssistantAction } from "../../services/home-assistant/home-assistant-actions.js";
 import { applyPatchState } from "../../utils/apply-patch-state.js";
 import { Temperature } from "../../utils/converters/temperature.js";
@@ -233,11 +237,18 @@ export class ThermostatServerBase extends FeaturedBase {
     _oldValue: number,
     context?: ActionContext,
   ) {
+    logger.debug(
+      `heatingSetpointChanging: value=${value}, oldValue=${_oldValue}, isOffline=${transactionIsOffline(context)}`,
+    );
     if (transactionIsOffline(context)) {
+      logger.debug(
+        "heatingSetpointChanging: skipping - transaction is offline",
+      );
       return;
     }
     const next = Temperature.celsius(value / 100);
     if (!next) {
+      logger.debug("heatingSetpointChanging: skipping - invalid temperature");
       return;
     }
     // Use asLocalActor to avoid access control issues when accessing HomeAssistantEntityBehavior
@@ -248,22 +259,31 @@ export class ThermostatServerBase extends FeaturedBase {
         homeAssistant.entity.state,
         this.agent,
       );
+      const currentMode = this.state.systemMode;
+      logger.debug(
+        `heatingSetpointChanging: supportsRange=${supportsRange}, systemMode=${currentMode}, features.heating=${this.features.heating}, features.cooling=${this.features.cooling}`,
+      );
 
       // For single-temperature thermostats, only update HA when heating setpoint changes
       // if we're in heating mode (or auto/heat_cool). This prevents Apple Home's deadband
       // enforcement from sending the wrong temperature when both setpoints are updated.
       if (!supportsRange) {
-        const currentMode = this.state.systemMode;
         const isHeatingMode =
           currentMode === Thermostat.SystemMode.Heat ||
           currentMode === Thermostat.SystemMode.EmergencyHeat ||
           currentMode === Thermostat.SystemMode.Auto;
         if (!isHeatingMode) {
+          logger.debug(
+            `heatingSetpointChanging: skipping - not in heating mode (mode=${currentMode})`,
+          );
           return; // Let coolingSetpointChanging handle this
         }
       }
 
       const coolingSetpoint = this.state.occupiedCoolingSetpoint;
+      logger.debug(
+        `heatingSetpointChanging: calling setTemperature with heat=${next.celsius(true)}, cool=${coolingSetpoint}`,
+      );
       this.setTemperature(
         next,
         Temperature.celsius(coolingSetpoint / 100)!,
