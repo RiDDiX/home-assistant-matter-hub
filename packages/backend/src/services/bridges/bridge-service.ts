@@ -138,8 +138,21 @@ export class BridgeService extends Service {
       return;
     }
     await bridge.stop();
-    await bridge.delete();
-    await bridge.dispose();
+    try {
+      await bridge.delete();
+    } catch (e) {
+      // Ignore Matter.js internal errors during deletion
+      // These occur when endpoints are already detached from the node
+      const msg = e instanceof Error ? e.message : String(e);
+      if (!msg.includes("Endpoint storage inaccessible")) {
+        throw e;
+      }
+    }
+    try {
+      await bridge.dispose();
+    } catch {
+      // Ignore disposal errors during deletion
+    }
     this.bridges.splice(this.bridges.indexOf(bridge), 1);
     await this.bridgeStorage.remove(bridgeId);
   }
