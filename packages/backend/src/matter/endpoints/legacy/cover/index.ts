@@ -10,6 +10,7 @@ import { testBit } from "../../../../utils/test-bit.js";
 import { BasicInformationServer } from "../../../behaviors/basic-information-server.js";
 import { HomeAssistantEntityBehavior } from "../../../behaviors/home-assistant-entity-behavior.js";
 import { IdentifyServer } from "../../../behaviors/identify-server.js";
+import { GarageDoorDevice } from "../garage-door/index.js";
 import { CoverWindowCoveringServer } from "./behaviors/cover-window-covering-server.js";
 
 const CoverDeviceType = (supportedFeatures: number) => {
@@ -50,6 +51,14 @@ export function CoverDevice(
 ): EndpointType {
   const attributes = homeAssistantEntity.entity.state
     .attributes as CoverDeviceAttributes;
+
+  // Use GarageDoorDevice for garage covers (device_class: garage or gate)
+  // This exposes them as DoorLock (deviceType 0x000A) which Apple CarPlay recognizes
+  const deviceClass = attributes.device_class;
+  if (deviceClass === "garage" || deviceClass === "gate") {
+    return GarageDoorDevice(homeAssistantEntity);
+  }
+
   return CoverDeviceType(attributes.supported_features ?? 0).set({
     homeAssistantEntity,
   });
