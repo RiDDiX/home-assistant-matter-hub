@@ -70,13 +70,10 @@ We use [Semantic Release](https://semantic-release.gitbook.io/) for automatic ve
 - **Node.js 24** - Latest LTS runtime
 - **64-bit Only** - Supports `amd64` and `arm64` (aarch64)
 
-### Stable Features (v1.7.x)
+### Stable Features (v1.7.x) - Current Stable 🎉
 
 - **Dark Mode Toggle** - Switch between light and dark theme
 - **Device List Sorting** - Sort endpoints by name, type, or ID
-
-### Stable Features (v1.8.x) - NEW! 🎉
-
 - **Graceful Crash Handler** - Failed entities no longer crash the bridge
   - Problematic entities are automatically skipped during boot
   - Failed entities are displayed in the UI with detailed error messages
