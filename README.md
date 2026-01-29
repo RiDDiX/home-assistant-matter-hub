@@ -39,7 +39,7 @@ of port forwarding etc.
 |---------|--------|-----------------|-------------|
 | **Stable** | `main` | v1.7.x | Production-ready, recommended for most users |
 | **Alpha** | `alpha` | v2.0.0-alpha.x | Pre-release with new features, for early adopters |
-| **Testing** | `testing` | v2.0.0-testing.x | ⚠️ **Highly unstable!** Experimental features, may break |
+| **Testing** | `testing` | v4.0.0-testing.x | ⚠️ **Highly unstable!** Breaking changes, experimental features |
 
 ### Semantic Versioning
 
@@ -96,30 +96,52 @@ We use [Semantic Release](https://semantic-release.gitbook.io/) for automatic ve
 > Alpha versions are for early adopters and may contain bugs!
 
 All stable features plus:
-- **Health Check API** (`/api/health`)
+
+#### APIs & Backend
+- **Health Check API** (`/api/health`, `/api/health/detailed`)
   - System status, uptime, and service information
   - Kubernetes-ready probes (`/live`, `/ready`)
+- **System Info API** (`/api/system/info`) - NEW!
+  - CPU, memory, storage usage
+  - Network interfaces, process info
+  - Application version and Node.js version
+- **Logs API** (`/api/logs`) - NEW!
+  - Retrieve, filter, and search application logs
+  - Clear logs, streaming via SSE
+- **Metrics API** (`/api/metrics`)
+  - Prometheus-compatible metrics endpoint
 - **WebSocket Live Updates** (`/api/ws`)
   - Real-time bridge status updates
   - No more polling required
+
+#### UI Enhancements
+- **System Information Panel** - Real-time system stats in Health page
+- **Log Viewer Dialog** - View, filter, and search logs from UI
 - **Entity Mapping Customization**
   - Override Matter device types per entity
   - Custom names for entities in Matter
   - Disable specific entities from bridge
-- **Full Backup/Restore** - Download complete backups as ZIP including entity mappings
 - **Filter Preview** - Preview which entities match your filter before saving
 - **Dark Mode Toggle** - Switch between light and dark theme
 - **Device List Sorting** - Sort endpoints by name, type, or ID
-- **Full Backup with Identity** - Preserve Matter commissioning across reinstalls
 - **Alphabetical Bridge Sorting** - Bridges sorted by name in UI
 
-### Testing Features (v2.0.0-testing) ⚠️
+#### Backup & Restore
+- **Full Backup/Restore** - Download complete backups as ZIP
+- **Full Backup with Identity** - Preserve Matter commissioning across reinstalls
+  - Includes Matter keypairs and fabric credentials
+  - No re-commissioning needed after restore
+
+### Testing Features (v4.0.0-testing) ⚠️
 
 > [!CAUTION]
-> Testing versions are **highly unstable** and intended for developers only!
-> Features may be incomplete, broken, or removed without notice.
+> Testing versions are **highly unstable** and may contain BREAKING CHANGES!
+> Intended for developers and testers only. Features may be incomplete, broken, or removed without notice.
 
-All alpha features plus experimental changes being actively developed.
+All alpha features plus:
+- Experimental Matter.js updates
+- Cutting-edge features being actively developed
+- Breaking changes may occur between versions
 
 ---
 
