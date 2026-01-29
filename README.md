@@ -39,7 +39,7 @@ of port forwarding etc.
 |---------|--------|-----------------|-------------|
 | **Stable** | `main` | v1.7.x | Production-ready, recommended for most users |
 | **Alpha** | `alpha` | v2.0.0-alpha.x | Pre-release with new features, for early adopters |
-| **Testing** | `testing` | v2.0.0-testing.x | ⚠️ **Highly unstable!** Experimental features, may break |
+| **Testing** | `testing` | v4.0.0-testing.x | ⚠️ **Highly unstable!** Breaking changes, experimental |
 
 ### Semantic Versioning
 
@@ -55,68 +55,83 @@ We use [Semantic Release](https://semantic-release.gitbook.io/) for automatic ve
 - **Early adopters**: Use **Alpha** (`alpha` branch) - new features, occasional bugs
 - **Developers/Testers**: Use **Testing** (`testing` branch) - bleeding edge, expect breakage
 
-### Stable Features (v1.5.x)
+### Current Stable Features (v1.7.x) 🎉
 
+#### Core Features
 - **Matter Bridge** - Expose Home Assistant entities to Matter controllers
 - **Multi-Fabric Support** - Connect to multiple ecosystems (Apple, Google, Alexa)
-- **Graceful Error Handling** - Skips problematic entities without crashing
-- **Failed Entity Reporting** - Shows which entities couldn't be loaded and why
-- **Health Monitoring Dashboard** - Real-time bridge and fabric status monitoring
-- **Automatic Recovery** - Auto-restart failed bridges with configurable intervals
-- **Bridge Wizard** - Guided setup for creating multiple bridges with automatic port assignment
-- **AirQuality Sensors** - Support for AQI, PM2.5, PM10, CO2, and VOC sensors
-- **Improved Fan Control** - Better speed control compatibility with Matter controllers
-- **Media Player Playback** - Play/Pause/Stop/Next/Previous track controls
 - **Node.js 24** - Latest LTS runtime
 - **64-bit Only** - Supports `amd64` and `arm64` (aarch64)
 
-### Stable Features (v1.7.x) - Current Stable 🎉
-
-- **Dark Mode Toggle** - Switch between light and dark theme
-- **Device List Sorting** - Sort endpoints by name, type, or ID
+#### Stability & Error Handling
 - **Graceful Crash Handler** - Failed entities no longer crash the bridge
   - Problematic entities are automatically skipped during boot
   - Failed entities are displayed in the UI with detailed error messages
   - Bridge continues to run with remaining healthy entities
-- **PM2.5/PM10 Numeric Sensors** - Real concentration values in µg/m³ (not just quality levels)
-- **Access Control Fix** - Fixed attribute write issues using `asLocalActor` ([Matter.js #3105](https://github.com/matter-js/matter.js/issues/3105))
-- **Water Valve Support** - Control water valves via Matter
-- **Smoke/CO Detector** - Binary sensors for smoke and carbon monoxide alarms (separate device types)
-- **Pressure Sensor** - Atmospheric pressure measurements
-- **Flow Sensor** - Volume flow rate measurements
-- **Air Purifier** - Map fans to Air Purifier device type via entity mapping
-- **Pump Device** - Map switches/valves to Pump device type via entity mapping
+- **Automatic Recovery** - Auto-restart failed bridges with configurable intervals
+- **Access Control Fix** - Fixed attribute write issues using `asLocalActor`
 
-### Alpha Features (v2.0.0-alpha) 🧪
+#### APIs & Backend
+- **Health Check API** (`/api/health`, `/api/health/detailed`) - System status and Kubernetes-ready probes
+- **System Info API** (`/api/system/info`) - CPU, memory, storage, network info
+- **Logs API** (`/api/logs`) - Retrieve, filter, search, and clear application logs
+- **Metrics API** (`/api/metrics`) - Prometheus-compatible metrics endpoint
+- **WebSocket Live Updates** (`/api/ws`) - Real-time bridge status updates
 
-> [!WARNING]
-> Alpha versions are for early adopters and may contain bugs!
-
-All stable features plus:
-- **Health Check API** (`/api/health`)
-  - System status, uptime, and service information
-  - Kubernetes-ready probes (`/live`, `/ready`)
-- **WebSocket Live Updates** (`/api/ws`)
-  - Real-time bridge status updates
-  - No more polling required
-- **Entity Mapping Customization**
-  - Override Matter device types per entity
-  - Custom names for entities in Matter
-  - Disable specific entities from bridge
-- **Full Backup/Restore** - Download complete backups as ZIP including entity mappings
-- **Filter Preview** - Preview which entities match your filter before saving
+#### UI Features
+- **Health Monitoring Dashboard** - Real-time bridge and fabric status
+- **System Information Panel** - CPU, memory, storage stats
+- **Log Viewer Dialog** - View, filter, and search logs from UI
+- **Bridge Wizard** - Guided setup for multiple bridges
 - **Dark Mode Toggle** - Switch between light and dark theme
 - **Device List Sorting** - Sort endpoints by name, type, or ID
-- **Full Backup with Identity** - Preserve Matter commissioning across reinstalls
-- **Alphabetical Bridge Sorting** - Bridges sorted by name in UI
+- **Alphabetical Bridge Sorting** - Bridges sorted by name
+- **Filter Preview** - Preview which entities match your filter
 
-### Testing Features (v2.0.0-testing) ⚠️
+#### Backup & Restore
+- **Full Backup/Restore** - Download complete backups as ZIP
+- **Full Backup with Identity** - Preserve Matter commissioning across reinstalls
+  - Includes Matter keypairs and fabric credentials
+  - No re-commissioning needed after restore
+
+#### Entity Mapping
+- **Entity Mapping Customization** - Override Matter device types per entity
+- **Custom Names** - Custom names for entities in Matter
+- **Disable Entities** - Disable specific entities from bridge
+
+#### Device Types
+- **Water Valve** - Control water valves via Matter
+- **Smoke/CO Detector** - Binary sensors (separate device types)
+- **Pressure Sensor** - Atmospheric pressure measurements
+- **Flow Sensor** - Volume flow rate measurements
+- **PM2.5/PM10 Sensors** - Real concentration values in µg/m³
+- **Air Purifier** - Map fans via entity mapping
+- **Pump Device** - Map switches/valves via entity mapping
+- **AirQuality Sensors** - AQI, PM2.5, PM10, CO2, VOC
+- **Media Player** - Volume and playback controls
+- **Improved Fan Control** - Better speed control compatibility
+
+### Alpha (v2.0.0-alpha) 🧪
+
+> [!WARNING]
+> Alpha versions are for early adopters testing new features before stable release.
+
+**Currently identical to Stable** - All features have been merged to main!
+
+Alpha is used for:
+- Testing new features before stable release
+- Early access to bug fixes
+- Community feedback on upcoming changes
+
+### Testing (v4.0.0-testing) ⚠️
 
 > [!CAUTION]
-> Testing versions are **highly unstable** and intended for developers only!
-> Features may be incomplete, broken, or removed without notice.
+> Testing versions may contain **BREAKING CHANGES** and are for developers only!
 
-All alpha features plus experimental changes being actively developed.
+Experimental features being actively developed:
+- Matter.js cutting-edge updates
+- Architecture experiments
+- Breaking changes before major releases
 
 ---
 
