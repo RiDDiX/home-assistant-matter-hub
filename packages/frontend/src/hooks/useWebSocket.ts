@@ -45,7 +45,9 @@ export function useWebSocket(): UseWebSocketResult {
     }
 
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const wsUrl = `${protocol}//${window.location.host}/api/ws`;
+    // Use relative path for Ingress compatibility - get the base path from current location
+    const basePath = window.location.pathname.replace(/\/$/, "");
+    const wsUrl = `${protocol}//${window.location.host}${basePath}/api/ws`;
 
     try {
       const ws = new WebSocket(wsUrl);
