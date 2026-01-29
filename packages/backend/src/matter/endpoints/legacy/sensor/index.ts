@@ -5,6 +5,7 @@ import {
 import type { EndpointType } from "@matter/main";
 import type { HomeAssistantEntityBehavior } from "../../../behaviors/home-assistant-entity-behavior.js";
 import { AirQualitySensorType } from "./devices/air-quality-sensor.js";
+import { Co2SensorType } from "./devices/co2-sensor.js";
 import { FlowSensorType } from "./devices/flow-sensor.js";
 import { HumiditySensorType } from "./devices/humidity-sensor.js";
 import { IlluminanceSensorType } from "./devices/illuminance-sensor.js";
@@ -44,9 +45,11 @@ export function SensorDevice(
   if (deviceClass === SensorDeviceClass.pm10) {
     return Pm10SensorType.set({ homeAssistantEntity });
   }
+  if (deviceClass === SensorDeviceClass.carbon_dioxide) {
+    return Co2SensorType.set({ homeAssistantEntity });
+  }
   if (
     deviceClass === SensorDeviceClass.aqi ||
-    deviceClass === SensorDeviceClass.carbon_dioxide ||
     deviceClass === SensorDeviceClass.volatile_organic_compounds ||
     deviceClass === SensorDeviceClass.volatile_organic_compounds_parts
   ) {

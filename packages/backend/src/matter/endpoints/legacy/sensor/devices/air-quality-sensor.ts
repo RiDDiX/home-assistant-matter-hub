@@ -52,19 +52,6 @@ class AirQualitySensorServerImpl extends AirQualityServerWithFeatures {
         } else {
           airQuality = AirQuality.AirQualityEnum.ExtremelyPoor;
         }
-      } else if (deviceClass === "carbon_dioxide") {
-        // CO2 in ppm
-        if (value < 400) {
-          airQuality = AirQuality.AirQualityEnum.Good;
-        } else if (value < 1000) {
-          airQuality = AirQuality.AirQualityEnum.Fair;
-        } else if (value < 2000) {
-          airQuality = AirQuality.AirQualityEnum.Moderate;
-        } else if (value < 5000) {
-          airQuality = AirQuality.AirQualityEnum.Poor;
-        } else {
-          airQuality = AirQuality.AirQualityEnum.VeryPoor;
-        }
       } else if (deviceClass === "pm25") {
         // PM2.5 in µg/m³
         if (value <= 12) {
