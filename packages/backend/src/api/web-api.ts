@@ -97,7 +97,7 @@ export class WebApi extends Service {
       )
       .use("/home-assistant", homeAssistantApi(this.haRegistry, this.haClient))
       .use("/logs", logsApi(this.logger))
-      .use("/system", systemApi())
+      .use("/system", systemApi(this.props.version))
       .use(
         "/metrics",
         metricsApi(
