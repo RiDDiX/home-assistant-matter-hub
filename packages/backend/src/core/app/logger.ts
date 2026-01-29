@@ -1,4 +1,5 @@
 import { LogFormat, Logger, LogLevel as MatterLogLevel } from "@matter/general";
+import { addLogEntry } from "../../api/logs-api.js";
 import type { Service } from "../ioc/service.js";
 
 export enum CustomLogLevel {
@@ -105,6 +106,46 @@ export class BetterLogger extends Logger {
     }
   }
 
+  override debug(...values: unknown[]): void {
+    const message = values.map((v) => String(v)).join(" ");
+    addLogEntry({
+      timestamp: new Date().toISOString(),
+      level: "debug",
+      message: `[${this.loggerName}] ${message}`,
+    });
+    super.debug(...values);
+  }
+
+  override info(...values: unknown[]): void {
+    const message = values.map((v) => String(v)).join(" ");
+    addLogEntry({
+      timestamp: new Date().toISOString(),
+      level: "info",
+      message: `[${this.loggerName}] ${message}`,
+    });
+    super.info(...values);
+  }
+
+  override warn(...values: unknown[]): void {
+    const message = values.map((v) => String(v)).join(" ");
+    addLogEntry({
+      timestamp: new Date().toISOString(),
+      level: "warn",
+      message: `[${this.loggerName}] ${message}`,
+    });
+    super.warn(...values);
+  }
+
+  override error(...values: unknown[]): void {
+    const message = values.map((v) => String(v)).join(" ");
+    addLogEntry({
+      timestamp: new Date().toISOString(),
+      level: "error",
+      message: `[${this.loggerName}] ${message}`,
+    });
+    super.error(...values);
+  }
+
   debugCtx(message: string, context?: LogContext): void {
     if (this._level <= MatterLogLevel.DEBUG) {
       this.logWithContext(MatterLogLevel.DEBUG, message, context);
@@ -135,9 +176,23 @@ export class BetterLogger extends Logger {
     context?: LogContext,
     error?: Error,
   ): void {
+    const levelStr = logLevelToString(level).toLowerCase();
+    const timestamp = new Date().toISOString();
+
+    // Add to log buffer for API access
+    addLogEntry({
+      timestamp,
+      level: levelStr,
+      message: `[${this.loggerName}] ${message}`,
+      context: {
+        ...context,
+        ...(error ? { error: error.message, stack: error.stack } : {}),
+      },
+    });
+
     if (this._jsonOutput) {
       const entry = {
-        timestamp: new Date().toISOString(),
+        timestamp,
         level: logLevelToString(level),
         logger: this.loggerName,
         message,
@@ -165,18 +220,18 @@ export class BetterLogger extends Logger {
       switch (level) {
         case CustomLogLevel.SILLY:
         case MatterLogLevel.DEBUG:
-          this.debug(logMessage);
+          super.debug(logMessage);
           break;
         case MatterLogLevel.INFO:
         case MatterLogLevel.NOTICE:
-          this.info(logMessage);
+          super.info(logMessage);
           break;
         case MatterLogLevel.WARN:
-          this.warn(logMessage);
+          super.warn(logMessage);
           break;
         case MatterLogLevel.ERROR:
         case MatterLogLevel.FATAL:
-          this.error(logMessage);
+          super.error(logMessage);
           break;
       }
     }
