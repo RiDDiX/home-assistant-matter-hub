@@ -172,7 +172,7 @@ export function BackupRestore() {
         if (result.identitiesRestored > 0) {
           parts.push(`${result.identitiesRestored} identities`);
         }
-        setSuccess(parts.join(", ") + "!");
+        setSuccess(`${parts.join(", ")}!`);
       }
 
       setDialogOpen(false);

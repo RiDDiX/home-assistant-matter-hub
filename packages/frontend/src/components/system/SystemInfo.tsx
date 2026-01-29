@@ -189,7 +189,11 @@ export const SystemInfo = () => {
                       label={systemInfo.environment}
                       size="small"
                       variant="outlined"
-                      color={systemInfo.environment === "Home Assistant Add-on" ? "success" : "default"}
+                      color={
+                        systemInfo.environment === "Home Assistant Add-on"
+                          ? "success"
+                          : "default"
+                      }
                     />
                   </Box>
                   <Box
@@ -236,8 +240,15 @@ export const SystemInfo = () => {
                     sx={{ display: "flex", justifyContent: "space-between" }}
                   >
                     <Typography variant="body2">CPU:</Typography>
-                    <Typography variant="body2" color="text.secondary" sx={{ maxWidth: 200, textAlign: "right" }} noWrap title={systemInfo.cpuModel}>
-                      {systemInfo.cpuCount}x {systemInfo.cpuModel.split("@")[0].trim()}
+                    <Typography
+                      variant="body2"
+                      color="text.secondary"
+                      sx={{ maxWidth: 200, textAlign: "right" }}
+                      noWrap
+                      title={systemInfo.cpuModel}
+                    >
+                      {systemInfo.cpuCount}x{" "}
+                      {systemInfo.cpuModel.split("@")[0].trim()}
                     </Typography>
                   </Box>
                   <Box
