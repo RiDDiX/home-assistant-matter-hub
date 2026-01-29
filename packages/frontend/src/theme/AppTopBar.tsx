@@ -1,5 +1,7 @@
 import BugReportIcon from "@mui/icons-material/BugReport";
 import DarkModeIcon from "@mui/icons-material/DarkMode";
+import DevicesIcon from "@mui/icons-material/Devices";
+import HubIcon from "@mui/icons-material/Hub";
 import LightModeIcon from "@mui/icons-material/LightMode";
 import MonitorHeartIcon from "@mui/icons-material/MonitorHeart";
 import AppBar from "@mui/material/AppBar";
@@ -43,6 +45,24 @@ export const AppTopBar = () => {
           >
             <AppLogo large={isLargeScreen} />
             <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+              <Tooltip title="Bridges">
+                <IconButton
+                  component={Link}
+                  to={navigation.bridges}
+                  sx={{ color: "inherit" }}
+                >
+                  <HubIcon />
+                </IconButton>
+              </Tooltip>
+              <Tooltip title="All Devices">
+                <IconButton
+                  component={Link}
+                  to={navigation.devices}
+                  sx={{ color: "inherit" }}
+                >
+                  <DevicesIcon />
+                </IconButton>
+              </Tooltip>
               <Tooltip title={mode === "dark" ? "Light Mode" : "Dark Mode"}>
                 <IconButton onClick={toggleColorMode} sx={{ color: "inherit" }}>
                   {mode === "dark" ? <LightModeIcon /> : <DarkModeIcon />}
