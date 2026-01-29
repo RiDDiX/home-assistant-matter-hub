@@ -316,8 +316,10 @@ export class ThermostatServerBase extends FeaturedBase {
     }
     // Map systemMode to the corresponding runningMode
     const runningMode = this.systemModeToRunningMode(systemMode);
-    // Set thermostatRunningMode while we still have write permissions (pre-commit)
-    this.state.thermostatRunningMode = runningMode;
+    // Use asLocalActor to get write permissions for state update
+    this.agent.asLocalActor(() => {
+      this.state.thermostatRunningMode = runningMode;
+    });
   }
 
   /**
