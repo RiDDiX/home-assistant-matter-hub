@@ -1,34 +1,34 @@
 import type { HomeAssistantDomain } from "./home-assistant-domain.js";
 
 export type MatterDeviceType =
-  | "on_off_light"
-  | "dimmable_light"
-  | "color_temperature_light"
-  | "extended_color_light"
-  | "on_off_switch"
-  | "dimmer_switch"
-  | "color_dimmer_switch"
-  | "contact_sensor"
-  | "occupancy_sensor"
-  | "light_sensor"
-  | "temperature_sensor"
-  | "humidity_sensor"
-  | "pressure_sensor"
-  | "flow_sensor"
-  | "on_off_plugin_unit"
-  | "dimmable_plugin_unit"
-  | "door_lock"
-  | "window_covering"
-  | "thermostat"
-  | "fan"
   | "air_purifier"
   | "air_quality_sensor"
+  | "color_dimmer_switch"
+  | "color_temperature_light"
+  | "contact_sensor"
+  | "dimmable_light"
+  | "dimmable_plugin_unit"
+  | "dimmer_switch"
+  | "door_lock"
+  | "extended_color_light"
+  | "fan"
+  | "flow_sensor"
   | "generic_switch"
-  | "speaker"
-  | "robot_vacuum_cleaner"
   | "humidifier_dehumidifier"
+  | "humidity_sensor"
+  | "light_sensor"
+  | "occupancy_sensor"
+  | "on_off_light"
+  | "on_off_plugin_unit"
+  | "on_off_switch"
+  | "pressure_sensor"
+  | "robot_vacuum_cleaner"
   | "smoke_co_alarm"
-  | "water_leak_detector";
+  | "speaker"
+  | "temperature_sensor"
+  | "thermostat"
+  | "water_leak_detector"
+  | "window_covering";
 
 export interface EntityMappingConfig {
   readonly entityId: string;
@@ -51,65 +51,80 @@ export interface EntityMappingResponse {
 }
 
 export const matterDeviceTypeLabels: Record<MatterDeviceType, string> = {
-  on_off_light: "On/Off Light",
-  dimmable_light: "Dimmable Light",
-  color_temperature_light: "Color Temperature Light",
-  extended_color_light: "Extended Color Light",
-  on_off_switch: "On/Off Switch",
-  dimmer_switch: "Dimmer Switch",
-  color_dimmer_switch: "Color Dimmer Switch",
-  contact_sensor: "Contact Sensor",
-  occupancy_sensor: "Occupancy Sensor",
-  light_sensor: "Light Sensor",
-  temperature_sensor: "Temperature Sensor",
-  humidity_sensor: "Humidity Sensor",
-  pressure_sensor: "Pressure Sensor",
-  flow_sensor: "Flow Sensor",
-  on_off_plugin_unit: "On/Off Plug-in Unit",
-  dimmable_plugin_unit: "Dimmable Plug-in Unit",
-  door_lock: "Door Lock",
-  window_covering: "Window Covering",
-  thermostat: "Thermostat",
-  fan: "Fan",
   air_purifier: "Air Purifier",
   air_quality_sensor: "Air Quality Sensor",
+  color_dimmer_switch: "Color Dimmer Switch",
+  color_temperature_light: "Color Temperature Light",
+  contact_sensor: "Contact Sensor",
+  dimmable_light: "Dimmable Light",
+  dimmable_plugin_unit: "Dimmable Plug-in Unit",
+  dimmer_switch: "Dimmer Switch",
+  door_lock: "Door Lock",
+  extended_color_light: "Extended Color Light",
+  fan: "Fan",
+  flow_sensor: "Flow Sensor",
   generic_switch: "Generic Switch (Button)",
-  speaker: "Speaker",
-  robot_vacuum_cleaner: "Robot Vacuum Cleaner",
   humidifier_dehumidifier: "Humidifier/Dehumidifier",
+  humidity_sensor: "Humidity Sensor",
+  light_sensor: "Light Sensor",
+  occupancy_sensor: "Occupancy Sensor",
+  on_off_light: "On/Off Light",
+  on_off_plugin_unit: "On/Off Plug-in Unit",
+  on_off_switch: "On/Off Switch",
+  pressure_sensor: "Pressure Sensor",
+  robot_vacuum_cleaner: "Robot Vacuum Cleaner",
   smoke_co_alarm: "Smoke/CO Alarm",
+  speaker: "Speaker",
+  temperature_sensor: "Temperature Sensor",
+  thermostat: "Thermostat",
   water_leak_detector: "Water Leak Detector",
+  window_covering: "Window Covering",
 };
 
 export const domainToDefaultMatterTypes: Partial<
   Record<HomeAssistantDomain, MatterDeviceType[]>
 > = {
-  light: [
-    "on_off_light",
-    "dimmable_light",
-    "color_temperature_light",
-    "extended_color_light",
-  ],
-  switch: ["on_off_plugin_unit", "on_off_switch"],
-  input_boolean: ["on_off_plugin_unit", "on_off_switch"],
-  lock: ["door_lock"],
-  cover: ["window_covering"],
-  climate: ["thermostat"],
-  fan: ["fan", "air_purifier"],
-  binary_sensor: ["contact_sensor", "occupancy_sensor"],
-  sensor: [
-    "temperature_sensor",
-    "humidity_sensor",
-    "pressure_sensor",
-    "light_sensor",
-    "air_quality_sensor",
+  automation: ["on_off_switch"],
+  binary_sensor: [
+    "contact_sensor",
+    "occupancy_sensor",
   ],
   button: ["generic_switch"],
-  input_button: ["generic_switch"],
-  automation: ["on_off_switch"],
-  script: ["on_off_switch"],
-  scene: ["on_off_switch"],
-  media_player: ["speaker", "on_off_switch"],
+  climate: ["thermostat"],
+  cover: ["window_covering"],
+  fan: [
+    "air_purifier",
+    "fan",
+  ],
   humidifier: ["humidifier_dehumidifier"],
+  input_boolean: [
+    "on_off_plugin_unit",
+    "on_off_switch",
+  ],
+  input_button: ["generic_switch"],
+  light: [
+    "color_temperature_light",
+    "dimmable_light",
+    "extended_color_light",
+    "on_off_light",
+  ],
+  lock: ["door_lock"],
+  media_player: [
+    "on_off_switch"
+    "speaker",
+  ],
+  scene: ["on_off_switch"],
+  script: ["on_off_switch"],
+  sensor: [
+    "air_quality_sensor",
+    "humidity_sensor",
+    "light_sensor",
+    "pressure_sensor",
+    "temperature_sensor",
+ ], 
+  switch: [
+    "on_off_plugin_unit",
+    "on_off_switch",
+  ],
   vacuum: ["robot_vacuum_cleaner"],
 };
