@@ -1,4 +1,4 @@
-const BASE_URL = "/api/bridge-icons";
+const BASE_URL = "api/bridge-icons";
 
 export async function uploadBridgeIcon(
   bridgeId: string,
