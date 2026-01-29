@@ -24,6 +24,7 @@ import { useRef, useState } from "react";
 interface BackupPreview {
   version: number;
   createdAt: string;
+  includesIdentity: boolean;
   bridges: Array<{
     id: string;
     name: string;
@@ -38,6 +39,7 @@ interface RestoreResult {
   bridgesRestored: number;
   bridgesSkipped: number;
   mappingsRestored: number;
+  identitiesRestored: number;
   errors: Array<{ bridgeId: string; error: string }>;
   restartRequired?: boolean;
 }
@@ -52,30 +54,34 @@ export function BackupRestore() {
   );
   const [overwriteExisting, setOverwriteExisting] = useState(false);
   const [includeMappings, setIncludeMappings] = useState(true);
+  const [restoreIdentity, setRestoreIdentity] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [restartDialogOpen, setRestartDialogOpen] = useState(false);
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const handleDownloadBackup = async () => {
+  const handleDownloadBackup = async (withIdentity: boolean = false) => {
     setLoading(true);
     setError(null);
     try {
-      const response = await fetch("api/backup/download");
+      const downloadUrl = withIdentity
+        ? "/api/backup/download?includeIdentity=true"
+        : "/api/backup/download";
+      const response = await fetch(downloadUrl);
       if (!response.ok) {
         throw new Error("Failed to create backup");
       }
       const blob = await response.blob();
-      const url = window.URL.createObjectURL(blob);
+      const blobUrl = window.URL.createObjectURL(blob);
       const a = document.createElement("a");
-      a.href = url;
+      a.href = blobUrl;
       a.download =
         response.headers
           .get("Content-Disposition")
           ?.match(/filename="(.+)"/)?.[1] || "hamh-backup.zip";
       document.body.appendChild(a);
       a.click();
-      window.URL.revokeObjectURL(url);
+      window.URL.revokeObjectURL(blobUrl);
       document.body.removeChild(a);
       setSuccess("Backup downloaded successfully!");
     } catch (e) {
@@ -99,7 +105,7 @@ export function BackupRestore() {
       const formData = new FormData();
       formData.append("file", file);
 
-      const response = await fetch("api/backup/restore/preview", {
+      const response = await fetch("/api/backup/restore/preview", {
         method: "POST",
         body: formData,
       });
@@ -138,10 +144,11 @@ export function BackupRestore() {
           bridgeIds: Array.from(selectedBridges),
           overwriteExisting,
           includeMappings,
+          restoreIdentity: restoreIdentity && preview?.includesIdentity,
         }),
       );
 
-      const response = await fetch("api/backup/restore", {
+      const response = await fetch("/api/backup/restore", {
         method: "POST",
         body: formData,
       });
@@ -158,9 +165,14 @@ export function BackupRestore() {
           `Restored ${result.bridgesRestored} bridges with ${result.errors.length} errors`,
         );
       } else {
-        setSuccess(
-          `Restored ${result.bridgesRestored} bridges and ${result.mappingsRestored} entity mappings!`,
-        );
+        const parts = [`Restored ${result.bridgesRestored} bridges`];
+        if (result.mappingsRestored > 0) {
+          parts.push(`${result.mappingsRestored} entity mappings`);
+        }
+        if (result.identitiesRestored > 0) {
+          parts.push(`${result.identitiesRestored} identities`);
+        }
+        setSuccess(parts.join(", ") + "!");
       }
 
       setDialogOpen(false);
@@ -190,7 +202,7 @@ export function BackupRestore() {
   const handleRestart = async () => {
     setLoading(true);
     try {
-      await fetch("api/backup/restart", { method: "POST" });
+      await fetch("/api/backup/restart", { method: "POST" });
       // The app will restart, so we just wait
       setSuccess("Application is restarting...");
     } catch (e) {
@@ -240,10 +252,26 @@ export function BackupRestore() {
                 <CloudDownloadIcon />
               )
             }
-            onClick={handleDownloadBackup}
+            onClick={() => handleDownloadBackup(false)}
             disabled={loading}
           >
             Download Backup
+          </Button>
+
+          <Button
+            variant="contained"
+            color="secondary"
+            startIcon={
+              loading ? (
+                <CircularProgress size={20} color="inherit" />
+              ) : (
+                <BackupIcon />
+              )
+            }
+            onClick={() => handleDownloadBackup(true)}
+            disabled={loading}
+          >
+            Full Backup (with Identity)
           </Button>
 
           <Button
@@ -277,6 +305,13 @@ export function BackupRestore() {
               <Typography variant="body2" color="text.secondary" gutterBottom>
                 Backup created: {new Date(preview.createdAt).toLocaleString()}
               </Typography>
+              {preview.includesIdentity && (
+                <Alert severity="info" sx={{ mt: 1 }}>
+                  This backup includes Matter identity data (keypairs, fabric
+                  credentials). Restoring identities allows bridges to reconnect
+                  without re-commissioning.
+                </Alert>
+              )}
 
               <Typography variant="subtitle2" sx={{ mt: 2, mb: 1 }}>
                 Select bridges to restore:
@@ -339,6 +374,17 @@ export function BackupRestore() {
                   }
                   label="Include entity mappings"
                 />
+                {preview?.includesIdentity && (
+                  <FormControlLabel
+                    control={
+                      <Checkbox
+                        checked={restoreIdentity}
+                        onChange={(e) => setRestoreIdentity(e.target.checked)}
+                      />
+                    }
+                    label="Restore Matter identities (no re-commissioning needed)"
+                  />
+                )}
               </Box>
             </>
           )}
