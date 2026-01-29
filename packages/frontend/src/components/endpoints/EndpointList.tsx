@@ -30,6 +30,14 @@ export interface EndpointListProps {
   endpoint: EndpointData;
 }
 
+const collectLeafEndpoints = (endpoint: EndpointData): EndpointData[] => {
+  const parts = endpoint.parts ?? [];
+  if (parts.length === 0) {
+    return [endpoint];
+  }
+  return parts.flatMap((part) => collectLeafEndpoints(part));
+};
+
 export const EndpointList = (props: EndpointListProps) => {
   const [selectedItem, setSelectedItem] = useState<EndpointData | undefined>(
     undefined,
@@ -40,9 +48,9 @@ export const EndpointList = (props: EndpointListProps) => {
   const [detailsOpen, setDetailsOpen] = useState(false);
 
   const endpoints = useMemo(() => {
-    const parts = props.endpoint.parts ?? [];
+    const leafEndpoints = collectLeafEndpoints(props.endpoint);
 
-    const filtered = parts.filter((ep) => {
+    const filtered = leafEndpoints.filter((ep) => {
       const name = getEndpointName(ep.state) ?? ep.id.local;
       const type = ep.type.name;
       const search = searchTerm.toLowerCase();
@@ -67,7 +75,7 @@ export const EndpointList = (props: EndpointListProps) => {
           return 0;
       }
     });
-  }, [props.endpoint.parts, searchTerm, sortBy]);
+  }, [props.endpoint, searchTerm, sortBy]);
 
   const handleCardClick = (endpoint: EndpointData) => {
     setSelectedItem(endpoint);
