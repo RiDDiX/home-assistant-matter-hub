@@ -10,8 +10,12 @@ import { OnOffServer } from "../../../behaviors/on-off-server.js";
 // Matter doesn't have a native alarm panel device type, so we use OnOffPlugInUnit
 // On = Armed (arm_away), Off = Disarmed
 const AlarmPanelOnOffServer = OnOffServer({
-  turnOn: (): HomeAssistantAction => ({ action: "alarm_arm_away" }),
-  turnOff: (): HomeAssistantAction => ({ action: "alarm_disarm" }),
+  turnOn: (): HomeAssistantAction => ({
+    action: "alarm_control_panel.alarm_arm_away",
+  }),
+  turnOff: (): HomeAssistantAction => ({
+    action: "alarm_control_panel.alarm_disarm",
+  }),
   isOn: (state) => {
     // Armed states: armed_away, armed_home, armed_night, armed_vacation, armed_custom_bypass, arming, pending
     // Disarmed states: disarmed, triggered (treat as "on" for visibility)
