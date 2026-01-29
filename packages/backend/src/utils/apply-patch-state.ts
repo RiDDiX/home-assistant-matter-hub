@@ -49,6 +49,13 @@ function applyPatch<T extends object>(state: T, patch: Partial<T>): Partial<T> {
     ) {
       return actualPatch;
     }
+    // Suppress synchronous transaction conflicts that occur when a reactor
+    // tries to update state while another transaction holds the lock.
+    // This can happen during rapid state changes (e.g., cover position updates).
+    // The state will be corrected on the next HA state update.
+    if (errorMessage.includes("synchronous-transaction-conflict")) {
+      return actualPatch;
+    }
     throw new Error(
       `Failed to patch the following properties: ${JSON.stringify(actualPatch, null, 2)}`,
       { cause: e },
