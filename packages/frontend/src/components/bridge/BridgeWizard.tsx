@@ -1,3 +1,8 @@
+import {
+  type CreateBridgeRequest,
+  type HomeAssistantMatcher,
+  HomeAssistantMatcherType,
+} from "@home-assistant-matter-hub/common";
 import AddIcon from "@mui/icons-material/Add";
 import ArrowBackIcon from "@mui/icons-material/ArrowBack";
 import ArrowForwardIcon from "@mui/icons-material/ArrowForward";
@@ -22,6 +27,7 @@ import Switch from "@mui/material/Switch";
 import TextField from "@mui/material/TextField";
 import Typography from "@mui/material/Typography";
 import { useCallback, useEffect, useState } from "react";
+import { createBridge as apiCreateBridge } from "../../api/bridges.js";
 
 interface BridgeWizardProps {
   open: boolean;
@@ -33,8 +39,8 @@ interface WizardBridge {
   name: string;
   port: number;
   filter: {
-    include: { entity_id: string[] };
-    exclude: { entity_id: string[] };
+    include: HomeAssistantMatcher[];
+    exclude: HomeAssistantMatcher[];
   };
 }
 
@@ -48,7 +54,7 @@ export function BridgeWizard({ open, onClose, onComplete }: BridgeWizardProps) {
   const [currentBridge, setCurrentBridge] = useState<WizardBridge>({
     name: "",
     port: 5540,
-    filter: { include: { entity_id: [] }, exclude: { entity_id: [] } },
+    filter: { include: [], exclude: [] },
   });
   const [useWildcard, setUseWildcard] = useState(true);
   const [entityPattern, setEntityPattern] = useState("*");
@@ -76,7 +82,7 @@ export function BridgeWizard({ open, onClose, onComplete }: BridgeWizardProps) {
       setCurrentBridge({
         name: "",
         port: nextPort,
-        filter: { include: { entity_id: [] }, exclude: { entity_id: [] } },
+        filter: { include: [], exclude: [] },
       });
       setUseWildcard(true);
       setEntityPattern("*");
@@ -94,21 +100,35 @@ export function BridgeWizard({ open, onClose, onComplete }: BridgeWizardProps) {
       setError(null);
     }
     if (activeStep === 1) {
-      const include = useWildcard
+      const includePatterns = useWildcard
         ? [entityPattern || "*"]
         : entityPattern
             .split(",")
             .map((s) => s.trim())
             .filter(Boolean);
-      const exclude = excludePattern
+      const excludePatterns = excludePattern
         .split(",")
         .map((s) => s.trim())
         .filter(Boolean);
+
+      const includeMatchers: HomeAssistantMatcher[] = includePatterns.map(
+        (pattern) => ({
+          type: HomeAssistantMatcherType.Pattern,
+          value: pattern,
+        }),
+      );
+      const excludeMatchers: HomeAssistantMatcher[] = excludePatterns.map(
+        (pattern) => ({
+          type: HomeAssistantMatcherType.Pattern,
+          value: pattern,
+        }),
+      );
+
       setCurrentBridge((prev) => ({
         ...prev,
         filter: {
-          include: { entity_id: include },
-          exclude: { entity_id: exclude },
+          include: includeMatchers,
+          exclude: excludeMatchers,
         },
       }));
     }
@@ -121,13 +141,13 @@ export function BridgeWizard({ open, onClose, onComplete }: BridgeWizardProps) {
   };
 
   const handleAddAnother = async () => {
-    await createBridge();
+    await createBridgeAsync();
     const newPort = nextPort + bridges.length + 1;
     setBridges((prev) => [...prev, currentBridge]);
     setCurrentBridge({
       name: "",
       port: newPort,
-      filter: { include: { entity_id: [] }, exclude: { entity_id: [] } },
+      filter: { include: [], exclude: [] },
     });
     setActiveStep(0);
     setUseWildcard(true);
@@ -135,18 +155,16 @@ export function BridgeWizard({ open, onClose, onComplete }: BridgeWizardProps) {
     setExcludePattern("");
   };
 
-  const createBridge = async () => {
+  const createBridgeAsync = async () => {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch("api/matter/bridges", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(currentBridge),
-      });
-      if (!res.ok) {
-        throw new Error("Failed to create bridge");
-      }
+      const request: CreateBridgeRequest = {
+        name: currentBridge.name,
+        port: currentBridge.port,
+        filter: currentBridge.filter,
+      };
+      await apiCreateBridge(request);
       return true;
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to create bridge");
@@ -157,7 +175,7 @@ export function BridgeWizard({ open, onClose, onComplete }: BridgeWizardProps) {
   };
 
   const handleComplete = async () => {
-    const success = await createBridge();
+    const success = await createBridgeAsync();
     if (success) {
       onComplete();
       onClose();
@@ -273,10 +291,15 @@ export function BridgeWizard({ open, onClose, onComplete }: BridgeWizardProps) {
           </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
             Include:{" "}
-            {currentBridge.filter.include.entity_id.length > 0
-              ? currentBridge.filter.include.entity_id.join(", ")
+            {currentBridge.filter.include.length > 0
+              ? currentBridge.filter.include.map((m) => m.value).join(", ")
               : entityPattern || "*"}
           </Typography>
+          {error && (
+            <Typography variant="body2" color="error" sx={{ mt: 1 }}>
+              {error}
+            </Typography>
+          )}
           {excludePattern && (
             <Typography variant="body2" color="text.secondary">
               Exclude: {excludePattern}
