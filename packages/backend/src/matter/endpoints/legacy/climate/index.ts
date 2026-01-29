@@ -74,6 +74,8 @@ const heatingModes: ClimateHvacMode[] = [
   ClimateHvacMode.heat_cool,
   ClimateHvacMode.heat,
 ];
+// Auto-only thermostats (no explicit heat/cool) should be treated as heating
+const autoOnlyMode: ClimateHvacMode[] = [ClimateHvacMode.auto];
 
 export function ClimateDevice(
   homeAssistantEntity: HomeAssistantEntityBehavior.State,
@@ -85,9 +87,16 @@ export function ClimateDevice(
   const supportsCooling = coolingModes.some((mode) =>
     attributes.hvac_modes.includes(mode),
   );
-  const supportsHeating = heatingModes.some((mode) =>
+  const hasExplicitHeating = heatingModes.some((mode) =>
     attributes.hvac_modes.includes(mode),
   );
+  // Treat auto-only thermostats (no heat/cool/heat_cool) as heating devices
+  // This allows simple thermostats that only have "auto" mode to work
+  const isAutoOnly =
+    !hasExplicitHeating &&
+    !supportsCooling &&
+    autoOnlyMode.some((mode) => attributes.hvac_modes.includes(mode));
+  const supportsHeating = hasExplicitHeating || isAutoOnly;
   const supportsHumidity = testBit(
     supportedFeatures,
     ClimateDeviceFeature.TARGET_HUMIDITY,
