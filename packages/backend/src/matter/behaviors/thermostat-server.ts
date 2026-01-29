@@ -130,29 +130,33 @@ export class ThermostatServerBase extends FeaturedBase {
     // minHeatSetpointLimit <= minCoolSetpointLimit - minSetpointDeadBand (default 200 = 2°C)
     // maxHeatSetpointLimit <= maxCoolSetpointLimit - minSetpointDeadBand
     // We must ensure our limits satisfy this constraint to prevent initialization errors.
-    const INTERNAL_DEADBAND = 200; // Matter.js default is 2.0°C (200 in 0.01°C units)
+    // Using 250 (2.5°C) to have some margin over Matter.js default of 200 (2.0°C)
+    const INTERNAL_DEADBAND = 250; // 2.5°C in 0.01°C units - safe margin over Matter.js default 2.0°C
 
-    // Adjust cool limits to be at least INTERNAL_DEADBAND higher than heat limits
-    const minCoolLimit =
-      this.features.heating && this.features.cooling
-        ? Math.max(
-            minSetpointLimit ?? 700,
-            (minSetpointLimit ?? 700) + INTERNAL_DEADBAND,
-          )
-        : minSetpointLimit;
-    const maxHeatLimit =
-      this.features.heating && this.features.cooling
-        ? Math.min(
-            maxSetpointLimit ?? 3000,
-            (maxSetpointLimit ?? 3200) - INTERNAL_DEADBAND,
-          )
-        : maxSetpointLimit;
+    // When both heating and cooling are enabled, we need to ensure:
+    // 1. minCoolSetpointLimit >= minHeatSetpointLimit + INTERNAL_DEADBAND
+    // 2. maxCoolSetpointLimit >= maxHeatSetpointLimit + INTERNAL_DEADBAND
+    const minHeatLimit = minSetpointLimit;
+    let minCoolLimit = minSetpointLimit;
+    let maxHeatLimit = maxSetpointLimit;
+    const maxCoolLimit = maxSetpointLimit;
+
+    if (this.features.heating && this.features.cooling) {
+      // Ensure minCool >= minHeat + deadband
+      if ((minCoolLimit ?? 700) < (minHeatLimit ?? 700) + INTERNAL_DEADBAND) {
+        minCoolLimit = (minHeatLimit ?? 700) + INTERNAL_DEADBAND;
+      }
+      // Ensure maxHeat <= maxCool - deadband
+      if ((maxHeatLimit ?? 3000) > (maxCoolLimit ?? 3200) - INTERNAL_DEADBAND) {
+        maxHeatLimit = (maxCoolLimit ?? 3200) - INTERNAL_DEADBAND;
+      }
+    }
 
     // Calculate actual limits for clamping setpoints
-    const effectiveMinHeatLimit = minSetpointLimit;
-    const effectiveMaxHeatLimit = maxHeatLimit ?? maxSetpointLimit;
-    const effectiveMinCoolLimit = minCoolLimit ?? minSetpointLimit;
-    const effectiveMaxCoolLimit = maxSetpointLimit;
+    const effectiveMinHeatLimit = minHeatLimit;
+    const effectiveMaxHeatLimit = maxHeatLimit;
+    const effectiveMinCoolLimit = minCoolLimit;
+    const effectiveMaxCoolLimit = maxCoolLimit;
 
     // Clamp setpoints to be within the calculated limits to prevent Matter.js validation errors
     // This handles cases where HA reports setpoints outside the valid range
@@ -176,19 +180,19 @@ export class ThermostatServerBase extends FeaturedBase {
       ...(this.features.heating
         ? {
             occupiedHeatingSetpoint: clampedHeatingSetpoint,
-            minHeatSetpointLimit: minSetpointLimit,
-            maxHeatSetpointLimit: maxHeatLimit ?? maxSetpointLimit,
-            absMinHeatSetpointLimit: minSetpointLimit,
-            absMaxHeatSetpointLimit: maxHeatLimit ?? maxSetpointLimit,
+            minHeatSetpointLimit: minHeatLimit,
+            maxHeatSetpointLimit: maxHeatLimit,
+            absMinHeatSetpointLimit: minHeatLimit,
+            absMaxHeatSetpointLimit: maxHeatLimit,
           }
         : {}),
       ...(this.features.cooling
         ? {
             occupiedCoolingSetpoint: clampedCoolingSetpoint,
-            minCoolSetpointLimit: minCoolLimit ?? minSetpointLimit,
-            maxCoolSetpointLimit: maxSetpointLimit,
-            absMinCoolSetpointLimit: minCoolLimit ?? minSetpointLimit,
-            absMaxCoolSetpointLimit: maxSetpointLimit,
+            minCoolSetpointLimit: minCoolLimit,
+            maxCoolSetpointLimit: maxCoolLimit,
+            absMinCoolSetpointLimit: minCoolLimit,
+            absMaxCoolSetpointLimit: maxCoolLimit,
           }
         : {}),
     });
@@ -424,11 +428,11 @@ export function ThermostatServer(config: ThermostatServerConfig) {
     localTemperature: 2100, // 21°C - reasonable room temperature default
     occupiedHeatingSetpoint: 2000, // 20°C in 0.01°C units
     occupiedCoolingSetpoint: 2400, // 24°C in 0.01°C units
-    // Limits must satisfy: minHeat <= minCool - 200 and maxHeat <= maxCool - 200
+    // Limits must satisfy: minHeat <= minCool - 250 and maxHeat <= maxCool - 250
     minHeatSetpointLimit: 700, // 7°C
-    maxHeatSetpointLimit: 3000, // 30°C
-    minCoolSetpointLimit: 900, // 9°C - must be >= minHeat + 200 (2°C deadband)
-    maxCoolSetpointLimit: 3200, // 32°C - must be >= maxHeat + 200
+    maxHeatSetpointLimit: 2950, // 29.5°C (must be <= maxCool - 250)
+    minCoolSetpointLimit: 950, // 9.5°C (must be >= minHeat + 250)
+    maxCoolSetpointLimit: 3200, // 32°C
     // Absolute limits
     absMinHeatSetpointLimit: 700,
     absMaxHeatSetpointLimit: 3000,
