@@ -140,20 +140,35 @@ export class ThermostatServerBase extends FeaturedBase {
     // When both heating and cooling are enabled, we need to ensure:
     // 1. minCoolSetpointLimit >= minHeatSetpointLimit + INTERNAL_DEADBAND
     // 2. maxCoolSetpointLimit >= maxHeatSetpointLimit + INTERNAL_DEADBAND
-    const minHeatLimit = minSetpointLimit;
+    //
+    // STRATEGY: Expand the heat limits (lower min, keep max) and cool limits (keep min, raise max)
+    // rather than restricting the user's range. This allows the full HA range for both setpoints
+    // while satisfying Matter.js constraints. HA will validate the actual values when actions are called.
+    let minHeatLimit = minSetpointLimit;
     let minCoolLimit = minSetpointLimit;
     let maxHeatLimit = maxSetpointLimit;
-    const maxCoolLimit = maxSetpointLimit;
+    let maxCoolLimit = maxSetpointLimit;
 
     if (this.features.heating && this.features.cooling) {
-      // Ensure minCool >= minHeat + deadband
-      if ((minCoolLimit ?? 700) < (minHeatLimit ?? 700) + INTERNAL_DEADBAND) {
-        minCoolLimit = (minHeatLimit ?? 700) + INTERNAL_DEADBAND;
-      }
-      // Ensure maxHeat <= maxCool - deadband
-      if ((maxHeatLimit ?? 3000) > (maxCoolLimit ?? 3200) - INTERNAL_DEADBAND) {
-        maxHeatLimit = (maxCoolLimit ?? 3200) - INTERNAL_DEADBAND;
-      }
+      // To satisfy: minHeat <= minCool - deadband
+      // We lower minHeat instead of raising minCool, so user can still set cool to HA's min_temp
+      const requiredMinHeat = (minSetpointLimit ?? 700) - INTERNAL_DEADBAND;
+      minHeatLimit = Math.max(requiredMinHeat, 700); // Don't go below 7°C absolute minimum
+      minCoolLimit = minSetpointLimit; // Keep cool min at HA's actual min_temp
+
+      // To satisfy: maxHeat <= maxCool - deadband
+      // We raise maxCool instead of lowering maxHeat, so user can still set heat to HA's max_temp
+      const requiredMaxCool = (maxSetpointLimit ?? 3000) + INTERNAL_DEADBAND;
+      maxHeatLimit = maxSetpointLimit; // Keep heat max at HA's actual max_temp
+      maxCoolLimit = Math.min(requiredMaxCool, 3500); // Don't go above 35°C absolute maximum
+    } else if (this.features.heating && !this.features.cooling) {
+      // Heating-only: Matter.js still enforces maxHeat <= maxCool - deadband internally
+      // Even without Cooling feature, the default maxCoolSetpointLimit is 3500 (35°C)
+      // We must clamp maxHeatSetpointLimit to satisfy: maxHeat <= 3500 - 200 = 3300
+      const MATTER_MAX_COOL_DEFAULT = 3500;
+      const MATTER_MIN_DEADBAND = 200;
+      const maxAllowedHeat = MATTER_MAX_COOL_DEFAULT - MATTER_MIN_DEADBAND; // 3300 = 33°C
+      maxHeatLimit = Math.min(maxSetpointLimit ?? 3000, maxAllowedHeat);
     }
 
     // Calculate actual limits for clamping setpoints
