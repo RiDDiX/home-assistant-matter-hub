@@ -109,7 +109,7 @@ export const domainToDefaultMatterTypes: Partial<
     "light_sensor",
     "pressure_sensor",
     "temperature_sensor",
- ], 
+  ], 
   switch: ["on_off_plugin_unit", "on_off_switch"],
   vacuum: ["robot_vacuum_cleaner"],
 };
