@@ -70,7 +70,12 @@ export const BridgeConfigEditor = (props: BridgeConfigEditorProps) => {
   );
 
   const onChange = (data: object | undefined, isValid: boolean) => {
-    setConfig(data);
+    // Preserve the icon field when FormEditor/JsonEditor updates
+    // since icon is managed separately by BridgeIconUpload
+    setConfig((prev) => ({
+      ...data,
+      icon: (prev as BridgeConfig)?.icon,
+    }));
     setIsValid(isValid);
   };
 
@@ -124,6 +129,7 @@ export const BridgeConfigEditor = (props: BridgeConfigEditorProps) => {
             value={config ?? {}}
             onChange={onChange}
             schema={bridgeConfigSchema}
+            uiSchema={{ icon: { "ui:widget": "hidden" } }}
             customValidate={validatePort}
           />
         )}
