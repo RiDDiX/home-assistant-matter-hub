@@ -39,6 +39,7 @@ import { EndpointTreeView, type SortOption } from "./EndpointTreeView.tsx";
 export interface EndpointListProps {
   endpoint: EndpointData;
   bridgeId?: string;
+  onMappingSaved?: () => void;
 }
 
 const collectLeafEndpoints = (endpoint: EndpointData): EndpointData[] => {
@@ -99,6 +100,7 @@ export const EndpointList = (props: EndpointListProps) => {
           severity: "success",
         });
         setMappingDialogOpen(false);
+        props.onMappingSaved?.();
       } catch (error) {
         setSnackbar({
           open: true,
@@ -107,7 +109,7 @@ export const EndpointList = (props: EndpointListProps) => {
         });
       }
     },
-    [props.bridgeId, selectedEntityId],
+    [props.bridgeId, selectedEntityId, props.onMappingSaved],
   );
 
   const endpoints = useMemo(() => {

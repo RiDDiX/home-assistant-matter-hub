@@ -37,9 +37,9 @@ of port forwarding etc.
 
 | Channel | Branch | Current Version | Description |
 |---------|--------|-----------------|-------------|
-| **Stable** | `main` | v2.0.x | Production-ready, recommended for most users |
-| **Alpha** | `alpha` | v2.1.0-alpha.x | Pre-release with new features, for early adopters |
-| **Testing** | `testing` | v2.1.0-testing.x | ⚠️ **Highly unstable!** Experimental features, may break |
+| **Stable** | `main` | v1.9.x | Production-ready, recommended for most users |
+| **Alpha** | `alpha` | v1.10.0-alpha.x | Pre-release with new features, for early adopters |
+| **Testing** | `testing` | v1.10.0-testing.x | ⚠️ **Highly unstable!** Experimental features, may break |
 
 ### Semantic Versioning
 
@@ -90,7 +90,7 @@ We use [Semantic Release](https://semantic-release.gitbook.io/) for automatic ve
 - **Air Purifier** - Map fans to Air Purifier device type via entity mapping
 - **Pump Device** - Map switches/valves to Pump device type via entity mapping
 
-### Stable Features (v2.0.0) - MAJOR RELEASE! 🚀
+### Stable Features (v1.9.0) - NEW! 🎉
 
 All previous features plus:
 
@@ -119,14 +119,14 @@ All previous features plus:
 - **Full Backup/Restore** - Complete backups including entity mappings and Matter identity
 - **Filter Preview** - Preview entity matches before saving
 
-### Alpha Features (v2.1.0-alpha) 🧪
+### Alpha Features (v1.10.0-alpha) 🧪
 
 > [!WARNING]
 > Alpha versions are for early adopters and may contain bugs!
 
 All stable features plus experimental changes being actively developed.
 
-### Testing Features (v2.1.0-testing) ⚠️
+### Testing Features (v1.10.0-testing) ⚠️
 
 > [!CAUTION]
 > Testing versions are **highly unstable** and intended for developers only!

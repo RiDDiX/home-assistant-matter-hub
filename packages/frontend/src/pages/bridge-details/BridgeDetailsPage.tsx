@@ -28,7 +28,6 @@ import { useAppDispatch } from "../../state/hooks.ts";
 import { BridgeMoreMenu } from "./BridgeMoreMenu.tsx";
 
 const MemoizedBridgeDetails = memo(BridgeDetails);
-const MemoizedEndpointList = memo(EndpointList);
 
 const FailedEntitiesAlert = ({
   failedEntities,
@@ -82,6 +81,11 @@ export const BridgeDetailsPage = () => {
   const dispatch = useAppDispatch();
 
   const { bridgeId } = useParams() as { bridgeId: string };
+  const [mappingRefreshKey, setMappingRefreshKey] = useState(0);
+
+  const handleMappingSaved = useCallback(() => {
+    setMappingRefreshKey((prev) => prev + 1);
+  }, []);
 
   const timerCallback = useCallback(() => {
     dispatch(loadDevices(bridgeId));
@@ -142,7 +146,7 @@ export const BridgeDetailsPage = () => {
 
       <MemoizedBridgeDetails bridge={bridge} />
 
-      <EntityMappingSection bridgeId={bridgeId} />
+      <EntityMappingSection bridgeId={bridgeId} key={mappingRefreshKey} />
 
       {devices && (
         <Stack spacing={2}>
@@ -156,7 +160,11 @@ export const BridgeDetailsPage = () => {
             )}
           </Box>
 
-          <MemoizedEndpointList endpoint={devices} bridgeId={bridgeId} />
+          <EndpointList
+            endpoint={devices}
+            bridgeId={bridgeId}
+            onMappingSaved={handleMappingSaved}
+          />
         </Stack>
       )}
     </Stack>

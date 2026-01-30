@@ -4,6 +4,12 @@
 
 ---
 
+> **Community Fork** - This is a fork of the original [t0bst4r/home-assistant-matter-hub](https://github.com/t0bst4r/home-assistant-matter-hub), which was discontinued in January 2026. We continue active development with bug fixes, new features, and community support.
+>
+> We actively work on fixing old issues from the original project and welcome new feature requests. This is a living project maintained by the community!
+
+---
+
 This project simulates bridges to publish your entities from Home Assistant to any Matter-compatible controller like
 Alexa, Apple Home or Google Home. Using Matter, those can be connected easily using local communication without the need
 of port forwarding etc.
@@ -67,14 +73,36 @@ Home, ...) are not placed in the same network segment. Please make sure to revie
 - **Smoke/CO Detector** - Binary sensors for smoke and CO alarms
 - **Pressure/Flow Sensors** - Atmospheric pressure and flow measurements
 
-### Alpha (v2.0.0-alpha)
+### Stable (v1.9.0) - NEW! 🎉
 
-All stable features plus:
+All previous features plus:
 
-- **Health Check API** - REST endpoints for monitoring (`/api/health`)
-- **WebSocket Live Updates** - Real-time status updates (`/api/ws`)
+**Bridge Icons & UI**
+- **Custom Bridge Icons** - Upload your own PNG, JPG, GIF, WebP, or SVG icons
+- **Domain-based Icons** - Automatic icon assignment based on bridge domain
+- **20 Preset Icons** - Quick selection dropdown in bridge editor
+- **Entity Mapping Button** - Quick access from bridge card view
+
+**Media & Devices**
+- **Basic Video Player** - TV and media player support for Apple Home
+- **Alexa Deduplication** - UniqueId prevents duplicate devices
+
+**Thermostat Improvements**
+- **Auto-only Thermostat Support** - Thermostats with only "auto" mode now work
+- **Heating+Cooling Fixes** - Proper Matter.js deadband handling
+- **Google Home Fix** - Handle null transitionTime
+
+**Infrastructure**
+- **Health Check API** - REST endpoints for monitoring (`api/health`)
+- **WebSocket Live Updates** - Real-time status updates (`api/ws`)
+- **Ingress Compatibility** - Fixed routing for Home Assistant Ingress
+- **Full Backup/Restore** - Complete backups including entity mappings
 - **Entity Mapping** - Override Matter device types per entity
-- **Full Backup/Restore** - Download complete backups as ZIP
+- **Filter Preview** - Preview entity matches before saving
+
+### Alpha (v1.10.0-alpha)
+
+All stable features plus experimental changes being actively developed.
 
 See the [Alpha Features Guide](./Guides/Alpha%20Features.md) for detailed documentation.
 
