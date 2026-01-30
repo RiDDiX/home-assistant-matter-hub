@@ -28,8 +28,8 @@ export function VacuumDevice(
     return undefined;
   }
 
-  const attributes =
-    homeAssistantEntity.entity.state.attributes as VacuumDeviceAttributes;
+  const attributes = homeAssistantEntity.entity.state
+    .attributes as VacuumDeviceAttributes;
   const supportedFeatures = attributes.supported_features ?? 0;
   let device = VacuumEndpointType.set({ homeAssistantEntity });
   if (testBit(supportedFeatures, VacuumDeviceFeature.START)) {
