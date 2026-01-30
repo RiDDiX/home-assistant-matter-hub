@@ -56,20 +56,9 @@ export class BridgeRegistry {
         return false;
       }
 
-      // Check if entity is explicitly included by a filter
-      const isExplicitlyIncluded =
-        filter.include.length > 0 &&
-        testMatchers(filter.include, device, entity);
-
-      // Hidden entities are included if:
-      // 1. includeHiddenEntities feature flag is enabled, OR
-      // 2. Entity is explicitly included by a filter (user wants it despite being hidden)
+      // Hidden entities are only included if includeHiddenEntities feature flag is enabled
       const isHidden = entity.hidden_by != null;
-      if (
-        isHidden &&
-        !featureFlags.includeHiddenEntities &&
-        !isExplicitlyIncluded
-      ) {
+      if (isHidden && !featureFlags.includeHiddenEntities) {
         return false;
       }
 
