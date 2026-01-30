@@ -43,6 +43,7 @@ export class HomeAssistantEntityBehavior extends Behavior {
 export namespace HomeAssistantEntityBehavior {
   export class State {
     entity!: HomeAssistantEntityInformation;
+    customName?: string;
   }
 
   export class Events extends EventEmitter {

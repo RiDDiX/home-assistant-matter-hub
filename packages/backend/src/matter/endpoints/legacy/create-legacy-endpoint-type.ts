@@ -40,11 +40,12 @@ export function createLegacyEndpointType(
   mapping?: EntityMappingConfig,
 ): EndpointType | undefined {
   const domain = entity.entity_id.split(".")[0] as HomeAssistantDomain;
+  const customName = mapping?.customName;
 
   if (mapping?.matterDeviceType) {
     const overrideFactory = matterDeviceTypeFactories[mapping.matterDeviceType];
     if (overrideFactory) {
-      return overrideFactory({ entity });
+      return overrideFactory({ entity, customName });
     }
   }
 
@@ -52,7 +53,7 @@ export function createLegacyEndpointType(
   if (!factory) {
     return undefined;
   }
-  return factory({ entity });
+  return factory({ entity, customName });
 }
 
 const deviceCtrs: Partial<
@@ -93,12 +94,22 @@ const matterDeviceTypeFactories: Partial<
     ) => EndpointType | undefined
   >
 > = {
-  on_off_light: (ha) => OnOffLightType.set({ homeAssistantEntity: ha }),
-  dimmable_light: (ha) => DimmableLightType.set({ homeAssistantEntity: ha }),
+  on_off_light: (ha) =>
+    OnOffLightType.set({
+      homeAssistantEntity: { entity: ha.entity, customName: ha.customName },
+    }),
+  dimmable_light: (ha) =>
+    DimmableLightType.set({
+      homeAssistantEntity: { entity: ha.entity, customName: ha.customName },
+    }),
   color_temperature_light: (ha) =>
-    ColorTemperatureLightType.set({ homeAssistantEntity: ha }),
+    ColorTemperatureLightType.set({
+      homeAssistantEntity: { entity: ha.entity, customName: ha.customName },
+    }),
   extended_color_light: (ha) =>
-    ExtendedColorLightType(true).set({ homeAssistantEntity: ha }),
+    ExtendedColorLightType(true).set({
+      homeAssistantEntity: { entity: ha.entity, customName: ha.customName },
+    }),
   on_off_plugin_unit: SwitchDevice,
   on_off_switch: SwitchDevice,
   door_lock: LockDevice,
