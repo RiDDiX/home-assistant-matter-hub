@@ -1,6 +1,7 @@
 import {
   type EntityMappingConfig,
   type HomeAssistantEntityInformation,
+  type VacuumDeviceAttributes,
   VacuumDeviceFeature,
 } from "@home-assistant-matter-hub/common";
 import type { EndpointType } from "@matter/main";
@@ -41,14 +42,21 @@ export class VacuumEndpoint extends DomainEndpoint {
       return undefined;
     }
 
-    const attributes = state.attributes;
+    const attributes = state.attributes as VacuumDeviceAttributes;
     const supportedFeatures = attributes.supported_features ?? 0;
 
     let device = VacuumEndpointType;
     if (testBit(supportedFeatures, VacuumDeviceFeature.START)) {
       device = device.with(VacuumOnOffServer);
     }
-    if (testBit(supportedFeatures, VacuumDeviceFeature.BATTERY)) {
+    // Add PowerSource if BATTERY feature is set OR battery_level attribute exists
+    const hasBatteryLevel =
+      attributes.battery_level != null &&
+      typeof attributes.battery_level === "number";
+    if (
+      testBit(supportedFeatures, VacuumDeviceFeature.BATTERY) ||
+      hasBatteryLevel
+    ) {
       device = device.with(VacuumPowerSourceServer);
     }
 
