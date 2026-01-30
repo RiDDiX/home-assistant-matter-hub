@@ -59,7 +59,7 @@ export function bridgeIconApi(storageLocation: string): express.Router {
         res.status(400).json({ error: "No file uploaded" });
         return;
       }
-      const iconUrl = `/api/bridge-icons/${req.params.bridgeId}`;
+      const iconUrl = `api/bridge-icons/${req.params.bridgeId}`;
       res.json({ success: true, iconUrl });
     },
   );
