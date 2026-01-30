@@ -126,77 +126,40 @@ export class ThermostatServerBase extends FeaturedBase {
       ? config.getRunningMode(entity.state, this.agent)
       : Thermostat.ThermostatRunningMode.Off;
 
-    // IMPORTANT: Even without AutoMode feature, Matter.js still enforces internal constraints:
-    // minHeatSetpointLimit <= minCoolSetpointLimit - minSetpointDeadBand (default 200 = 2°C)
-    // maxHeatSetpointLimit <= maxCoolSetpointLimit - minSetpointDeadBand
-    // We must ensure our limits satisfy this constraint to prevent initialization errors.
-    // Using 250 (2.5°C) to have some margin over Matter.js default of 200 (2.0°C)
-    const INTERNAL_DEADBAND = 250; // 2.5°C in 0.01°C units - safe margin over Matter.js default 2.0°C
-
-    // When both heating and cooling are enabled, we need to ensure:
-    // 1. minCoolSetpointLimit >= minHeatSetpointLimit + INTERNAL_DEADBAND
-    // 2. maxCoolSetpointLimit >= maxHeatSetpointLimit + INTERNAL_DEADBAND
+    // Temperature limit handling based on Matterbridge approach:
+    // - For SINGLE-MODE (heat-only or cool-only): Use HA's actual min/max limits directly
+    // - For DUAL-MODE (heat + cool): Use wide limits (like Matterbridge: 0-50°C) to avoid
+    //   Matter.js deadband constraint issues. HA will validate actual values.
     //
-    // STRATEGY: Expand the heat limits (lower min, keep max) and cool limits (keep min, raise max)
-    // rather than restricting the user's range. This allows the full HA range for both setpoints
-    // while satisfying Matter.js constraints. HA will validate the actual values when actions are called.
-    let minHeatLimit = minSetpointLimit;
-    let minCoolLimit = minSetpointLimit;
-    let maxHeatLimit = maxSetpointLimit;
-    let maxCoolLimit = maxSetpointLimit;
+    // This ensures Apple Home shows the correct temperature range for single-mode thermostats
+    // while still working correctly for dual-mode thermostats.
+
+    let minHeatLimit: number | undefined;
+    let minCoolLimit: number | undefined;
+    let maxHeatLimit: number | undefined;
+    let maxCoolLimit: number | undefined;
 
     if (this.features.heating && this.features.cooling) {
-      // Matter.js constraint: minCool >= minHeat + deadband
-      // We need to ensure this is satisfied regardless of what HA reports
-      const MATTER_MIN_HEAT_ABSOLUTE = 700; // 7°C - Matter.js absolute minimum for heating
-      const MATTER_MIN_COOL_ABSOLUTE = 1600; // 16°C - Matter.js absolute minimum for cooling
+      // DUAL-MODE: Use wide limits like Matterbridge (0-50°C = 0-5000 in 0.01°C units)
+      // This avoids Matter.js deadband constraints and lets HA do the validation
+      const WIDE_MIN = 0; // 0°C
+      const WIDE_MAX = 5000; // 50°C
 
-      // Start with HA's reported min, but ensure minimums are within Matter.js absolute limits
-      minHeatLimit = Math.max(
-        minSetpointLimit ?? 700,
-        MATTER_MIN_HEAT_ABSOLUTE,
-      );
-      minCoolLimit = Math.max(
-        minSetpointLimit ?? 1600,
-        MATTER_MIN_COOL_ABSOLUTE,
-      );
-
-      // Now ensure the constraint: minCool >= minHeat + deadband
-      const requiredMinCool = minHeatLimit + INTERNAL_DEADBAND;
-      if (minCoolLimit < requiredMinCool) {
-        minCoolLimit = requiredMinCool;
-      }
-
-      // To satisfy: maxHeat <= maxCool - deadband
-      // Strategy: Try to raise maxCool first, but if that exceeds 35°C, we must also clamp maxHeat
-      const MATTER_MAX_COOL_ABSOLUTE = 3500; // 35°C - Matter.js absolute maximum for cooling
-      const MATTER_MIN_DEADBAND = 200; // 2°C - Matter.js minimum deadband
-
-      // Calculate what maxCool would need to be to support the full heat range
-      const requiredMaxCool = (maxSetpointLimit ?? 3000) + INTERNAL_DEADBAND;
-
-      if (requiredMaxCool <= MATTER_MAX_COOL_ABSOLUTE) {
-        // We can accommodate the full heat range by raising maxCool
-        maxHeatLimit = maxSetpointLimit;
-        maxCoolLimit = requiredMaxCool;
-      } else {
-        // maxCool would exceed 35°C, so we must clamp maxHeat as well
-        maxCoolLimit = MATTER_MAX_COOL_ABSOLUTE;
-        // maxHeat must be <= maxCool - deadband = 3500 - 200 = 3300
-        const maxAllowedHeat = MATTER_MAX_COOL_ABSOLUTE - MATTER_MIN_DEADBAND;
-        maxHeatLimit = Math.min(maxSetpointLimit ?? 3000, maxAllowedHeat);
-      }
+      minHeatLimit = WIDE_MIN;
+      maxHeatLimit = WIDE_MAX;
+      minCoolLimit = WIDE_MIN;
+      maxCoolLimit = WIDE_MAX;
     } else if (this.features.heating && !this.features.cooling) {
-      // Heating-only: Matter.js still enforces maxHeat <= maxCool - deadband internally
-      // Even without Cooling feature, the default maxCoolSetpointLimit is 3500 (35°C)
-      // We must clamp maxHeatSetpointLimit to satisfy: maxHeat <= 3500 - 200 = 3300
-      const MATTER_MAX_COOL_DEFAULT = 3500;
-      const MATTER_MIN_DEADBAND = 200;
-      const maxAllowedHeat = MATTER_MAX_COOL_DEFAULT - MATTER_MIN_DEADBAND; // 3300 = 33°C
-      maxHeatLimit = Math.min(maxSetpointLimit ?? 3000, maxAllowedHeat);
+      // HEAT-ONLY: Use HA's actual limits directly
+      minHeatLimit = minSetpointLimit;
+      maxHeatLimit = maxSetpointLimit;
+    } else if (this.features.cooling && !this.features.heating) {
+      // COOL-ONLY: Use HA's actual limits directly
+      minCoolLimit = minSetpointLimit;
+      maxCoolLimit = maxSetpointLimit;
     }
 
-    // Calculate actual limits for clamping setpoints
+    // For single-mode, use HA limits for clamping; for dual-mode use wide limits
     const effectiveMinHeatLimit = minHeatLimit;
     const effectiveMaxHeatLimit = maxHeatLimit;
     const effectiveMinCoolLimit = minCoolLimit;
@@ -460,11 +423,8 @@ export function ThermostatServer(config: ThermostatServerConfig) {
   // depend on which features (Heating, Cooling) are enabled. It MUST be set
   // in initialize() BEFORE super.initialize() runs.
   //
-  // CRITICAL: These defaults must satisfy Matter.js constraints:
-  // - minHeatSetpointLimit <= minCoolSetpointLimit - minSetpointDeadBand (default 200)
-  // - maxHeatSetpointLimit <= maxCoolSetpointLimit - minSetpointDeadBand (default 200)
-  // Without AutoMode, we can't set minSetpointDeadBand, so we must ensure limits satisfy
-  // the constraint with the default 200 (2°C) deadband.
+  // Using wide limits (0-50°C) like Matterbridge to avoid Matter.js deadband constraints.
+  // Actual limits will be set in update() based on features and HA values.
   return ThermostatServerBase.set({
     config,
     // Provide reasonable defaults for setpoints to prevent undefined->NaN issues
@@ -472,15 +432,15 @@ export function ThermostatServer(config: ThermostatServerConfig) {
     localTemperature: 2100, // 21°C - reasonable room temperature default
     occupiedHeatingSetpoint: 2000, // 20°C in 0.01°C units
     occupiedCoolingSetpoint: 2400, // 24°C in 0.01°C units
-    // Limits must satisfy: minHeat <= minCool - 250 and maxHeat <= maxCool - 250
-    minHeatSetpointLimit: 700, // 7°C
-    maxHeatSetpointLimit: 2950, // 29.5°C (must be <= maxCool - 250)
-    minCoolSetpointLimit: 950, // 9.5°C (must be >= minHeat + 250)
-    maxCoolSetpointLimit: 3200, // 32°C
-    // Absolute limits
-    absMinHeatSetpointLimit: 700,
-    absMaxHeatSetpointLimit: 3000,
-    absMinCoolSetpointLimit: 700,
-    absMaxCoolSetpointLimit: 3200,
+    // Wide limits like Matterbridge (0-50°C) - actual limits set in update()
+    minHeatSetpointLimit: 0, // 0°C
+    maxHeatSetpointLimit: 5000, // 50°C
+    minCoolSetpointLimit: 0, // 0°C
+    maxCoolSetpointLimit: 5000, // 50°C
+    // Absolute limits - also wide
+    absMinHeatSetpointLimit: 0,
+    absMaxHeatSetpointLimit: 5000,
+    absMinCoolSetpointLimit: 0,
+    absMaxCoolSetpointLimit: 5000,
   });
 }
