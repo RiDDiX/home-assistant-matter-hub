@@ -7,7 +7,8 @@ import { PowerSourceServer } from "../../../../behaviors/power-source-server.js"
 export const VacuumPowerSourceServer = PowerSourceServer({
   getBatteryPercent(entity) {
     const attributes = entity.attributes as VacuumDeviceAttributes;
-    const batteryLevel = attributes.battery_level;
+    // Some vacuums use 'battery_level', others use 'battery' (e.g. Dreame)
+    const batteryLevel = attributes.battery_level ?? attributes.battery;
     if (batteryLevel == null || typeof batteryLevel !== "number") {
       return null;
     }

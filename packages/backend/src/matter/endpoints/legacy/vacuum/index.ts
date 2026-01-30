@@ -35,14 +35,11 @@ export function VacuumDevice(
   if (testBit(supportedFeatures, VacuumDeviceFeature.START)) {
     device = device.with(VacuumOnOffServer);
   }
-  // Add PowerSource if BATTERY feature is set OR if battery_level attribute exists
-  const hasBatteryLevel =
-    attributes.battery_level != null &&
-    typeof attributes.battery_level === "number";
-  if (
-    testBit(supportedFeatures, VacuumDeviceFeature.BATTERY) ||
-    hasBatteryLevel
-  ) {
+  // Add PowerSource if BATTERY feature is set OR if battery attribute exists
+  // Some vacuums use 'battery_level', others use 'battery' (e.g. Dreame)
+  const batteryValue = attributes.battery_level ?? attributes.battery;
+  const hasBattery = batteryValue != null && typeof batteryValue === "number";
+  if (testBit(supportedFeatures, VacuumDeviceFeature.BATTERY) || hasBattery) {
     device = device.with(VacuumPowerSourceServer);
   }
   return device;
