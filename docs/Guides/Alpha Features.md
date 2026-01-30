@@ -1,6 +1,9 @@
 # Alpha Features Guide
 
-This guide covers all features available in the Alpha version of Home-Assistant-Matter-Hub. Alpha versions contain new features that are being tested before release to stable.
+This guide covers features available in the Alpha version (v1.10.0-alpha) of Home-Assistant-Matter-Hub.
+
+> [!NOTE]
+> **Most Alpha features are now in Stable!** With the v1.9.0 release, features like Health API, WebSocket, Entity Mapping, Backup/Restore, and Bridge Icons are now available in the stable version.
 
 > [!WARNING]
 > Alpha versions are for testing only and may contain bugs. Use at your own risk!
@@ -29,7 +32,33 @@ docker run -d \
 
 ---
 
-## New Features in Alpha
+## Features Now in Stable (v1.9.0)
+
+The following features have graduated from Alpha to Stable:
+
+- **Custom Bridge Icons** - Upload PNG, JPG, GIF, WebP, SVG icons
+- **Domain-based Icons** - Automatic icon assignment by domain
+- **Health Check API** - REST endpoints for monitoring
+- **WebSocket Live Updates** - Real-time bridge status
+- **Entity Mapping** - Override Matter device types per entity
+- **Full Backup/Restore** - Complete ZIP backups
+- **Filter Preview** - Test filters before saving
+- **Dark Mode** - Theme toggle in UI
+- **Basic Video Player** - TV support for Apple Home
+- **Thermostat Improvements** - Auto-only mode, heating+cooling fixes
+- **Ingress Compatibility** - Fixed routing for HA Ingress
+
+---
+
+## Current Alpha Features (v1.10.0-alpha)
+
+Alpha currently contains all stable features. New experimental features will be added here before being promoted to stable.
+
+---
+
+## Reference: Feature Documentation
+
+The following sections document features that are now in stable but provide detailed usage instructions.
 
 ### 1. Full Backup & Restore System
 
