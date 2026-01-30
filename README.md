@@ -37,9 +37,9 @@ of port forwarding etc.
 
 | Channel | Branch | Current Version | Description |
 |---------|--------|-----------------|-------------|
-| **Stable** | `main` | v1.9.x | Production-ready, recommended for most users |
-| **Alpha** | `alpha` | v1.10.0-alpha.x | Pre-release with new features, for early adopters |
-| **Testing** | `testing` | v1.10.0-testing.x | ⚠️ **Highly unstable!** Experimental features, may break |
+| **Stable** | `main` | v1.10.x | Production-ready, recommended for most users |
+| **Alpha** | `alpha` | v2.0.0-alpha.x | Pre-release with new features, for early adopters |
+| **Testing** | `testing` | v4.0.0-testing.x | ⚠️ **Highly unstable!** Experimental features, may break |
 
 ### Semantic Versioning
 
@@ -119,14 +119,14 @@ All previous features plus:
 - **Full Backup/Restore** - Complete backups including entity mappings and Matter identity
 - **Filter Preview** - Preview entity matches before saving
 
-### Alpha Features (v1.10.0-alpha) 🧪
+### Alpha Features (v2.0.0-alpha) 🧪
 
 > [!WARNING]
 > Alpha versions are for early adopters and may contain bugs!
 
 All stable features plus experimental changes being actively developed.
 
-### Testing Features (v1.10.0-testing) ⚠️
+### Testing Features (v4.0.0-testing) ⚠️
 
 > [!CAUTION]
 > Testing versions are **highly unstable** and intended for developers only!
@@ -253,7 +253,9 @@ This project thrives thanks to the amazing community! Special thanks to everyone
 
 | Contributor | Contributions |
 |-------------|---------------|
-| [@codyc1515](https://github.com/codyc1515) | 🥇 **Top Reporter** - Climate/thermostat bugs (#24, #21, #20), extensive testing feedback |
+| [@codyc1515](https://github.com/codyc1515) | 🥇 **Top Reporter** - Climate/thermostat bugs (#52, #24, #21, #20), extensive testing feedback |
+| [@Chrulf](https://github.com/Chrulf) | 🔍 Google Home brightness debugging (#41), detailed logs & testing |
+| [@SH1FT-W](https://github.com/SH1FT-W) | 💎 **Sponsor** + Vacuum room selection feature request (#49) |
 | [@depahk](https://github.com/depahk) | 📝 Migration documentation fix ([#32](https://github.com/RiDDiX/home-assistant-matter-hub/pull/32)) |
 | [@Fettkeewl](https://github.com/Fettkeewl) | 🐛 Script import bug (#26), Alias feature request (#25) |
 | [@razzietheman](https://github.com/razzietheman) | 💡 Feature requests: Preserve commissioned state (#31), alphabetical sorting (#30) |
@@ -264,19 +266,31 @@ Thank you to everyone who helps improve this project by reporting issues!
 
 | User | Issues | Type |
 |------|--------|------|
+| [@marksev1](https://github.com/marksev1) | [#62](https://github.com/RiDDiX/home-assistant-matter-hub/issues/62) | 💡 Aliases support |
+| [@smacpi](https://github.com/smacpi) | [#60](https://github.com/RiDDiX/home-assistant-matter-hub/issues/60) | 💡 Battery sensor |
+| [@semonR](https://github.com/semonR) | [#58](https://github.com/RiDDiX/home-assistant-matter-hub/issues/58) | 🐛 Dehumidifier |
+| [@mrbluebrett](https://github.com/mrbluebrett) | [#53](https://github.com/RiDDiX/home-assistant-matter-hub/issues/53) | 🐛 Alexa duplicates |
+| [@anpak](https://github.com/anpak) | [#45](https://github.com/RiDDiX/home-assistant-matter-hub/issues/45) | 💡 TV media player |
+| [@alondin](https://github.com/alondin) | [#43](https://github.com/RiDDiX/home-assistant-matter-hub/issues/43) | 💡 Air Purifier |
+| [@Chrulf](https://github.com/Chrulf) | [#41](https://github.com/RiDDiX/home-assistant-matter-hub/issues/41) | 🐛 Google brightness |
+| [@Weske90](https://github.com/Weske90) | [#40](https://github.com/RiDDiX/home-assistant-matter-hub/issues/40) | 💡 Harmony remote |
+| [@didiht](https://github.com/didiht) | [#37](https://github.com/RiDDiX/home-assistant-matter-hub/issues/37) | 🐛 Alexa brightness |
+| [@Dixiland20](https://github.com/Dixiland20) | [#34](https://github.com/RiDDiX/home-assistant-matter-hub/issues/34) | 🐛 Somfy shutters |
 | [@chromaxx7](https://github.com/chromaxx7) | [#29](https://github.com/RiDDiX/home-assistant-matter-hub/issues/29) | 🐛 Climate crash |
-| [@Tomyk9991](https://github.com/Tomyk9991) | [#28](https://github.com/RiDDiX/home-assistant-matter-hub/issues/28) | � Heat/Cool startup |
+| [@Tomyk9991](https://github.com/Tomyk9991) | [#28](https://github.com/RiDDiX/home-assistant-matter-hub/issues/28) | 🐛 Heat/Cool startup |
 | [@datvista](https://github.com/datvista) | [#27](https://github.com/RiDDiX/home-assistant-matter-hub/issues/27) | 🐛 Add-on start |
 | [@bwynants](https://github.com/bwynants) | [#23](https://github.com/RiDDiX/home-assistant-matter-hub/issues/23) | 🐛 OccupancySensor |
 | [@Pozzi831](https://github.com/Pozzi831) | [#22](https://github.com/RiDDiX/home-assistant-matter-hub/issues/22) | 🐛 AC problems |
 
 ### 💖 Sponsors
 
-A huge thank you to our sponsors who help keep this project alive!
+> **Donations are completely voluntary!** I'm incredibly grateful to everyone who has supported this project - it wasn't necessary, but it truly means a lot. This project exists because of passion for open source, not money. ❤️
 
 | Sponsor | |
 |---------|---|
 | [@thorsten-gehrig](https://github.com/thorsten-gehrig) | 🥇 **First Sponsor!** Thank you for believing in this project! |
+| [@SH1FT-W](https://github.com/SH1FT-W) | 💎 Thank you for your generous support! |
+| *Anonymous supporters* | 🙏 Thank you to those who prefer not to be named - your support is equally appreciated! |
 
 ### 🌟 Original Author
 

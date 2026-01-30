@@ -342,6 +342,151 @@ In the Alpha/Testing versions, you can override the default device type mapping 
 
 ---
 
+## Known Controller Limitations
+
+### Google Home
+
+#### Light Brightness Reset After Extended Off Period
+
+**Issue:** When a light has been off for several minutes (typically 5+), turning it on via Google Home may set brightness to 100% instead of the last used value.
+
+**Cause:** This is a Google Home / Matter.js interaction issue. Google Home sends brightness commands without the required `transitionTime` field after subscription renewals, causing validation errors in Matter.js before the bridge can process the command.
+
+**Workaround - Home Assistant Blueprint:**
+
+Create a blueprint that stores brightness on turn-off and restores it on turn-on:
+
+<details>
+<summary>Click to expand Blueprint YAML</summary>
+
+```yaml
+blueprint:
+  name: Matter/Google - Restore brightness after delayed ON
+  description: >
+    Workaround for Google Home / Matter bridge behavior that turns lights on at 100%
+    after being off for a while. Stores brightness on turn_off and restores it on
+    turn_on if the light was off for at least X minutes.
+  domain: automation
+  input:
+    light_target:
+      name: Light entity
+      selector:
+        entity:
+          domain: light
+    brightness_store:
+      name: Helper to store last brightness (input_number, 1..255)
+      selector:
+        entity:
+          domain: input_number
+    off_minutes_threshold:
+      name: Minutes off before restore
+      default: 5
+      selector:
+        number:
+          min: 1
+          max: 120
+          mode: slider
+          step: 1
+    restore_only_if_100pct:
+      name: Only restore if Google turned it on at ~100%
+      description: If enabled, restore only when current brightness is very high (>=250).
+      default: true
+      selector:
+        boolean: {}
+
+mode: restart
+
+trigger:
+  - platform: state
+    entity_id: !input light_target
+    to: "off"
+    id: turned_off
+  - platform: state
+    entity_id: !input light_target
+    to: "on"
+    id: turned_on
+
+variables:
+  light_entity: !input light_target
+  store_entity: !input brightness_store
+  minutes_threshold: !input off_minutes_threshold
+  only_if_100: !input restore_only_if_100pct
+
+action:
+  - choose:
+      - conditions:
+          - condition: trigger
+            id: turned_off
+        sequence:
+          - variables:
+              prev_brightness: "{{ state_attr(light_entity, 'brightness') }}"
+          - condition: template
+            value_template: "{{ prev_brightness is number and prev_brightness|int > 0 }}"
+          - service: input_number.set_value
+            target:
+              entity_id: "{{ store_entity }}"
+            data:
+              value: "{{ prev_brightness|int }}"
+      - conditions:
+          - condition: trigger
+            id: turned_on
+        sequence:
+          - delay: "00:00:02"
+          - variables:
+              was_off_seconds: >
+                {{ (as_timestamp(now()) - as_timestamp(states[light_entity].last_changed)) | int }}
+              threshold_seconds: "{{ (minutes_threshold | int) * 60 }}"
+              current_brightness: "{{ state_attr(light_entity, 'brightness') | int(0) }}"
+              saved_brightness: "{{ states(store_entity) | int(0) }}"
+          - condition: template
+            value_template: >
+              {{ saved_brightness > 0 and (not only_if_100 or current_brightness >= 250) }}
+          - service: light.turn_on
+            target:
+              entity_id: "{{ light_entity }}"
+            data:
+              brightness: "{{ saved_brightness }}"
+```
+
+</details>
+
+**Setup:**
+1. Create an `input_number` helper for each light (range 1-255)
+2. Import the blueprint or create an automation with the YAML above
+3. Configure: select your light entity and the corresponding helper
+
+**Alternative:** Use voice commands ("Hey Google, dim the lights to 50%") which work reliably.
+
+#### Cover Automations Not Available
+
+**Issue:** Window covering devices (blinds, shutters, curtains) cannot be used as actions in Google Home Automations. When selecting a cover device, "no actions available" is shown.
+
+**Cause:** This is a Google Home limitation with Matter WindowCovering devices. The same issue affects native Matter blinds (e.g., Smartwings).
+
+**Workarounds:**
+1. Use Google Home Routines with voice commands ("Hey Google, close [cover name]")
+2. Create Home Assistant scripts and expose them as switches via HAMH
+3. Use Home Assistant automations instead of Google Home automations
+
+---
+
+### Amazon Alexa / Echo Devices
+
+#### Light Brightness Reset on Turn-On
+
+**Issue:** After a subscription renewal (approximately every 5 minutes), Alexa may reset light brightness to 100% when turning on a light, even if it was previously dimmed to a different level.
+
+**Cause:** This is an Alexa-side behavior where Echo devices send an explicit `moveToLevel(254)` command immediately after the `on()` command following a new subscription.
+
+**Evidence:**
+- The same behavior occurs with other Matter bridges
+- Logs show Alexa explicitly sending `level: 254` after `on()` commands
+- This does NOT happen immediately after dimming, only after subscription renewal
+
+**Workaround:** A feature flag `alexaPreserveBrightnessOnTurnOn` is available in Alpha/Testing versions. When enabled, the bridge will ignore brightness commands that set the light to 100% immediately after a turn-on command.
+
+---
+
 ## Requesting New Device Types
 
 Before requesting a new device type, please verify:
