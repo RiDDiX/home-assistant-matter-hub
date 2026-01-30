@@ -3,7 +3,6 @@ import type {
   HumidiferDeviceAttributes,
 } from "@home-assistant-matter-hub/common";
 import type { Agent } from "@matter/main";
-import { FanControl } from "@matter/main/clusters";
 import {
   FanControlServer,
   type FanControlServerConfig,
@@ -33,23 +32,51 @@ function setHumidityFromPercent(percent: number, agent: Agent) {
   };
 }
 
+function hasAutoMode(state: HomeAssistantEntityState): boolean {
+  const { available_modes } = state.attributes as HumidiferDeviceAttributes;
+  return available_modes?.some((m) => m.toLowerCase() === "auto") ?? false;
+}
+
+function isInAutoMode(state: HomeAssistantEntityState): boolean {
+  const { mode } = state.attributes as HumidiferDeviceAttributes;
+  return mode?.toLowerCase() === "auto";
+}
+
 const config: FanControlServerConfig = {
   getPercentage: (state: HomeAssistantEntityState) => getHumidityPercent(state),
   getStepSize: () => undefined,
   getAirflowDirection: () => undefined,
-  isInAutoMode: () => false,
-  getPresetModes: () => undefined,
-  getCurrentPresetMode: () => undefined,
+  isInAutoMode: (state: HomeAssistantEntityState) => isInAutoMode(state),
+  getPresetModes: (state: HomeAssistantEntityState) => {
+    const { available_modes } = state.attributes as HumidiferDeviceAttributes;
+    return available_modes;
+  },
+  getCurrentPresetMode: (state: HomeAssistantEntityState) => {
+    const { mode } = state.attributes as HumidiferDeviceAttributes;
+    return mode;
+  },
   supportsPercentage: () => true,
   turnOff: () => ({ action: "humidifier.turn_off" }),
   turnOn: (percent: number, agent: Agent) =>
     setHumidityFromPercent(percent, agent),
-  setAutoMode: () => ({ action: "humidifier.turn_on" }),
+  setAutoMode: () => ({
+    action: "humidifier.set_mode",
+    data: { mode: "auto" },
+  }),
   setAirflowDirection: () => ({ action: "humidifier.turn_on" }),
-  setPresetMode: () => ({ action: "humidifier.turn_on" }),
+  setPresetMode: (mode: string) => ({
+    action: "humidifier.set_mode",
+    data: { mode },
+  }),
 };
 
 export const HumidifierFanControlServer = FanControlServer(config).with(
   "MultiSpeed",
   "Step",
+);
+
+export const HumidifierFanControlServerWithAuto = FanControlServer(config).with(
+  "MultiSpeed",
+  "Step",
+  "Auto",
 );
