@@ -5,6 +5,7 @@ import type {
 import { OnOffServer as Base } from "@matter/main/behaviors";
 import { applyPatchState } from "../../utils/apply-patch-state.js";
 import { HomeAssistantEntityBehavior } from "./home-assistant-entity-behavior.js";
+import { notifyLightTurnedOn } from "./level-control-server.js";
 import type { ValueGetter, ValueSetter } from "./utils/cluster-config.js";
 
 export interface OnOffConfig {
@@ -47,6 +48,8 @@ class OnOffServerBase extends FeaturedBase {
       return;
     }
     const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);
+    // Notify LevelControlServer about turn-on for Alexa brightness workaround
+    notifyLightTurnedOn(homeAssistant.entityId);
     homeAssistant.callAction(
       turnOn?.(void 0, this.agent) ?? { action: "homeassistant.turn_on" },
     );
