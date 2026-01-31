@@ -5,7 +5,10 @@ import {
 } from "@home-assistant-matter-hub/common";
 import type { ClusterBehavior, EndpointType } from "@matter/main";
 import type { Thermostat } from "@matter/main/clusters";
-import { ThermostatDevice } from "@matter/main/devices";
+import {
+  RoomAirConditionerDevice,
+  ThermostatDevice,
+} from "@matter/main/devices";
 import type { ClusterType } from "@matter/main/types";
 import { InvalidDeviceError } from "../../../../utils/errors/invalid-device-error.js";
 import type { FeatureSelection } from "../../../../utils/feature-selection.js";
@@ -13,6 +16,7 @@ import { testBit } from "../../../../utils/test-bit.js";
 import { BasicInformationServer } from "../../../behaviors/basic-information-server.js";
 import { HomeAssistantEntityBehavior } from "../../../behaviors/home-assistant-entity-behavior.js";
 import { IdentifyServer } from "../../../behaviors/identify-server.js";
+import { ClimateFanControlServer } from "./behaviors/climate-fan-control-server.js";
 import { ClimateHumidityMeasurementServer } from "./behaviors/climate-humidity-measurement-server.js";
 import { ClimateOnOffServer } from "./behaviors/climate-on-off-server.js";
 import { ClimateThermostatServer } from "./behaviors/climate-thermostat-server.js";
@@ -40,6 +44,7 @@ const ClimateDeviceType = (
   supportsHeating: boolean,
   supportsOnOff: boolean,
   supportsHumidity: boolean,
+  supportsFanMode: boolean,
 ) => {
   const features = thermostatFeatures(supportsCooling, supportsHeating);
   if (features.size === 0) {
@@ -55,6 +60,19 @@ const ClimateDeviceType = (
   }
   if (supportsHumidity) {
     additionalClusters.push(ClimateHumidityMeasurementServer);
+  }
+
+  // Use RoomAirConditionerDevice for climate entities with fan_mode support
+  // This exposes both Thermostat and FanControl clusters
+  if (supportsFanMode) {
+    return RoomAirConditionerDevice.with(
+      BasicInformationServer,
+      IdentifyServer,
+      HomeAssistantEntityBehavior,
+      ClimateThermostatServer.with(...features),
+      ClimateFanControlServer,
+      ...additionalClusters,
+    );
   }
 
   return ThermostatDevice.with(
@@ -104,11 +122,16 @@ export function ClimateDevice(
   const supportsOnOff =
     testBit(supportedFeatures, ClimateDeviceFeature.TURN_ON) &&
     testBit(supportedFeatures, ClimateDeviceFeature.TURN_OFF);
+  const supportsFanMode = testBit(
+    supportedFeatures,
+    ClimateDeviceFeature.FAN_MODE,
+  );
 
   return ClimateDeviceType(
     supportsCooling,
     supportsHeating,
     supportsOnOff,
     supportsHumidity,
+    supportsFanMode,
   ).set({ homeAssistantEntity });
 }

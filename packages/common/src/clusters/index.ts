@@ -39,6 +39,7 @@ export enum ClusterId {
   smokeCoAlarm = "smokeCoAlarm",
   temperatureMeasurement = "temperatureMeasurement",
   thermostat = "thermostat",
+  valveConfigurationAndControl = "valveConfigurationAndControl",
   windowCovering = "windowCovering",
   mediaInput = "mediaInput",
   rvcRunMode = "rvcRunMode",

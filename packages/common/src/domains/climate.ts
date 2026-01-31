@@ -48,4 +48,6 @@ export interface ClimateDeviceAttributes {
   target_temp_low?: number | string | null | undefined;
   target_temp_high?: number | string | null | undefined;
   supported_features?: number;
+  fan_mode?: string | null | undefined;
+  fan_modes?: string[] | null | undefined;
 }

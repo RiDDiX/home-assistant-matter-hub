@@ -1,23 +1,32 @@
 import type { EndpointType } from "@matter/main";
-import { OnOffPlugInUnitDevice } from "@matter/main/devices";
-import type { HomeAssistantAction } from "../../../../services/home-assistant/home-assistant-actions.js";
+import { ValveConfigurationAndControl } from "@matter/main/clusters";
+import { WaterValveDevice } from "@matter/main/devices";
 import { BasicInformationServer } from "../../../behaviors/basic-information-server.js";
 import { HomeAssistantEntityBehavior } from "../../../behaviors/home-assistant-entity-behavior.js";
 import { IdentifyServer } from "../../../behaviors/identify-server.js";
-import { OnOffServer } from "../../../behaviors/on-off-server.js";
+import { ValveConfigurationAndControlServer } from "../../../behaviors/valve-configuration-and-control-server.js";
 
-// Use OnOff for valve control since Matter valve devices use on/off
-const ValveOnOffServer = OnOffServer({
-  isOn: (state) => state.state === "open",
-  turnOn: (): HomeAssistantAction => ({ action: "valve.open_valve" }),
-  turnOff: (): HomeAssistantAction => ({ action: "valve.close_valve" }),
+const ValveServer = ValveConfigurationAndControlServer({
+  getCurrentState: (state) => {
+    switch (state.state) {
+      case "open":
+        return ValveConfigurationAndControl.ValveState.Open;
+      case "opening":
+      case "closing":
+        return ValveConfigurationAndControl.ValveState.Transitioning;
+      default:
+        return ValveConfigurationAndControl.ValveState.Closed;
+    }
+  },
+  open: () => ({ action: "valve.open_valve" }),
+  close: () => ({ action: "valve.close_valve" }),
 });
 
-const ValveEndpointType = OnOffPlugInUnitDevice.with(
+const ValveEndpointType = WaterValveDevice.with(
   BasicInformationServer,
   IdentifyServer,
   HomeAssistantEntityBehavior,
-  ValveOnOffServer,
+  ValveServer,
 );
 
 export function ValveDevice(
