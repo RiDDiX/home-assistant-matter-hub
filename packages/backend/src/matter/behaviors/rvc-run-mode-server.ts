@@ -18,6 +18,16 @@ export interface RvcRunModeServerConfig {
   start: ValueSetter<void>;
   returnToBase: ValueSetter<void>;
   pause: ValueSetter<void>;
+  /** Optional: Clean a specific room by mode value */
+  cleanRoom?: ValueSetter<number>;
+}
+
+/** Base mode value for room-specific cleaning modes */
+export const ROOM_MODE_BASE = 100;
+
+/** Check if a mode value represents a room-specific cleaning mode */
+export function isRoomMode(mode: number): boolean {
+  return mode >= ROOM_MODE_BASE;
 }
 
 // biome-ignore lint/correctness/noUnusedVariables: Biome thinks this is unused, but it's used by the function below
@@ -64,7 +74,20 @@ class RvcRunModeServerBase extends Base {
     request: ModeBase.ChangeToModeRequest,
   ): ModeBase.ChangeToModeResponse {
     const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);
-    switch (request.newMode) {
+    const { newMode } = request;
+
+    // Check for room-specific cleaning mode
+    if (isRoomMode(newMode) && this.state.config.cleanRoom) {
+      homeAssistant.callAction(
+        this.state.config.cleanRoom(newMode, this.agent),
+      );
+      return {
+        status: ModeBase.ModeChangeStatus.Success,
+        statusText: "Starting room cleaning",
+      };
+    }
+
+    switch (newMode) {
       case RvcSupportedRunMode.Cleaning:
         homeAssistant.callAction(this.state.config.start(void 0, this.agent));
         break;

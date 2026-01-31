@@ -43,6 +43,19 @@ export enum VacuumFanSpeed {
   max = "max",
 }
 
+/**
+ * Room/segment info for vacuum room cleaning.
+ * Different integrations provide this in different formats.
+ */
+export interface VacuumRoom {
+  /** Room/segment ID used for cleaning commands */
+  id: number | string;
+  /** Human-readable room name */
+  name: string;
+  /** Optional icon for the room */
+  icon?: string;
+}
+
 export interface VacuumDeviceAttributes {
   supported_features?: number;
   battery_level?: number | string | null | undefined;
@@ -51,4 +64,16 @@ export interface VacuumDeviceAttributes {
   fan_speed?: VacuumFanSpeed | string | null | undefined;
   fan_speed_list?: string[];
   status?: string | null | undefined;
+  /**
+   * Room/segment list for room-specific cleaning.
+   * Format varies by integration:
+   * - Dreame: Often separate entities, but some have 'rooms' attribute
+   * - Roborock: May have 'rooms' or 'segments' attribute
+   * - Xiaomi: May have 'room_list' attribute
+   */
+  rooms?: VacuumRoom[] | Record<string | number, string> | null | undefined;
+  /** Alternative attribute name used by some integrations */
+  segments?: VacuumRoom[] | Record<string | number, string> | null | undefined;
+  /** Alternative attribute name used by some integrations */
+  room_list?: VacuumRoom[] | Record<string | number, string> | null | undefined;
 }
