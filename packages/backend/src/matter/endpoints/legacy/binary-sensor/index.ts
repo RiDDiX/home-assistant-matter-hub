@@ -19,22 +19,37 @@ type CombinedType =
   | typeof OnOffSensorType;
 
 const deviceClasses: Partial<Record<BinarySensorDeviceClass, CombinedType>> = {
-  [BinarySensorDeviceClass.Occupancy]: OccupancySensorType,
-  [BinarySensorDeviceClass.Motion]: OccupancySensorType,
-  [BinarySensorDeviceClass.Moving]: OccupancySensorType,
-  [BinarySensorDeviceClass.Presence]: OccupancySensorType,
-
-  [BinarySensorDeviceClass.Door]: ContactSensorType,
-  [BinarySensorDeviceClass.Window]: ContactSensorType,
-  [BinarySensorDeviceClass.GarageDoor]: ContactSensorType,
-  [BinarySensorDeviceClass.Lock]: ContactSensorType,
-  [BinarySensorDeviceClass.Opening]: ContactSensorType,
-
-  [BinarySensorDeviceClass.Moisture]: WaterLeakDetectorType,
-
-  [BinarySensorDeviceClass.Smoke]: SmokeAlarmType,
   [BinarySensorDeviceClass.CarbonMonoxide]: CoAlarmType,
   [BinarySensorDeviceClass.Gas]: CoAlarmType,
+
+  [BinarySensorDeviceClass.Battery]: ContactSensorType,
+  [BinarySensorDeviceClass.BatteryCharging]: ContactSensorType,
+  [BinarySensorDeviceClass.Cold]: ContactSensorType,
+  [BinarySensorDeviceClass.Connectivity]: ContactSensorType,
+  [BinarySensorDeviceClass.Door]: ContactSensorType,
+  [BinarySensorDeviceClass.GarageDoor]: ContactSensorType,
+  [BinarySensorDeviceClass.Heat]: ContactSensorType,
+  [BinarySensorDeviceClass.Light]: ContactSensorType,
+  [BinarySensorDeviceClass.Lock]: ContactSensorType,
+  [BinarySensorDeviceClass.Opening]: ContactSensorType,
+  [BinarySensorDeviceClass.Plug]: ContactSensorType,
+  [BinarySensorDeviceClass.Power]: ContactSensorType,
+  [BinarySensorDeviceClass.Problem]: ContactSensorType,
+  [BinarySensorDeviceClass.Running]: ContactSensorType,
+  [BinarySensorDeviceClass.Safety]: ContactSensorType,
+  [BinarySensorDeviceClass.Sound]: ContactSensorType,
+  [BinarySensorDeviceClass.Tamper]: ContactSensorType,
+  [BinarySensorDeviceClass.Vibration]: ContactSensorType,
+  [BinarySensorDeviceClass.Window]: ContactSensorType,
+
+  [BinarySensorDeviceClass.Motion]: OccupancySensorType,
+  [BinarySensorDeviceClass.Moving]: OccupancySensorType,
+  [BinarySensorDeviceClass.Occupancy]: OccupancySensorType,
+  [BinarySensorDeviceClass.Presence]: OccupancySensorType,
+
+  [BinarySensorDeviceClass.Smoke]: SmokeAlarmType,
+
+  [BinarySensorDeviceClass.Moisture]: WaterLeakDetectorType,
 };
 
 export function BinarySensorDevice(
