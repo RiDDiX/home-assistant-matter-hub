@@ -31,6 +31,7 @@ import { SensorDevice } from "./sensor/index.js";
 import { SwitchDevice } from "./switch/index.js";
 import { VacuumDevice } from "./vacuum/index.js";
 import { ValveDevice } from "./valve/index.js";
+import { WaterHeaterDevice } from "./water-heater/index.js";
 
 /**
  * @deprecated
@@ -84,6 +85,7 @@ const deviceCtrs: Partial<
   valve: ValveDevice,
   alarm_control_panel: AlarmControlPanelDevice,
   remote: RemoteDevice,
+  water_heater: WaterHeaterDevice,
 };
 
 const matterDeviceTypeFactories: Partial<

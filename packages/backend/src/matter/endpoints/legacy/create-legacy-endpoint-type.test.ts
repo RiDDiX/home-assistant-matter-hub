@@ -18,6 +18,7 @@ import {
   type SensorDeviceAttributes,
   SensorDeviceClass,
   type VacuumDeviceAttributes,
+  type WaterHeaterDeviceAttributes,
 } from "@home-assistant-matter-hub/common";
 import { Endpoint, type EndpointType } from "@matter/main";
 import { uniq } from "lodash-es";
@@ -152,6 +153,16 @@ const testEntities: Record<
     createEntity("alarm_control_panel.a1", "armed_away"),
   ],
   [HomeAssistantDomain.remote]: [createEntity("remote.r1", "on")],
+  [HomeAssistantDomain.water_heater]: [
+    createEntity<WaterHeaterDeviceAttributes>("water_heater.wh1", "off", {
+      min_temp: 30,
+      max_temp: 100,
+      current_temperature: 45,
+      temperature: 60,
+      operation_mode: "off",
+      operation_list: ["off", "eco", "electric"],
+    }),
+  ],
 };
 
 describe("createLegacyEndpointType", () => {
