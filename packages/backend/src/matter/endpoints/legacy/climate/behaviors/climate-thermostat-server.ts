@@ -37,7 +37,7 @@ const getTemp = (
 };
 
 const systemModeToHvacMode: Record<Thermostat.SystemMode, ClimateHvacMode> = {
-  [Thermostat.SystemMode.Auto]: ClimateHvacMode.auto,
+  [Thermostat.SystemMode.Auto]: ClimateHvacMode.heat_cool,
   [Thermostat.SystemMode.Precooling]: ClimateHvacMode.cool,
   [Thermostat.SystemMode.Cool]: ClimateHvacMode.cool,
   [Thermostat.SystemMode.Heat]: ClimateHvacMode.heat,
@@ -114,13 +114,12 @@ const config: ThermostatServerConfig = {
     const hvacModes = attributes(homeAssistant.entity.state).hvac_modes ?? [];
     let targetMode = systemModeToHvacMode[systemMode] ?? ClimateHvacMode.off;
 
-    // Handle Auto mode: prefer 'auto' if available, fallback to 'heat_cool'
+    // Handle Auto mode: prefer 'auto' if explicitly available, otherwise use 'heat_cool' (default)
     if (systemMode === Thermostat.SystemMode.Auto) {
       if (hvacModes.includes(ClimateHvacMode.auto)) {
         targetMode = ClimateHvacMode.auto;
-      } else if (hvacModes.includes(ClimateHvacMode.heat_cool)) {
-        targetMode = ClimateHvacMode.heat_cool;
       }
+      // Otherwise keep heat_cool from the static mapping
     }
 
     return {
