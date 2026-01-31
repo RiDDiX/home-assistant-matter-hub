@@ -39,6 +39,7 @@ const deviceClasses: Partial<Record<BinarySensorDeviceClass, CombinedType>> = {
   [BinarySensorDeviceClass.Safety]: ContactSensorType,
   [BinarySensorDeviceClass.Sound]: ContactSensorType,
   [BinarySensorDeviceClass.Tamper]: ContactSensorType,
+  [BinarySensorDeviceClass.Update]: ContactSensorType,
   [BinarySensorDeviceClass.Vibration]: ContactSensorType,
   [BinarySensorDeviceClass.Window]: ContactSensorType,
 
