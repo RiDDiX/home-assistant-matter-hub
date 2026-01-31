@@ -46,6 +46,8 @@ export enum VacuumFanSpeed {
 export interface VacuumDeviceAttributes {
   supported_features?: number;
   battery_level?: number | string | null | undefined;
+  /** Some vacuums (e.g. Dreame) use 'battery' instead of 'battery_level' */
+  battery?: number | string | null | undefined;
   fan_speed?: VacuumFanSpeed | string | null | undefined;
   fan_speed_list?: string[];
   status?: string | null | undefined;

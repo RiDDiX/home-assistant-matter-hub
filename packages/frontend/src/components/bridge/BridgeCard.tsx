@@ -2,7 +2,6 @@ import type { BridgeDataWithMetadata } from "@home-assistant-matter-hub/common";
 import DeviceHub from "@mui/icons-material/DeviceHub";
 import Devices from "@mui/icons-material/Devices";
 import Language from "@mui/icons-material/Language";
-import Router from "@mui/icons-material/Router";
 import Avatar from "@mui/material/Avatar";
 import Box from "@mui/material/Box";
 import Card from "@mui/material/Card";
@@ -14,6 +13,7 @@ import Typography from "@mui/material/Typography";
 import { Link as RouterLink } from "react-router";
 import { navigation } from "../../routes.tsx";
 import { BridgeStatusIcon } from "./BridgeStatusIcon.tsx";
+import { getBridgeIcon, getBridgeIconColor } from "./bridgeIconUtils";
 
 export interface BridgeCardProps {
   bridge: BridgeDataWithMetadata;
@@ -21,6 +21,8 @@ export interface BridgeCardProps {
 
 export const BridgeCard = ({ bridge }: BridgeCardProps) => {
   const fabricCount = bridge.commissioning?.fabrics.length ?? 0;
+  const BridgeIcon = getBridgeIcon(bridge);
+  const bridgeColor = getBridgeIconColor(bridge);
 
   return (
     <Card variant="elevation" sx={{ height: "100%" }}>
@@ -33,12 +35,12 @@ export const BridgeCard = ({ bridge }: BridgeCardProps) => {
           <Box display="flex" alignItems="flex-start" gap={2}>
             <Avatar
               sx={{
-                bgcolor: "primary.main",
+                bgcolor: bridgeColor,
                 width: 48,
                 height: 48,
               }}
             >
-              <Router />
+              <BridgeIcon />
             </Avatar>
             <Box flexGrow={1} minWidth={0}>
               <Box display="flex" alignItems="center" gap={1} mb={0.5}>

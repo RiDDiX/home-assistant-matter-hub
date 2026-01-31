@@ -20,6 +20,7 @@ export class BasicInformationServer extends Base {
       return;
     }
     const { basicInformation } = this.env.get(BridgeDataProvider);
+    const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);
     const device = entity.deviceRegistry;
     applyPatchState(this.state, {
       vendorId: VendorId(basicInformation.vendorId),
@@ -37,6 +38,7 @@ export class BasicInformationServer extends Base {
       hardwareVersionString: ellipse(64, device?.hw_version),
       softwareVersionString: ellipse(64, device?.sw_version),
       nodeLabel:
+        ellipse(32, homeAssistant.state.customName) ??
         ellipse(32, entity.state?.attributes?.friendly_name) ??
         ellipse(32, entity.entity_id),
       reachable:

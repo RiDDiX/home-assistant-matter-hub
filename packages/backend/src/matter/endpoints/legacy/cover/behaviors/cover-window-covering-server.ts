@@ -16,15 +16,25 @@ const attributes = (entity: HomeAssistantEntityState) =>
   <CoverDeviceAttributes>entity.attributes;
 
 /**
+ * Platforms known to use Matter-compatible position semantics (0=open, 100=closed).
+ * These integrations report position as "% open" which matches Matter's expectations.
+ */
+const MATTER_SEMANTIC_PLATFORMS = [
+  "overkiz", // Somfy TaHoma, Cozytouch, etc.
+  "tahoma", // Legacy Somfy TaHoma integration
+  "somfy", // Direct Somfy integration
+  "somfy_mylink", // Somfy myLink
+];
+
+/**
  * Checks if the entity uses Matter-compatible position semantics (0=open, 100=closed).
  * Some integrations like Overkiz (Somfy TaHoma) use this convention instead of
  * standard HA semantics (0=closed, 100=open).
  */
 const usesMatterSemantics = (agent: Agent): boolean => {
   const homeAssistant = agent.get(HomeAssistantEntityBehavior);
-  const platform = homeAssistant.entity.registry?.platform;
-  // Overkiz (Somfy TaHoma) uses Matter-compatible semantics
-  if (platform === "overkiz") {
+  const platform = homeAssistant.entity.registry?.platform?.toLowerCase();
+  if (platform && MATTER_SEMANTIC_PLATFORMS.includes(platform)) {
     return true;
   }
   return false;
@@ -58,8 +68,7 @@ const adjustPositionForReading = (position: number, agent: Agent) => {
 /**
  * Adjusts position when WRITING to HA from Matter controller commands.
  * By default, inverts percentage (Matter 80% closed → HA 20% open).
- * With coverUseHomeAssistantPercentage, still inverts to keep commands correct.
- * Only coverDoNotInvertPercentage skips inversion for writing (breaks commands).
+ * With coverUseHomeAssistantPercentage, also skips inversion so commands match display.
  */
 const adjustPositionForWriting = (position: number, agent: Agent) => {
   const { featureFlags } = agent.env.get(BridgeDataProvider);
@@ -67,13 +76,13 @@ const adjustPositionForWriting = (position: number, agent: Agent) => {
     return null;
   }
   let percentValue = position;
-  // Only skip inversion for writing if:
-  // 1. User explicitly set coverDoNotInvertPercentage flag (legacy, breaks commands), OR
-  // 2. Integration uses Matter-compatible semantics (like Overkiz/Somfy)
-  // NOTE: coverUseHomeAssistantPercentage does NOT skip inversion for writing,
-  // so open/close commands work correctly even with Alexa-friendly display.
+  // Skip inversion for writing if:
+  // 1. User explicitly set coverDoNotInvertPercentage flag, OR
+  // 2. User set coverUseHomeAssistantPercentage (so commands match displayed %), OR
+  // 3. Integration uses Matter-compatible semantics (like Overkiz/Somfy)
   const skipInversion =
     featureFlags?.coverDoNotInvertPercentage === true ||
+    featureFlags?.coverUseHomeAssistantPercentage === true ||
     usesMatterSemantics(agent);
   if (!skipInversion) {
     percentValue = 100 - percentValue;
@@ -86,11 +95,12 @@ const config: WindowCoveringConfig = {
     let position = attributes(entity).current_position;
     if (position == null) {
       const coverState = entity.state as CoverDeviceState;
+      // HA semantics: 0=closed, 100=open
       position =
         coverState === CoverDeviceState.closed
-          ? 100
+          ? 0
           : coverState === CoverDeviceState.open
-            ? 0
+            ? 100
             : undefined;
     }
     return position == null ? null : adjustPositionForReading(position, agent);
@@ -99,11 +109,12 @@ const config: WindowCoveringConfig = {
     let position = attributes(entity).current_tilt_position;
     if (position == null) {
       const coverState = entity.state as CoverDeviceState;
+      // HA semantics: 0=closed, 100=open
       position =
         coverState === CoverDeviceState.closed
-          ? 100
+          ? 0
           : coverState === CoverDeviceState.open
-            ? 0
+            ? 100
             : undefined;
     }
     return position == null ? null : adjustPositionForReading(position, agent);

@@ -151,6 +151,7 @@ const testEntities: Record<
   [HomeAssistantDomain.alarm_control_panel]: [
     createEntity("alarm_control_panel.a1", "armed_away"),
   ],
+  [HomeAssistantDomain.remote]: [createEntity("remote.r1", "on")],
 };
 
 describe("createLegacyEndpointType", () => {

@@ -12,6 +12,7 @@ export enum HomeAssistantDomain {
   light = "light",
   lock = "lock",
   media_player = "media_player",
+  remote = "remote",
   scene = "scene",
   script = "script",
   sensor = "sensor",

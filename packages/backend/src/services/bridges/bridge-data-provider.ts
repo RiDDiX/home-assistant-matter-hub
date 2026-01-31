@@ -2,6 +2,7 @@ import type {
   BridgeBasicInformation,
   BridgeData,
   BridgeFeatureFlags,
+  BridgeIconType,
   BridgeStatus,
   FailedEntity,
   HomeAssistantFilter,
@@ -48,6 +49,9 @@ export class BridgeDataProvider extends Service implements BridgeData {
   get countryCode(): string | undefined {
     return this.data.countryCode;
   }
+  get icon(): BridgeIconType | undefined {
+    return this.data.icon;
+  }
 
   /************************************************
    * Functions
@@ -77,6 +81,7 @@ export class BridgeDataProvider extends Service implements BridgeData {
       featureFlags: this.featureFlags,
       basicInformation: this.basicInformation,
       countryCode: this.countryCode,
+      icon: this.icon,
       status: status.code,
       statusReason: status.reason,
       commissioning: commissioning

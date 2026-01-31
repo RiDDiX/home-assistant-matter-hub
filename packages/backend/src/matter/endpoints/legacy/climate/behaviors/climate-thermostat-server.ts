@@ -10,6 +10,7 @@ import { Thermostat } from "@matter/main/clusters";
 import { HomeAssistantConfig } from "../../../../../services/home-assistant/home-assistant-config.js";
 import { Temperature } from "../../../../../utils/converters/temperature.js";
 import { testBit } from "../../../../../utils/test-bit.js";
+import { HomeAssistantEntityBehavior } from "../../../../behaviors/home-assistant-entity-behavior.js";
 import {
   ThermostatServer,
   type ThermostatServerConfig,
@@ -108,12 +109,24 @@ const config: ThermostatServerConfig = {
       hvacActionToRunningMode[action] ?? Thermostat.ThermostatRunningMode.Off
     );
   },
-  setSystemMode: (systemMode) => ({
-    action: "climate.set_hvac_mode",
-    data: {
-      hvac_mode: systemModeToHvacMode[systemMode] ?? ClimateHvacMode.off,
-    },
-  }),
+  setSystemMode: (systemMode, agent) => {
+    const homeAssistant = agent.get(HomeAssistantEntityBehavior);
+    const hvacModes = attributes(homeAssistant.entity.state).hvac_modes ?? [];
+    let targetMode = systemModeToHvacMode[systemMode] ?? ClimateHvacMode.off;
+
+    // Handle Auto mode: prefer 'auto' if explicitly available, otherwise use 'heat_cool' (default)
+    if (systemMode === Thermostat.SystemMode.Auto) {
+      if (hvacModes.includes(ClimateHvacMode.auto)) {
+        targetMode = ClimateHvacMode.auto;
+      }
+      // Otherwise keep heat_cool from the static mapping
+    }
+
+    return {
+      action: "climate.set_hvac_mode",
+      data: { hvac_mode: targetMode },
+    };
+  },
   setTargetTemperature: (value, agent) => ({
     action: "climate.set_temperature",
     data: {

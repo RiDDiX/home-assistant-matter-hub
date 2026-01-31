@@ -5,23 +5,24 @@ import { HomeAssistantEntityBehavior } from "../../../behaviors/home-assistant-e
 import { IdentifyServer } from "../../../behaviors/identify-server.js";
 import { OnOffServer } from "../../../behaviors/on-off-server.js";
 
-const ButtonOnOffServer = OnOffServer({
-  isOn: () => false,
+const RemoteOnOffServer = OnOffServer({
   turnOn: () => ({
-    action: "button.press",
+    action: "remote.turn_on",
   }),
-  turnOff: null,
+  turnOff: () => ({
+    action: "remote.turn_off",
+  }),
 }).with("Lighting");
 
-const ButtonEndpointType = OnOffPlugInUnitDevice.with(
+const RemoteEndpointType = OnOffPlugInUnitDevice.with(
   BasicInformationServer,
   IdentifyServer,
   HomeAssistantEntityBehavior,
-  ButtonOnOffServer,
+  RemoteOnOffServer,
 );
 
-export function ButtonDevice(
+export function RemoteDevice(
   homeAssistantEntity: HomeAssistantEntityBehavior.State,
 ): EndpointType {
-  return ButtonEndpointType.set({ homeAssistantEntity });
+  return RemoteEndpointType.set({ homeAssistantEntity });
 }

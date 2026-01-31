@@ -69,6 +69,15 @@ const featureFlagSchema: JSONSchema7 = {
       type: "boolean",
       default: false,
     },
+
+    alexaPreserveBrightnessOnTurnOn: {
+      title: "Alexa: Preserve Brightness on Turn-On",
+      description:
+        "Workaround for Alexa resetting light brightness to 100% after subscription renewal. " +
+        "When enabled, the bridge ignores brightness commands that set lights to 100% immediately after a turn-on command.",
+      type: "boolean",
+      default: false,
+    },
   },
   additionalProperties: false,
 };
