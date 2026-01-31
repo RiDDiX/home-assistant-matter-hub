@@ -150,6 +150,8 @@ export class ThermostatEndpoint extends DomainEndpoint {
     );
   }
 
+  private externalTemperatureSensor?: string;
+
   private constructor(
     type: EndpointType,
     entityId: string,
@@ -160,27 +162,72 @@ export class ThermostatEndpoint extends DomainEndpoint {
 
   /**
    * Handle HA entity state changes.
-   * Note: The behaviors already handle state updates via HomeAssistantEntityBehavior.onChange.
-   * This method is for future domain-specific coordination (e.g., external temperature sensors).
+   * Checks for external temperature sensors from neighbor entities.
    */
-  protected onEntityStateChanged(
+  protected onEntityStateChanged(entity: HomeAssistantEntityInformation): void {
+    // Check if the climate entity lacks current_temperature
+    const attributes = entity.state?.attributes as ClimateDeviceAttributes;
+    if (attributes?.current_temperature == null) {
+      // Try to find an external temperature sensor from neighbor entities
+      this.tryUseExternalTemperatureSensor();
+    }
+  }
+
+  /**
+   * Handle neighbor entity state changes.
+   * Updates external temperature if using a neighbor temperature sensor.
+   */
+  protected override onNeighborStateChanged(
+    entityId: string,
     _entity: HomeAssistantEntityInformation,
   ): void {
-    // Behaviors handle their own state updates via HomeAssistantEntityBehavior.onChange.
-    // This hook is available for domain-specific coordination if needed.
-    // Future use cases:
-    // - Integrate external temperature sensors from neighbor entities
-    // - Coordinate with humidity sensors
-    // - Handle complex HVAC systems with multiple zones
+    if (entityId === this.externalTemperatureSensor) {
+      // External temperature sensor updated - behaviors will pick this up
+      // via their next state update cycle
+    }
+  }
+
+  /**
+   * Try to use an external temperature sensor from neighbor entities.
+   * This is useful for climate entities that don't report current_temperature
+   * but have a temperature sensor in the same device.
+   */
+  private tryUseExternalTemperatureSensor(): void {
+    if (this.externalTemperatureSensor) {
+      return; // Already configured
+    }
+
+    // Find temperature sensors in neighbor entities
+    const tempSensors = this.findNeighborsByDeviceClass("temperature");
+    if (tempSensors.length > 0) {
+      const sensor = tempSensors[0];
+      this.externalTemperatureSensor = sensor.entity_id;
+      // Log that we're using an external sensor
+      // The actual temperature reading will be handled by the behavior
+      // via the neighbor entity's state
+    }
+  }
+
+  /**
+   * Get external temperature from neighbor sensor if available.
+   * This can be used by behaviors to supplement missing current_temperature.
+   */
+  public getExternalTemperature(): number | undefined {
+    if (!this.externalTemperatureSensor) {
+      return undefined;
+    }
+    const sensor = this.getNeighborEntity(this.externalTemperatureSensor);
+    const temp = sensor?.state?.state;
+    if (temp != null && !Number.isNaN(+temp)) {
+      return +temp;
+    }
+    return undefined;
   }
 
   /**
    * Handle Matter commands from controllers.
-   * Note: The behaviors already handle commands via their override methods.
-   * This method is for future domain-specific coordination.
    */
   protected onBehaviorCommand(_command: BehaviorCommand): void {
     // Behaviors handle their own commands.
-    // This hook is available for domain-specific coordination if needed.
   }
 }
