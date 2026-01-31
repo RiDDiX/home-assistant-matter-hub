@@ -25,6 +25,7 @@ export interface BackupData {
   bridges: BridgeData[];
   entityMappings: Record<string, unknown[]>;
   includesIdentity?: boolean;
+  includesIcons?: boolean;
 }
 
 export function backupApi(
@@ -83,6 +84,20 @@ export function backupApi(
           if (fs.existsSync(bridgeStoragePath)) {
             archive.directory(bridgeStoragePath, `identity/${bridge.id}`);
           }
+        }
+
+        // Include bridge icons
+        const iconsDir = path.join(storageLocation, "bridge-icons");
+        if (fs.existsSync(iconsDir)) {
+          const iconFiles = fs.readdirSync(iconsDir);
+          for (const iconFile of iconFiles) {
+            const bridgeId = iconFile.split(".")[0];
+            if (bridges.some((b) => b.id === bridgeId)) {
+              const iconPath = path.join(iconsDir, iconFile);
+              archive.file(iconPath, { name: `bridge-icons/${iconFile}` });
+            }
+          }
+          backupData.includesIcons = true;
         }
       }
 
@@ -162,6 +177,7 @@ export function backupApi(
         let bridgesSkipped = 0;
         let mappingsRestored = 0;
         let identitiesRestored = 0;
+        let iconsRestored = 0;
         const errors: Array<{ bridgeId: string; error: string }> = [];
 
         for (const bridge of bridgesToRestore) {
@@ -205,6 +221,18 @@ export function backupApi(
                 identitiesRestored++;
               }
             }
+
+            // Restore bridge icons
+            if (backupData.includesIcons) {
+              const iconRestored = await restoreBridgeIcon(
+                zipDirectory,
+                bridge.id,
+                storageLocation,
+              );
+              if (iconRestored) {
+                iconsRestored++;
+              }
+            }
           } catch (e) {
             errors.push({
               bridgeId: bridge.id,
@@ -218,6 +246,7 @@ export function backupApi(
           bridgesSkipped,
           mappingsRestored,
           identitiesRestored,
+          iconsRestored,
           errors,
           restartRequired: bridgesRestored > 0 || identitiesRestored > 0,
         });
@@ -282,6 +311,37 @@ async function restoreIdentityFiles(
     const targetDirPath = path.dirname(targetPath);
 
     fs.mkdirSync(targetDirPath, { recursive: true });
+
+    const content = await file.buffer();
+    fs.writeFileSync(targetPath, content);
+  }
+
+  return true;
+}
+
+async function restoreBridgeIcon(
+  zipDirectory: unzipper.CentralDirectory,
+  bridgeId: string,
+  storageLocation: string,
+): Promise<boolean> {
+  const iconPrefix = "bridge-icons/";
+  const iconFiles = zipDirectory.files.filter(
+    (f: { path: string; type: string }) =>
+      f.path.startsWith(iconPrefix) &&
+      f.path.split("/")[1]?.startsWith(`${bridgeId}.`) &&
+      f.type === "File",
+  );
+
+  if (iconFiles.length === 0) {
+    return false;
+  }
+
+  const iconsDir = path.join(storageLocation, "bridge-icons");
+  fs.mkdirSync(iconsDir, { recursive: true });
+
+  for (const file of iconFiles) {
+    const fileName = file.path.substring(iconPrefix.length);
+    const targetPath = path.join(iconsDir, fileName);
 
     const content = await file.buffer();
     fs.writeFileSync(targetPath, content);
