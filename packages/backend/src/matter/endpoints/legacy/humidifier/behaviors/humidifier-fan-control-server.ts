@@ -32,11 +32,6 @@ function setHumidityFromPercent(percent: number, agent: Agent) {
   };
 }
 
-function hasAutoMode(state: HomeAssistantEntityState): boolean {
-  const { available_modes } = state.attributes as HumidiferDeviceAttributes;
-  return available_modes?.some((m) => m.toLowerCase() === "auto") ?? false;
-}
-
 function isInAutoMode(state: HomeAssistantEntityState): boolean {
   const { mode } = state.attributes as HumidiferDeviceAttributes;
   return mode?.toLowerCase() === "auto";
