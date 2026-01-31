@@ -38,7 +38,7 @@ of port forwarding etc.
 | Channel | Branch | Current Version | Description |
 |---------|--------|-----------------|-------------|
 | **Stable** | `main` | v1.10.4 | Production-ready, recommended for most users |
-| **Alpha** | `alpha` | v1.10.4 | Same as stable (synced) |
+| **Alpha** | `alpha` | v2.0.0-alpha.x | Pre-release with new features, for early adopters |
 | **Testing** | `testing` | v4.1.0-testing.x | ⚠️ **Highly unstable!** Experimental features, may break |
 
 ### Semantic Versioning
@@ -165,12 +165,12 @@ All previous features plus:
 - **Icon API** - Fixed leading slash in bridge-icons API for Ingress compatibility
 - **Icon Preservation** - Icon field now preserved when saving bridge config
 
-### Alpha Features (v1.10.4) 🧪
+### Alpha Features (v2.0.0-alpha) 🧪
 
 > [!WARNING]
 > Alpha versions are for early adopters and may contain bugs!
 
-Currently synced with stable. New experimental features coming soon!
+All stable features plus experimental changes being actively developed.
 
 ### Testing Features (v4.1.0-testing) ⚠️
 
