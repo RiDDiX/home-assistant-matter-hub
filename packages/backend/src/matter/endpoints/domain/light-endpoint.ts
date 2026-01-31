@@ -5,21 +5,14 @@ import {
   LightDeviceColorMode,
 } from "@home-assistant-matter-hub/common";
 import type { EndpointType } from "@matter/main";
-import type { ColorControl } from "@matter/main/clusters";
-import {
-  ColorTemperatureLightDevice,
-  DimmableLightDevice,
-  ExtendedColorLightDevice,
-  OnOffLightDevice,
-} from "@matter/main/devices";
+import { DimmableLightDevice, OnOffLightDevice } from "@matter/main/devices";
 import type { BridgeRegistry } from "../../../services/bridges/bridge-registry.js";
-import type { FeatureSelection } from "../../../utils/feature-selection.js";
 import { BasicInformationServer } from "../../behaviors/basic-information-server.js";
+import { LightCommands } from "../../behaviors/callback-behavior.js";
 import { HomeAssistantEntityBehavior } from "../../behaviors/home-assistant-entity-behavior.js";
 import { IdentifyServer } from "../../behaviors/identify-server.js";
-import { LightColorControlServer } from "../legacy/light/behaviors/light-color-control-server.js";
-import { LightLevelControlServer } from "../legacy/light/behaviors/light-level-control-server.js";
-import { LightOnOffServer } from "../legacy/light/behaviors/light-on-off-server.js";
+import { LevelControlBehavior } from "./behaviors/level-control-behavior.js";
+import { OnOffBehavior } from "./behaviors/on-off-behavior.js";
 import { type BehaviorCommand, DomainEndpoint } from "./domain-endpoint.js";
 
 const brightnessModes: LightDeviceColorMode[] = Object.values(
@@ -28,28 +21,31 @@ const brightnessModes: LightDeviceColorMode[] = Object.values(
   .filter((mode) => mode !== LightDeviceColorMode.UNKNOWN)
   .filter((mode) => mode !== LightDeviceColorMode.ONOFF);
 
-const colorModes: LightDeviceColorMode[] = [
-  LightDeviceColorMode.HS,
-  LightDeviceColorMode.RGB,
-  LightDeviceColorMode.XY,
-  LightDeviceColorMode.RGBW,
-  LightDeviceColorMode.RGBWW,
-];
+const OnOffLightType = OnOffLightDevice.with(
+  IdentifyServer,
+  BasicInformationServer,
+  HomeAssistantEntityBehavior,
+  OnOffBehavior,
+);
+
+const DimmableLightType = DimmableLightDevice.with(
+  IdentifyServer,
+  BasicInformationServer,
+  HomeAssistantEntityBehavior,
+  OnOffBehavior,
+  LevelControlBehavior,
+);
 
 /**
  * LightEndpoint - Vision 1 implementation for light entities.
  *
- * This endpoint uses the proven legacy behaviors but provides:
- * - Domain-specific coordination
- * - Access to neighbor entities (for future multi-entity scenarios)
- * - Clean separation between endpoint logic and behavior logic
- *
- * The behaviors handle:
- * - Self-updating via HomeAssistantEntityBehavior.onChange
- * - Matter commands (on/off, level control, color control)
- * - HA service calls
+ * This endpoint:
+ * - Receives entity state changes and updates behavior states
+ * - Receives command callbacks from behaviors and calls HA services
  */
 export class LightEndpoint extends DomainEndpoint {
+  private supportsBrightness = false;
+
   public static async create(
     registry: BridgeRegistry,
     entityId: string,
@@ -70,12 +66,6 @@ export class LightEndpoint extends DomainEndpoint {
     const supportsBrightness = supportedColorModes.some((mode) =>
       brightnessModes.includes(mode),
     );
-    const supportsColorControl = supportedColorModes.some((mode) =>
-      colorModes.includes(mode),
-    );
-    const supportsColorTemperature = supportedColorModes.includes(
-      LightDeviceColorMode.COLOR_TEMP,
-    );
 
     const homeAssistantEntity: HomeAssistantEntityBehavior.State = {
       entity: {
@@ -86,68 +76,16 @@ export class LightEndpoint extends DomainEndpoint {
       } as HomeAssistantEntityInformation,
     };
 
-    // Create appropriate device type based on capabilities
-    const deviceType = supportsColorControl
-      ? LightEndpoint.createExtendedColorType(supportsColorTemperature)
-      : supportsColorTemperature
-        ? LightEndpoint.createColorTemperatureType()
-        : supportsBrightness
-          ? LightEndpoint.createDimmableType()
-          : LightEndpoint.createOnOffType();
+    const deviceType = supportsBrightness ? DimmableLightType : OnOffLightType;
 
     const customName = mapping?.customName;
-    return new LightEndpoint(
+    const endpoint = new LightEndpoint(
       deviceType.set({ homeAssistantEntity }),
       entityId,
       customName,
     );
-  }
-
-  private static createOnOffType() {
-    return OnOffLightDevice.with(
-      IdentifyServer,
-      BasicInformationServer,
-      HomeAssistantEntityBehavior,
-      LightOnOffServer,
-    );
-  }
-
-  private static createDimmableType() {
-    return DimmableLightDevice.with(
-      IdentifyServer,
-      BasicInformationServer,
-      HomeAssistantEntityBehavior,
-      LightOnOffServer,
-      LightLevelControlServer,
-    );
-  }
-
-  private static createColorTemperatureType() {
-    return ColorTemperatureLightDevice.with(
-      IdentifyServer,
-      BasicInformationServer,
-      HomeAssistantEntityBehavior,
-      LightOnOffServer,
-      LightLevelControlServer,
-      LightColorControlServer.with("ColorTemperature"),
-    );
-  }
-
-  private static createExtendedColorType(supportsTemperature: boolean) {
-    const features: FeatureSelection<ColorControl.Cluster> = new Set([
-      "HueSaturation",
-    ]);
-    if (supportsTemperature) {
-      features.add("ColorTemperature");
-    }
-    return ExtendedColorLightDevice.with(
-      IdentifyServer,
-      BasicInformationServer,
-      HomeAssistantEntityBehavior,
-      LightOnOffServer,
-      LightLevelControlServer,
-      LightColorControlServer.with(...features),
-    );
+    endpoint.supportsBrightness = supportsBrightness;
+    return endpoint;
   }
 
   private constructor(
@@ -158,25 +96,42 @@ export class LightEndpoint extends DomainEndpoint {
     super(type, entityId, customName);
   }
 
-  /**
-   * Handle HA entity state changes.
-   * Note: The behaviors already handle state updates via HomeAssistantEntityBehavior.onChange.
-   * This method is for future domain-specific coordination (e.g., multi-entity scenarios).
-   */
-  protected onEntityStateChanged(
-    _entity: HomeAssistantEntityInformation,
-  ): void {
-    // Behaviors handle their own state updates via HomeAssistantEntityBehavior.onChange.
-    // This hook is available for domain-specific coordination if needed.
+  protected onEntityStateChanged(entity: HomeAssistantEntityInformation): void {
+    if (!entity.state) return;
+
+    const isOn =
+      entity.state.state !== "off" && entity.state.state !== "unavailable";
+    const attributes = entity.state.attributes as LightDeviceAttributes;
+
+    try {
+      this.setStateOf(OnOffBehavior, { onOff: isOn });
+
+      if (this.supportsBrightness) {
+        const brightness = attributes.brightness ?? 0;
+        this.setStateOf(LevelControlBehavior, { currentLevel: brightness });
+      }
+    } catch {
+      // Behavior may not be initialized yet
+    }
   }
 
-  /**
-   * Handle Matter commands from controllers.
-   * Note: The behaviors already handle commands via their override methods.
-   * This method is for future domain-specific coordination.
-   */
-  protected onBehaviorCommand(_command: BehaviorCommand): void {
-    // Behaviors handle their own commands.
-    // This hook is available for domain-specific coordination if needed.
+  protected onBehaviorCommand(command: BehaviorCommand): void {
+    switch (command.command) {
+      case LightCommands.TURN_ON:
+        this.callAction("light", "turn_on");
+        break;
+      case LightCommands.TURN_OFF:
+        this.callAction("light", "turn_off");
+        break;
+      case LightCommands.SET_BRIGHTNESS: {
+        const args = command.args as
+          | { level?: number; withOnOff?: boolean }
+          | undefined;
+        if (args?.level != null) {
+          this.callAction("light", "turn_on", { brightness: args.level });
+        }
+        break;
+      }
+    }
   }
 }

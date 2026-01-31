@@ -1,21 +1,30 @@
-import {
-  type EntityMappingConfig,
-  type FanDeviceAttributes,
-  FanDeviceFeature,
-  type HomeAssistantEntityInformation,
+import type {
+  EntityMappingConfig,
+  FanDeviceAttributes,
+  HomeAssistantEntityInformation,
 } from "@home-assistant-matter-hub/common";
 import type { EndpointType } from "@matter/main";
-import type { FanControl } from "@matter/main/clusters";
+import { FanControl } from "@matter/main/clusters";
 import { FanDevice as Device } from "@matter/main/devices";
 import type { BridgeRegistry } from "../../../services/bridges/bridge-registry.js";
-import type { FeatureSelection } from "../../../utils/feature-selection.js";
-import { testBit } from "../../../utils/test-bit.js";
 import { BasicInformationServer } from "../../behaviors/basic-information-server.js";
+import {
+  FanCommands,
+  LightCommands,
+} from "../../behaviors/callback-behavior.js";
 import { HomeAssistantEntityBehavior } from "../../behaviors/home-assistant-entity-behavior.js";
 import { IdentifyServer } from "../../behaviors/identify-server.js";
-import { FanFanControlServer } from "../legacy/fan/behaviors/fan-fan-control-server.js";
-import { FanOnOffServer } from "../legacy/fan/behaviors/fan-on-off-server.js";
+import { FanBehavior } from "./behaviors/fan-behavior.js";
+import { OnOffBehavior } from "./behaviors/on-off-behavior.js";
 import { type BehaviorCommand, DomainEndpoint } from "./domain-endpoint.js";
+
+const FanDeviceType = Device.with(
+  IdentifyServer,
+  BasicInformationServer,
+  HomeAssistantEntityBehavior,
+  OnOffBehavior,
+  FanBehavior,
+);
 
 /**
  * FanEndpoint - Vision 1 implementation for fan entities.
@@ -34,37 +43,6 @@ export class FanEndpoint extends DomainEndpoint {
       return undefined;
     }
 
-    const attributes = state.attributes as FanDeviceAttributes;
-    const supportedFeatures = attributes.supported_features ?? 0;
-
-    const hasSetSpeed = testBit(supportedFeatures, FanDeviceFeature.SET_SPEED);
-    const hasPresetMode = testBit(
-      supportedFeatures,
-      FanDeviceFeature.PRESET_MODE,
-    );
-    const presetModes = attributes.preset_modes ?? [];
-    const speedPresets = presetModes.filter((m) => m.toLowerCase() !== "auto");
-
-    const features: FeatureSelection<FanControl.Cluster> = new Set();
-    if (hasSetSpeed || speedPresets.length > 0) {
-      features.add("MultiSpeed");
-      features.add("Step");
-    }
-    if (hasPresetMode) {
-      features.add("Auto");
-    }
-    if (testBit(supportedFeatures, FanDeviceFeature.DIRECTION)) {
-      features.add("AirflowDirection");
-    }
-
-    const deviceType = Device.with(
-      IdentifyServer,
-      BasicInformationServer,
-      HomeAssistantEntityBehavior,
-      FanOnOffServer,
-      FanFanControlServer.with(...features),
-    );
-
     const homeAssistantEntity: HomeAssistantEntityBehavior.State = {
       entity: {
         entity_id: entityId,
@@ -76,7 +54,7 @@ export class FanEndpoint extends DomainEndpoint {
 
     const customName = mapping?.customName;
     return new FanEndpoint(
-      deviceType.set({ homeAssistantEntity }),
+      FanDeviceType.set({ homeAssistantEntity }),
       entityId,
       customName,
     );
@@ -90,13 +68,47 @@ export class FanEndpoint extends DomainEndpoint {
     super(type, entityId, customName);
   }
 
-  protected onEntityStateChanged(
-    _entity: HomeAssistantEntityInformation,
-  ): void {
-    // Behaviors handle their own state updates
+  protected onEntityStateChanged(entity: HomeAssistantEntityInformation): void {
+    if (!entity.state) return;
+
+    const isOn =
+      entity.state.state !== "off" && entity.state.state !== "unavailable";
+    const attributes = entity.state.attributes as FanDeviceAttributes;
+    const percentage = attributes.percentage ?? 0;
+
+    // Map percentage to Matter speed (0-100)
+    const speedSetting = Math.round(percentage);
+    const fanMode = isOn ? FanControl.FanMode.On : FanControl.FanMode.Off;
+
+    try {
+      this.setStateOf(OnOffBehavior, { onOff: isOn });
+      this.setStateOf(FanBehavior, {
+        fanMode,
+        percentCurrent: percentage,
+        percentSetting: percentage,
+        speedCurrent: speedSetting,
+        speedSetting: speedSetting,
+      });
+    } catch {
+      // Behavior may not be initialized yet
+    }
   }
 
-  protected onBehaviorCommand(_command: BehaviorCommand): void {
-    // Behaviors handle their own commands
+  protected onBehaviorCommand(command: BehaviorCommand): void {
+    switch (command.command) {
+      case LightCommands.TURN_ON:
+        this.callAction("fan", "turn_on");
+        break;
+      case LightCommands.TURN_OFF:
+        this.callAction("fan", "turn_off");
+        break;
+      case FanCommands.SET_SPEED: {
+        const args = command.args as { speed?: number } | undefined;
+        if (args?.speed != null) {
+          this.callAction("fan", "set_percentage", { percentage: args.speed });
+        }
+        break;
+      }
+    }
   }
 }
