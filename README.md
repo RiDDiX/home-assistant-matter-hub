@@ -290,6 +290,8 @@ Thank you to everyone who helps improve this project by reporting issues!
 |---------|---|
 | [@thorsten-gehrig](https://github.com/thorsten-gehrig) | 🥇 **First Sponsor!** Thank you for believing in this project! |
 | [@SH1FT-W](https://github.com/SH1FT-W) | 💎 Thank you for your generous support! |
+| [@ilGaspa](https://github.com/ilGaspa) | 💎 Thank you for your generous support! |
+| [@linux4life798](https://github.com/linux4life798) | 💎 Thank you for your generous support! |
 | *Anonymous supporters* | 🙏 Thank you to those who prefer not to be named - your support is equally appreciated! |
 
 ### 🌟 Original Author
