@@ -19,4 +19,5 @@ export enum HomeAssistantDomain {
   switch = "switch",
   vacuum = "vacuum",
   valve = "valve",
+  water_heater = "water_heater",
 }
