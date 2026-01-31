@@ -124,7 +124,23 @@ All previous features plus:
 > [!WARNING]
 > Alpha versions are for early adopters and may contain bugs!
 
-All stable features plus experimental changes being actively developed.
+All stable features plus:
+
+**🌡️ New Device Support**
+- **Water Heater** - New `water_heater` domain mapped to Thermostat device (Heating only) ([#14](https://github.com/RiDDiX/home-assistant-matter-hub/issues/14))
+
+**🤖 Vacuum Enhancements**
+- **Room Selection** - Vacuum room/segment selection via RvcRunMode cluster ([#49](https://github.com/RiDDiX/home-assistant-matter-hub/issues/49))
+
+**🏷️ Entity Mapping**
+- **Sensor Type Override** - Entity mapping now correctly overrides sensor device types (Temperature, Humidity, Pressure, etc.) ([#73](https://github.com/RiDDiX/home-assistant-matter-hub/issues/73))
+
+**🖼️ Backup & Restore**
+- **Bridge Icons in Backup** - Full backup now includes bridge icons when exporting with identity
+- **Icon Restore** - Icons are automatically restored during backup import
+
+**🔧 Binary Sensor**
+- **Update Device Class** - New `update` device class mapping for binary sensors
 
 ### Testing Features (v4.1.0-testing) ⚠️
 
