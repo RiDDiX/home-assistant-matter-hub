@@ -6,6 +6,7 @@ import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import Accordion from "@mui/material/Accordion";
 import AccordionDetails from "@mui/material/AccordionDetails";
 import AccordionSummary from "@mui/material/AccordionSummary";
+import Button from "@mui/material/Button";
 import Paper from "@mui/material/Paper";
 import Stack from "@mui/material/Stack";
 import Table from "@mui/material/Table";
@@ -49,7 +50,24 @@ export const EndpointState = (props: EndpointStateProps) => {
     <>
       <Paper sx={{ p: 2, mb: 2 }} variant="outlined">
         <Stack spacing={2}>
-          <Typography component="span">About this endpoint</Typography>
+          <Stack
+            direction="row"
+            justifyContent="space-between"
+            alignItems="center"
+          >
+            <Typography component="span">About this endpoint</Typography>
+            <Button
+              onClick={() => {
+                navigator.clipboard.writeText(
+                  JSON.stringify(props.endpoint, null, 2),
+                );
+              }}
+              variant="outlined"
+              size="small"
+            >
+              Copy data to clipboard
+            </Button>
+          </Stack>
           <ObjectTable value={metadata} hideHead></ObjectTable>
         </Stack>
       </Paper>
