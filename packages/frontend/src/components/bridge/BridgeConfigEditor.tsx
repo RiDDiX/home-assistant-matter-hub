@@ -176,7 +176,7 @@ export const BridgeConfigEditor = (props: BridgeConfigEditorProps) => {
       ))}
 
       <Stack spacing={2}>
-        <Box display="flex" justifyContent={"flex-end"}>
+        <Box sx={{ display: "flex", justifyContent: "flex-end" }}>
           <Button
             onClick={() => toggleEditor()}
             title={
@@ -235,7 +235,11 @@ export const BridgeConfigEditor = (props: BridgeConfigEditorProps) => {
 
         <Card variant="outlined">
           <CardContent>
-            <Typography variant="subtitle1" gutterBottom fontWeight={600}>
+            <Typography
+              variant="subtitle1"
+              gutterBottom
+              sx={{ fontWeight: 600 }}
+            >
               {t("bridge.iconLabel")}
             </Typography>
             <BridgeIconUpload

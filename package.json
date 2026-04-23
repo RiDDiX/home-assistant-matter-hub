@@ -53,7 +53,7 @@
     }
   },
   "devDependencies": {
-    "@biomejs/biome": "2.4.3",
+    "@biomejs/biome": "^2.4.12",
     "@dotenvx/dotenvx": "^1.61.1",
     "@semantic-release/changelog": "^6.0.3",
     "@semantic-release/commit-analyzer": "^13.0.1",
@@ -63,6 +63,7 @@
     "@swc-node/register": "~1.11.1",
     "@swc/core": "~1.15.30",
     "@swc/helpers": "~0.5.21",
+    "@types/supertest": "^7.2.0",
     "conventional-changelog-conventionalcommits": "^9.3.1",
     "esbuild": "^0.28.0",
     "esbuild-plugin-noexternal": "^0.1.6",
@@ -75,5 +76,11 @@
     "typescript": "^6.0.3",
     "vite": "^8.0.8",
     "vitest": "^4.1.4"
+  },
+  "dependencies": {
+    "@mui/icons-material": "^9.0.0",
+    "@types/ajv": "^1.0.4",
+    "ajv": "^8.18.0",
+    "fastify": "^5.8.5"
   }
 }

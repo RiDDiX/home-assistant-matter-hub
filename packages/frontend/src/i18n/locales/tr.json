@@ -57,7 +57,8 @@
     "import": "İçe aktar",
     "export": "Dışa aktar",
     "exportAll": "Tümünü dışa aktar",
-    "wizard": "Sihirbaz"
+    "wizard": "Sihirbaz",
+    "finish": ""
   },
   "nav": {
     "bridges": "Köprüler",
@@ -141,7 +142,9 @@
     "bridgeStatusRunning": "Çalışan köprüler",
     "bridgeStatusFailed": "Başarısız köprüler",
     "devicesFailed": "Hatalı cihazlar",
-    "uptimeFormat": "Çalışma süresi: {value}"
+    "uptimeFormat": "Çalışma süresi: {value}",
+    "openWizard": "",
+    "standaloneDeviceWizard": ""
   },
   "bridge": {
     "name": "Ad",
@@ -352,7 +355,9 @@
     "sortType": "Türe göre sırala",
     "sortName": "Ada göre sırala",
     "deviceCount": "Cihaz sayısı",
-    "filteredCount": "Filtrelenmiş kayıt sayısı"
+    "filteredCount": "Filtrelenmiş kayıt sayısı",
+    "failedEntitiesTitle": "",
+    "noFailedEntities": ""
   },
   "diagnostics": {
     "title": "Tanılama",
@@ -582,7 +587,8 @@
   },
   "footer": {
     "github": "GitHub",
-    "documentation": "Dokümantasyon"
+    "documentation": "Dokümantasyon",
+    "support": ""
   },
   "languageSwitcher": {
     "disclaimer": "Çeviriler topluluk katkıları içerebilir.",
@@ -616,5 +622,7 @@
     "importJson": "JSON içe aktar",
     "importSuccess": "İçe aktarma başarılı",
     "importFailed": "İçe aktarma başarısız"
-  }
+  },
+  "wizard": "",
+  "standaloneDeviceWizard": ""
 }

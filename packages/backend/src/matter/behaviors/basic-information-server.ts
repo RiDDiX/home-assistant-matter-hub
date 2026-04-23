@@ -17,7 +17,7 @@ export class BasicInformationServer extends Base {
   }
 
   private update(entity: HomeAssistantEntityInformation) {
-    if (!entity.state || !entity.state.attributes) {
+    if (!entity.state?.attributes) {
       return;
     }
     const { basicInformation, featureFlags } = this.env.get(BridgeDataProvider);

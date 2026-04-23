@@ -101,27 +101,7 @@ interface AllBridgeFeatureFlags {
 
 export type BridgeFeatureFlags = Partial<AllBridgeFeatureFlags>;
 
-export type BridgeIconType =
-  | "light"
-  | "switch"
-  | "climate"
-  | "cover"
-  | "fan"
-  | "lock"
-  | "sensor"
-  | "media_player"
-  | "vacuum"
-  | "remote"
-  | "humidifier"
-  | "speaker"
-  | "garage"
-  | "door"
-  | "window"
-  | "motion"
-  | "battery"
-  | "power"
-  | "camera"
-  | "default";
+export type BridgeIconType = string;
 
 export interface BridgeConfig {
   readonly name: string;

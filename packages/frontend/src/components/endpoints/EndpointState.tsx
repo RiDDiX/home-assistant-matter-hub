@@ -161,8 +161,8 @@ const EntityDiagnosticsPanel = ({ endpoint }: { endpoint: EndpointData }) => {
       variant="outlined"
     >
       <Stack spacing={1.5}>
-        <Box display="flex" alignItems="center" gap={1}>
-          <Typography variant="subtitle2" fontWeight={600}>
+        <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+          <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
             {t("endpoints.homeAssistantEntity")}
           </Typography>
           {diag.isUnavailable ? (
@@ -192,7 +192,9 @@ const EntityDiagnosticsPanel = ({ endpoint }: { endpoint: EndpointData }) => {
                   {t("endpoints.entityId")}
                 </TableCell>
                 <TableCell>
-                  <Typography fontFamily="monospace" fontSize="0.85em">
+                  <Typography
+                    sx={{ fontFamily: "monospace", fontSize: "0.85em" }}
+                  >
                     {diag.entityId}
                   </Typography>
                 </TableCell>
@@ -202,7 +204,9 @@ const EntityDiagnosticsPanel = ({ endpoint }: { endpoint: EndpointData }) => {
                   {t("endpoints.haState")}
                 </TableCell>
                 <TableCell>
-                  <Typography fontFamily="monospace" fontSize="0.85em">
+                  <Typography
+                    sx={{ fontFamily: "monospace", fontSize: "0.85em" }}
+                  >
                     {diag.haState}
                   </Typography>
                 </TableCell>
@@ -239,7 +243,7 @@ const EntityDiagnosticsPanel = ({ endpoint }: { endpoint: EndpointData }) => {
             <Typography
               variant="caption"
               color="text.secondary"
-              fontWeight={600}
+              sx={{ fontWeight: 600 }}
             >
               {t("endpoints.keyHaAttributes")}
             </Typography>
@@ -258,7 +262,9 @@ const EntityDiagnosticsPanel = ({ endpoint }: { endpoint: EndpointData }) => {
                         {key}
                       </TableCell>
                       <TableCell>
-                        <Typography fontFamily="monospace" fontSize="0.8em">
+                        <Typography
+                          sx={{ fontFamily: "monospace", fontSize: "0.8em" }}
+                        >
                           {typeof value === "object"
                             ? JSON.stringify(value)
                             : String(value)}
@@ -278,11 +284,16 @@ const EntityDiagnosticsPanel = ({ endpoint }: { endpoint: EndpointData }) => {
             <Typography
               variant="caption"
               color="text.secondary"
-              fontWeight={600}
+              sx={{ fontWeight: 600 }}
             >
               {t("endpoints.entityMappings")}
             </Typography>
-            <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
+            <Stack
+              direction="row"
+              spacing={0.5}
+              sx={{ flexWrap: "wrap" }}
+              useFlexGap
+            >
               {diag.mappings.map((m) => (
                 <Tooltip key={m.label} title={m.entity}>
                   <Chip
@@ -358,8 +369,7 @@ export const EndpointState = (props: EndpointStateProps) => {
         <Stack spacing={2}>
           <Stack
             direction="row"
-            justifyContent="space-between"
-            alignItems="center"
+            sx={{ justifyContent: "space-between", alignItems: "center" }}
           >
             <Typography component="span">
               {t("endpoints.aboutEndpoint")}
@@ -388,7 +398,7 @@ export const EndpointState = (props: EndpointStateProps) => {
               expandIcon={<ExpandMoreIcon />}
               aria-controls="panel1-content"
             >
-              <Box display="flex" alignItems="center" gap={1}>
+              <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
                 <Typography component="span">
                   {t("endpoints.behavior")}: <strong>{behavior}</strong>
                 </Typography>
@@ -462,7 +472,7 @@ const RenderProperty = (props: { property: unknown }) => {
     }
   }, [props.property]);
   return (
-    <Typography fontFamily="monospace" fontSize="0.9em">
+    <Typography sx={{ fontFamily: "monospace", fontSize: "0.9em" }}>
       {value}
     </Typography>
   );

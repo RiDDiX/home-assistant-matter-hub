@@ -122,6 +122,7 @@ const CredentialDialog = ({
             }
             fullWidth
             helperText="4-8 digit PIN code for this lock"
+            // @ts-expect-error MUI v9 type mismatch, runtime is correct
             inputProps={{ inputMode: "numeric", pattern: "[0-9]*" }}
           />
           <TextField

@@ -4,7 +4,7 @@ import BlindsIcon from "@mui/icons-material/Blinds";
 import CheckBoxIcon from "@mui/icons-material/CheckBox";
 import DeviceHubIcon from "@mui/icons-material/DeviceHub";
 import GroupWorkIcon from "@mui/icons-material/GroupWork";
-import UnknownIcon from "@mui/icons-material/HelpOutline";
+import UnknownIcon from "@mui/icons-material/HelpOutlineOutlined";
 import LightbulbIcon from "@mui/icons-material/Lightbulb";
 import LockIcon from "@mui/icons-material/Lock";
 import MeetingRoomIcon from "@mui/icons-material/MeetingRoom";

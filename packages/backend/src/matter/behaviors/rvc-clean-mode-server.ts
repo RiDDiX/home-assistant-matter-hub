@@ -43,7 +43,7 @@ class RvcCleanModeServerBase extends Base {
   }
 
   private update(entity: HomeAssistantEntityInformation) {
-    if (!entity.state || !entity.state.attributes) {
+    if (!entity.state?.attributes) {
       return;
     }
     const reportedMode = this.state.config.getCurrentMode(

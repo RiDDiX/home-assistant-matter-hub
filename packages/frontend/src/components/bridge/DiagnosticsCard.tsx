@@ -156,7 +156,7 @@ export const DiagnosticsCard = ({ devices }: DiagnosticsCardProps) => {
   return (
     <Card>
       <CardContent>
-        <Box display="flex" alignItems="center" gap={1} mb={2}>
+        <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 2 }}>
           <Avatar sx={{ bgcolor: "secondary.main" }}>
             <MonitorHeartIcon />
           </Avatar>
@@ -169,9 +169,8 @@ export const DiagnosticsCard = ({ devices }: DiagnosticsCardProps) => {
         <Stack
           direction="row"
           spacing={1}
-          flexWrap="wrap"
           useFlexGap
-          sx={{ mb: 2 }}
+          sx={{ mb: 1, flexWrap: "wrap" }}
         >
           <Chip
             icon={<CheckCircleIcon />}
@@ -222,15 +221,18 @@ export const DiagnosticsCard = ({ devices }: DiagnosticsCardProps) => {
           </Typography>
           <Stack spacing={0.5} sx={{ mb: 1 }}>
             {unavailable.map((d) => (
-              <Box key={d.entityId} display="flex" alignItems="center" gap={1}>
+              <Box
+                key={d.entityId}
+                sx={{ display: "flex", alignItems: "center", gap: 1 }}
+              >
                 <WarningAmberIcon color="warning" sx={{ fontSize: 16 }} />
-                <Typography variant="body2" fontWeight="medium">
+                <Typography variant="body2" sx={{ fontWeight: 500 }}>
                   {d.name}
                 </Typography>
                 <Typography
                   variant="caption"
                   color="text.secondary"
-                  fontFamily="monospace"
+                  sx={{ fontFamily: "monospace" }}
                 >
                   {d.entityId}
                 </Typography>
@@ -257,7 +259,14 @@ export const DiagnosticsCard = ({ devices }: DiagnosticsCardProps) => {
               .sort((a, b) => (a.batteryPercent ?? 0) - (b.batteryPercent ?? 0))
               .map((d) => (
                 <Box key={d.entityId}>
-                  <Box display="flex" alignItems="center" gap={1} mb={0.5}>
+                  <Box
+                    sx={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 1,
+                      mb: 0.5,
+                    }}
+                  >
                     {d.isCharging ? (
                       <BatteryChargingFullIcon
                         color="info"
@@ -271,7 +280,7 @@ export const DiagnosticsCard = ({ devices }: DiagnosticsCardProps) => {
                     <Typography variant="body2" sx={{ flexGrow: 1 }}>
                       {d.name}
                     </Typography>
-                    <Typography variant="body2" fontWeight="medium">
+                    <Typography variant="body2" sx={{ fontWeight: 500 }}>
                       {d.batteryPercent}%{d.isCharging ? " ⚡" : ""}
                     </Typography>
                   </Box>
@@ -300,8 +309,11 @@ export const DiagnosticsCard = ({ devices }: DiagnosticsCardProps) => {
           </Typography>
           <Stack spacing={0.5} sx={{ mb: 1 }}>
             {withMappings.map((d) => (
-              <Box key={d.entityId} display="flex" alignItems="center" gap={1}>
-                <Typography variant="body2" fontWeight="medium" noWrap>
+              <Box
+                key={d.entityId}
+                sx={{ display: "flex", alignItems: "center", gap: 1 }}
+              >
+                <Typography variant="body2" sx={{ fontWeight: 500 }} noWrap>
                   {d.name}
                 </Typography>
                 <Stack direction="row" spacing={0.5} sx={{ ml: "auto" }}>

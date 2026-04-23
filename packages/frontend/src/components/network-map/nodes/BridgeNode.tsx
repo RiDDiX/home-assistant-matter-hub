@@ -97,15 +97,18 @@ export const BridgeNode = ({ data }: NodeProps) => {
         <Icon sx={{ fontSize: 16, color: config.color }} />
         <Typography
           variant="subtitle2"
-          fontWeight={700}
           noWrap
-          sx={{ color: config.color }}
+          sx={{ fontWeight: 700, color: config.color }}
         >
           {label}
         </Typography>
       </Box>
 
-      <Typography variant="caption" color="text.secondary" display="block">
+      <Typography
+        variant="caption"
+        color="text.secondary"
+        sx={{ display: "block" }}
+      >
         Port {port}
       </Typography>
 

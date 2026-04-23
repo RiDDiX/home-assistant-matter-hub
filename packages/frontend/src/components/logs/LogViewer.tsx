@@ -147,7 +147,7 @@ export const LogViewer = ({ open, onClose }: LogViewerProps) => {
 
       <DialogContent>
         <Stack spacing={2} sx={{ mb: 2 }}>
-          <Stack direction="row" spacing={2} alignItems="center">
+          <Stack direction="row" spacing={2} sx={{ alignItems: "center" }}>
             <FormControl size="small" sx={{ minWidth: 200 }}>
               <InputLabel>{t("logs.logLevel")}</InputLabel>
               <Select

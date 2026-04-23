@@ -182,7 +182,7 @@ export function HealthDashboard(props: HealthDashboardProps = {}) {
 
   if (loading) {
     return (
-      <Box display="flex" justifyContent="center" p={4}>
+      <Box sx={{ display: "flex", justifyContent: "center", p: 4 }}>
         <CircularProgress />
       </Box>
     );
@@ -208,12 +208,14 @@ export function HealthDashboard(props: HealthDashboardProps = {}) {
   return (
     <Box sx={{ p: 2 }}>
       <Box
-        display="flex"
-        alignItems="center"
-        justifyContent="space-between"
-        mb={2}
+        sx={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          mb: 2,
+        }}
       >
-        <Box display="flex" alignItems="center" gap={1}>
+        <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
           {statusIcon}
           <Typography variant="h5">{t("health.systemHealth")}</Typography>
           <Chip
@@ -228,7 +230,7 @@ export function HealthDashboard(props: HealthDashboardProps = {}) {
             size="small"
           />
         </Box>
-        <Box display="flex" alignItems="center" gap={1}>
+        <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
           <Button
             variant="outlined"
             size="small"
@@ -285,14 +287,16 @@ export function HealthDashboard(props: HealthDashboardProps = {}) {
       <Divider sx={{ my: 3 }} />
 
       <Box
-        display="flex"
-        alignItems="center"
-        justifyContent="space-between"
-        mb={2}
-        flexWrap="wrap"
-        gap={1}
+        sx={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          mb: 2,
+          flexWrap: "wrap",
+          gap: 1,
+        }}
       >
-        <Box display="flex" alignItems="center" gap={1}>
+        <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
           <MemoryIcon />
           <Typography variant="h6">{t("health.bridgeStatus")}</Typography>
           <Chip
@@ -301,7 +305,7 @@ export function HealthDashboard(props: HealthDashboardProps = {}) {
             variant="outlined"
           />
         </Box>
-        <Box display="flex" alignItems="center" gap={1}>
+        <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
           <SortIcon fontSize="small" color="action" />
           <FormControl size="small" sx={{ minWidth: 120 }}>
             <InputLabel>{t("health.sortBy")}</InputLabel>
@@ -338,7 +342,7 @@ export function HealthDashboard(props: HealthDashboardProps = {}) {
         </Box>
       </Box>
 
-      <Grid container spacing={2} alignItems="stretch">
+      <Grid container spacing={2} sx={{ alignItems: "stretch" }}>
         {[...health.bridgeDetails]
           .sort((a, b) => {
             let cmp = 0;
@@ -382,32 +386,37 @@ export function HealthDashboard(props: HealthDashboardProps = {}) {
                   }}
                 >
                   <Box
-                    display="flex"
-                    justifyContent="space-between"
-                    alignItems="flex-start"
-                    flexShrink={0}
+                    sx={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "flex-start",
+                      flexShrink: 0,
+                    }}
                   >
                     <Box
-                      display="flex"
-                      alignItems="center"
-                      gap={1}
-                      minWidth={0}
+                      sx={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 1,
+                        minWidth: 0,
+                      }}
                     >
                       <DevicesIcon />
                       <Typography
                         variant="subtitle1"
-                        fontWeight="bold"
                         noWrap
-                        sx={{ maxWidth: 140 }}
+                        sx={{ fontWeight: "bold", maxWidth: 140 }}
                       >
                         {bridge.name}
                       </Typography>
                     </Box>
                     <Box
-                      display="flex"
-                      alignItems="center"
-                      gap={0.5}
-                      flexShrink={0}
+                      sx={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 0.5,
+                        flexShrink: 0,
+                      }}
                     >
                       <Chip
                         label={bridge.status.toUpperCase()}
@@ -445,10 +454,12 @@ export function HealthDashboard(props: HealthDashboardProps = {}) {
 
                   <Box sx={{ mt: "auto", pt: 1, flexShrink: 0 }}>
                     <Box
-                      display="flex"
-                      flexWrap="wrap"
-                      gap={0.5}
-                      alignItems="center"
+                      sx={{
+                        display: "flex",
+                        flexWrap: "wrap",
+                        gap: 0.5,
+                        alignItems: "center",
+                      }}
                     >
                       <Chip
                         label={`${t("common.port")} ${bridge.port}`}
@@ -497,7 +508,14 @@ export function HealthDashboard(props: HealthDashboardProps = {}) {
                       <Typography variant="caption" color="text.secondary">
                         {t("health.connectedTo")}:
                       </Typography>
-                      <Box display="flex" gap={0.5} flexWrap="wrap" mt={0.5}>
+                      <Box
+                        sx={{
+                          display: "flex",
+                          gap: 0.5,
+                          flexWrap: "wrap",
+                          mt: 0.5,
+                        }}
+                      >
                         {bridge.fabrics.map((fabric) => (
                           <Tooltip
                             key={fabric.fabricIndex}
@@ -546,7 +564,7 @@ export function HealthDashboard(props: HealthDashboardProps = {}) {
       {health.recovery.enabled && (
         <>
           <Divider sx={{ my: 3 }} />
-          <Box display="flex" alignItems="center" gap={1} mb={1}>
+          <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 1 }}>
             <AutorenewIcon />
             <Typography variant="h6">{t("health.autoRecovery")}</Typography>
             <Chip label={t("common.enabled")} color="success" size="small" />

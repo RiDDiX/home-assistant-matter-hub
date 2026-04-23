@@ -120,5 +120,5 @@ i18n
 restoreCustomLanguages();
 restoreOverrides();
 
-export { STORAGE_KEY, CUSTOM_LANGS_KEY };
+export { CUSTOM_LANGS_KEY, STORAGE_KEY };
 export default i18n;

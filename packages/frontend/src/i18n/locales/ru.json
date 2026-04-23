@@ -57,7 +57,8 @@
     "import": "Импорт",
     "export": "Экспорт",
     "exportAll": "Экспортировать все",
-    "wizard": "Мастер настройки"
+    "wizard": "Мастер настройки",
+    "finish": ""
   },
   "nav": {
     "bridges": "Мосты",
@@ -141,7 +142,9 @@
     "bridgeStatusRunning": "{{running}} работает",
     "bridgeStatusFailed": "{{failed}} с ошибками",
     "devicesFailed": "{{count}} с ошибками",
-    "uptimeFormat": "{{time}}"
+    "uptimeFormat": "{{time}}",
+    "openWizard": "",
+    "standaloneDeviceWizard": ""
   },
   "bridge": {
     "name": "Имя моста",
@@ -352,7 +355,9 @@
     "sortType": "Тип устройства",
     "sortName": "Имя",
     "deviceCount": "{{count}} устройство(а)",
-    "filteredCount": "{{filtered}} из {{total}} устройств"
+    "filteredCount": "{{filtered}} из {{total}} устройств",
+    "failedEntitiesTitle": "",
+    "noFailedEntities": ""
   },
   "diagnostics": {
     "title": "Диагностика в реальном времени",
@@ -582,7 +587,8 @@
   },
   "footer": {
     "github": "GitHub",
-    "documentation": "Документация"
+    "documentation": "Документация",
+    "support": ""
   },
   "languageSwitcher": {
     "disclaimer": "Переводы могут быть неполными.",
@@ -616,5 +622,7 @@
     "importJson": "Импорт JSON",
     "importSuccess": "Импортировано {{count}} перевод(ов).",
     "importFailed": "Ошибка импорта: недопустимый формат JSON."
-  }
+  },
+  "wizard": "",
+  "standaloneDeviceWizard": ""
 }

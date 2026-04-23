@@ -57,7 +57,8 @@
     "import": "Importera",
     "export": "Exportera",
     "exportAll": "Exportera alla",
-    "wizard": "Guide"
+    "wizard": "Guide",
+    "finish": ""
   },
   "nav": {
     "bridges": "Bryggor",
@@ -141,7 +142,9 @@
     "bridgeStatusRunning": "{{running}} Körs",
     "bridgeStatusFailed": "{{failed}} misslyckades",
     "devicesFailed": "{{count}} misslyckades",
-    "uptimeFormat": "{{time}}"
+    "uptimeFormat": "{{time}}",
+    "openWizard": "",
+    "standaloneDeviceWizard": ""
   },
   "bridge": {
     "name": "Brygg-namn",
@@ -352,7 +355,9 @@
     "sortType": "Enhetstyp",
     "sortName": "Namn",
     "deviceCount": "{{count}} Enheter",
-    "filteredCount": "{{filtered}} av {{total}} enheter"
+    "filteredCount": "{{filtered}} av {{total}} enheter",
+    "failedEntitiesTitle": "",
+    "noFailedEntities": ""
   },
   "diagnostics": {
     "title": "Live diagnostik",
@@ -617,5 +622,7 @@
     "importJson": "Importera JSON",
     "importSuccess": "{{count}} översättning(ar) importerade.",
     "importFailed": "Import misslyckades: ogiltigt JSON-format."
-  }
+  },
+  "wizard": "",
+  "standaloneDeviceWizard": ""
 }

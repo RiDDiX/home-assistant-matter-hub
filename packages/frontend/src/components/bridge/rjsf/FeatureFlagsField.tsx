@@ -71,16 +71,17 @@ export function FeatureFlagsField(props: FieldProps) {
                     }}
                   >
                     <Box
-                      display="flex"
-                      justifyContent="space-between"
-                      alignItems="flex-start"
-                      gap={1}
+                      sx={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "flex-start",
+                        gap: 1,
+                      }}
                     >
                       <Box sx={{ flex: 1, minWidth: 0 }}>
                         <Typography
                           variant="subtitle2"
-                          fontWeight={600}
-                          sx={{ lineHeight: 1.3 }}
+                          sx={{ fontWeight: 600, lineHeight: 1.2 }}
                         >
                           {flagSchema.title ?? key}
                         </Typography>

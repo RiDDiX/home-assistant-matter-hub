@@ -67,7 +67,7 @@ class RvcOperationalStateServerBase extends Base {
   }
 
   private update(entity: HomeAssistantEntityInformation) {
-    if (!entity.state || !entity.state.attributes) {
+    if (!entity.state?.attributes) {
       return;
     }
     const newState = this.state.config.getOperationalState(

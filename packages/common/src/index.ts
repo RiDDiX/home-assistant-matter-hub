@@ -17,5 +17,6 @@ export * from "./home-assistant-filter.js";
 export * from "./lock-credential.js";
 export * from "./mapping-profile.js";
 export * from "./schemas/index.js";
+export * from "./standalone-device-data.js";
 export * from "./utils/index.js";
 export * from "./websocket-message.js";

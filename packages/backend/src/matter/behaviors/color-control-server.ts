@@ -121,7 +121,7 @@ export class ColorControlServerBase extends FeaturedBase {
   }
 
   private update(entity: HomeAssistantEntityInformation) {
-    if (!entity.state || !entity.state.attributes) {
+    if (!entity.state?.attributes) {
       return;
     }
     const config = this.state.config;

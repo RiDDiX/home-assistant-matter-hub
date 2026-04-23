@@ -57,7 +57,8 @@
     "import": "Importieren",
     "export": "Exportieren",
     "exportAll": "Alle exportieren",
-    "wizard": "Assistent"
+    "wizard": "Assistent",
+    "finish": ""
   },
   "nav": {
     "bridges": "Bridges",
@@ -141,7 +142,9 @@
     "bridgeStatusRunning": "{{running}} läuft",
     "bridgeStatusFailed": "{{failed}} fehlgeschlagen",
     "devicesFailed": "{{count}} fehlgeschlagen",
-    "uptimeFormat": "{{time}}"
+    "uptimeFormat": "{{time}}",
+    "openWizard": "",
+    "standaloneDeviceWizard": ""
   },
   "bridge": {
     "name": "Bridge-Name",
@@ -432,7 +435,9 @@
     "sortType": "Gerätetyp",
     "sortName": "Name",
     "deviceCount": "{{count}} Gerät(e)",
-    "filteredCount": "{{filtered}} von {{total}} Geräten"
+    "filteredCount": "{{filtered}} von {{total}} Geräten",
+    "failedEntitiesTitle": "",
+    "noFailedEntities": ""
   },
   "diagnostics": {
     "title": "Live-Diagnose",
@@ -617,5 +622,7 @@
     "bridgesToCreate": "Zu erstellende Bridges ({{count}})",
     "bridgesCreated": "{{count}} Bridge(s) bereits in dieser Sitzung erstellt",
     "addAnother": "Weitere hinzufügen"
-  }
+  },
+  "wizard": "",
+  "standaloneDeviceWizard": ""
 }

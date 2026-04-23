@@ -203,7 +203,7 @@ export const AreaBridgeSetupPage = () => {
 
   if (loading) {
     return (
-      <Box display="flex" justifyContent="center" p={4}>
+      <Box sx={{ display: "flex", justifyContent: "center", p: 4 }}>
         <CircularProgress />
       </Box>
     );
@@ -229,7 +229,11 @@ export const AreaBridgeSetupPage = () => {
         <>
           {/* Controller Selection */}
           <Box>
-            <Typography variant="subtitle1" fontWeight={600} gutterBottom>
+            <Typography
+              variant="subtitle1"
+              gutterBottom
+              sx={{ fontWeight: 600 }}
+            >
               {t("areaSetup.selectController")}
             </Typography>
             <Grid container spacing={1.5}>
@@ -258,11 +262,20 @@ export const AreaBridgeSetupPage = () => {
                         <CardContent
                           sx={{ p: 1.5, "&:last-child": { pb: 1.5 } }}
                         >
-                          <Box display="flex" alignItems="center" gap={0.5}>
-                            <Typography fontSize={18}>
+                          <Box
+                            sx={{
+                              display: "flex",
+                              alignItems: "center",
+                              gap: 0.5,
+                            }}
+                          >
+                            <Typography sx={{ fontSize: 18 }}>
                               {controllerIcons[profile.id] ?? "\uD83C\uDFE0"}
                             </Typography>
-                            <Typography variant="body2" fontWeight={500}>
+                            <Typography
+                              variant="body2"
+                              sx={{ fontWeight: 500 }}
+                            >
                               {profile.name}
                             </Typography>
                             {isSelected && (
@@ -284,18 +297,20 @@ export const AreaBridgeSetupPage = () => {
           {/* Area Selection */}
           <Box>
             <Box
-              display="flex"
-              alignItems="center"
-              justifyContent="space-between"
-              mb={1}
+              sx={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                mb: 1,
+              }}
             >
-              <Typography variant="subtitle1" fontWeight={600}>
+              <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
                 {t("areaSetup.selectAreas", {
                   selected: selectedAreas.size,
                   total: areas.length,
                 })}
               </Typography>
-              <Box display="flex" gap={1}>
+              <Box sx={{ display: "flex", gap: 1 }}>
                 <Button size="small" onClick={selectAll}>
                   {t("common.all")}
                 </Button>
@@ -341,7 +356,13 @@ export const AreaBridgeSetupPage = () => {
                             width: "100%",
                           }}
                         >
-                          <Box display="flex" alignItems="center" gap={1}>
+                          <Box
+                            sx={{
+                              display: "flex",
+                              alignItems: "center",
+                              gap: 1,
+                            }}
+                          >
                             <FormControlLabel
                               control={
                                 <Checkbox
@@ -366,11 +387,13 @@ export const AreaBridgeSetupPage = () => {
                             />
                           </Box>
                           <Box
-                            display="flex"
-                            gap={0.5}
-                            flexWrap="wrap"
-                            mt={0.5}
-                            ml={4}
+                            sx={{
+                              display: "flex",
+                              gap: 0.5,
+                              flexWrap: "wrap",
+                              mt: 0.5,
+                              ml: 4,
+                            }}
                           >
                             {topDomains.map(([domain, count]) => (
                               <Chip
@@ -392,7 +415,7 @@ export const AreaBridgeSetupPage = () => {
           </Box>
 
           {/* Create Button */}
-          <Box display="flex" gap={2} alignItems="center">
+          <Box sx={{ display: "flex", gap: 2, alignItems: "center" }}>
             <Button
               onClick={() => navigate(navigation.bridges)}
               startIcon={<ArrowBackIcon />}

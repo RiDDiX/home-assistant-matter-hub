@@ -57,7 +57,8 @@
     "import": "Importuj",
     "export": "Eksportuj",
     "exportAll": "Eksportuj wszystko",
-    "wizard": "Kreator"
+    "wizard": "Kreator",
+    "finish": ""
   },
   "nav": {
     "bridges": "Mostki",
@@ -141,7 +142,9 @@
     "bridgeStatusRunning": "{{running}} uruchomione",
     "bridgeStatusFailed": "{{failed}} nieudane",
     "devicesFailed": "{{count}} nieudane",
-    "uptimeFormat": "{{time}}"
+    "uptimeFormat": "{{time}}",
+    "openWizard": "",
+    "standaloneDeviceWizard": ""
   },
   "bridge": {
     "name": "Nazwa mostka",
@@ -288,7 +291,21 @@
     "descending": "Malejąco",
     "connectedTo": "Połączono z",
     "autoRecovery": "Automatyczne odzyskiwanie",
-    "recoveryAttempts": "Próby odzyskania"
+    "recoveryAttempts": "Próby odzyskania",
+    "fabrics": "",
+    "networkDiagnostics": "",
+    "checksPassed": "",
+    "checksWarning": "",
+    "checksFailed": "",
+    "hideDetails": "",
+    "showDetails": "",
+    "allChecks": "",
+    "check": "",
+    "statusLabel": "",
+    "message": "",
+    "networkInterfaces": "",
+    "interfaceName": "",
+    "refresh": ""
   },
   "mapping": {
     "title": "Mapowania encji",
@@ -313,7 +330,13 @@
     "loadFailed": "Nie udało się wczytać mapowań encji",
     "noMappings": "Nie skonfigurowano niestandardowych mapowań encji. Użyj mapowań, aby nadpisać typy urządzeń Matter, ustawić własne nazwy lub wyłączyć konkretne encje.",
     "applying": "Zastosowywanie...",
-    "applyCount": "Zastosuj {{count}} mapowań"
+    "applyCount": "Zastosuj {{count}} mapowań",
+    "customProductName": "",
+    "customProductNameHelp": "",
+    "customVendorName": "",
+    "customVendorNameHelp": "",
+    "customSerialNumber": "",
+    "customSerialNumberHelp": ""
   },
   "notFound": {
     "title": "Nie znaleziono strony",
@@ -332,7 +355,9 @@
     "sortType": "Typ urządzenia",
     "sortName": "Nazwa",
     "deviceCount": "{{count}} urządzeń",
-    "filteredCount": "{{filtered}} z {{total}} urządzeń"
+    "filteredCount": "{{filtered}} z {{total}} urządzeń",
+    "failedEntitiesTitle": "",
+    "noFailedEntities": ""
   },
   "diagnostics": {
     "title": "Diagnostyka na żywo",
@@ -346,7 +371,8 @@
     "bridgeStop": "Stop mostka",
     "filterEvents": "Filtruj typy zdarzeń",
     "clearEvents": "Wyczyść wszystkie zdarzenia",
-    "noEvents": "Brak zdarzeń pasujących do aktualnych filtrów."
+    "noEvents": "Brak zdarzeń pasujących do aktualnych filtrów.",
+    "entityWarning": ""
   },
   "startup": {
     "title": "Kolejność uruchamiania",
@@ -561,7 +587,8 @@
   },
   "footer": {
     "github": "GitHub",
-    "documentation": "Dokumentacja"
+    "documentation": "Dokumentacja",
+    "support": ""
   },
   "languageSwitcher": {
     "disclaimer": "Tłumaczenia mogą być niekompletne.",
@@ -595,5 +622,7 @@
     "importJson": "Importuj JSON",
     "importSuccess": "Zaimportowano {{count}} tłumaczeń.",
     "importFailed": "Import nie powiódł się: nieprawidłowy format JSON."
-  }
+  },
+  "wizard": "",
+  "standaloneDeviceWizard": ""
 }

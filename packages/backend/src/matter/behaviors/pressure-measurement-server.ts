@@ -29,7 +29,7 @@ export class PressureMeasurementServerBase extends Base {
   }
 
   private update(entity: HomeAssistantEntityInformation) {
-    if (!entity.state || !entity.state.attributes) {
+    if (!entity.state?.attributes) {
       return;
     }
     const pressure = this.getPressure(entity.state);

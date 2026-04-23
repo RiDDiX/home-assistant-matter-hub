@@ -35,7 +35,7 @@ export function BridgeTemplateSelector({
 }: BridgeTemplateSelectorProps) {
   return (
     <Box>
-      <Typography variant="subtitle1" gutterBottom fontWeight={600}>
+      <Typography variant="subtitle1" gutterBottom sx={{ fontWeight: 600 }}>
         Start from a Template (optional)
       </Typography>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
@@ -43,11 +43,14 @@ export function BridgeTemplateSelector({
         settings. You can customize everything afterwards.
       </Typography>
 
-      <Grid container spacing={1.5} alignItems="flex-start">
+      <Grid container spacing={1.5} sx={{ alignItems: "flex-start" }}>
         {bridgeTemplates.map((template) => {
           const isSelected = selectedTemplate === template.id;
           return (
-            <Grid key={template.id} size={{ xs: 12, sm: 6, md: 4 }}>
+            <Grid
+              key={template.id}
+              sx={{ gridColumn: { xs: "span 12", sm: "span 6", md: "span 4" } }}
+            >
               <Card
                 variant="outlined"
                 sx={{
@@ -69,8 +72,15 @@ export function BridgeTemplateSelector({
                   }}
                 >
                   <CardContent sx={{ p: 1.5, "&:last-child": { pb: 1.5 } }}>
-                    <Box display="flex" alignItems="center" gap={1} mb={0.5}>
-                      <Typography fontSize={20}>
+                    <Box
+                      sx={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 1,
+                        mb: 0.5,
+                      }}
+                    >
+                      <Typography sx={{ fontSize: 20 }}>
                         {templateIcons[template.icon] ?? templateIcons.default}
                       </Typography>
                       <Typography variant="subtitle2" sx={{ flexGrow: 1 }}>

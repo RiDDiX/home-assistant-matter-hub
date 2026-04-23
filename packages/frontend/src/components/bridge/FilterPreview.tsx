@@ -187,8 +187,8 @@ export function FilterPreview({ filter }: FilterPreviewProps) {
       <Collapse in={expanded && result !== null}>
         {result && (
           <Box sx={{ mt: 2 }}>
-            <Box display="flex" alignItems="center" gap={1} mb={1}>
-              <Typography variant="subtitle1" fontWeight="bold">
+            <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 1 }}>
+              <Typography variant="subtitle1" sx={{ fontWeight: "bold" }}>
                 {result.total} entities match
               </Typography>
               {result.truncated && (
@@ -223,7 +223,7 @@ export function FilterPreview({ filter }: FilterPreviewProps) {
               </Stack>
             )}
 
-            <Box display="flex" gap={0.5} flexWrap="wrap" mb={2}>
+            <Box sx={{ display: "flex", gap: 0.5, flexWrap: "wrap", mb: 2 }}>
               {Object.entries(domainCounts)
                 .sort((a, b) => b[1] - a[1])
                 .map(([domain, count]) => (
@@ -251,13 +251,22 @@ export function FilterPreview({ filter }: FilterPreviewProps) {
               {result.entities.map((entity) => (
                 <ListItem key={entity.entity_id} divider>
                   <ListItemText
-                    primary={entity.friendly_name || entity.entity_id}
-                    secondary={`${entity.entity_id}${domainToMatterType[entity.domain] ? ` → ${domainToMatterType[entity.domain]}` : ""}`}
-                    primaryTypographyProps={{ variant: "body2" }}
-                    secondaryTypographyProps={{
-                      variant: "caption",
-                      fontFamily: "monospace",
-                    }}
+                    primary={
+                      <Typography variant="body2">
+                        {entity.friendly_name || entity.entity_id}
+                      </Typography>
+                    }
+                    secondary={
+                      <Typography
+                        variant="caption"
+                        sx={{ fontFamily: "monospace" }}
+                      >
+                        {entity.entity_id}
+                        {domainToMatterType[entity.domain]
+                          ? ` → ${domainToMatterType[entity.domain]}`
+                          : ""}
+                      </Typography>
+                    }
                   />
                 </ListItem>
               ))}

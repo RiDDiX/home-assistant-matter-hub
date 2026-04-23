@@ -4,7 +4,7 @@ import type {
   BridgeData,
   EntityMappingConfig,
 } from "@home-assistant-matter-hub/common";
-import archiver from "archiver";
+import * as archiver from "archiver";
 import type { Request } from "express";
 import express from "express";
 import multer from "multer";
@@ -73,7 +73,7 @@ export function backupApi(
         includesIcons,
       };
 
-      const archive = archiver("zip", { zlib: { level: 9 } });
+      const archive = archiver.create("zip", { zlib: { level: 9 } });
       const dateStr = new Date().toISOString().split("T")[0];
       const filename = includeIdentity
         ? `hamh-full-backup-${dateStr}.zip`

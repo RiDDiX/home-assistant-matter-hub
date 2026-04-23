@@ -23,6 +23,7 @@ import {
 import { ComposedAirPurifierEndpoint } from "../composed/composed-air-purifier-endpoint.js";
 import { ComposedSensorEndpoint } from "../composed/composed-sensor-endpoint.js";
 import { UserComposedEndpoint } from "../composed/user-composed-endpoint.js";
+import { mapEntityToClusters } from "../entity-to-cluster-mapper.js";
 import { createLegacyEndpointType } from "./create-legacy-endpoint-type.js";
 import { supportsCleaningModes } from "./vacuum/behaviors/vacuum-rvc-clean-mode-server.js";
 
@@ -45,6 +46,16 @@ export class LegacyEndpoint extends EntityEndpoint {
     if (!state) {
       return;
     }
+
+    // Construct HomeAssistantEntityInformation for mapping
+    const entityInfo = {
+      ...entity,
+      state,
+    };
+    // Centralized cluster mapping logic
+    const _clusterMapping = mapEntityToClusters(entityInfo, mapping);
+    // Optionally, log or use clusterMapping.clusters, clusterMapping.composed, etc.
+    // This can be used to drive endpoint type selection, validation, and diagnostics.
 
     // Auto-mapping: Skip entities that have been auto-assigned to another device
     if (

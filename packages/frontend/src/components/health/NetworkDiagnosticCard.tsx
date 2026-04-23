@@ -82,12 +82,14 @@ export function NetworkDiagnosticCard() {
   return (
     <Paper variant="outlined" sx={{ p: 2 }}>
       <Box
-        display="flex"
-        justifyContent="space-between"
-        alignItems="center"
-        mb={1}
+        sx={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          mb: 1,
+        }}
       >
-        <Typography variant="subtitle1" fontWeight="bold">
+        <Typography variant="subtitle1" sx={{ fontWeight: "bold" }}>
           {t("health.networkDiagnostics")}
         </Typography>
         <Button size="small" onClick={fetchDiagnostics} disabled={loading}>
@@ -103,7 +105,7 @@ export function NetworkDiagnosticCard() {
 
       {data && (
         <>
-          <Box display="flex" gap={1} mb={1.5} flexWrap="wrap">
+          <Box sx={{ display: "flex", gap: 1, mb: 1.5, flexWrap: "wrap" }}>
             {passCount > 0 && (
               <Chip
                 label={`${passCount} ${t("health.checksPassed")}`}
@@ -200,7 +202,7 @@ export function NetworkDiagnosticCard() {
                         <Typography
                           variant="caption"
                           color="text.secondary"
-                          display="block"
+                          sx={{ display: "block" }}
                         >
                           {check.detail}
                         </Typography>

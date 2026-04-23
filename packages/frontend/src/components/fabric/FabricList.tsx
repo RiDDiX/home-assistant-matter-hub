@@ -14,10 +14,7 @@ export const FabricList = (props: FabricListProps) => {
       {props.fabrics.map((fabric) => (
         <Box
           key={fabric.fabricId}
-          display="flex"
-          alignItems="center"
-          gap={1.5}
-          py={0.5}
+          sx={{ display: "flex", alignItems: "center", gap: 1.5, py: 0.5 }}
         >
           <FabricIcon fabric={fabric} />
           <Typography variant="body2">

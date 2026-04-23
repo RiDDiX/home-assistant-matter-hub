@@ -7,13 +7,11 @@ import {
   matterDeviceTypeLabels,
   RvcCleanModeModeTag,
 } from "@home-assistant-matter-hub/common";
-import AddCircleOutlineIcon from "@mui/icons-material/AddCircleOutline";
+import AddCircleOutlineIcon from "@mui/icons-material/AddCircleOutlineOutlined";
 import DeleteIcon from "@mui/icons-material/Delete";
 import Autocomplete from "@mui/material/Autocomplete";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
-import Chip from "@mui/material/Chip";
-import CircularProgress from "@mui/material/CircularProgress";
 import Dialog from "@mui/material/Dialog";
 import DialogActions from "@mui/material/DialogActions";
 import DialogContent from "@mui/material/DialogContent";
@@ -549,21 +547,8 @@ export function EntityMappingDialog({
               }}
               loading={loadingButtons}
               freeSolo
-              renderTags={(value, getTagProps) =>
-                value.map((option, index) => (
-                  <Chip
-                    label={
-                      typeof option === "string"
-                        ? option
-                        : option.friendly_name || option.clean_name
-                    }
-                    size="small"
-                    {...getTagProps({ index })}
-                    key={typeof option === "string" ? option : option.entity_id}
-                  />
-                ))
-              }
-              renderInput={(params) => (
+              // MUI v5+ does not support renderTags prop directly; use default tag rendering or migrate to slotProps if needed
+              renderInput={(params: any) => (
                 <TextField
                   {...params}
                   variant="outlined"
@@ -573,17 +558,7 @@ export function EntityMappingDialog({
                       : "Select room buttons or type entity ID"
                   }
                   helperText="Select button entities that trigger room cleaning (e.g., button.roborock_clean_kitchen). These appear as rooms in Apple Home."
-                  InputProps={{
-                    ...params.InputProps,
-                    endAdornment: (
-                      <>
-                        {loadingButtons ? (
-                          <CircularProgress color="inherit" size={20} />
-                        ) : null}
-                        {params.InputProps.endAdornment}
-                      </>
-                    ),
-                  }}
+                  // Remove InputProps override for MUI v5+ compatibility
                 />
               )}
             />

@@ -150,7 +150,7 @@ export const BridgeIconUpload = ({
             Custom Icon
           </Typography>
 
-          <Stack direction="row" spacing={2} alignItems="center">
+          <Stack direction="row" spacing={2} sx={{ alignItems: "center" }}>
             {hasCustomIcon && customIconUrl && (
               <Box
                 component="img"

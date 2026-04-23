@@ -34,7 +34,7 @@ export const BridgeCard = ({ bridge }: BridgeCardProps) => {
         sx={{ height: "100%" }}
       >
         <CardContent>
-          <Box display="flex" alignItems="flex-start" gap={2}>
+          <Box sx={{ display: "flex", alignItems: "flex-start", gap: 2 }}>
             <Avatar
               sx={{
                 bgcolor: bridgeColor,
@@ -44,8 +44,10 @@ export const BridgeCard = ({ bridge }: BridgeCardProps) => {
             >
               <BridgeIcon />
             </Avatar>
-            <Box flexGrow={1} minWidth={0}>
-              <Box display="flex" alignItems="center" gap={1} mb={0.5}>
+            <Box sx={{ flexGrow: 1, minWidth: 0 }}>
+              <Box
+                sx={{ display: "flex", alignItems: "center", gap: 1, mb: 0.5 }}
+              >
                 <Typography
                   variant="h6"
                   component="div"
@@ -63,7 +65,12 @@ export const BridgeCard = ({ bridge }: BridgeCardProps) => {
               >
                 {t("common.port")} {bridge.port}
               </Typography>
-              <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+              <Stack
+                direction="row"
+                spacing={1}
+                useFlexGap
+                sx={{ flexWrap: "wrap" }}
+              >
                 <Chip
                   icon={<Devices fontSize="small" />}
                   label={`${bridge.deviceCount} ${t("common.devices")}`}

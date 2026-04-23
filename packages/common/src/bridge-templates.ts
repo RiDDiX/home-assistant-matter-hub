@@ -18,7 +18,7 @@ export const bridgeTemplates: BridgeTemplate[] = [
     name: "All Lights",
     description:
       "Expose all light entities. Ideal for controlling lights via Apple Home, Google Home, or Alexa.",
-    icon: "light",
+    icon: "💡",
     filter: {
       include: [{ type: HomeAssistantMatcherType.Domain, value: "light" }],
       exclude: [],
@@ -33,7 +33,7 @@ export const bridgeTemplates: BridgeTemplate[] = [
     name: "All Switches & Plugs",
     description:
       "Expose all switch entities including smart plugs. Includes power and energy monitoring.",
-    icon: "switch",
+    icon: "🔌",
     filter: {
       include: [{ type: HomeAssistantMatcherType.Domain, value: "switch" }],
       exclude: [],
@@ -46,7 +46,7 @@ export const bridgeTemplates: BridgeTemplate[] = [
     name: "All Sensors",
     description:
       "Expose temperature, humidity, pressure, and other sensors. Auto-combines related sensors from the same device.",
-    icon: "sensor",
+    icon: "📊",
     filter: {
       include: [
         { type: HomeAssistantMatcherType.Domain, value: "sensor" },
@@ -66,7 +66,7 @@ export const bridgeTemplates: BridgeTemplate[] = [
     name: "Climate & Covers",
     description:
       "Expose thermostats, fans, covers, and humidifiers for climate control.",
-    icon: "climate",
+    icon: "🌡️",
     filter: {
       include: [
         { type: HomeAssistantMatcherType.Domain, value: "climate" },
@@ -86,7 +86,7 @@ export const bridgeTemplates: BridgeTemplate[] = [
     name: "Security & Locks",
     description:
       "Expose locks, alarm panels, and security-related binary sensors (motion, door, window).",
-    icon: "lock",
+    icon: "🔒",
     filter: {
       include: [
         { type: HomeAssistantMatcherType.Domain, value: "lock" },
@@ -117,7 +117,7 @@ export const bridgeTemplates: BridgeTemplate[] = [
     name: "Robot Vacuum (Server Mode)",
     description:
       "Single vacuum bridge with Server Mode enabled. Required for Apple Home Siri commands and proper Alexa discovery. Add only ONE vacuum to this bridge.",
-    icon: "vacuum",
+    icon: "🤖",
     filter: {
       include: [{ type: HomeAssistantMatcherType.Domain, value: "vacuum" }],
       exclude: [],
@@ -132,7 +132,7 @@ export const bridgeTemplates: BridgeTemplate[] = [
     name: "Media Players & Speakers",
     description:
       "Expose media players, speakers, and TVs for volume and playback control.",
-    icon: "media_player",
+    icon: "🎵",
     filter: {
       include: [
         { type: HomeAssistantMatcherType.Domain, value: "media_player" },
@@ -147,7 +147,7 @@ export const bridgeTemplates: BridgeTemplate[] = [
     name: "Google Home Optimized",
     description:
       "All devices with Auto Force Sync enabled. Prevents Google Home from showing devices as offline after a few hours.",
-    icon: "default",
+    icon: "✨",
     filter: {
       include: [{ type: HomeAssistantMatcherType.Pattern, value: "*" }],
       exclude: [],
@@ -165,7 +165,7 @@ export const bridgeTemplates: BridgeTemplate[] = [
     name: "Alexa-Optimized Covers",
     description:
       "Covers with Alexa-friendly percentage display. Displayed percentage matches Home Assistant values.",
-    icon: "cover",
+    icon: "🪟",
     filter: {
       include: [{ type: HomeAssistantMatcherType.Domain, value: "cover" }],
       exclude: [],
@@ -181,7 +181,7 @@ export const bridgeTemplates: BridgeTemplate[] = [
     name: "Automations & Scripts",
     description:
       "Expose Home Assistant automations, scripts, and scenes as Matter switches.",
-    icon: "remote",
+    icon: "🎛️",
     filter: {
       include: [
         { type: HomeAssistantMatcherType.Domain, value: "automation" },

@@ -377,7 +377,7 @@ export const DevicesPage = () => {
             </IconButton>
           }
         >
-          <Typography variant="body2" fontWeight="bold" gutterBottom>
+          <Typography variant="body2" sx={{ fontWeight: "bold" }} gutterBottom>
             {t("devices.failedEntitiesTitle", {
               count: failedEntities.length,
               defaultValue: `${failedEntities.length} failed entities`,
@@ -390,13 +390,12 @@ export const DevicesPage = () => {
                   <WarningIcon color="warning" fontSize="small" />
                 </ListItemIcon>
                 <ListItemText
-                  primary={fe.entityId}
-                  secondary={`${fe.bridgeName} — ${fe.reason}`}
-                  primaryTypographyProps={{
-                    variant: "body2",
-                    fontWeight: "bold",
-                  }}
-                  secondaryTypographyProps={{ variant: "caption" }}
+                  primary={<span style={{ fontSize: 14 }}>{fe.entityId}</span>}
+                  secondary={
+                    <span
+                      style={{ fontSize: 12, color: "#888" }}
+                    >{`${fe.bridgeName} — ${fe.reason}`}</span>
+                  }
                 />
               </ListItem>
             ))}
@@ -427,9 +426,10 @@ export const DevicesPage = () => {
       <Card sx={{ mb: 3 }}>
         <CardContent>
           <Stack
-            spacing={2}
-            direction={{ xs: "column", md: "row" }}
-            alignItems={{ md: "center" }}
+            direction="row"
+            spacing={1.5}
+            sx={{ mb: 2, flexWrap: "wrap" }}
+            useFlexGap
           >
             <TextField
               label={t("devices.searchPlaceholder")}
@@ -547,7 +547,7 @@ export const DevicesPage = () => {
           flexWrap: "wrap",
         }}
       >
-        <Stack direction="row" spacing={1} alignItems="center">
+        <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
           <Typography
             variant="body2"
             color="text.secondary"

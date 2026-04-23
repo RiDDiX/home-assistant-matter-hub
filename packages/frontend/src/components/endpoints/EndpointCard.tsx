@@ -7,7 +7,6 @@ import CheckCircleIcon from "@mui/icons-material/CheckCircle";
 import DeleteIcon from "@mui/icons-material/Delete";
 import EditIcon from "@mui/icons-material/Edit";
 import ErrorIcon from "@mui/icons-material/Error";
-import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import LinkIcon from "@mui/icons-material/Link";
 import WarningAmberIcon from "@mui/icons-material/WarningAmber";
 import Box from "@mui/material/Box";
@@ -521,175 +520,167 @@ export const EndpointCard = ({
               getDeviceIcon(deviceType)
             )}
           </Box>
-          <Box sx={{ flexGrow: 1, minWidth: 0 }}>
-            <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-              <Typography variant="h6" noWrap sx={{ flexGrow: 1 }}>
-                {name}
-              </Typography>
-              {entityId && (
-                <>
-                  <input
-                    type="file"
-                    ref={fileInputRef}
-                    onChange={handleFileChange}
-                    accept="image/png,image/jpeg,image/gif,image/webp,image/svg+xml"
-                    style={{ display: "none" }}
-                  />
-                  <Tooltip title={t("endpoints.uploadImage")}>
-                    <IconButton
-                      size="small"
-                      onClick={handleUploadClick}
-                      sx={{ ml: 0.5 }}
-                      aria-label={`Upload image for ${name}`}
-                    >
-                      <CameraAltIcon fontSize="small" />
-                    </IconButton>
-                  </Tooltip>
-                  {imageInfo?.source === "custom" && (
-                    <Tooltip title={t("endpoints.removeImage")}>
-                      <IconButton
-                        size="small"
-                        onClick={handleDeleteImage}
-                        sx={{ ml: -0.5 }}
-                        aria-label={`Remove image for ${name}`}
-                      >
-                        <DeleteIcon fontSize="small" />
-                      </IconButton>
-                    </Tooltip>
-                  )}
-                </>
-              )}
-              {onEditMapping && entityId && bridgeId && (
-                <Tooltip title={t("endpoints.editMapping")}>
-                  <IconButton
-                    size="small"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onEditMapping(entityId, bridgeId);
-                    }}
-                    sx={{ ml: 0.5 }}
-                    aria-label={`Edit mapping for ${name}`}
-                  >
-                    <EditIcon fontSize="small" />
-                  </IconButton>
-                </Tooltip>
-              )}
-              {isUnavailable ? (
-                <Tooltip title={`HA State: ${haState}`}>
-                  <WarningAmberIcon color="warning" fontSize="small" />
-                </Tooltip>
-              ) : (
-                <Tooltip
-                  title={isReachable ? t("common.online") : t("common.offline")}
-                >
-                  {isReachable ? (
-                    <CheckCircleIcon color="success" fontSize="small" />
-                  ) : (
-                    <ErrorIcon color="error" fontSize="small" />
-                  )}
-                </Tooltip>
-              )}
-            </Box>
-            {entityId && (
-              <Typography
-                variant="caption"
-                color="text.secondary"
-                fontFamily="monospace"
-                noWrap
+        </Box>
+        <Box sx={{ flexGrow: 1, minWidth: 0 }}>
+          {/* Top row: name, image upload, edit, status */}
+          <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+            <Typography variant="h6" noWrap sx={{ flexGrow: 1 }}>
+              {name}
+            </Typography>
+            {/* Upload and remove image buttons */}
+            <input
+              type="file"
+              accept="image/png,image/jpeg,image/gif,image/webp,image/svg+xml"
+              style={{ display: "none" }}
+              ref={fileInputRef}
+              onChange={handleFileChange}
+            />
+            <Tooltip title={t("endpoints.uploadImage")}>
+              <IconButton
+                size="small"
+                onClick={handleUploadClick}
+                sx={{ ml: 0.5 }}
+                aria-label={`Upload image for ${name}`}
               >
-                {entityId}
-              </Typography>
-            )}
-            {bridgeName && (
-              <Typography variant="body2" color="text.secondary" noWrap>
-                {bridgeName}
-              </Typography>
-            )}
-            <Stack
-              direction="row"
-              spacing={0.5}
-              sx={{ mt: 1, flexWrap: "wrap", gap: 0.5 }}
-            >
-              <Tooltip title={`Device Type ID: ${endpoint.type.id}`}>
-                <Chip
-                  label={`${deviceType} (${endpoint.type.id})`}
+                <CameraAltIcon fontSize="small" />
+              </IconButton>
+            </Tooltip>
+            {imageInfo?.source === "custom" && (
+              <Tooltip title={t("endpoints.removeImage")}>
+                <IconButton
                   size="small"
-                  sx={{
-                    backgroundColor: `${getDeviceColor(deviceType, isDark)}20`,
-                    color: getDeviceColor(deviceType, isDark),
-                    fontWeight: 500,
+                  onClick={handleDeleteImage}
+                  sx={{ ml: -0.5 }}
+                  aria-label={`Remove image for ${name}`}
+                >
+                  <DeleteIcon fontSize="small" />
+                </IconButton>
+              </Tooltip>
+            )}
+            {onEditMapping && entityId && bridgeId && (
+              <Tooltip title={t("endpoints.editMapping")}>
+                <IconButton
+                  size="small"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onEditMapping(entityId, bridgeId);
                   }}
+                  sx={{ ml: 0.5 }}
+                  aria-label={`Edit mapping for ${name}`}
+                >
+                  <EditIcon fontSize="small" />
+                </IconButton>
+              </Tooltip>
+            )}
+            {isUnavailable ? (
+              <Tooltip title={`HA State: ${haState}`}>
+                <WarningAmberIcon color="warning" fontSize="small" />
+              </Tooltip>
+            ) : (
+              <Tooltip
+                title={isReachable ? t("common.online") : t("common.offline")}
+              >
+                {isReachable ? (
+                  <CheckCircleIcon color="success" fontSize="small" />
+                ) : (
+                  <ErrorIcon color="error" fontSize="small" />
+                )}
+              </Tooltip>
+            )}
+          </Box>
+          {/* Entity ID and bridge name */}
+          {entityId && (
+            <Typography
+              variant="caption"
+              color="text.secondary"
+              sx={{ fontFamily: "monospace" }}
+              noWrap
+            >
+              {entityId}
+            </Typography>
+          )}
+          {bridgeName && (
+            <Typography variant="body2" color="text.secondary" noWrap>
+              {bridgeName}
+            </Typography>
+          )}
+          {/* State chips */}
+          <Stack
+            direction="row"
+            spacing={0.5}
+            sx={{ mt: 1, flexWrap: "wrap", gap: 0.5 }}
+          >
+            <Tooltip title={`Device Type ID: ${endpoint.type.id}`}>
+              <Chip
+                label={`${deviceType} (${endpoint.type.id})`}
+                size="small"
+                sx={{
+                  backgroundColor: `${getDeviceColor(deviceType, isDark)}20`,
+                  color: getDeviceColor(deviceType, isDark),
+                  fontWeight: 500,
+                }}
+              />
+            </Tooltip>
+            {stateChips.map((chip) => (
+              <Chip
+                key={chip.label}
+                label={chip.label}
+                size="small"
+                variant="outlined"
+                color={chip.color ?? "default"}
+              />
+            ))}
+          </Stack>
+          {/* Battery and auto-mapping chips */}
+          <Divider sx={{ my: 1 }} />
+          <Stack
+            direction="row"
+            spacing={1}
+            sx={{ flexWrap: "wrap", gap: 0.5, mb: 1, alignItems: "center" }}
+          >
+            {batteryPercent != null && (
+              <Chip
+                icon={
+                  isCharging ? (
+                    <BatteryChargingFullIcon />
+                  ) : batteryPercent <= 20 ? (
+                    <BatteryAlertIcon />
+                  ) : (
+                    <BatteryFullIcon />
+                  )
+                }
+                label={`${batteryPercent}%`}
+                size="small"
+                color={
+                  isCharging
+                    ? "info"
+                    : batteryPercent <= 10
+                      ? "error"
+                      : batteryPercent <= 20
+                        ? "warning"
+                        : "success"
+                }
+                variant="outlined"
+              />
+            )}
+            {autoMappings.map((m) => (
+              <Tooltip key={m.label} title={m.entity}>
+                <Chip
+                  icon={<LinkIcon />}
+                  label={m.label}
+                  size="small"
+                  variant="outlined"
+                  sx={{ fontSize: "0.7rem", height: 22 }}
                 />
               </Tooltip>
-              {stateChips.map((chip) => (
-                <Chip
-                  key={chip.label}
-                  label={chip.label}
-                  size="small"
-                  variant="outlined"
-                  color={chip.color ?? "default"}
-                />
-              ))}
-            </Stack>
-          </Box>
+            ))}
+          </Stack>
         </Box>
-
-        {/* Battery & Auto-Mappings */}
-        {(batteryPercent != null || autoMappings.length > 0) && (
-          <>
-            <Divider sx={{ my: 1 }} />
-            <Stack
-              direction="row"
-              spacing={1}
-              alignItems="center"
-              sx={{ flexWrap: "wrap", gap: 0.5, mb: 1 }}
-            >
-              {batteryPercent != null && (
-                <Chip
-                  icon={
-                    isCharging ? (
-                      <BatteryChargingFullIcon />
-                    ) : batteryPercent <= 20 ? (
-                      <BatteryAlertIcon />
-                    ) : (
-                      <BatteryFullIcon />
-                    )
-                  }
-                  label={`${batteryPercent}%`}
-                  size="small"
-                  color={
-                    isCharging
-                      ? "info"
-                      : batteryPercent <= 10
-                        ? "error"
-                        : batteryPercent <= 20
-                          ? "warning"
-                          : "success"
-                  }
-                  variant="outlined"
-                />
-              )}
-              {autoMappings.map((m) => (
-                <Tooltip key={m.label} title={m.entity}>
-                  <Chip
-                    icon={<LinkIcon />}
-                    label={m.label}
-                    size="small"
-                    variant="outlined"
-                    sx={{ fontSize: "0.7rem", height: 22 }}
-                  />
-                </Tooltip>
-              ))}
-            </Stack>
-          </>
-        )}
 
         {/* Clusters */}
         <Box>
           <Box
-            display="flex"
-            alignItems="center"
-            sx={{ cursor: "pointer" }}
+            sx={{ display: "flex", alignItems: "center", cursor: "pointer" }}
             onClick={(e) => {
               e.stopPropagation();
               setExpanded(!expanded);
@@ -702,20 +693,6 @@ export const EndpointCard = ({
             >
               {t("endpoints.clusters")} ({clusters.length})
             </Typography>
-            <ExpandMoreIcon
-              sx={{
-                fontSize: 16,
-                color: "text.secondary",
-                transform: expanded ? "rotate(180deg)" : "rotate(0deg)",
-                transition: "transform 0.2s",
-              }}
-            />
-          </Box>
-          <Stack
-            direction="row"
-            spacing={0.5}
-            sx={{ flexWrap: "wrap", gap: 0.5, mt: 0.5 }}
-          >
             {clusters.slice(0, expanded ? undefined : 5).map((cluster) => {
               const isAutoMapped = autoMappedClusters.has(cluster);
               return (
@@ -746,7 +723,7 @@ export const EndpointCard = ({
                 sx={{ fontSize: "0.7rem", height: 22 }}
               />
             )}
-          </Stack>
+          </Box>
         </Box>
 
         {/* Expanded: Cluster state details + HA entity info */}
@@ -765,22 +742,20 @@ export const EndpointCard = ({
               </Typography>
               <Typography
                 variant="body2"
-                fontFamily="monospace"
-                fontSize="0.75rem"
+                sx={{ fontFamily: "monospace", fontSize: "0.75rem" }}
               >
                 {t("endpoints.haState")}: {haState ?? t("common.unknown")}
               </Typography>
               <Typography
                 variant="body2"
-                fontFamily="monospace"
-                fontSize="0.75rem"
+                sx={{ fontFamily: "monospace", fontSize: "0.75rem" }}
               >
                 Device Type: {endpoint.type.name} ({endpoint.type.id})
               </Typography>
               <Typography
-                variant="body2"
-                fontFamily="monospace"
-                fontSize="0.75rem"
+                variant="caption"
+                color="text.secondary"
+                sx={{ display: "block", mb: 1, fontWeight: 600 }}
               >
                 Endpoint: {endpoint.endpoint ?? "N/A"}
               </Typography>
@@ -808,8 +783,7 @@ export const EndpointCard = ({
                 <Typography
                   variant="caption"
                   color="text.secondary"
-                  fontWeight={600}
-                  sx={{ display: "block", mb: 0.25 }}
+                  sx={{ display: "block", mb: 0.25, fontWeight: 600 }}
                 >
                   {cluster}
                 </Typography>
@@ -817,10 +791,9 @@ export const EndpointCard = ({
                   <Typography
                     key={key}
                     variant="body2"
-                    fontFamily="monospace"
-                    fontSize="0.7rem"
                     color="text.secondary"
                     noWrap
+                    sx={{ fontFamily: "monospace", fontSize: "0.7rem" }}
                   >
                     {key}: {formatClusterValue(value)}
                   </Typography>

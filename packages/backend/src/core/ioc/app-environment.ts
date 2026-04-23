@@ -12,6 +12,7 @@ import { AppStorage } from "../../services/storage/app-storage.js";
 import { BridgeStorage } from "../../services/storage/bridge-storage.js";
 import { EntityMappingStorage } from "../../services/storage/entity-mapping-storage.js";
 import { LockCredentialStorage } from "../../services/storage/lock-credential-storage.js";
+import { StandaloneDeviceStorage } from "../../services/storage/standalone-device-storage.js";
 import { LoggerService } from "../app/logger.js";
 import type { Options } from "../app/options.js";
 import { BridgeEnvironmentFactory } from "./bridge-environment.js";
@@ -53,6 +54,10 @@ export class AppEnvironment extends EnvironmentBase {
     this.set(
       LockCredentialStorage,
       new LockCredentialStorage(await this.load(AppStorage)),
+    );
+    this.set(
+      StandaloneDeviceStorage,
+      new StandaloneDeviceStorage(await this.load(AppStorage)),
     );
     this.set(
       AppSettingsStorage,

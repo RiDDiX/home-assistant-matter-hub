@@ -93,7 +93,7 @@ class HaGenericSwitchServerBase extends SimpleBase {
   private handleEventChange() {
     const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);
     const entity = homeAssistant.entity;
-    if (!entity?.state || !entity.state.attributes) return;
+    if (!entity?.state?.attributes) return;
 
     const attrs = entity.state.attributes as EventDeviceAttributes;
     const eventType = attrs.event_type;
@@ -171,7 +171,7 @@ class HaGenericSwitchServerMultiBase extends FullBase {
   private handleEventChange() {
     const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);
     const entity = homeAssistant.entity;
-    if (!entity?.state || !entity.state.attributes) return;
+    if (!entity?.state?.attributes) return;
 
     const attrs = entity.state.attributes as EventDeviceAttributes;
     const eventType = attrs.event_type;

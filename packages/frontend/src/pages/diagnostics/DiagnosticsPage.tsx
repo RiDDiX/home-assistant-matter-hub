@@ -127,12 +127,14 @@ export function LiveEventLog({
     <Card>
       <CardContent>
         <Box
-          display="flex"
-          alignItems="center"
-          justifyContent="space-between"
-          mb={2}
+          sx={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            mb: 2,
+          }}
         >
-          <Box display="flex" alignItems="center" gap={1}>
+          <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
             <TimelineIcon />
             <Typography variant="h6">{t("diagnostics.title")}</Typography>
             <Chip
@@ -151,7 +153,7 @@ export function LiveEventLog({
               variant="outlined"
             />
           </Box>
-          <Stack direction="row" spacing={0.5} alignItems="center">
+          <Stack direction="row" spacing={0.5} sx={{ alignItems: "center" }}>
             <Tooltip title={t("diagnostics.filterEvents")}>
               <IconButton
                 size="small"
@@ -173,8 +175,7 @@ export function LiveEventLog({
         <Stack
           direction="row"
           spacing={0.5}
-          flexWrap="wrap"
-          sx={{ mb: 2, gap: 0.5 }}
+          sx={{ mb: 2, gap: 0.5, flexWrap: "wrap" }}
         >
           {allEventTypes.map((type) => {
             const count = typeCounts[type] ?? 0;
@@ -388,14 +389,16 @@ function BridgeSnapshotCard({ bridge }: { bridge: DiagnosticBridgeInfo }) {
         sx={{ p: 1.5, overflow: "hidden", minWidth: 0 }}
       >
         <Box
-          display="flex"
-          justifyContent="space-between"
-          alignItems="center"
-          sx={{ cursor: "pointer" }}
+          sx={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            cursor: "pointer",
+          }}
           onClick={() => setExpanded((v) => !v)}
         >
           <Box sx={{ minWidth: 0, overflow: "hidden" }}>
-            <Typography variant="body2" fontWeight={500} noWrap>
+            <Typography variant="body2" sx={{ fontWeight: 500 }} noWrap>
               {bridge.bridgeName}
             </Typography>
             <Typography variant="caption" color="text.secondary" noWrap>
@@ -405,10 +408,13 @@ function BridgeSnapshotCard({ bridge }: { bridge: DiagnosticBridgeInfo }) {
           <Stack
             direction="row"
             spacing={0.5}
-            alignItems="center"
-            flexWrap="wrap"
-            justifyContent="flex-end"
-            sx={{ flexShrink: 0, ml: 1 }}
+            sx={{
+              alignItems: "center",
+              flexWrap: "wrap",
+              justifyContent: "flex-end",
+              flexShrink: 0,
+              ml: 1,
+            }}
           >
             {Object.entries(bridge.featureFlags)
               .filter(([, v]) => v)
@@ -473,7 +479,7 @@ function BridgeSnapshotCard({ bridge }: { bridge: DiagnosticBridgeInfo }) {
                 >
                   {entity.entityId}
                 </Typography>
-                <Box display="flex" gap={0.3} flexWrap="wrap">
+                <Box sx={{ display: "flex", gap: 0.3, flexWrap: "wrap" }}>
                   {entity.matterClusters.map((cluster) => (
                     <Chip
                       key={cluster}

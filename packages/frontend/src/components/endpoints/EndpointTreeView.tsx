@@ -95,15 +95,17 @@ const EndpointTreeItemLabel = (props: EndpointTreeItemProps) => {
   }, [props.endpoint.state]);
 
   return (
-    <Box display="flex" alignItems="center">
+    <Box sx={{ display: "flex", alignItems: "center" }}>
       <EndpointIcon endpoint={props.endpoint} />
       <Box
-        marginLeft={1}
         component="span"
-        whiteSpace="nowrap"
-        textOverflow="ellipsis"
-        overflow="hidden"
-        sx={isUnavailable ? { opacity: 0.6 } : undefined}
+        sx={{
+          ml: 1,
+          whiteSpace: "nowrap",
+          textOverflow: "ellipsis",
+          overflow: "hidden",
+          ...(isUnavailable ? { opacity: 0.6 } : {}),
+        }}
       >
         <EndpointName endpoint={props.endpoint} />
       </Box>

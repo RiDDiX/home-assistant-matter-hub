@@ -1,6 +1,6 @@
 import AddIcon from "@mui/icons-material/Add";
 import ContentCopyIcon from "@mui/icons-material/ContentCopy";
-import DeleteOutlineIcon from "@mui/icons-material/DeleteOutline";
+import DeleteOutlineIcon from "@mui/icons-material/DeleteOutlineOutlined";
 import DownloadIcon from "@mui/icons-material/Download";
 import RestoreIcon from "@mui/icons-material/Restore";
 import SearchIcon from "@mui/icons-material/Search";
@@ -385,18 +385,20 @@ export function TranslationEditor() {
   return (
     <Box sx={{ p: 2 }}>
       <Box
-        display="flex"
-        alignItems="center"
-        justifyContent="space-between"
-        mb={2}
-        flexWrap="wrap"
-        gap={1}
+        sx={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          mb: 2,
+          flexWrap: "wrap",
+          gap: 1,
+        }}
       >
-        <Box display="flex" alignItems="center" gap={1}>
+        <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
           <TranslateIcon />
           <Typography variant="h5">{t("translationEditor.title")}</Typography>
         </Box>
-        <Box display="flex" alignItems="center" gap={1}>
+        <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
           <FormControl size="small" sx={{ minWidth: 140 }}>
             <InputLabel>{t("translationEditor.editLanguage")}</InputLabel>
             <Select
@@ -439,11 +441,13 @@ export function TranslationEditor() {
 
       <Collapse in={showAddLang}>
         <Box
-          display="flex"
-          gap={1}
-          mb={2}
-          alignItems="flex-start"
-          flexWrap="wrap"
+          sx={{
+            display: "flex",
+            gap: 1,
+            mb: 2,
+            alignItems: "flex-start",
+            flexWrap: "wrap",
+          }}
         >
           <TextField
             size="small"
@@ -479,13 +483,23 @@ export function TranslationEditor() {
         {t("translationEditor.info")}
       </Alert>
 
-      <Box display="flex" alignItems="center" gap={2} mb={2} flexWrap="wrap">
+      <Box
+        sx={{
+          display: "flex",
+          alignItems: "center",
+          gap: 2,
+          mb: 2,
+          flexWrap: "wrap",
+        }}
+      >
         <Box sx={{ flexGrow: 1, minWidth: 200 }}>
           <Box
-            display="flex"
-            alignItems="center"
-            justifyContent="space-between"
-            mb={0.5}
+            sx={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              mb: 0.5,
+            }}
           >
             <Typography variant="body2" color="text.secondary">
               {t("translationEditor.progress", {
@@ -493,7 +507,7 @@ export function TranslationEditor() {
                 total: totalKeys,
               })}
             </Typography>
-            <Typography variant="body2" fontWeight={600}>
+            <Typography variant="body2" sx={{ fontWeight: 600 }}>
               {Math.round(progress)}%
             </Typography>
           </Box>
@@ -514,7 +528,7 @@ export function TranslationEditor() {
         )}
       </Box>
 
-      <Box display="flex" gap={1} mb={2} flexWrap="wrap">
+      <Box sx={{ display: "flex", gap: 1, mb: 2, flexWrap: "wrap" }}>
         <TextField
           size="small"
           placeholder={t("translationEditor.searchPlaceholder")}
@@ -551,7 +565,7 @@ export function TranslationEditor() {
         </FormControl>
       </Box>
 
-      <Box display="flex" gap={1} mb={3} flexWrap="wrap">
+      <Box sx={{ display: "flex", gap: 1, mb: 3, flexWrap: "wrap" }}>
         <Button
           variant="outlined"
           size="small"
@@ -595,8 +609,7 @@ export function TranslationEditor() {
         <Box key={section} sx={{ mb: 3 }}>
           <Typography
             variant="subtitle1"
-            fontWeight={600}
-            sx={{ mb: 1, textTransform: "capitalize" }}
+            sx={{ fontWeight: 600, mb: 1, textTransform: "capitalize" }}
           >
             {section}
           </Typography>

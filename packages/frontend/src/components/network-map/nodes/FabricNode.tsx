@@ -41,7 +41,7 @@ export const FabricNode = ({ data }: NodeProps) => {
 
       <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
         <CastConnectedIcon sx={{ fontSize: 16 }} />
-        <Typography variant="caption" fontWeight={700}>
+        <Typography variant="caption" sx={{ fontWeight: 700 }}>
           {vendorName}
         </Typography>
       </Box>
@@ -49,8 +49,7 @@ export const FabricNode = ({ data }: NodeProps) => {
       {label && label !== vendorName && (
         <Typography
           variant="caption"
-          display="block"
-          sx={{ opacity: 0.8, fontSize: "0.6rem" }}
+          sx={{ display: "block", opacity: 0.8, fontSize: "0.6rem" }}
         >
           {label}
         </Typography>

@@ -277,7 +277,7 @@ export class ThermostatServerBase extends FullFeaturedBase {
 
   // biome-ignore lint/correctness/noUnusedPrivateClassMembers: Called via thermostatPostInitialize + prototype copy
   private update(entity: HomeAssistantEntityInformation) {
-    if (!entity.state || !entity.state.attributes) {
+    if (!entity.state?.attributes) {
       return;
     }
     const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);

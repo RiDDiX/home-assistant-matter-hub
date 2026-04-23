@@ -1,4 +1,4 @@
-import ErrorOutlineIcon from "@mui/icons-material/ErrorOutline";
+import ErrorOutlineIcon from "@mui/icons-material/ErrorOutlineOutlined";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
 import Typography from "@mui/material/Typography";
@@ -32,23 +32,24 @@ export class ErrorBoundary extends Component<Props, State> {
     if (this.state.hasError) {
       return (
         <Box
-          display="flex"
-          flexDirection="column"
-          alignItems="center"
-          justifyContent="center"
-          minHeight="60vh"
-          gap={2}
-          p={4}
+          sx={{
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            justifyContent: "center",
+            minHeight: "60vh",
+            gap: 2,
+            p: 4,
+          }}
         >
           <ErrorOutlineIcon color="error" sx={{ fontSize: 64 }} />
-          <Typography variant="h5" fontWeight={600}>
+          <Typography variant="h5" sx={{ fontWeight: 600 }}>
             {i18n.t("errorBoundary.title")}
           </Typography>
           <Typography
             variant="body2"
             color="text.secondary"
-            textAlign="center"
-            maxWidth={480}
+            sx={{ textAlign: "center", maxWidth: 480 }}
           >
             {this.state.error?.message ??
               i18n.t("errorBoundary.fallbackMessage")}

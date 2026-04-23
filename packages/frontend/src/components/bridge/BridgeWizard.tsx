@@ -359,7 +359,10 @@ export function BridgeWizard({ open, onClose, onComplete }: BridgeWizardProps) {
         {controllerProfiles.map((profile) => {
           const isSelected = selectedController?.id === profile.id;
           return (
-            <Grid key={profile.id} size={{ xs: 12, sm: 6 }}>
+            <Grid
+              key={profile.id}
+              sx={{ gridColumn: { xs: "span 12", sm: "span 6" } }}
+            >
               <Card
                 variant="outlined"
                 sx={{
@@ -382,8 +385,15 @@ export function BridgeWizard({ open, onClose, onComplete }: BridgeWizardProps) {
                   <CardContent
                     sx={{ p: 1.5, "&:last-child": { pb: 1.5 }, width: "100%" }}
                   >
-                    <Box display="flex" alignItems="center" gap={1} mb={0.5}>
-                      <Typography fontSize={20}>
+                    <Box
+                      sx={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 1,
+                        mb: 0.5,
+                      }}
+                    >
+                      <Typography sx={{ fontSize: 20 }}>
                         {controllerIcons[profile.id] ?? "\uD83C\uDFE0"}
                       </Typography>
                       <Typography variant="subtitle2" sx={{ flexGrow: 1 }}>
@@ -400,7 +410,14 @@ export function BridgeWizard({ open, onClose, onComplete }: BridgeWizardProps) {
                       {profile.description}
                     </Typography>
                     {isSelected && (
-                      <Box display="flex" gap={0.5} flexWrap="wrap" mt={0.5}>
+                      <Box
+                        sx={{
+                          display: "flex",
+                          gap: 0.5,
+                          flexWrap: "wrap",
+                          mt: 0.5,
+                        }}
+                      >
                         {Object.entries(profile.featureFlags)
                           .filter(([, v]) => v)
                           .map(([k]) => (
@@ -502,7 +519,7 @@ export function BridgeWizard({ open, onClose, onComplete }: BridgeWizardProps) {
           <Typography variant="subtitle2" color="text.secondary">
             {t("bridgeWizard.bridgesToCreate", { count: bridges.length })}:
           </Typography>
-          <Box display="flex" gap={1} flexWrap="wrap" mt={1}>
+          <Box sx={{ display: "flex", gap: 1, flexWrap: "wrap", mt: 1 }}>
             {bridges.map((b) => (
               <Chip
                 key={b.port}
@@ -621,8 +638,7 @@ export function BridgeWizard({ open, onClose, onComplete }: BridgeWizardProps) {
           <Typography
             variant="caption"
             color="text.secondary"
-            display="block"
-            sx={{ ml: 7, mt: -0.5 }}
+            sx={{ display: "block", ml: 7, mt: -0.5 }}
           >
             {flag.description}
           </Typography>
@@ -642,7 +658,7 @@ export function BridgeWizard({ open, onClose, onComplete }: BridgeWizardProps) {
         </Typography>
         <Card variant="outlined" sx={{ mt: 2 }}>
           <CardContent>
-            <Box display="flex" alignItems="center" gap={1} mb={1}>
+            <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 1 }}>
               <DevicesIcon />
               <Typography variant="h6">{currentBridge.name}</Typography>
             </Box>
@@ -668,7 +684,7 @@ export function BridgeWizard({ open, onClose, onComplete }: BridgeWizardProps) {
               />
             )}
             {flagEntries.length > 0 && (
-              <Box display="flex" gap={0.5} flexWrap="wrap" mt={1}>
+              <Box sx={{ display: "flex", gap: 0.5, flexWrap: "wrap", mt: 1 }}>
                 {flagEntries
                   .filter(([key]) => key !== "serverMode")
                   .map(([key]) => (
@@ -719,7 +735,7 @@ export function BridgeWizard({ open, onClose, onComplete }: BridgeWizardProps) {
   return (
     <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
       <DialogTitle>
-        <Box display="flex" alignItems="center" gap={1}>
+        <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
           <SettingsIcon />
           <span>{t("bridgeWizard.title")}</span>
         </Box>

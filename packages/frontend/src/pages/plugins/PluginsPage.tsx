@@ -497,22 +497,22 @@ export const PluginsPage = () => {
 
           {installTab === 2 && (
             <>
-              <TextField
-                autoFocus
-                margin="dense"
-                label="Absolute path to plugin folder"
-                placeholder="/path/to/your/plugin"
-                fullWidth
-                value={localPath}
-                onChange={(e) => setLocalPath(e.target.value)}
-                disabled={installing}
-                InputProps={{
-                  startAdornment: <FolderOpenIcon sx={{ mr: 1 }} />,
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") handleLocalInstall();
-                }}
-              />
+              <Box sx={{ display: "flex", alignItems: "center" }}>
+                <FolderOpenIcon sx={{ mr: 1 }} />
+                <TextField
+                  autoFocus
+                  margin="dense"
+                  label="Absolute path to plugin folder"
+                  placeholder="/path/to/your/plugin"
+                  fullWidth
+                  value={localPath}
+                  onChange={(e) => setLocalPath(e.target.value)}
+                  disabled={installing}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") handleLocalInstall();
+                  }}
+                />
+              </Box>
               <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
                 Link a local plugin directory (creates a symlink). Useful for
                 development. Restart the bridge after linking.

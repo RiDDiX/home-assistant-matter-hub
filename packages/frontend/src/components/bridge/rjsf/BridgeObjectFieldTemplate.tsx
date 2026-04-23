@@ -55,7 +55,7 @@ function CollapsibleFilterTemplate(props: ObjectFieldTemplateProps) {
         }}
       >
         <FilterListIcon fontSize="small" color="action" />
-        <Typography variant="subtitle1" fontWeight={600}>
+        <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
           Entity Filters
         </Typography>
         <Badge

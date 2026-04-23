@@ -565,7 +565,11 @@ export const NetworkMapPage = () => {
           alignItems: "center",
         }}
       >
-        <Typography variant="caption" color="text.secondary" fontWeight={600}>
+        <Typography
+          variant="caption"
+          color="text.secondary"
+          sx={{ fontWeight: 600 }}
+        >
           {t("networkMap.legend")}:
         </Typography>
         <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>

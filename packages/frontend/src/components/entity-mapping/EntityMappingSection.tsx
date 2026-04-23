@@ -274,10 +274,12 @@ export function EntityMappingSection({ bridgeId }: EntityMappingSectionProps) {
     <Card>
       <CardContent>
         <Box
-          display="flex"
-          justifyContent="space-between"
-          alignItems="center"
-          mb={2}
+          sx={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            mb: 2,
+          }}
         >
           <Typography variant="h6">
             <SettingsIcon sx={{ mr: 1, verticalAlign: "middle" }} />
@@ -360,7 +362,10 @@ export function EntityMappingSection({ bridgeId }: EntityMappingSectionProps) {
                 {mappingsList.map((config) => (
                   <TableRow key={config.entityId}>
                     <TableCell>
-                      <Typography variant="body2" fontFamily="monospace">
+                      <Typography
+                        variant="body2"
+                        sx={{ fontFamily: "monospace" }}
+                      >
                         {config.entityId}
                       </Typography>
                     </TableCell>
@@ -479,7 +484,10 @@ export function EntityMappingSection({ bridgeId }: EntityMappingSectionProps) {
                         />
                       </TableCell>
                       <TableCell>
-                        <Typography variant="body2" fontFamily="monospace">
+                        <Typography
+                          variant="body2"
+                          sx={{ fontFamily: "monospace" }}
+                        >
                           {config.entityId}
                         </Typography>
                       </TableCell>
@@ -560,7 +568,10 @@ export function EntityMappingSection({ bridgeId }: EntityMappingSectionProps) {
                             />
                           </TableCell>
                           <TableCell>
-                            <Typography variant="body2" fontFamily="monospace">
+                            <Typography
+                              variant="body2"
+                              sx={{ fontFamily: "monospace" }}
+                            >
                               {match.matchedEntityId}
                             </Typography>
                           </TableCell>

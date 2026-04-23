@@ -96,7 +96,7 @@ class LockServerBase extends Base {
   }
 
   private update(entity: HomeAssistantEntityInformation) {
-    if (!entity.state || !entity.state.attributes) {
+    if (!entity.state?.attributes) {
       return;
     }
     applyPatchState(this.state, {
@@ -186,7 +186,7 @@ class LockServerWithPinBase extends PinCredentialBase {
   }
 
   private update(entity: HomeAssistantEntityInformation) {
-    if (!entity.state || !entity.state.attributes) {
+    if (!entity.state?.attributes) {
       return;
     }
 
@@ -452,7 +452,7 @@ class LockServerWithPinAndUnboltBase extends PinCredentialUnboltBase {
   }
 
   private update(entity: HomeAssistantEntityInformation) {
-    if (!entity.state || !entity.state.attributes) {
+    if (!entity.state?.attributes) {
       return;
     }
     const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);

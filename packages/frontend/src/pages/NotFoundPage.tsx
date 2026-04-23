@@ -12,16 +12,18 @@ export const NotFoundPage = () => {
   const { t } = useTranslation();
   return (
     <Box
-      display="flex"
-      flexDirection="column"
-      alignItems="center"
-      justifyContent="center"
-      minHeight="60vh"
-      gap={2}
-      p={4}
+      sx={{
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "center",
+        minHeight: "60vh",
+        gap: 2,
+        p: 4,
+      }}
     >
       <SearchOffIcon color="disabled" sx={{ fontSize: 64 }} />
-      <Typography variant="h5" fontWeight={600}>
+      <Typography variant="h5" sx={{ fontWeight: 600 }}>
         {t("notFound.title")}
       </Typography>
       <Typography variant="body2" color="text.secondary">

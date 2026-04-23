@@ -20,7 +20,7 @@ export class PirOccupancySensingServer extends PirOccupancySensingServerBase {
   }
 
   private update(entity: HomeAssistantEntityInformation) {
-    if (!entity.state || !entity.state.attributes) {
+    if (!entity.state?.attributes) {
       return;
     }
     const { state } = entity;

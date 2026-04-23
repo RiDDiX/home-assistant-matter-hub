@@ -149,7 +149,7 @@ export function FloatingLanguageSwitcher() {
                     </Typography>
                     <Typography
                       variant="body2"
-                      fontWeight={currentLang === lang.code ? 600 : 400}
+                      sx={{ fontWeight: currentLang === lang.code ? 600 : 400 }}
                     >
                       {lang.name}
                     </Typography>

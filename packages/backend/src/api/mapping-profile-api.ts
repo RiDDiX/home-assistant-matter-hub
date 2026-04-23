@@ -8,6 +8,7 @@ import type {
   MappingProfileImportResult,
 } from "@home-assistant-matter-hub/common";
 import express from "express";
+import rateLimit from "express-rate-limit";
 import type { EntityMappingStorage } from "../services/storage/entity-mapping-storage.js";
 
 function configToProfileEntry(
@@ -41,8 +42,18 @@ function configToProfileEntry(
 
 export function mappingProfileApi(
   mappingStorage: EntityMappingStorage,
+  _jwtSecret: string = "dev_secret",
 ): express.Router {
   const router = express.Router();
+  // Rate limiting middleware (per IP)
+  router.use(
+    rateLimit({
+      windowMs: 60 * 1000, // 1 minute
+      max: 30, // 30 requests per minute per IP
+      standardHeaders: true,
+      legacyHeaders: false,
+    }),
+  );
 
   router.get("/export/:bridgeId", (req, res) => {
     const { bridgeId } = req.params;

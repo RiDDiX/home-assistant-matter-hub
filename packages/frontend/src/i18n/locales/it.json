@@ -57,7 +57,8 @@
     "import": "Importa",
     "export": "Esporta",
     "exportAll": "Esporta tutto",
-    "wizard": "Procedura guidata"
+    "wizard": "Procedura guidata",
+    "finish": ""
   },
   "nav": {
     "bridges": "Bridges",
@@ -96,7 +97,19 @@
     "importBackup": "Importa backup",
     "dangerZone": "Zona pericolosa",
     "resetAll": "Ripristina tutto",
-    "about": "Informazioni"
+    "about": "Informazioni",
+    "username": "",
+    "password": "",
+    "enterNewPassword": "",
+    "enableAuth": "",
+    "disableAuth": "",
+    "disableAuthMessage": "",
+    "disableAuthConfirm": "",
+    "usernamePasswordRequired": "",
+    "authSaveFailed": "",
+    "authLoadFailed": "",
+    "authDisabled": "",
+    "authRemoveFailed": ""
   },
   "dashboard": {
     "title": "Dashboard",
@@ -125,7 +138,13 @@
     "filterReference": "Riferimento filtri",
     "successMessage": "I tuoi bridge sono connessi a {{count}} fabric controller. I dispositivi dovrebbero ora apparire nella tua app.",
     "noBridgesHint": "Nessun bridge configurato. Usa la procedura guidata o creane uno manualmente.",
-    "customizeDashboard": "Personalizza dashboard"
+    "customizeDashboard": "Personalizza dashboard",
+    "openWizard": "",
+    "standaloneDeviceWizard": "",
+    "bridgeStatusRunning": "",
+    "bridgeStatusFailed": "",
+    "devicesFailed": "",
+    "uptimeFormat": ""
   },
   "bridge": {
     "name": "Nome Bridge",
@@ -199,7 +218,16 @@
     "importing": "Importazione...",
     "importCount": "Importa {{count}} bridge",
     "jsonEditor": "Editor JSON",
-    "formEditor": "Editor modulo"
+    "formEditor": "Editor modulo",
+    "openingCommissioning": "",
+    "fabricTooltip": "",
+    "forceSyncTooltip": "",
+    "openingWindow": "",
+    "scanQrCode": "",
+    "appleHomeWarning": "",
+    "googleHomeWarning": "",
+    "confirmResetMessage": "",
+    "confirmDeleteMessage": ""
   },
   "endpoints": {
     "title": "Endpoint",
@@ -263,7 +291,21 @@
     "descending": "Decrescente",
     "connectedTo": "Connesso a",
     "autoRecovery": "Recupero automatico",
-    "recoveryAttempts": "Tentativi di recupero"
+    "recoveryAttempts": "Tentativi di recupero",
+    "fabrics": "",
+    "networkDiagnostics": "",
+    "checksPassed": "",
+    "checksWarning": "",
+    "checksFailed": "",
+    "hideDetails": "",
+    "showDetails": "",
+    "allChecks": "",
+    "check": "",
+    "statusLabel": "",
+    "message": "",
+    "networkInterfaces": "",
+    "interfaceName": "",
+    "refresh": ""
   },
   "mapping": {
     "title": "Mappature entità",
@@ -283,7 +325,18 @@
     "customVendorName": "Custom Vendor Name",
     "customVendorNameHelp": "Override the vendor/manufacturer name reported to Matter controllers.",
     "customSerialNumber": "Custom Serial Number",
-    "customSerialNumberHelp": "Override the serial number reported to Matter controllers."
+    "customSerialNumberHelp": "Override the serial number reported to Matter controllers.",
+    "matterTag": "",
+    "exportProfile": "",
+    "importProfile": "",
+    "profileName": "",
+    "match": "",
+    "existing": "",
+    "autoDetect": "",
+    "loadFailed": "",
+    "noMappings": "",
+    "applying": "",
+    "applyCount": ""
   },
   "languageSwitcher": {
     "disclaimer": "Le traduzioni potrebbero essere incomplete.",
@@ -315,7 +368,8 @@
     "removeLanguage": "Rimuovi lingua",
     "importJson": "Importa JSON",
     "importSuccess": "{{count}} traduzione/i importata/e.",
-    "importFailed": "Importazione fallita: formato JSON non valido."
+    "importFailed": "Importazione fallita: formato JSON non valido.",
+    "removeLanguageConfirm": ""
   },
   "notFound": {
     "title": "Pagina non trovata",
@@ -324,6 +378,20 @@
   },
   "footer": {
     "github": "GitHub",
-    "documentation": "Documentazione"
-  }
+    "documentation": "Documentazione",
+    "support": ""
+  },
+  "devices": "",
+  "diagnostics": "",
+  "startup": "",
+  "areaSetup": "",
+  "lockCredentials": "",
+  "labels": "",
+  "logs": "",
+  "backup": "",
+  "networkMap": "",
+  "updateChecker": "",
+  "wizard": "",
+  "standaloneDeviceWizard": "",
+  "bridgeWizard": ""
 }

@@ -43,7 +43,7 @@ export class Pm10ConcentrationMeasurementServer extends Pm10ConcentrationMeasure
   }
 
   private update(entity: HomeAssistantEntityInformation) {
-    if (!entity.state || !entity.state.attributes) {
+    if (!entity.state?.attributes) {
       return;
     }
     const state = entity.state.state;

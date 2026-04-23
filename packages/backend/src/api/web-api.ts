@@ -10,10 +10,12 @@ import type { BridgeService } from "../services/bridges/bridge-service.js";
 import { DiagnosticService } from "../services/diagnostics/diagnostic-service.js";
 import type { HomeAssistantClient } from "../services/home-assistant/home-assistant-client.js";
 import type { HomeAssistantRegistry } from "../services/home-assistant/home-assistant-registry.js";
+import { StandaloneDeviceManager } from "../services/standalone-devices/standalone-device-manager.js";
 import type { AppSettingsStorage } from "../services/storage/app-settings-storage.js";
 import type { BridgeStorage } from "../services/storage/bridge-storage.js";
 import type { EntityMappingStorage } from "../services/storage/entity-mapping-storage.js";
 import type { LockCredentialStorage } from "../services/storage/lock-credential-storage.js";
+import { StandaloneDeviceStorage } from "../services/storage/standalone-device-storage.js";
 import { accessLogger } from "./access-log.js";
 import { backupApi } from "./backup-api.js";
 import { bridgeExportApi } from "./bridge-export-api.js";
@@ -32,6 +34,7 @@ import { networkDiagnosticApi } from "./network-diagnostic-api.js";
 import { pluginApi } from "./plugin-api.js";
 import { supportIngress, supportProxyLocation } from "./proxy-support.js";
 import { settingsApi } from "./settings-api.js";
+import { standaloneDeviceApi } from "./standalone-device-api.js";
 import { systemApi } from "./system-api.js";
 import { webUi } from "./web-ui.js";
 import { WebSocketApi } from "./websocket-api.js";
@@ -52,12 +55,13 @@ export interface WebApiProps {
 }
 
 export class WebApi extends Service {
+  private standaloneDeviceManager!: StandaloneDeviceManager;
+  private standaloneDeviceStorage!: StandaloneDeviceStorage;
   private readonly log: BetterLogger;
   private readonly logger: LoggerService;
   private readonly accessLogger: express.RequestHandler;
   private readonly startTime: number;
   private readonly wsApi: WebSocketApi;
-
   private app!: express.Application;
   private server?: http.Server;
 
@@ -90,6 +94,25 @@ export class WebApi extends Service {
   }
 
   protected override async initialize() {
+    // Get StandaloneDeviceStorage from environment (assume DI or manual load)
+    // If not available, throw error
+    // Try to get StandaloneDeviceStorage from environment if available
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const envObj = (this as unknown as { env: any }).env;
+    this.standaloneDeviceStorage =
+      this.standaloneDeviceStorage || envObj?.get?.(StandaloneDeviceStorage);
+    if (!this.standaloneDeviceStorage) {
+      throw new Error(
+        "StandaloneDeviceStorage not available in WebApi environment",
+      );
+    }
+    // Pass the correct Environment instance, not 'this' (WebApi)
+    this.standaloneDeviceManager = new StandaloneDeviceManager(
+      envObj,
+      this.standaloneDeviceStorage,
+    );
+    await this.standaloneDeviceManager.initialize();
+
     const api = express.Router();
     api
       .use(express.json())
@@ -112,6 +135,10 @@ export class WebApi extends Service {
       )
       .use("/entity-mappings", entityMappingApi(this.mappingStorage))
       .use("/mapping-profiles", mappingProfileApi(this.mappingStorage))
+      .use(
+        "/standalone-devices",
+        standaloneDeviceApi(this.standaloneDeviceStorage),
+      )
       .use("/lock-credentials", lockCredentialApi(this.lockCredentialStorage))
       .use("/settings", settingsApi(this.settingsStorage, this.props.auth))
       .use(

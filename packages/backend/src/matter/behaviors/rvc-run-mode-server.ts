@@ -106,7 +106,7 @@ class RvcRunModeServerBase extends Base {
   }
 
   private update(entity: HomeAssistantEntityInformation) {
-    if (!entity.state || !entity.state.attributes) {
+    if (!entity.state?.attributes) {
       return;
     }
     const s = getSession(this.endpoint);
@@ -202,7 +202,7 @@ class RvcRunModeServerBase extends Base {
 
       const stateProvider = this.agent.env.get(EntityStateProvider);
       const roomState = stateProvider.getState(currentRoomEntityId);
-      if (!roomState || !roomState.state) {
+      if (!roomState?.state) {
         this.logShortCircuitOnce(
           "no-state",
           `currentRoom sensor: no state available for ${currentRoomEntityId}`,

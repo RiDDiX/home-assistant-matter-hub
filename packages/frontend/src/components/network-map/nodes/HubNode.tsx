@@ -33,7 +33,7 @@ export const HubNode = ({ data }: NodeProps) => {
       }}
     >
       <HubIcon sx={{ fontSize: 32, mb: 0.5 }} />
-      <Typography variant="caption" fontWeight={700} lineHeight={1.1}>
+      <Typography variant="caption" sx={{ fontWeight: 700, lineHeight: 1.1 }}>
         {label}
       </Typography>
       <Typography variant="caption" sx={{ opacity: 0.8, fontSize: "0.65rem" }}>

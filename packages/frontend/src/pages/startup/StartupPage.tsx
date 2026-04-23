@@ -141,7 +141,7 @@ const SortableBridgeCard = ({ bridge, index }: SortableBridgeCardProps) => {
         )}
 
         <Box sx={{ flex: 1 }}>
-          <Typography variant="subtitle1" fontWeight={500}>
+          <Typography variant="subtitle1" sx={{ fontWeight: 500 }}>
             {bridge.name}
           </Typography>
           <Typography variant="caption" color="text.secondary">
@@ -237,10 +237,10 @@ export const StartupPage = () => {
         ]}
       />
 
-      <Box display="flex" alignItems="center" gap={2}>
+      <Box sx={{ display: "flex", alignItems: "center", gap: 2 }}>
         <RocketLaunch color="primary" fontSize="large" />
         <Box>
-          <Typography variant="h5" fontWeight={600}>
+          <Typography variant="h5" sx={{ fontWeight: 600 }}>
             {t("startup.title")}
           </Typography>
           <Typography variant="body2" color="text.secondary">
@@ -289,13 +289,13 @@ export const StartupPage = () => {
       </DndContext>
 
       {orderedBridges.length === 0 && (
-        <Typography color="text.secondary" textAlign="center" py={4}>
+        <Typography color="text.secondary" sx={{ textAlign: "center", py: 4 }}>
           {t("startup.noBridges")}
         </Typography>
       )}
 
       {hasChanges && orderedBridges.length > 0 && (
-        <Box display="flex" justifyContent="flex-end">
+        <Box sx={{ display: "flex", justifyContent: "flex-end" }}>
           <Button variant="contained" startIcon={<Save />} onClick={handleSave}>
             {t("startup.saveOrder")}
           </Button>

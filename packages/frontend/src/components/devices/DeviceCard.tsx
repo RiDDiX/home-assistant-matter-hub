@@ -51,7 +51,7 @@ export const DeviceCard = ({ bridge }: DeviceCardProps) => {
         sx={{ height: "100%" }}
       >
         <CardContent>
-          <Box display="flex" alignItems="flex-start" gap={2}>
+          <Box sx={{ display: "flex", alignItems: "flex-start", gap: 2 }}>
             {hasCustomIcon ? (
               <Box
                 component="img"
@@ -77,8 +77,10 @@ export const DeviceCard = ({ bridge }: DeviceCardProps) => {
                 <DeviceIcon sx={{ fontSize: 32 }} />
               </Avatar>
             )}
-            <Box flexGrow={1} minWidth={0}>
-              <Box display="flex" alignItems="center" gap={1} mb={1}>
+            <Box sx={{ flexGrow: 1, minWidth: 0 }}>
+              <Box
+                sx={{ display: "flex", alignItems: "center", gap: 1, mb: 1 }}
+              >
                 <Typography
                   variant="h6"
                   component="div"
@@ -90,22 +92,22 @@ export const DeviceCard = ({ bridge }: DeviceCardProps) => {
                 <BridgeStatusIcon status={bridge.status} />
               </Box>
 
-              <Stack spacing={1} mb={2}>
-                <Box display="flex" alignItems="center" gap={1}>
+              <Stack spacing={1} sx={{ mb: 2 }}>
+                <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
                   <Devices sx={{ fontSize: 16, color: "text.secondary" }} />
                   <Typography variant="body2" color="text.secondary">
                     {bridge.deviceCount} devices
                   </Typography>
                 </Box>
 
-                <Box display="flex" alignItems="center" gap={1}>
+                <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
                   <Wifi sx={{ fontSize: 16, color: "text.secondary" }} />
                   <Typography variant="body2" color="text.secondary">
                     {fabricCount} fabric{fabricCount !== 1 ? "s" : ""}
                   </Typography>
                 </Box>
 
-                <Box display="flex" alignItems="center" gap={1}>
+                <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
                   <Sensors sx={{ fontSize: 16, color: "text.secondary" }} />
                   <Typography variant="body2" color="text.secondary">
                     Port {bridge.port}

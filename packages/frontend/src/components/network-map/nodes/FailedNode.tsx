@@ -1,4 +1,4 @@
-import ErrorOutlineIcon from "@mui/icons-material/ErrorOutline";
+import ErrorOutlineIcon from "@mui/icons-material/ErrorOutlineOutlined";
 import Box from "@mui/material/Box";
 import { useColorScheme } from "@mui/material/styles";
 import Typography from "@mui/material/Typography";
@@ -41,9 +41,8 @@ export const FailedNode = ({ data }: NodeProps) => {
         <ErrorOutlineIcon sx={{ fontSize: 14, color: textColor }} />
         <Typography
           variant="caption"
-          fontWeight={600}
           noWrap
-          sx={{ maxWidth: 160, color: textColor }}
+          sx={{ fontWeight: 600, maxWidth: 160, color: textColor }}
         >
           {label}
         </Typography>
@@ -52,10 +51,9 @@ export const FailedNode = ({ data }: NodeProps) => {
       <Typography
         variant="caption"
         color="text.secondary"
-        display="block"
-        sx={{ fontSize: "0.6rem", mt: 0.25 }}
         noWrap
         title={reason}
+        sx={{ display: "block", fontSize: "0.6rem", mt: 0.25 }}
       >
         {reason}
       </Typography>

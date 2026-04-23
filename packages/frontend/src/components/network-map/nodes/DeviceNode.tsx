@@ -39,9 +39,8 @@ export const DeviceNode = ({ data }: NodeProps) => {
         <DevicesIcon sx={{ fontSize: 14, color: "text.secondary" }} />
         <Typography
           variant="caption"
-          fontWeight={600}
           noWrap
-          sx={{ maxWidth: 160 }}
+          sx={{ fontWeight: 600, maxWidth: 160 }}
         >
           {label}
         </Typography>
@@ -50,9 +49,8 @@ export const DeviceNode = ({ data }: NodeProps) => {
       <Typography
         variant="caption"
         color="text.secondary"
-        display="block"
-        sx={{ fontSize: "0.6rem", mt: 0.25 }}
         noWrap
+        sx={{ display: "block", fontSize: "0.6rem", mt: 0.25 }}
       >
         {deviceType}
       </Typography>

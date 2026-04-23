@@ -57,7 +57,8 @@
     "import": "导入",
     "export": "导出",
     "exportAll": "全部导出",
-    "wizard": "向导"
+    "wizard": "向导",
+    "finish": ""
   },
   "nav": {
     "bridges": "Bridges",
@@ -96,7 +97,19 @@
     "importBackup": "导入备份",
     "dangerZone": "危险操作",
     "resetAll": "全部重置",
-    "about": "关于"
+    "about": "关于",
+    "username": "",
+    "password": "",
+    "enterNewPassword": "",
+    "enableAuth": "",
+    "disableAuth": "",
+    "disableAuthMessage": "",
+    "disableAuthConfirm": "",
+    "usernamePasswordRequired": "",
+    "authSaveFailed": "",
+    "authLoadFailed": "",
+    "authDisabled": "",
+    "authRemoveFailed": ""
   },
   "dashboard": {
     "title": "仪表盘",
@@ -125,7 +138,13 @@
     "filterReference": "过滤器参考",
     "successMessage": "你的 Bridge 已连接到 {{count}} 个控制器 Fabric。设备现在应该出现在你的控制器应用中。",
     "noBridgesHint": "尚未配置 Bridge。使用 Bridge 向导或手动创建一个。",
-    "customizeDashboard": "自定义仪表盘"
+    "customizeDashboard": "自定义仪表盘",
+    "openWizard": "",
+    "standaloneDeviceWizard": "",
+    "bridgeStatusRunning": "",
+    "bridgeStatusFailed": "",
+    "devicesFailed": "",
+    "uptimeFormat": ""
   },
   "bridge": {
     "name": "Bridge 名称",
@@ -199,7 +218,16 @@
     "importing": "导入中...",
     "importCount": "导入 {{count}} 个 Bridge",
     "jsonEditor": "JSON 编辑器",
-    "formEditor": "表单编辑器"
+    "formEditor": "表单编辑器",
+    "openingCommissioning": "",
+    "fabricTooltip": "",
+    "forceSyncTooltip": "",
+    "openingWindow": "",
+    "scanQrCode": "",
+    "appleHomeWarning": "",
+    "googleHomeWarning": "",
+    "confirmResetMessage": "",
+    "confirmDeleteMessage": ""
   },
   "endpoints": {
     "title": "端点",
@@ -263,7 +291,21 @@
     "descending": "降序",
     "connectedTo": "已连接到",
     "autoRecovery": "自动恢复",
-    "recoveryAttempts": "恢复尝试"
+    "recoveryAttempts": "恢复尝试",
+    "fabrics": "",
+    "networkDiagnostics": "",
+    "checksPassed": "",
+    "checksWarning": "",
+    "checksFailed": "",
+    "hideDetails": "",
+    "showDetails": "",
+    "allChecks": "",
+    "check": "",
+    "statusLabel": "",
+    "message": "",
+    "networkInterfaces": "",
+    "interfaceName": "",
+    "refresh": ""
   },
   "mapping": {
     "title": "实体映射",
@@ -283,7 +325,18 @@
     "customVendorName": "自定义厂商名称",
     "customVendorNameHelp": "覆盖报告给 Matter 控制器的厂商/制造商名称。",
     "customSerialNumber": "自定义序列号",
-    "customSerialNumberHelp": "覆盖报告给 Matter 控制器的序列号。"
+    "customSerialNumberHelp": "覆盖报告给 Matter 控制器的序列号。",
+    "matterTag": "",
+    "exportProfile": "",
+    "importProfile": "",
+    "profileName": "",
+    "match": "",
+    "existing": "",
+    "autoDetect": "",
+    "loadFailed": "",
+    "noMappings": "",
+    "applying": "",
+    "applyCount": ""
   },
   "languageSwitcher": {
     "disclaimer": "翻译可能不完整。",
@@ -315,7 +368,8 @@
     "removeLanguage": "移除语言",
     "importJson": "导入 JSON",
     "importSuccess": "已导入 {{count}} 条翻译。",
-    "importFailed": "导入失败：JSON 格式无效。"
+    "importFailed": "导入失败：JSON 格式无效。",
+    "removeLanguageConfirm": ""
   },
   "notFound": {
     "title": "页面未找到",
@@ -324,6 +378,20 @@
   },
   "footer": {
     "github": "GitHub",
-    "documentation": "文档"
-  }
+    "documentation": "文档",
+    "support": ""
+  },
+  "devices": "",
+  "diagnostics": "",
+  "startup": "",
+  "areaSetup": "",
+  "lockCredentials": "",
+  "labels": "",
+  "logs": "",
+  "backup": "",
+  "networkMap": "",
+  "updateChecker": "",
+  "wizard": "",
+  "standaloneDeviceWizard": "",
+  "bridgeWizard": ""
 }

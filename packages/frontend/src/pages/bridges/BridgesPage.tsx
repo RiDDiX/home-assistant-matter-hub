@@ -25,8 +25,8 @@ import {
 } from "../../api/bridges.js";
 import { BridgeImportDialog } from "../../components/bridge/BridgeImportDialog.js";
 import { BridgeList } from "../../components/bridge/BridgeList";
-import { BridgeWizard } from "../../components/bridge/BridgeWizard.js";
 import { useNotifications } from "../../components/notifications/use-notifications.ts";
+import { Wizard } from "../../components/Wizard";
 import { useBridges } from "../../hooks/data/bridges";
 import { navigation } from "../../routes.tsx";
 import { loadBridges } from "../../state/bridges/bridge-actions.ts";
@@ -140,11 +140,13 @@ export const BridgesPage = () => {
         {bridges && (
           <>
             <Box
-              display="flex"
-              justifyContent="end"
-              flexWrap="wrap"
-              gap={1}
-              paddingTop={{ xs: 1, sm: 0 }}
+              sx={{
+                display: "flex",
+                justifyContent: "end",
+                flexWrap: "wrap",
+                gap: 1,
+                paddingTop: { xs: 1, sm: 0 },
+              }}
             >
               {bridges.length >= 1 && (
                 <>
@@ -240,7 +242,7 @@ export const BridgesPage = () => {
         onImported={handleImported}
       />
 
-      <BridgeWizard
+      <Wizard
         open={wizardOpen}
         onClose={() => setWizardOpen(false)}
         onComplete={() => dispatch(loadBridges())}

@@ -26,7 +26,7 @@ export const AppFooter = () => {
   return (
     <Container sx={{ mt: 16, mb: 4 }}>
       <Divider sx={{ mt: 4, mb: 4 }} />
-      <Grid container spacing={2} justifyContent="center">
+      <Grid container spacing={2} sx={{ justifyContent: "center" }}>
         {links.map((link, idx) => (
           <Grid size={{ xs: 12, sm: "auto" }} key={idx.toString()}>
             <Button

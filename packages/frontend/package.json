@@ -9,7 +9,10 @@
     "serve": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
-    "test": "vitest run"
+    "test": "vitest run",
+    "sync-i18n": "node scripts/sync-i18n.cjs",
+    "find-missing-i18n": "node scripts/missing-i18n.cjs",
+    "add-missing-i18n": "node scripts/missing-i18n.cjs --add"
   },
   "dependencies": {
     "@codemirror/lang-json": "^6.0.2",
@@ -21,8 +24,8 @@
     "@emotion/styled": "^11.14.1",
     "@fontsource/roboto": "^5.2.10",
     "@home-assistant-matter-hub/common": "workspace:*",
-    "@mui/icons-material": "^7.3.10",
-    "@mui/material": "^7.3.10",
+    "@mui/icons-material": "^9.0.0",
+    "@mui/material": "^9.0.0",
     "@mui/x-tree-view": "^9.0.2",
     "@reduxjs/toolkit": "^2.11.2",
     "@rjsf/core": "^6.5.1",
@@ -57,6 +60,7 @@
     "@types/lodash": "^4.17.24",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
+    "@types/supertest": "^7.2.0",
     "@vitejs/plugin-react-swc": "^4.3.0",
     "jsdom": "^29.0.2",
     "vite-plugin-svgr": "^5.2.0"

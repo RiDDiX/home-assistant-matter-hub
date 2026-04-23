@@ -89,8 +89,13 @@ export function DashboardCustomizeDialog({
                 </ListItemIcon>
                 <ListItemText
                   primary={widget.label}
-                  secondary={widget.description}
-                  secondaryTypographyProps={{ variant: "caption" }}
+                  secondary={
+                    <span
+                      style={{ fontSize: "0.8em", color: "rgba(0,0,0,0.6)" }}
+                    >
+                      {widget.description}
+                    </span>
+                  }
                 />
               </ListItem>
             );
