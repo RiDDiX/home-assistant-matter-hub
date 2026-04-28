@@ -30,7 +30,20 @@ function isCharging(entity: { attributes: Record<string, unknown> }): boolean {
 }
 
 export const VacuumRvcOperationalStateServer = RvcOperationalStateServer({
-  getOperationalState(entity): RvcOperationalState.OperationalState {
+  async initialize() {
+    const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);
+
+    const updateCache = () => {
+      const newState = this.getOperationalState(homeAssistant.entity.state, this.agent);
+      this.state.operationalState = newState;
+    };
+
+    this.react(homeAssistant.entity.state, updateCache);
+    updateCache();
+  },
+  
+  getOperationalState(entity) {
+    if (entity === this.state) return this.state.operationalState;
     const state = entity.state as VacuumState | "unavailable";
 
     const cleaningStates: string[] = [

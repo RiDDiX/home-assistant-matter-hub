@@ -517,7 +517,28 @@ function createCleanModeConfig(
 ) {
   const hasCleanTypes = !!cleaningModeOptions && cleaningModeOptions.length > 0;
   return {
-    getCurrentMode: (entity: { attributes: unknown }, agent: Agent): number => {
+    async initialize() {
+      const agent = this.agent;
+      const homeAssistant = agent.get(HomeAssistantEntityBehavior);
+      const mapping = homeAssistant.state.mapping;
+      const stateProvider = agent.env.get(EntityStateProvider);
+      
+      let isUpdating = false;
+      const updateCache = () => {
+        this.state.currentMode = this.getCurrentMode(homeAssistant.entity.state, agent);
+      };
+      this.react(homeAssistant.entity.state, updateCache);
+      if (mapping?.suctionLevelEntity) {
+        this.react(stateProvider.getState(mapping.suctionLevelEntity), updateCache);
+      }
+      if (mapping?.mopIntensityEntity) {
+        this.react(stateProvider.getState(mapping.mopIntensityEntity), updateCache);
+      }
+
+      updateCache();
+    },
+    
+    getCurrentMode: (entity, agent) => {
       const attributes = entity.attributes as VacuumDeviceAttributes & {
         cleaning_mode?: string;
       };
