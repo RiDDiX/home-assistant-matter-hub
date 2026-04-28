@@ -34,7 +34,10 @@ export const VacuumRvcOperationalStateServer = RvcOperationalStateServer({
     const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);
 
     const updateCache = () => {
-      const newState = this.getOperationalState(homeAssistant.entity.state, this.agent);
+      const newState = this.getOperationalState(
+        homeAssistant.entity.state,
+        this.agent,
+      );
       this.state.operationalState = newState;
     };
 

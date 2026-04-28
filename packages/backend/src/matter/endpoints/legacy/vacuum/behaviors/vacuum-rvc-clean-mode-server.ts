@@ -523,16 +523,27 @@ function createCleanModeConfig(
       const mapping = homeAssistant.state.mapping;
       const stateProvider = agent.env.get(EntityStateProvider);
       
-      let isUpdating = false;
       const updateCache = () => {
-        this.state.currentMode = this.getCurrentMode(homeAssistant.entity.state, agent);
+      this.state.currentMode = this.getCurrentMode(
+        homeAssistant.entity.state,
+        agent,
+        );
       };
+
       this.react(homeAssistant.entity.state, updateCache);
+
       if (mapping?.suctionLevelEntity) {
-        this.react(stateProvider.getState(mapping.suctionLevelEntity), updateCache);
+        this.react(
+          stateProvider.getState(mapping.suctionLevelEntity),
+          updateCache,
+        );
       }
+
       if (mapping?.mopIntensityEntity) {
-        this.react(stateProvider.getState(mapping.mopIntensityEntity), updateCache);
+        this.react(
+          stateProvider.getState(mapping.mopIntensityEntity),
+          updateCache,
+        );
       }
 
       updateCache();
