@@ -44,7 +44,7 @@ export const VacuumRvcOperationalStateServer = RvcOperationalStateServer({
     this.react(homeAssistant.entity.state, updateCache);
     updateCache();
   },
-  
+
   getOperationalState(entity) {
     if (entity === this.state) return this.state.operationalState;
     const state = entity.state as VacuumState | "unavailable";

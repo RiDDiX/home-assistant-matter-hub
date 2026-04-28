@@ -522,11 +522,11 @@ function createCleanModeConfig(
       const homeAssistant = agent.get(HomeAssistantEntityBehavior);
       const mapping = homeAssistant.state.mapping;
       const stateProvider = agent.env.get(EntityStateProvider);
-      
+
       const updateCache = () => {
-      this.state.currentMode = this.getCurrentMode(
-        homeAssistant.entity.state,
-        agent,
+        this.state.currentMode = this.getCurrentMode(
+          homeAssistant.entity.state,
+          agent,
         );
       };
 
@@ -548,7 +548,7 @@ function createCleanModeConfig(
 
       updateCache();
     },
-    
+
     getCurrentMode: (entity, agent) => {
       const attributes = entity.attributes as VacuumDeviceAttributes & {
         cleaning_mode?: string;
