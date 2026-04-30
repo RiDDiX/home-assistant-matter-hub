@@ -288,7 +288,21 @@
     "descending": "Malejąco",
     "connectedTo": "Połączono z",
     "autoRecovery": "Automatyczne odzyskiwanie",
-    "recoveryAttempts": "Próby odzyskania"
+    "recoveryAttempts": "Próby odzyskania",
+    "fabrics": "Fabryki",
+    "networkDiagnostics": "Diagnostyka sieci",
+    "checksPassed": "udane",
+    "checksWarning": "ostrzeżenia",
+    "checksFailed": "nieudane",
+    "hideDetails": "Ukryj szczegóły",
+    "showDetails": "Pokaż szczegóły",
+    "allChecks": "Wszystkie testy",
+    "check": "Test",
+    "statusLabel": "Etykieta statusu",
+    "message": "Wiadomość",
+    "networkInterfaces": "Interfejsy sieciowe",
+    "interfaceName": "Nazwa interfejsu",
+    "refresh": "Odśwież"
   },
   "mapping": {
     "title": "Mapowania encji",
@@ -310,6 +324,12 @@
     "match": "Dopasowanie",
     "existing": "Istniejące",
     "autoDetect": "Auto-wykrywanie (domyślne)",
+    "customProductName": "Nazwa produktu",
+    "customProductNameHelp": "Niestandardowa nazwa produktu",
+    "customVendorName": "Nazwa producenta",
+    "customVendorNameHelp": "Niestandardowa nazwa producenta",
+    "customSerialNumber": "Numer seryjny",
+    "customSerialNumberHelp": "Niestandardowy numer seryjny",
     "loadFailed": "Nie udało się wczytać mapowań encji",
     "noMappings": "Nie skonfigurowano niestandardowych mapowań encji. Użyj mapowań, aby nadpisać typy urządzeń Matter, ustawić własne nazwy lub wyłączyć konkretne encje.",
     "applying": "Zastosowywanie...",
@@ -344,6 +364,7 @@
     "subscription": "Subskrypcja",
     "bridgeStart": "Start mostka",
     "bridgeStop": "Stop mostka",
+    "entityWarning": "Ostrzeżenie",
     "filterEvents": "Filtruj typy zdarzeń",
     "clearEvents": "Wyczyść wszystkie zdarzenia",
     "noEvents": "Brak zdarzeń pasujących do aktualnych filtrów."
@@ -561,7 +582,8 @@
   },
   "footer": {
     "github": "GitHub",
-    "documentation": "Dokumentacja"
+    "documentation": "Dokumentacja",
+    "support": "Pomoc"
   },
   "languageSwitcher": {
     "disclaimer": "Tłumaczenia mogą być niekompletne.",
