@@ -140,6 +140,10 @@ function buildSupportedModes(
  * Build the primary action for custom service areas and queue the rest
  * for sequential dispatch. Custom areas use 1-based IDs matching
  * createCustomServiceAreaServer.
+ *
+ * When any matched area has batchDispatch === true, a single combined call
+ * is fired instead of sequential per-area calls (opt-in, for integrations
+ * like Xiaomi Home that accept all room IDs in one call).
  */
 function handleCustomServiceAreas(
   selectedAreas: number[],
@@ -155,6 +159,26 @@ function handleCustomServiceAreas(
       `Custom service areas: no match for selected IDs ${selectedAreas.join(", ")}`,
     );
     return { action: "vacuum.start" };
+  }
+
+  // Batch dispatch: one call for all selected areas, injecting combined data.
+  const batchArea = matched.find(({ area }) => area.batchDispatch === true);
+  if (batchArea) {
+    logger.info(
+      `Custom service areas (batch): single call for ${matched.length} room(s): ${matched.map(({ area }) => area.name).join(", ")}`,
+    );
+    session.pendingDispatches = [];
+    const template = batchArea.area;
+    return {
+      action: template.service,
+      target: template.target,
+      data: {
+        ...template.data,
+        selected_area_names: matched.map(({ area }) => area.name),
+        selected_area_ids_csv: matched.map(({ area }) => area.name).join(","),
+        selected_area_data: matched.map(({ area }) => area.data ?? {}),
+      },
+    };
   }
 
   logger.info(
