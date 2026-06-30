@@ -6,7 +6,7 @@ Home Assistant `lock` entities are mapped to Matter **DoorLock** devices with PI
 
 - **Lock**, Always allowed, no PIN required
 - **Unlock**, Requires PIN if credentials are configured
-- **Unlatch / Unbolt**, Available when the HA entity supports the `OPEN` feature. Maps to `lock.open` action. Apple Home shows an "Unlatch" button.
+- **Unlatch / Unbolt**, Available when the HA entity supports the `OPEN` feature. Unlatch (unlock) maps to `lock.open`, unbolt maps to `lock.unlock`. Apple Home shows an "Unlatch" button.
 
 ## State Mapping
 
@@ -44,7 +44,7 @@ Since v2.0.25, the Unbolting feature is automatically enabled when your HA lock 
 
 When enabled:
 - Apple Home shows an "Unlatch" button alongside Lock/Unlock
-- Pressing Unlatch calls `lock.open` in HA
+- Unlatch (unlock) calls `lock.open`; unbolt (Google's "open door when unlocking" off) calls `lock.unlock`
 - Useful for door openers, electric strikes, and motorized locks with separate unlatch capability
 
 ## Compatibility

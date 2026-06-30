@@ -536,11 +536,9 @@ export function LockServerWithPin(config: LockServerConfig) {
 }
 
 /**
- * Extended DoorLock server with PinCredential + Unbolting features.
- * Adds unboltDoor command (unlatch) in addition to lock/unlock.
- * Used when the HA lock entity supports the OPEN feature.
- *
- * Apple Home shows an "Unlatch" button when this feature is present.
+ * DoorLock server with PIN + Unbolting, for HA locks with the OPEN feature.
+ * Unlock pulls the latch (lock.open), unbolt just retracts the bolt
+ * (lock.unlock). Apple Home shows an "Unlatch" button when this is present.
  */
 const PinCredentialUnboltBase = Base.with(
   "User",
@@ -674,14 +672,8 @@ class LockServerWithPinAndUnboltBase extends PinCredentialUnboltBase {
 
   override unboltDoor(request: DoorLock.UnboltDoorRequest) {
     const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);
-    const unlatchConfig = this.state.config.unlatch;
-    if (!unlatchConfig) {
-      // Fallback to unlock if unlatch not configured
-      const action = this.state.config.unlock(void 0, this.agent);
-      homeAssistant.callAction(action);
-      return;
-    }
-    const action = unlatchConfig(void 0, this.agent);
+    // Unbolt pulls the bolt but not the latch, so unlock, not open (#397).
+    const action = this.state.config.unlock(void 0, this.agent);
     const hasPinProvided = !!request.pinCode;
     logger.debug(
       `unboltDoor called for ${homeAssistant.entityId}, PIN provided: ${hasPinProvided}, requirePin: ${this.state.requirePinForRemoteOperation}`,
