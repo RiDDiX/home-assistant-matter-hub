@@ -394,6 +394,12 @@ export class FanControlServerBase extends FeaturedBase {
       homeAssistant.entity.state?.state === "off" ||
       (this.agent.has(OnOffBehavior) &&
         !this.agent.get(OnOffBehavior).state.onOff);
+    if (wasOff) {
+      // Log the power-on decision so a stuck-at-100 report is unambiguous (#387).
+      logger.debug(
+        `[${homeAssistant.entityId}] power-on write ${percentage}%: restore flag=${restoreOnPowerOn}, last speed=${this.lastNonZeroPercent}`,
+      );
+    }
     if (
       restoreOnPowerOn &&
       wasOff &&
