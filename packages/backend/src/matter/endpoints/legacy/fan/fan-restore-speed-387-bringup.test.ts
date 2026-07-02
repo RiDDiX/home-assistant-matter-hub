@@ -162,6 +162,47 @@ async function powerOnClusterState(mapping: EntityMappingConfig): Promise<{
   return out;
 }
 
+// Some integrations (ha_xiaomi_home) accept fan.set_percentage but never
+// report a percentage attribute, so update() alone can't capture the last
+// speed. The controller write itself must be remembered (#387).
+async function powerOnAfterMatterSpeedWrite(
+  mapping: EntityMappingConfig,
+): Promise<number | undefined> {
+  const server = await ServerNode.create({
+    // biome-ignore lint/suspicious/noExplicitAny: env valid at runtime
+    environment: env as any,
+    id: "fan-restore-write-node",
+    network: { port: 0 },
+    commissioning: { passcode: 20202021, discriminator: 3840 },
+    basicInformation: { vendorId: VendorId(0xfff1), productId: 0x8000 },
+  });
+  const aggregator = new AggregatorEndpoint("aggregator");
+  await server.add(aggregator);
+  const entity = fanEntity();
+  // Fan is on but HA never fills the percentage attribute.
+  entity.state.state = "on";
+  // biome-ignore lint/suspicious/noExplicitAny: test fixture
+  (entity.state.attributes as any).percentage = null;
+  const endpoint = new Endpoint(FanDevice({ entity, mapping } as never), {
+    id: "fan",
+  });
+  await aggregator.add(endpoint);
+
+  calls.length = 0;
+  await endpoint.act((agent) => {
+    // biome-ignore lint/suspicious/noExplicitAny: drive the controller writes
+    const a = agent as any;
+    a.onOff.state.onOff = true;
+    a.fanControl.targetPercentSettingChanged(50, 0, { subject: {} }); // user picks 50%
+    a.onOff.state.onOff = false; // fan turned off
+    a.fanControl.targetPercentSettingChanged(100, 0, { subject: {} }); // Apple power button
+  });
+  await server.close().catch(() => {});
+
+  const setPct = calls.filter((c) => c.action === "fan.set_percentage").at(-1);
+  return (setPct?.data as { percentage?: number } | undefined)?.percentage;
+}
+
 // Reproduce the Apple race: onOff.on already flipped the Matter onOff true in a
 // separate frame before the percentSetting reactor runs. The HA state is still
 // off, so the restore must still fire (#387).
@@ -228,5 +269,13 @@ describe("fan restore speed on power-on (#387)", () => {
       fanRestoreSpeedOnPowerOn: true,
     });
     expect(pct).toBe(24);
+  });
+
+  it("remembers a speed set via Matter when HA reports no percentage", async () => {
+    const pct = await powerOnAfterMatterSpeedWrite({
+      entityId: "fan.test",
+      fanRestoreSpeedOnPowerOn: true,
+    });
+    expect(pct).toBe(50);
   });
 });

@@ -310,6 +310,7 @@ export class FanControlServerBase extends FeaturedBase {
       homeAssistant.callAction(
         this.state.config.turnOn(clampedPercentage, this.agent),
       );
+      this.rememberSpeed(clampedPercentage);
     }
   }
 
@@ -448,6 +449,7 @@ export class FanControlServerBase extends FeaturedBase {
       );
 
       homeAssistant.callAction(config.turnOn(clampedPercentage, this.agent));
+      this.rememberSpeed(clampedPercentage);
     } else {
       const presetModes =
         config.getPresetModes(homeAssistant.entity.state, this.agent) ?? [];
@@ -464,8 +466,28 @@ export class FanControlServerBase extends FeaturedBase {
         homeAssistant.callAction(
           config.setPresetMode(targetPreset, this.agent),
         );
+        this.rememberSpeed(percentage);
       }
     }
+  }
+
+  // Controller writes count as the last speed too. Some integrations
+  // (ha_xiaomi_home) accept fan.set_percentage but never report a percentage
+  // attribute, so capturing only HA updates misses them (#387).
+  private rememberSpeed(percentage: number) {
+    if (percentage <= 0) {
+      return;
+    }
+    this.lastNonZeroPercent = percentage;
+    const speedMax = this.state.speedMax ?? 0;
+    if (this.features.multiSpeed && speedMax > 0) {
+      this.lastNonZeroSpeed = Math.max(
+        1,
+        Math.ceil(speedMax * (percentage / 100)),
+      );
+    }
+    // lastIsAutoMode stays managed by update(), the HA echo decides whether
+    // the device actually left auto (humidifiers share this base).
   }
 
   private targetAirflowDirectionChanged(
