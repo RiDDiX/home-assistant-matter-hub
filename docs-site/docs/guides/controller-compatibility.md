@@ -65,6 +65,8 @@ By default a `moisture` or `cold` binary sensor is exposed as a plain ContactSen
 
 \*\*\*\* A `weather` entity is exposed as a TemperatureSensor with Humidity and Pressure clusters stacked on one device. Temperature and Humidity should work where the standalone sensor rows do; Pressure is Google-only (see the PressureSensor row). The stacked-cluster shape on a single device is not yet community-tested, so treat these cells as expected, not confirmed.
 
+**No switch tile over Matter.** Matter has no on/off device type that controllers render as a plain "switch": every controller shows 0x010A as a plug/outlet and 0x0100 (the OnOffSwitch override) as a light. The switch tile you may know from HA's HomeKit Bridge comes from the HomeKit-native Switch service, which has no Matter equivalent. Apple's "Show as" works on Matter outlets but only offers Outlet, Light, or Fan. The Matter 1.4 Mounted On/Off Control type (experimental override) shows as a switch on SmartThings and Aqara; Apple, Google, and Alexa don't know the type and are expected to fall back to its advertised plug subset (not yet verified on real devices). For a genuine switch tile on Apple or Google, expose that entity through HA's HomeKit Bridge or Google integration in parallel ([#380](https://github.com/RiDDiX/home-assistant-matter-hub/issues/380)).
+
 ### Sources
 
 Footnote references for the ✅ / ❌ cells above:

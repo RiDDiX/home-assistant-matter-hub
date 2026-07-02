@@ -582,7 +582,8 @@ You can override the default device type mapping per entity using the Entity Map
 - ColorTemperatureLight
 - ExtendedColorLight
 - OnOffPlugInUnit
-- OnOffSwitch (now produces a real 0x0100 On/Off Light with an OnOff server that controllers render as a switch, instead of the old no-op plug; opt-in users need a one-time re-pair) ([#380](https://github.com/RiDDiX/home-assistant-matter-hub/issues/380))
+- OnOffSwitch (now produces a real 0x0100 On/Off Light with an OnOff server that controllers render as a switch, instead of the old no-op plug; opt-in users need a one-time re-pair. All controllers treat 0x0100 as a light, so Alexa's "turn off all lights" will toggle it too) ([#380](https://github.com/RiDDiX/home-assistant-matter-hub/issues/380))
+- MountedOnOffControl (experimental Matter 1.4 type 0x010F. SmartThings and Aqara show it as a real switch; Apple, Google and Alexa don't know the type yet and are expected to fall back to the plug subset the endpoint also advertises, not yet verified on real devices) ([#380](https://github.com/RiDDiX/home-assistant-matter-hub/issues/380))
 - DoorLock
 - WindowCovering
 - Thermostat
