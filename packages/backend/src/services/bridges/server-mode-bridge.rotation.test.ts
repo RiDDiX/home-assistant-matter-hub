@@ -4,7 +4,9 @@ import {
   DEFAULT_SESSION_MAX_AGE_HOURS,
   parseSessionMaxAgeHours,
   SESSION_MAX_AGE_HOURS_RANGE,
+  STALE_SESSION_QUIET_WINDOW_MS,
   seedExistingSessionStarts,
+  staleSessionQuietWindowMs,
   staleSessionShouldClose,
 } from "./session-rotation.js";
 
@@ -38,6 +40,63 @@ describe("staleSessionShouldClose", () => {
 
   it("keeps a session that is already closing", () => {
     expect(staleSessionShouldClose(session({ isClosing: true }))).toBe(false);
+  });
+
+  // #398: isPeerActive only covers ~4s, so a hub session with traffic 94s
+  // ago was closed and Apple Home wedged on "Updating...". Recent traffic
+  // must keep the session alive.
+  const NOW = 1_750_000_000_000;
+
+  it("keeps a session with recent traffic (#398)", () => {
+    expect(
+      staleSessionShouldClose(
+        session({ timestamp: NOW - 94_000 }),
+        STALE_SESSION_QUIET_WINDOW_MS,
+        NOW,
+      ),
+    ).toBe(false);
+  });
+
+  it("keeps a session just inside the quiet window", () => {
+    expect(
+      staleSessionShouldClose(
+        session({ timestamp: NOW - STALE_SESSION_QUIET_WINDOW_MS + 1 }),
+        STALE_SESSION_QUIET_WINDOW_MS,
+        NOW,
+      ),
+    ).toBe(false);
+  });
+
+  it("closes a session silent for the whole quiet window", () => {
+    expect(
+      staleSessionShouldClose(
+        session({ timestamp: NOW - STALE_SESSION_QUIET_WINDOW_MS }),
+        STALE_SESSION_QUIET_WINDOW_MS,
+        NOW,
+      ),
+    ).toBe(true);
+  });
+
+  it("ignores the window when it is 0 (fastSessionRecovery)", () => {
+    expect(
+      staleSessionShouldClose(session({ timestamp: NOW - 1_000 }), 0, NOW),
+    ).toBe(true);
+  });
+});
+
+describe("staleSessionQuietWindowMs", () => {
+  it("uses the quiet window by default", () => {
+    expect(staleSessionQuietWindowMs(undefined)).toBe(
+      STALE_SESSION_QUIET_WINDOW_MS,
+    );
+    expect(staleSessionQuietWindowMs({})).toBe(STALE_SESSION_QUIET_WINDOW_MS);
+    expect(staleSessionQuietWindowMs({ fastSessionRecovery: false })).toBe(
+      STALE_SESSION_QUIET_WINDOW_MS,
+    );
+  });
+
+  it("drops the window for fastSessionRecovery (#386)", () => {
+    expect(staleSessionQuietWindowMs({ fastSessionRecovery: true })).toBe(0);
   });
 });
 

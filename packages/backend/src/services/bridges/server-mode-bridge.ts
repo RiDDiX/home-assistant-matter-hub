@@ -22,6 +22,7 @@ import {
   ROTATION_CHECK_INTERVAL_MS,
   SESSION_MAX_AGE_HOURS_RANGE,
   seedExistingSessionStarts,
+  staleSessionQuietWindowMs,
   staleSessionShouldClose,
 } from "./session-rotation.js";
 
@@ -493,12 +494,18 @@ export class ServerModeBridge {
         if (s.id !== sessionId || s.isClosing || s.subscriptions.size > 0) {
           continue;
         }
-        if (!staleSessionShouldClose(s)) {
-          // 0 subs but the peer is still talking: it is recovering, not dead.
+        const idleSec = Math.round((Date.now() - s.timestamp) / 1000);
+        if (
+          !staleSessionShouldClose(
+            s,
+            staleSessionQuietWindowMs(this.dataProvider.featureFlags),
+          )
+        ) {
+          // 0 subs but recent traffic: the peer is recovering, not dead.
           // Re-arm and only close once it goes quiet, so a controller can
-          // re-subscribe on this session instead of being forced offline (#287).
+          // re-subscribe on this session instead of being forced offline (#287/#398).
           this.log.info(
-            `Keeping session ${s.id} (peer ${s.peerNodeId}, 0 subs but peer still active)`,
+            `Keeping session ${s.id} (peer ${s.peerNodeId}, 0 subs, last traffic ${idleSec}s ago)`,
           );
           this.staleSessionTimers.set(
             sessionId,
@@ -510,7 +517,7 @@ export class ServerModeBridge {
           break;
         }
         this.log.warn(
-          `Closing stale session ${s.id} (peer ${s.peerNodeId}, no subscriptions for ${DEAD_SESSION_TIMEOUT_MS / 1000}s)`,
+          `Closing stale session ${s.id} (peer ${s.peerNodeId}, no subscriptions for ${DEAD_SESSION_TIMEOUT_MS / 1000}s, no traffic for ${idleSec}s)`,
         );
         s.initiateClose()
           .catch(() => {
@@ -538,13 +545,22 @@ export class ServerModeBridge {
         if (s.isClosing || s.subscriptions.size > 0) {
           continue;
         }
-        if (!staleSessionShouldClose(s)) {
-          // Peer still active: leave it so it can re-subscribe (#287).
+        const idleSec = Math.round((Date.now() - s.timestamp) / 1000);
+        if (
+          !staleSessionShouldClose(
+            s,
+            staleSessionQuietWindowMs(this.dataProvider.featureFlags),
+          )
+        ) {
+          // Recent traffic: leave it so the peer can re-subscribe (#287/#398).
+          this.log.info(
+            `Keeping session ${s.id} (peer ${s.peerNodeId}, 0 subs, last traffic ${idleSec}s ago)`,
+          );
           kept++;
           continue;
         }
         this.log.warn(
-          `Closing dead session ${s.id} (peer ${s.peerNodeId}, no subscriptions for ${DEAD_SESSION_TIMEOUT_MS / 1000}s)`,
+          `Closing dead session ${s.id} (peer ${s.peerNodeId}, no subscriptions for ${DEAD_SESSION_TIMEOUT_MS / 1000}s, no traffic for ${idleSec}s)`,
         );
         closes.push(
           s.initiateClose().catch(() => {
