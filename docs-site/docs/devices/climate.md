@@ -47,6 +47,12 @@ This only takes effect when the climate entity reports the `FAN_MODE` feature. E
 
 Turning the Fan tile off now sends `climate.turn_off` (it no longer flips the AC into cool/heat). Turning it on puts the AC into `fan_only`, and the tile's speed maps to `climate.set_fan_mode`.
 
+## Plain Thermostat fallback (Aqara)
+
+A climate entity with a fan mode is exposed as a Matter **Room Air Conditioner** (0x0072). Aqara Home only knows that type since app 5.1.9 / controller firmware 4.3.5, older versions silently drop the endpoint. Set `disableClimateFanControl` in **Entity Mapping** to expose the entity as a plain **Thermostat** instead, which Aqara has long supported.
+
+The flag only takes effect after a **full HAMH restart** (restarting just the bridge is not enough), and Aqara caches the bridge's device list, so afterwards **remove the bridge from Aqara Home and pair it again**. Skipping either step leaves the old air conditioner endpoint in place and the device stays invisible ([#318](https://github.com/RiDDiX/home-assistant-matter-hub/issues/318), [#389](https://github.com/RiDDiX/home-assistant-matter-hub/issues/389)).
+
 ## Temperature Display Unit
 
 The `ThermostatUserInterfaceConfiguration` cluster exposes your HA temperature unit preference (°C or °F) to Matter controllers. Controllers may use this to display temperatures in your preferred unit.
@@ -82,3 +88,7 @@ If `current_temperature` is `null` or unavailable, the bridge falls back to the 
 ### Zoned AC with only heat_cool mode
 
 Devices that report only `heat_cool` in `hvac_modes` (no explicit `heat` or `cool`) are handled since v2.0.27. The `controlSequenceOfOperation` dynamically switches between `CoolingOnly` and `HeatingOnly` based on `hvac_action`.
+
+### Aqara Home does not show the climate device
+
+See [Plain Thermostat fallback (Aqara)](#plain-thermostat-fallback-aqara) above. Also update HAMH to v2.0.47 or later first: v2.0.46 had a bug where a climate endpoint could fail to initialize and silently disappear from the bridge (#375).

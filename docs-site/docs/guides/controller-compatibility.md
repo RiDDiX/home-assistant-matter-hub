@@ -86,7 +86,7 @@ A few Aqara quirks are handled for you:
 - The root `softwareVersionString` is aligned with the numeric version so bridge registration does not stall ([#316](https://github.com/RiDDiX/home-assistant-matter-hub/issues/316)).
 - `productName` is stripped of characters that crash Aqara when the `productNameFromNodeLabel` flag is on ([#330](https://github.com/RiDDiX/home-assistant-matter-hub/issues/330)).
 
-If Aqara does not show an air conditioner, set the entity's `disableClimateFanControl` flag to expose it as a plain Thermostat ([#318](https://github.com/RiDDiX/home-assistant-matter-hub/issues/318)). For naming, the `productNameFromNodeLabel` bridge flag and the per-entity `customProductName` / `customVendorId` overrides help Aqara show the device name you expect.
+If Aqara does not show an air conditioner, set the entity's `disableClimateFanControl` flag to expose it as a plain Thermostat ([#318](https://github.com/RiDDiX/home-assistant-matter-hub/issues/318)). The flag needs a full HAMH restart to take effect, and Aqara caches the bridge's device list, so remove the bridge from Aqara Home and pair it again afterwards. Alternatively, Aqara Home app 5.1.9 with controller firmware 4.3.5 or newer knows the Room Air Conditioner type natively, so updating Aqara can make the default exposure work without the flag. For naming, the `productNameFromNodeLabel` bridge flag and the per-entity `customProductName` / `customVendorId` overrides help Aqara show the device name you expect.
 
 ## Controller Profiles
 

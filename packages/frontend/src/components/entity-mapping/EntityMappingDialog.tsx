@@ -1176,7 +1176,7 @@ export function EntityMappingDialog({
                   }
                 />
               }
-              label="Expose as plain Thermostat (drop FanControl), workaround for controllers like Aqara that don't recognise the air conditioner device type"
+              label="Expose as plain Thermostat (drop FanControl), workaround for controllers like Aqara that don't recognise the air conditioner device type. Needs a full HAMH restart, then re-pair the bridge in the controller (Aqara caches the device list)"
               sx={{ mt: 1, display: "block" }}
             />
             <FormControlLabel
