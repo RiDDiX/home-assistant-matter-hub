@@ -12,6 +12,7 @@ import {
 import type { FeatureSelection } from "../../../../utils/feature-selection.js";
 import { testBit } from "../../../../utils/test-bit.js";
 import { BasicInformationServer } from "../../../behaviors/basic-information-server.js";
+import { FanSpeedMemoryBehavior } from "../../../behaviors/fan-speed-memory.js";
 import { HomeAssistantEntityBehavior } from "../../../behaviors/home-assistant-entity-behavior.js";
 import { IdentifyServer } from "../../../behaviors/identify-server.js";
 import { DefaultPowerSourceServer } from "../../../behaviors/power-source-server.js";
@@ -109,6 +110,7 @@ export function FanDevice(
         GroupsServer,
         FanOnOffServer,
         FanFanControlServer.with(...features),
+        FanSpeedMemoryBehavior,
         DefaultPowerSourceServer,
       )
     : Device.with(
@@ -118,6 +120,7 @@ export function FanDevice(
         GroupsServer,
         FanOnOffServer,
         FanFanControlServer.with(...features),
+        FanSpeedMemoryBehavior,
       );
   return device.set({ homeAssistantEntity });
 }

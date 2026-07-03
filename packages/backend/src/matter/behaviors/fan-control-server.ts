@@ -14,6 +14,7 @@ import {
 } from "../../utils/converters/fan-mode-order.js";
 import { FanSpeed } from "../../utils/converters/fan-speed.js";
 import { transactionIsOffline } from "../../utils/transaction-is-offline.js";
+import { FanSpeedMemoryBehavior } from "./fan-speed-memory.js";
 import { HomeAssistantEntityBehavior } from "./home-assistant-entity-behavior.js";
 import { setOptimisticOnOff } from "./on-off-server.js";
 import type { ValueGetter, ValueSetter } from "./utils/cluster-config.js";
@@ -76,10 +77,27 @@ export interface FanControlServerConfig {
 export class FanControlServerBase extends FeaturedBase {
   declare state: FanControlServerBase.State;
 
-  // Track last non-zero fan speed for restore on turn-on (#225)
+  // Fallback last-speed tracking for endpoints without FanSpeedMemoryBehavior
+  // (climate companion, humidifier). matter.js builds behavior instances per
+  // transaction, so these fields only live within one interaction; fans use
+  // the persisted memory behavior instead (#225/#387).
   private lastNonZeroPercent = 0;
   private lastNonZeroSpeed = 0;
   private lastIsAutoMode = false;
+
+  // Remembered speed, read at decision time. Behavior state survives
+  // transactions and restarts, instance fields do not (#387).
+  private remembered(): { percent: number; speed: number; auto: boolean } {
+    if (this.agent.has(FanSpeedMemoryBehavior)) {
+      const s = this.agent.get(FanSpeedMemoryBehavior).state;
+      return { percent: s.lastPercent, speed: s.lastSpeed, auto: s.lastAuto };
+    }
+    return {
+      percent: this.lastNonZeroPercent,
+      speed: this.lastNonZeroSpeed,
+      auto: this.lastIsAutoMode,
+    };
+  }
 
   override async initialize() {
     // Matter.js defaults: speedMax=0, percentSetting=null, percentCurrent=0
@@ -103,6 +121,15 @@ export class FanControlServerBase extends FeaturedBase {
       const ss = this.state.speedSetting;
       if (ss != null && ss > 0) {
         this.lastNonZeroSpeed = ss;
+      }
+    }
+    // Migrate the percentSetting seed into the persisted memory once, so
+    // fans that were on at shutdown keep their speed known (#387).
+    if (this.agent.has(FanSpeedMemoryBehavior)) {
+      const memory = await this.agent.load(FanSpeedMemoryBehavior);
+      if (memory.state.lastPercent === 0 && this.lastNonZeroPercent > 0) {
+        memory.state.lastPercent = this.lastNonZeroPercent;
+        memory.state.lastSpeed = this.lastNonZeroSpeed;
       }
     }
 
@@ -232,6 +259,7 @@ export class FanControlServerBase extends FeaturedBase {
       this.lastNonZeroPercent = percentage;
       this.lastNonZeroSpeed = speed;
       this.lastIsAutoMode = config.isInAutoMode(entity.state, this.agent);
+      this.persistSpeed(this.lastIsAutoMode);
     }
 
     try {
@@ -395,29 +423,30 @@ export class FanControlServerBase extends FeaturedBase {
       homeAssistant.entity.state?.state === "off" ||
       (this.agent.has(OnOffBehavior) &&
         !this.agent.get(OnOffBehavior).state.onOff);
+    const remembered = this.remembered();
     if (wasOff) {
       // Log the power-on decision so a stuck-at-100 report is unambiguous (#387).
       logger.debug(
-        `[${homeAssistant.entityId}] power-on write ${percentage}%: restore flag=${restoreOnPowerOn}, last speed=${this.lastNonZeroPercent}`,
+        `[${homeAssistant.entityId}] power-on write ${percentage}%: restore flag=${restoreOnPowerOn}, last speed=${remembered.percent}`,
       );
     }
     if (
       restoreOnPowerOn &&
       wasOff &&
-      this.lastNonZeroPercent > 0 &&
+      remembered.percent > 0 &&
       percentage > 0
     ) {
-      percentage = this.lastNonZeroPercent;
+      percentage = remembered.percent;
       // Reflect it in the cluster too, else Apple's injected 100 stays and a
       // later sync pushes it back over the restore (#387).
       try {
         applyPatchState(this.state, {
-          percentSetting: this.lastNonZeroPercent,
-          percentCurrent: this.lastNonZeroPercent,
-          ...(this.features.multiSpeed && this.lastNonZeroSpeed > 0
+          percentSetting: remembered.percent,
+          percentCurrent: remembered.percent,
+          ...(this.features.multiSpeed && remembered.speed > 0
             ? {
-                speedSetting: this.lastNonZeroSpeed,
-                speedCurrent: this.lastNonZeroSpeed,
+                speedSetting: remembered.speed,
+                speedCurrent: remembered.speed,
               }
             : {}),
         });
@@ -486,8 +515,28 @@ export class FanControlServerBase extends FeaturedBase {
         Math.ceil(speedMax * (percentage / 100)),
       );
     }
-    // lastIsAutoMode stays managed by update(), the HA echo decides whether
-    // the device actually left auto (humidifiers share this base).
+    // A manual speed write leaves auto mode. Safe to persist here: the
+    // memory behavior only exists on fan endpoints, so humidifier percent
+    // writes (humidity setpoints) never reach it.
+    this.persistSpeed(false);
+  }
+
+  // Write the remembered speed through to the memory behavior. Instance
+  // fields die with the transaction, this is what later interactions and
+  // restarts read (#387).
+  private persistSpeed(auto?: boolean) {
+    if (!this.agent.has(FanSpeedMemoryBehavior)) {
+      return;
+    }
+    try {
+      applyPatchState(this.agent.get(FanSpeedMemoryBehavior).state, {
+        lastPercent: this.lastNonZeroPercent,
+        lastSpeed: this.lastNonZeroSpeed,
+        ...(auto !== undefined ? { lastAuto: auto } : {}),
+      });
+    } catch {
+      // Transaction conflict, a later write will persist it
+    }
   }
 
   private targetAirflowDirectionChanged(
@@ -579,7 +628,8 @@ export class FanControlServerBase extends FeaturedBase {
     if (transactionIsOffline(context)) {
       return;
     }
-    if (onOff && this.lastNonZeroPercent > 0) {
+    const remembered = this.remembered();
+    if (onOff && remembered.percent > 0) {
       // Use asLocalActor so the percentSetting change is treated as offline.
       // Without this, targetPercentSettingChanged fires and sends a second
       // fan.turn_on(percentage), overriding the no-param fan.turn_on from
@@ -587,9 +637,9 @@ export class FanControlServerBase extends FeaturedBase {
       this.agent.asLocalActor(() => {
         try {
           applyPatchState(this.state, {
-            percentSetting: this.lastNonZeroPercent,
-            ...(this.features.multiSpeed && this.lastNonZeroSpeed > 0
-              ? { speedSetting: this.lastNonZeroSpeed }
+            percentSetting: remembered.percent,
+            ...(this.features.multiSpeed && remembered.speed > 0
+              ? { speedSetting: remembered.speed }
               : {}),
           });
         } catch {
@@ -600,13 +650,13 @@ export class FanControlServerBase extends FeaturedBase {
       // fall back to 100% when a plain OnOff.on() is used (#275).
       const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);
       if (homeAssistant.isAvailable) {
-        if (this.lastIsAutoMode) {
+        if (remembered.auto) {
           homeAssistant.callAction(
             this.state.config.setAutoMode(void 0, this.agent),
           );
         } else {
           homeAssistant.callAction(
-            this.state.config.turnOn(this.lastNonZeroPercent, this.agent),
+            this.state.config.turnOn(remembered.percent, this.agent),
           );
         }
       }

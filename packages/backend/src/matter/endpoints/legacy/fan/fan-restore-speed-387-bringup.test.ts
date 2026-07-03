@@ -5,10 +5,12 @@ import type {
   EntityMappingConfig,
   HomeAssistantEntityInformation,
 } from "@home-assistant-matter-hub/common";
-import { Environment, VariableService } from "@matter/general";
+import type { DataNamespace } from "@matter/general";
+import { Environment, StorageService, VariableService } from "@matter/general";
 import { Endpoint, VendorId } from "@matter/main";
 import { ServerNode } from "@matter/main/node";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { CustomStorage } from "../../../../core/app/storage/custom-storage.js";
 import { BridgeDataProvider } from "../../../../services/bridges/bridge-data-provider.js";
 import {
   type HomeAssistantAction,
@@ -109,9 +111,9 @@ async function powerOnPercentage(
   calls.length = 0;
   await endpoint.act((agent) => {
     // biome-ignore lint/suspicious/noExplicitAny: drive the controller write
-    const fc = (agent as any).fanControl;
-    fc.lastNonZeroPercent = 24; // remembered speed from before it was turned off
-    fc.targetPercentSettingChanged(100, 0, { subject: {} });
+    const a = agent as any;
+    a.fanSpeedMemory.state.lastPercent = 24; // remembered speed from before off
+    a.fanControl.targetPercentSettingChanged(100, 0, { subject: {} });
   });
   await server.close().catch(() => {});
 
@@ -149,10 +151,11 @@ async function powerOnClusterState(mapping: EntityMappingConfig): Promise<{
   } = {};
   await endpoint.act((agent) => {
     // biome-ignore lint/suspicious/noExplicitAny: drive the controller write
-    const fc = (agent as any).fanControl;
+    const a = agent as any;
+    const fc = a.fanControl;
     fc.state.percentSetting = 100; // Apple Home's injected power-on value
-    fc.lastNonZeroPercent = 24;
-    fc.lastNonZeroSpeed = 2;
+    a.fanSpeedMemory.state.lastPercent = 24;
+    a.fanSpeedMemory.state.lastSpeed = 2;
     fc.targetPercentSettingChanged(100, 0, { subject: {} });
     out.percentSetting = fc.state.percentSetting;
     out.percentCurrent = fc.state.percentCurrent;
@@ -188,16 +191,94 @@ async function powerOnAfterMatterSpeedWrite(
   });
   await aggregator.add(endpoint);
 
-  calls.length = 0;
+  // Two separate acts: matter.js builds behavior instances per transaction,
+  // so this is the real controller sequence, not a same-instance shortcut.
   await endpoint.act((agent) => {
     // biome-ignore lint/suspicious/noExplicitAny: drive the controller writes
     const a = agent as any;
     a.onOff.state.onOff = true;
     a.fanControl.targetPercentSettingChanged(50, 0, { subject: {} }); // user picks 50%
+  });
+  calls.length = 0;
+  await endpoint.act((agent) => {
+    // biome-ignore lint/suspicious/noExplicitAny: drive the controller writes
+    const a = agent as any;
     a.onOff.state.onOff = false; // fan turned off
     a.fanControl.targetPercentSettingChanged(100, 0, { subject: {} }); // Apple power button
   });
   await server.close().catch(() => {});
+
+  const setPct = calls.filter((c) => c.action === "fan.set_percentage").at(-1);
+  return (setPct?.data as { percentage?: number } | undefined)?.percentage;
+}
+
+// The remembered speed must survive an add-on restart. Session 1 sets 50%
+// via Matter (fan reports no percentage attribute), session 2 reuses the same
+// storage and gets the Apple power-on write while off (#387). Runs on the
+// production CustomStorage, which skips loading ClusterId-suffixed contexts,
+// so this breaks if fanSpeedMemory ever lands in ClusterId.
+async function powerOnAfterBridgeRestart(
+  mapping: EntityMappingConfig,
+): Promise<number | undefined> {
+  const storageService = env.get(StorageService);
+  storageService.registerDriver({
+    id: CustomStorage.driverId,
+    async create(namespace: DataNamespace) {
+      const driver = new CustomStorage(namespace);
+      await driver.initialize();
+      return driver;
+    },
+  });
+  storageService.defaultDriver = CustomStorage.driverId;
+  // Fresh config per session, matter.js mutates it during create.
+  const nodeConfig = () => ({
+    // biome-ignore lint/suspicious/noExplicitAny: env valid at runtime
+    environment: env as any,
+    id: "fan-restart-node",
+    network: { port: 0 },
+    commissioning: { passcode: 20202021, discriminator: 3840 },
+    basicInformation: { vendorId: VendorId(0xfff1), productId: 0x8000 },
+  });
+
+  const onEntity = fanEntity();
+  onEntity.state.state = "on";
+  // biome-ignore lint/suspicious/noExplicitAny: test fixture
+  (onEntity.state.attributes as any).percentage = null;
+  const server1 = await ServerNode.create(nodeConfig());
+  const aggregator1 = new AggregatorEndpoint("aggregator");
+  await server1.add(aggregator1);
+  const endpoint1 = new Endpoint(
+    FanDevice({ entity: onEntity, mapping } as never),
+    { id: "fan" },
+  );
+  await aggregator1.add(endpoint1);
+  await endpoint1.act((agent) => {
+    // biome-ignore lint/suspicious/noExplicitAny: drive the controller write
+    const a = agent as any;
+    a.onOff.state.onOff = true;
+    a.fanControl.targetPercentSettingChanged(50, 0, { subject: {} });
+  });
+  await server1.close().catch(() => {});
+
+  const offEntity = fanEntity();
+  // biome-ignore lint/suspicious/noExplicitAny: test fixture
+  (offEntity.state.attributes as any).percentage = null;
+  const server2 = await ServerNode.create(nodeConfig());
+  const aggregator2 = new AggregatorEndpoint("aggregator");
+  await server2.add(aggregator2);
+  const endpoint2 = new Endpoint(
+    FanDevice({ entity: offEntity, mapping } as never),
+    { id: "fan" },
+  );
+  await aggregator2.add(endpoint2);
+  calls.length = 0;
+  await endpoint2.act((agent) => {
+    // biome-ignore lint/suspicious/noExplicitAny: drive the controller write
+    (agent as any).fanControl.targetPercentSettingChanged(100, 0, {
+      subject: {},
+    });
+  });
+  await server2.close().catch(() => {});
 
   const setPct = calls.filter((c) => c.action === "fan.set_percentage").at(-1);
   return (setPct?.data as { percentage?: number } | undefined)?.percentage;
@@ -230,7 +311,7 @@ async function powerOnPercentageOnOffRace(
     // biome-ignore lint/suspicious/noExplicitAny: drive the controller write
     const a = agent as any;
     a.onOff.state.onOff = true; // onOff.on already processed (the race)
-    a.fanControl.lastNonZeroPercent = 24;
+    a.fanSpeedMemory.state.lastPercent = 24;
     a.fanControl.targetPercentSettingChanged(100, 0, { subject: {} });
   });
   await server.close().catch(() => {});
@@ -273,6 +354,14 @@ describe("fan restore speed on power-on (#387)", () => {
 
   it("remembers a speed set via Matter when HA reports no percentage", async () => {
     const pct = await powerOnAfterMatterSpeedWrite({
+      entityId: "fan.test",
+      fanRestoreSpeedOnPowerOn: true,
+    });
+    expect(pct).toBe(50);
+  });
+
+  it("keeps the remembered speed across a bridge restart", async () => {
+    const pct = await powerOnAfterBridgeRestart({
       entityId: "fan.test",
       fanRestoreSpeedOnPowerOn: true,
     });
