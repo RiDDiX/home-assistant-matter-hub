@@ -27,6 +27,7 @@ export const controllerProfiles: ControllerProfile[] = [
       autoBatteryMapping: true,
       autoHumidityMapping: true,
       autoPressureMapping: true,
+      fanRestorePercentOnTurnOn: true,
     },
   },
   {

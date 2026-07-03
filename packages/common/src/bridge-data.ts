@@ -99,6 +99,17 @@ interface AllBridgeFeatureFlags {
    */
   readonly alexaPreserveBrightnessOnTurnOn: boolean;
   /**
+   * Fan: Restore Percent on Turn-On. When a fan is turned off,
+   * percentSetting must be 0 (otherwise Apple Home shows "Turning off..."
+   * indefinitely). When the fan is turned back on, Apple Home writes
+   * percentSetting=100 as its default, resetting the speed. With this
+   * flag enabled, the bridge intercepts the 100% default and restores
+   * the user's previous fan speed instead.
+   * Enable on Apple Home bridges; not needed for Alexa.
+   * Default: false (disabled)
+   */
+  readonly fanRestorePercentOnTurnOn: boolean;
+  /**
    * Use HA Registry Serial Number: when set, fall back to the Home Assistant
    * device registry serial_number for the Matter serialNumber attribute when
    * no per-entity customSerialNumber is configured. Default off because

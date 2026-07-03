@@ -287,6 +287,17 @@ const featureFlagSchema: JSONSchema7 = {
       default: false,
     },
 
+    fanRestorePercentOnTurnOn: {
+      title: "Fan: Restore Percent on Turn-On",
+      description:
+        "When a fan is turned off, the bridge sets percentSetting to 0 (required so Apple Home " +
+        "does not show 'Turning off...' indefinitely). Apple Home then defaults to 100% on the " +
+        "next turn-on. With this flag enabled, the bridge intercepts the 100% default and " +
+        "restores the fan's previous speed. Enable on Apple Home bridges.",
+      type: "boolean",
+      default: false,
+    },
+
     useHaRegistrySerial: {
       title: "Use HA Registry Serial Number",
       description:

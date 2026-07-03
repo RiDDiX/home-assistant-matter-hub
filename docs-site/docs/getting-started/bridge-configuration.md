@@ -301,6 +301,7 @@ Feature flags control advanced behavior of the bridge. Configure them in the **B
 | `serverMode` | Expose device as standalone Matter device (required for Robot Vacuums with Apple Home/Alexa). Only ONE device per bridge! | `false` |
 | `productNameFromNodeLabel` | Report the node label (custom name / friendly name / entity id) as Matter `productName`. Useful for Aqara controllers that show productName as the device name. A per-entity `customProductName` still wins. | `false` |
 | `preferEntityRegistryName` | Use the entity registry name (or `original_name`) as `nodeLabel` instead of the composed `friendly_name`. HA 2026.4 prefixes `friendly_name` with the device name, breaking voice commands that relied on the short entity name. `customName` still wins. | `false` |
+| `fanRestorePercentOnTurnOn` | Restore the fan's previous speed when turned on instead of defaulting to 100%. Apple Home resets fans to 100% on every turn-on because the bridge must report 0% while the fan is off. Enable on Apple Home bridges. | `false` |
 | `vacuumOnOff` | Add OnOff cluster to vacuum endpoints. Required for Alexa discovery. In Server Mode, enabled by default unless explicitly set to `false`. In Bridge Mode, disabled by default. | (see description) |
 | `vacuumIncludeUnnamedRooms` | Include rooms without names in vacuum room selection | `false` |
 

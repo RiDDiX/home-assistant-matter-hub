@@ -6,6 +6,7 @@ import {
   OnOffBehavior,
 } from "@matter/main/behaviors";
 import { FanControl } from "@matter/main/clusters";
+import { BridgeDataProvider } from "../../services/bridges/bridge-data-provider.js";
 import { applyPatchState } from "../../utils/apply-patch-state.js";
 import { FanMode } from "../../utils/converters/fan-mode.js";
 import {
@@ -383,6 +384,42 @@ export class FanControlServerBase extends FeaturedBase {
     if (!homeAssistant.isAvailable) {
       return;
     }
+
+    // When the fan transitions from off (percentCurrent=0) to on, Apple
+    // Home writes percentSetting=100 as its default because percentSetting
+    // was 0 while the fan was off (#219 requires percentSetting=0 when
+    // off, otherwise Apple Home shows "Turning off..." indefinitely).
+    // Intercept only the 100% default so explicit percentage choices (e.g.
+    // dragging the slider to 90%) are not overridden (#275).
+    const { featureFlags } = this.env.get(BridgeDataProvider);
+    if (
+      featureFlags?.fanRestorePercentOnTurnOn === true && // opt-in flag
+      this.state.percentCurrent === 0 && // fan is off
+      percentage === 100 && // controller sent the default 100%
+      this.lastNonZeroPercent > 0 // we have a previous speed to restore
+    ) {
+      if (this.lastIsAutoMode) {
+        this.syncOnOff(true);
+        homeAssistant.callAction(
+          this.state.config.setAutoMode(void 0, this.agent),
+        );
+        return;
+      }
+      if (this.lastNonZeroPercent < 100) {
+        percentage = this.lastNonZeroPercent;
+        try {
+          applyPatchState(this.state, {
+            percentSetting: percentage,
+            ...(this.features.multiSpeed && this.lastNonZeroSpeed > 0
+              ? { speedSetting: this.lastNonZeroSpeed }
+              : {}),
+          });
+        } catch {
+          // Transaction conflict — HA state update will correct the values
+        }
+      }
+    }
+
     const config = this.state.config;
     const supportsPercentage = config.supportsPercentage(
       homeAssistant.entity.state,
