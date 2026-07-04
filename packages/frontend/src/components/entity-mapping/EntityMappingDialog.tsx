@@ -142,6 +142,9 @@ export function EntityMappingDialog({
   const [coverSwapOpenClose, setCoverSwapOpenClose] = useState(false);
   const [coverExposeAsDimmableLight, setCoverExposeAsDimmableLight] =
     useState(false);
+  const [selectExposeAsSwitch, setSelectExposeAsSwitch] = useState(false);
+  const [selectSwitchOnOption, setSelectSwitchOnOption] = useState("");
+  const [selectSwitchOffOption, setSelectSwitchOffOption] = useState("");
   const [coverSliderDebounceMs, setCoverSliderDebounceMs] = useState("");
   const [updateThrottleMs, setUpdateThrottleMs] = useState("");
   const [disableClimateOnOff, setDisableClimateOnOff] = useState(false);
@@ -224,6 +227,9 @@ export function EntityMappingDialog({
       setCoverExposeAsDimmableLight(
         currentMapping?.coverExposeAsDimmableLight || false,
       );
+      setSelectExposeAsSwitch(currentMapping?.selectExposeAsSwitch || false);
+      setSelectSwitchOnOption(currentMapping?.selectSwitchOnOption || "");
+      setSelectSwitchOffOption(currentMapping?.selectSwitchOffOption || "");
       setCoverSliderDebounceMs(
         currentMapping?.coverSliderDebounceMs != null
           ? String(currentMapping.coverSliderDebounceMs)
@@ -354,6 +360,13 @@ export function EntityMappingDialog({
       valetudoIdentifier: valetudoIdentifier.trim() || undefined,
       coverSwapOpenClose: coverSwapOpenClose || undefined,
       coverExposeAsDimmableLight: coverExposeAsDimmableLight || undefined,
+      selectExposeAsSwitch: selectExposeAsSwitch || undefined,
+      selectSwitchOnOption: selectExposeAsSwitch
+        ? selectSwitchOnOption.trim() || undefined
+        : undefined,
+      selectSwitchOffOption: selectExposeAsSwitch
+        ? selectSwitchOffOption.trim() || undefined
+        : undefined,
       coverSliderDebounceMs: parseDebounceMs(coverSliderDebounceMs),
       updateThrottleMs: parseThrottleMs(updateThrottleMs),
       disableClimateOnOff: disableClimateOnOff || undefined,
@@ -401,6 +414,9 @@ export function EntityMappingDialog({
     valetudoIdentifier,
     coverSwapOpenClose,
     coverExposeAsDimmableLight,
+    selectExposeAsSwitch,
+    selectSwitchOnOption,
+    selectSwitchOffOption,
     coverSliderDebounceMs,
     updateThrottleMs,
     disableClimateOnOff,
@@ -444,6 +460,8 @@ export function EntityMappingDialog({
   // Show swap open/close option for covers
   const showCoverSwapField =
     matterDeviceType === "window_covering" || currentDomain === "cover";
+  const showSelectSwitchFields =
+    currentDomain === "select" || currentDomain === "input_select";
 
   // Show PIN disable option for locks
   const showLockPinField =
@@ -643,6 +661,39 @@ export function EntityMappingDialog({
             label="Restore the last fan speed when turned on (Apple Home's power button injects 100%). Only a 100% or High command while off is treated as power-on; lower speeds set while off are kept, so you cannot start an off fan at full speed."
             sx={{ mt: 1, display: "block" }}
           />
+        )}
+
+        {showSelectSwitchFields && (
+          <>
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={selectExposeAsSwitch}
+                  onChange={(e) => setSelectExposeAsSwitch(e.target.checked)}
+                />
+              }
+              label="Expose as an on/off switch (controllers can't render select options over Matter). On and off each pick one option below. Re-pair after changing."
+              sx={{ mt: 1, display: "block" }}
+            />
+            {selectExposeAsSwitch && (
+              <Box sx={{ display: "flex", gap: 2, mt: 1 }}>
+                <TextField
+                  label="Option for ON"
+                  size="small"
+                  value={selectSwitchOnOption}
+                  onChange={(e) => setSelectSwitchOnOption(e.target.value)}
+                  helperText="Exact option text"
+                />
+                <TextField
+                  label="Option for OFF"
+                  size="small"
+                  value={selectSwitchOffOption}
+                  onChange={(e) => setSelectSwitchOffOption(e.target.value)}
+                  helperText="Exact option text"
+                />
+              </Box>
+            )}
+          </>
         )}
 
         {showCleaningModeField && (

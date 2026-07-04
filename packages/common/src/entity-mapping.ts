@@ -247,6 +247,16 @@ export interface EntityMappingConfig {
    */
   readonly coverExposeAsDimmableLight?: boolean;
   /**
+   * Expose a select/input_select as an on/off switch. Controllers can't
+   * render the Matter ModeSelect type (#356), this maps on/off to two
+   * chosen options instead.
+   */
+  readonly selectExposeAsSwitch?: boolean;
+  /** Option that the switch "on" selects and reports as on. */
+  readonly selectSwitchOnOption?: string;
+  /** Option that the switch "off" selects. */
+  readonly selectSwitchOffOption?: string;
+  /**
    * Optional: per-entity cover slider debounce (ms). Overrides the bridge
    * coverSliderDebounceMs flag. 0 / unset = fall back to bridge / default.
    */
@@ -366,6 +376,9 @@ export interface EntityMappingRequest {
   readonly valetudoIdentifier?: string;
   readonly coverSwapOpenClose?: boolean;
   readonly coverExposeAsDimmableLight?: boolean;
+  readonly selectExposeAsSwitch?: boolean;
+  readonly selectSwitchOnOption?: string;
+  readonly selectSwitchOffOption?: string;
   readonly coverSliderDebounceMs?: number;
   readonly updateThrottleMs?: number;
   readonly disableClimateOnOff?: boolean;

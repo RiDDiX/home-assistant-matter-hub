@@ -149,6 +149,9 @@ export class EntityMappingStorage extends Service {
       coverSwapOpenClose: request.coverSwapOpenClose || undefined,
       coverExposeAsDimmableLight:
         request.coverExposeAsDimmableLight || undefined,
+      selectExposeAsSwitch: request.selectExposeAsSwitch || undefined,
+      selectSwitchOnOption: request.selectSwitchOnOption || undefined,
+      selectSwitchOffOption: request.selectSwitchOffOption || undefined,
       coverSliderDebounceMs: sanitizeDebounceMs(request.coverSliderDebounceMs),
       updateThrottleMs: sanitizeThrottleMs(request.updateThrottleMs),
       disableClimateOnOff: request.disableClimateOnOff || undefined,
@@ -195,6 +198,9 @@ export class EntityMappingStorage extends Service {
       !config.valetudoIdentifier &&
       !config.coverSwapOpenClose &&
       !config.coverExposeAsDimmableLight &&
+      !config.selectExposeAsSwitch &&
+      !config.selectSwitchOnOption &&
+      !config.selectSwitchOffOption &&
       !config.coverSliderDebounceMs &&
       !config.updateThrottleMs &&
       !config.disableClimateOnOff &&
