@@ -11,6 +11,11 @@ import { HomeAssistantEntityBehavior } from "./home-assistant-entity-behavior.js
 
 const logger = Logger.get("BasicInformationServer");
 
+// UniqueID is fixed quality per Matter spec, so it must not change while the
+// process runs. Frozen here per bridge+entity; a uniqueIdSuffix change only
+// applies on the next HAMH restart (#385).
+const appliedUniqueIds = new Map<string, string>();
+
 export class BasicInformationServer extends Base {
   override async initialize(): Promise<void> {
     await super.initialize();
@@ -85,15 +90,28 @@ export class BasicInformationServer extends Base {
       serialNumber,
       // UniqueId helps controllers (especially Alexa) identify devices across
       // multiple fabric connections. Using MD5 hash of entity_id for stability.
-      uniqueId: crypto
-        .createHash("md5")
-        .update(entity.entity_id)
-        .digest("hex")
-        .substring(0, 32),
+      // uniqueIdSuffix mints a fresh identity so stale controller cloud
+      // records keyed on it can be shed (#385).
+      uniqueId: this.frozenUniqueId(entity.entity_id),
     });
     logger.debug(
       `[${entity.entity_id}] basicInfo vendor=${this.state.vendorName} product=${this.state.productName} label=${this.state.productLabel} serial=${this.state.serialNumber} node=${this.state.nodeLabel}`,
     );
+  }
+
+  private frozenUniqueId(entityId: string): string {
+    const provider = this.env.get(BridgeDataProvider);
+    const key = `${provider.id}:${entityId}`;
+    let uniqueId = appliedUniqueIds.get(key);
+    if (uniqueId == null) {
+      uniqueId = crypto
+        .createHash("md5")
+        .update(entityId + (provider.uniqueIdSuffix ?? ""))
+        .digest("hex")
+        .substring(0, 32);
+      appliedUniqueIds.set(key, uniqueId);
+    }
+    return uniqueId;
   }
 }
 

@@ -163,6 +163,12 @@ export interface BridgeConfig {
    */
   readonly serialNumberSuffix?: string;
   /**
+   * Mixed into every bridged device uniqueId (standard bridge mode).
+   * Controllers like Alexa cache device records keyed on the uniqueId, so
+   * changing this can mint fresh identities. Applies on restart (#385).
+   */
+  readonly uniqueIdSuffix?: string;
+  /**
    * Server Mode only. Rotate matter sessions older than this many hours so
    * iPhone clients re-establish CASE and re-subscribe, which unsticks
    * Apple Home "Updating" tiles (#287). 0 disables. Range 0..168.

@@ -38,6 +38,9 @@ export const EditBridgePage = () => {
       ...(bridge.serialNumberSuffix != null && {
         serialNumberSuffix: bridge.serialNumberSuffix,
       }),
+      ...(bridge.uniqueIdSuffix != null && {
+        uniqueIdSuffix: bridge.uniqueIdSuffix,
+      }),
     };
   }, [isLoading, bridge]);
 

@@ -397,6 +397,17 @@ export const bridgeConfigSchema: JSONSchema7 = {
         "and bypass cached device data. Leave empty for default behavior.",
       maxLength: 16,
     },
+    uniqueIdSuffix: {
+      title: "Unique ID Suffix",
+      type: "string",
+      description:
+        "Mixed into the unique ID of every bridged device on this bridge " +
+        "(standard bridge mode). Controllers like Alexa cache device records " +
+        "keyed on the unique ID, so setting or changing this can help mint " +
+        "fresh identities. Applies after a bridge restart, then re-discover " +
+        "in the controller. Leave empty for default behavior.",
+      maxLength: 16,
+    },
     sessionMaxAgeHours: {
       title: "Session Rotation Max Age (hours)",
       type: "number",
