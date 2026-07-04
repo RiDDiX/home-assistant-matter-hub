@@ -430,11 +430,13 @@ export class FanControlServerBase extends FeaturedBase {
         `[${homeAssistant.entityId}] power-on write ${percentage}%: restore flag=${restoreOnPowerOn}, last speed=${remembered.percent}`,
       );
     }
+    // Only the controller's injected 100% default gets replaced. A lower
+    // value while off is a deliberate speed choice and passes through.
     if (
       restoreOnPowerOn &&
       wasOff &&
       remembered.percent > 0 &&
-      percentage > 0
+      percentage >= 100
     ) {
       percentage = remembered.percent;
       // Reflect it in the cluster too, else Apple's injected 100 stays and a

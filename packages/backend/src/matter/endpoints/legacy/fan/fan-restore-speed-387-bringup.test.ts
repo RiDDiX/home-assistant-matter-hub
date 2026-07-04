@@ -91,6 +91,7 @@ function fanEntity(): HomeAssistantEntityInformation {
 // percentage HAMH sends to HA.
 async function powerOnPercentage(
   mapping: EntityMappingConfig,
+  writtenPercent = 100,
 ): Promise<number | undefined> {
   const server = await ServerNode.create({
     // biome-ignore lint/suspicious/noExplicitAny: env valid at runtime
@@ -113,7 +114,9 @@ async function powerOnPercentage(
     // biome-ignore lint/suspicious/noExplicitAny: drive the controller write
     const a = agent as any;
     a.fanSpeedMemory.state.lastPercent = 24; // remembered speed from before off
-    a.fanControl.targetPercentSettingChanged(100, 0, { subject: {} });
+    a.fanControl.targetPercentSettingChanged(writtenPercent, 0, {
+      subject: {},
+    });
   });
   await server.close().catch(() => {});
 
@@ -349,6 +352,23 @@ describe("fan restore speed on power-on (#387)", () => {
       entityId: "fan.test",
       fanRestoreSpeedOnPowerOn: true,
     });
+    expect(pct).toBe(24);
+  });
+
+  it("keeps a deliberate partial speed while off (only 100 is the default)", async () => {
+    const pct = await powerOnPercentage(
+      { entityId: "fan.test", fanRestoreSpeedOnPowerOn: true },
+      40,
+    );
+    expect(pct).toBe(40);
+  });
+
+  it("treats High (100%) while off as power-on and restores (accepted tradeoff)", async () => {
+    // fanMode High maps to 100, indistinguishable from Apple's injection.
+    const pct = await powerOnPercentage(
+      { entityId: "fan.test", fanRestoreSpeedOnPowerOn: true },
+      100,
+    );
     expect(pct).toBe(24);
   });
 

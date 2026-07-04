@@ -640,7 +640,7 @@ export function EntityMappingDialog({
                 onChange={(e) => setFanRestoreSpeedOnPowerOn(e.target.checked)}
               />
             }
-            label="Restore the last fan speed when turned on, ignoring a controller's injected value (Apple Home power button). While on, you cannot turn on at full speed from off."
+            label="Restore the last fan speed when turned on (Apple Home's power button injects 100%). Only a 100% or High command while off is treated as power-on; lower speeds set while off are kept, so you cannot start an off fan at full speed."
             sx={{ mt: 1, display: "block" }}
           />
         )}
