@@ -118,7 +118,7 @@ HAMH flags this in two places: the **Network Diagnostics** card on the **Health 
 - **HA OS add-on:** set the `mdns_network_interface` option to the LAN NIC (e.g. `end0`, `eth0`, `enp0s3`), not `docker0`, `hassio`, `veth*`, or `wpan0`.
 - **Plain container:** pass `--mdns-network-interface eth1` (your LAN NIC on `192.168.x`), not the Docker bridge (e.g. `eth0` on `172.16.x`), or run the container with `--network=host` (recommended for Matter).
 
-If your LAN interface also carries a global IPv6 that controllers cannot reach, drop it from what mDNS advertises with `mdns_strip_global_ipv6` (add-on, alpha builds) or `--mdns-strip-global-ipv6` (container). This keeps only the link-local and ULA addresses. It does **not** remove a Thread `fd::` address, since that is a ULA; for Thread interfaces, bind the LAN interface instead.
+If your LAN interface also carries a global IPv6 that controllers cannot reach, drop it from what mDNS advertises with `mdns_strip_global_ipv6` (add-on, both channels; stable from the next release) or `--mdns-strip-global-ipv6` (container). This keeps only the link-local and ULA addresses. It does **not** remove a Thread `fd::` address, since that is a ULA; for Thread interfaces, bind the LAN interface instead.
 
 Check names and addresses with `ip addr`, or read them straight from the Network Diagnostics card. After changing the interface on an add-on, **reboot HAOS** (not just the add-on) so mDNS re-reads addresses, then re-commission the bridge in your controller.
 
@@ -157,6 +157,12 @@ Check names and addresses with `ip addr`, or read them straight from the Network
 - **Certified Matter Device**: Google Home may reject uncertified Matter devices.
   Follow [this guide](https://github.com/project-chip/matter.js/blob/main/docs/ECOSYSTEMS.md#google-home-ecosystem) to
   register your hub properly with Google Home.
+
+### Duplicate / ghost mDNS records after re-pairing
+
+If you see two `_matter._tcp` instances with the same fabric prefix and one of them fails to resolve, a controller or network cache is still holding a record from an earlier pairing. The bridge is not announcing it, so restarting HAMH will not clear it. Check the **Fabrics** card on the bridge page first: if it really shows 2 fabrics, factory-reset the bridge instead.
+
+To clear a stale record: remove the bridge from the controller, factory-reset the bridge in HAMH, reboot the controller hub (Nest, Apple TV, Echo) and the HA host, then re-pair. An unclean shutdown (power loss, hard kill) skips the mDNS goodbye, so old records linger until their TTL expires.
 
 ## 4. Additional Troubleshooting Tips
 
