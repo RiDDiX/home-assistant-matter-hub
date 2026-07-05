@@ -1,4 +1,5 @@
 import {
+  alexaPairingPortProblem,
   type BridgeFeatureFlags,
   BridgeStatus,
   type ExposedDeviceType,
@@ -7,7 +8,11 @@ import {
 import type { Environment } from "@matter/general";
 import type { Endpoint } from "@matter/main";
 import { CommissioningServer } from "@matter/main/node";
-import { DeviceAdvertiser, SessionManager } from "@matter/main/protocol";
+import {
+  DeviceAdvertiser,
+  FabricManager,
+  SessionManager,
+} from "@matter/main/protocol";
 import type { BetterLogger, LoggerService } from "../../core/app/logger.js";
 import { BridgeServerNode } from "../../matter/endpoints/bridge-server-node.js";
 import { ensureCommissioningConfig } from "../../utils/ensure-commissioning-config.js";
@@ -96,6 +101,10 @@ export class Bridge {
   private sessionAddedHandler?: (session: any) => void;
   // biome-ignore lint/suspicious/noExplicitAny: matter.js internal types
   private sessionDeletedHandler?: (session: any) => void;
+
+  // Warns when Alexa pairs on a non-5540 port, the fabric rolls back later (#401).
+  // biome-ignore lint/suspicious/noExplicitAny: matter.js internal types
+  private fabricAddedHandler?: (fabric: any) => void;
 
   get id() {
     return this.dataProvider.id;
@@ -347,6 +356,7 @@ export class Bridge {
       }
 
       this.wireSessionDiagnostics();
+      this.wireFabricWarnings();
       this.startSessionRotation();
       logMemoryUsage(this.log, "bridge running");
       diagnosticEventBus.emit("bridge_started", `Bridge started`, {
@@ -376,6 +386,7 @@ export class Bridge {
 
   private async runStop(code: BridgeStatus, reason: string) {
     this.unwireSessionDiagnostics();
+    this.unwireFabricWarnings();
     this.stopAutoForceSync();
     await this.closeActiveSessions();
     await this.endpointManager.stopPlugins();
@@ -790,6 +801,40 @@ export class Bridge {
     this.staleSessionTimers.clear();
     this.stopSessionRotation();
     this.sessionStartedAt.clear();
+  }
+
+  // Warn at the fabric-added event when Alexa pairs on a non-5540 port. Alexa
+  // completes AddNOC but never CASEs, so the fabric rolls back on failsafe
+  // expiry ~20s later and the committed-fabric warning path never sees it (#401).
+  private wireFabricWarnings() {
+    // Drop the old listener first so factory-reset restarts do not double-register.
+    this.unwireFabricWarnings();
+    try {
+      const fabrics = this.server.env.get(FabricManager);
+      this.fabricAddedHandler = (fabric: { rootVendorId: number }) => {
+        const port = this.dataProvider.port;
+        if (alexaPairingPortProblem(fabric.rootVendorId, port)) {
+          this.log.warn(
+            `Fabric added by Amazon Alexa (vendor ${fabric.rootVendorId}) on port ${port}. Alexa only completes pairing on port 5540, this attempt will roll back about 20s after AddNOC. Recreate the bridge on port 5540 (#401)`,
+          );
+        }
+      };
+      fabrics.events.added.on(this.fabricAddedHandler);
+    } catch {
+      // FabricManager not yet available
+    }
+  }
+
+  private unwireFabricWarnings() {
+    try {
+      const fabrics = this.server.env.get(FabricManager);
+      if (this.fabricAddedHandler) {
+        fabrics.events.added.off(this.fabricAddedHandler);
+      }
+    } catch {
+      // Already disposed
+    }
+    this.fabricAddedHandler = undefined;
   }
 
   private stopAutoForceSync() {

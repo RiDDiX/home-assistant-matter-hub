@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  alexaPairingPortProblem,
   classifyController,
   computeControllerWarnings,
   controllerWarningsForFabrics,
@@ -17,6 +18,22 @@ describe("classifyController", () => {
     expect(classifyController(4939)).toBeUndefined(); // Home Assistant
     expect(classifyController(4362)).toBeUndefined(); // SmartThings
     expect(classifyController(99999)).toBeUndefined();
+  });
+});
+
+describe("alexaPairingPortProblem", () => {
+  it("flags an Alexa vendor pairing on a non-5540 port", () => {
+    expect(alexaPairingPortProblem(4631, 5541)).toBe(true); // 0x1217
+    expect(alexaPairingPortProblem(4448, 5542)).toBe(true); // 0x1160
+  });
+
+  it("does not flag Alexa on port 5540", () => {
+    expect(alexaPairingPortProblem(4631, 5540)).toBe(false);
+  });
+
+  it("does not flag other controllers on any port", () => {
+    expect(alexaPairingPortProblem(24582, 5541)).toBe(false); // Google
+    expect(alexaPairingPortProblem(99999, 5541)).toBe(false); // unknown
   });
 });
 
