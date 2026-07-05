@@ -41,9 +41,11 @@ export function staleSessionQuietWindowMs(flags?: BridgeFeatureFlags): number {
 // re-subscribe on it instead of being forced offline (#287/#398); a truly
 // dead session has a frozen timestamp and still closes via the re-arm
 // loops (#266/#105).
-export function staleSessionShouldClose(
+// True once a session is not closing, its peer stopped talking, and its last
+// traffic is past the quiet window. Shared by the 0-sub stale check and the
+// superseded-session sweep so both agree on what "quiet" means (#287/#398).
+export function sessionIsQuiet(
   session: {
-    subscriptions: { size: number };
     isClosing: boolean;
     isPeerActive: boolean;
     timestamp?: number;
@@ -51,7 +53,7 @@ export function staleSessionShouldClose(
   quietWindowMs = STALE_SESSION_QUIET_WINDOW_MS,
   now = Date.now(),
 ): boolean {
-  if (session.subscriptions.size > 0 || session.isClosing) return false;
+  if (session.isClosing) return false;
   if (session.isPeerActive) return false;
   if (
     quietWindowMs > 0 &&
@@ -62,6 +64,60 @@ export function staleSessionShouldClose(
     return false;
   }
   return true;
+}
+
+export function staleSessionShouldClose(
+  session: {
+    subscriptions: { size: number };
+    isClosing: boolean;
+    isPeerActive: boolean;
+    timestamp?: number;
+  },
+  quietWindowMs = STALE_SESSION_QUIET_WINDOW_MS,
+  now = Date.now(),
+): boolean {
+  return (
+    session.subscriptions.size === 0 &&
+    sessionIsQuiet(session, quietWindowMs, now)
+  );
+}
+
+// A peer that re-CASEs leaves its old sessions behind. The #105 loop only
+// force-closes the 0-sub ones; sessions still holding a dead subscription
+// escaped every cleanup path and piled up 160 deep for one flapping Echo
+// (#400). Returns superseded sessions for the same peer+fabric that have
+// gone quiet, regardless of subscription count.
+export function selectSupersededSessions(
+  sessions: Iterable<{
+    id: number;
+    peerNodeId: unknown;
+    fabric?: { fabricIndex?: unknown };
+    isClosing: boolean;
+    isPeerActive: boolean;
+    timestamp?: number;
+    subscriptions: { size: number };
+  }>,
+  newSession: {
+    id: number;
+    peerNodeId: unknown;
+    fabric?: { fabricIndex?: unknown };
+  },
+  quietWindowMs = STALE_SESSION_QUIET_WINDOW_MS,
+  now = Date.now(),
+): number[] {
+  const ids: number[] = [];
+  for (const s of sessions) {
+    if (
+      s.id !== newSession.id &&
+      s.peerNodeId === newSession.peerNodeId &&
+      s.fabric?.fabricIndex === newSession.fabric?.fabricIndex &&
+      !s.isClosing &&
+      sessionIsQuiet(s, quietWindowMs, now)
+    ) {
+      ids.push(s.id);
+    }
+  }
+  return ids;
 }
 
 export function seedExistingSessionStarts(

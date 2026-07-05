@@ -23,6 +23,7 @@ import {
   ROTATION_CHECK_INTERVAL_MS,
   SESSION_MAX_AGE_HOURS_RANGE,
   seedExistingSessionStarts,
+  selectSupersededSessions,
   staleSessionQuietWindowMs,
   staleSessionShouldClose,
 } from "./session-rotation.js";
@@ -538,6 +539,41 @@ export class Bridge {
               cause: new Error("stale session replaced by new session"),
             }).catch(() => {});
           }
+        }
+        // Sweep superseded sessions the #105 loop cannot: same peer+fabric
+        // sessions still holding a dead subscription escaped every cleanup
+        // path and piled up 160 deep for one flapping Echo (#400). The
+        // selector also returns the 0-sub ones the loop above just handled,
+        // so skip those here.
+        const quietWindowMs = staleSessionQuietWindowMs(
+          this.dataProvider.featureFlags,
+        );
+        const now = Date.now();
+        const supersededIds = new Set(
+          selectSupersededSessions(
+            [...sessionManager.sessions],
+            newSession,
+            quietWindowMs,
+            now,
+          ),
+        );
+        const closes: Promise<unknown>[] = [];
+        for (const s of [...sessionManager.sessions]) {
+          if (!supersededIds.has(s.id) || s.subscriptions.size === 0) continue;
+          const quietSec = Math.round((now - s.timestamp) / 1000);
+          this.log.info(
+            `Closing superseded session ${s.id} (peer ${s.peerNodeId}, ${s.subscriptions.size} subs, quiet ${quietSec}s), replaced by session ${newSession.id}`,
+          );
+          closes.push(
+            s.initiateClose().catch(() =>
+              s.initiateForceClose({
+                cause: new Error("superseded session, forcing"),
+              }),
+            ),
+          );
+        }
+        if (closes.length > 0) {
+          Promise.allSettled(closes).then(() => this.triggerMdnsReAnnounce());
         }
       };
       this.sessionDeletedHandler = (session: {
