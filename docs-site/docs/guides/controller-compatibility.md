@@ -96,10 +96,10 @@ HAMH includes built-in controller profiles that pre-configure feature flags for 
 
 | Profile | Key Settings |
 |---|---|
-| **Apple Home** | `autoForceSync: true`, `coverUseHomeAssistantPercentage: true` |
-| **Google Home** | `autoForceSync: true` |
-| **Alexa** | `autoForceSync: true`, `vacuumOnOff: true` |
-| **Multi-Controller** | `autoForceSync: true`, `vacuumOnOff: true`, `coverUseHomeAssistantPercentage: true` |
+| **Apple Home** | `autoComposedDevices: true`, `autoBatteryMapping: true`, `autoHumidityMapping: true`, `autoPressureMapping: true` |
+| **Google Home** | `autoForceSync: true`, `autoComposedDevices: true`, `autoBatteryMapping: true`, `autoHumidityMapping: true`, `autoPressureMapping: true` |
+| **Alexa** | `autoForceSync: true`, `autoBatteryMapping: true`, `autoHumidityMapping: true`, `autoPressureMapping: true`, `coverUseHomeAssistantPercentage: true` |
+| **Multi-Controller** | `autoForceSync: true`, `autoComposedDevices: true`, `autoBatteryMapping: true`, `autoHumidityMapping: true`, `autoPressureMapping: true` |
 
 See [Bridge Configuration](../getting-started/bridge-configuration.md) for details on how to select a profile.
 

@@ -30,9 +30,13 @@ You can access the bridge configuration by opening the web UI:
 > See [this guide](../guides/connect-multiple-fabrics.md) for details how to set this up.
 
 > [!WARNING]
-> Alexa only supports port `5540`. Therefore, you cannot create multiple bridges to connect with Alexa.
-> 
-> There are users who managed to get it work using the following approach:
+> Alexa only completes pairing on port `5540`. On any other port the pairing rolls back about 20 seconds after AddNOC (#401), so only the bridge currently on `5540` can complete Alexa pairing.
+>
+> Recommended multi-bridge setup: keep one bridge on `5540`, widen its filters to cover every entity Alexa should see, and pair Alexa with it. Other controllers are not limited to `5540`, so they can pair the other bridges or join the `5540` bridge as an extra fabric (see [this guide](../guides/connect-multiple-fabrics.md)).
+>
+> Alexa may also refuse to pair a bridge with more than about 80-100 devices.
+>
+> Last resort: shuffle ports to pair several bridges one at a time.
 > 1. Create a bridge with port 5540
 > 2. Connect your Alexa with that bridge
 > 3. Change the port of the bridge
@@ -301,7 +305,7 @@ Feature flags control advanced behavior of the bridge. Configure them in the **B
 | `serverMode` | Expose device as standalone Matter device (required for Robot Vacuums with Apple Home/Alexa). Only ONE device per bridge! | `false` |
 | `productNameFromNodeLabel` | Report the node label (custom name / friendly name / entity id) as Matter `productName`. Useful for Aqara controllers that show productName as the device name. A per-entity `customProductName` still wins. | `false` |
 | `preferEntityRegistryName` | Use the entity registry name (or `original_name`) as `nodeLabel` instead of the composed `friendly_name`. HA 2026.4 prefixes `friendly_name` with the device name, breaking voice commands that relied on the short entity name. `customName` still wins. | `false` |
-| `vacuumOnOff` | Add OnOff cluster to vacuum endpoints. Required for Alexa discovery. In Server Mode, enabled by default unless explicitly set to `false`. In Bridge Mode, disabled by default. | (see description) |
+| `vacuumOnOff` | Add OnOff cluster to vacuum endpoints. Some Alexa setups need this for the vacuum to be discovered. Disabled by default in both Bridge Mode and Server Mode. | `false` |
 | `vacuumIncludeUnnamedRooms` | Include rooms without names in vacuum room selection | `false` |
 
 ## Issues with labels
