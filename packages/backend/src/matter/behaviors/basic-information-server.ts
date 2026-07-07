@@ -95,7 +95,7 @@ export class BasicInformationServer extends Base {
       uniqueId: this.frozenUniqueId(entity.entity_id),
     });
     logger.debug(
-      `[${entity.entity_id}] basicInfo vendor=${this.state.vendorName} product=${this.state.productName} label=${this.state.productLabel} serial=${this.state.serialNumber} node=${this.state.nodeLabel}`,
+      `[${entity.entity_id}] basicInfo vendor=${this.state.vendorName} product=${this.state.productName} label=${this.state.productLabel} serial=${this.state.serialNumber} node=${this.state.nodeLabel} uniqueId=${this.state.uniqueId}`,
     );
   }
 
