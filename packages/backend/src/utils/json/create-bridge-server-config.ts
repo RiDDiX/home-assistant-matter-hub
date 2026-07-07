@@ -1,9 +1,9 @@
 import crypto from "node:crypto";
 import type { BridgeData } from "@home-assistant-matter-hub/common";
-import { Seconds } from "@matter/general";
 import { AggregatorEndpoint } from "@matter/main/endpoints";
 import { type Node, ServerNode } from "@matter/main/node";
 import { VendorId } from "@matter/main/types";
+import { matterSubscriptionOptions } from "../../matter/subscription-options.js";
 import { trimToLength } from "../trim-to-length.js";
 
 export type BridgeServerNodeConfig =
@@ -17,13 +17,7 @@ export function createBridgeServerConfig(
     id: data.id,
     network: {
       port: data.port,
-      // No jitter: matter.js adds up to 10s over the controller's max interval,
-      // pushing our keepalive past Google's ceiling so it drops the sub (#386).
-      subscriptionOptions: {
-        minInterval: Seconds(2),
-        maxInterval: Seconds(60),
-        randomizationWindow: Seconds(0),
-      },
+      subscriptionOptions: matterSubscriptionOptions(),
     },
     productDescription: {
       name: data.name,
