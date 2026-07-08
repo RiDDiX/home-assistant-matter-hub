@@ -3,7 +3,11 @@ import {
   type HomeAssistantEntityState,
 } from "@home-assistant-matter-hub/common";
 import { describe, expect, it } from "vitest";
-import { coverLevelAction, coverOpenness } from "./cover-as-light.js";
+import {
+  coverLevelAction,
+  coverOpenness,
+  tiltOpenClose,
+} from "./cover-as-light.js";
 
 function state(
   value: string,
@@ -83,6 +87,35 @@ describe("coverLevelAction", () => {
       action: "cover.open_cover_tilt",
     });
     expect(coverLevelAction(0.2, TILT_BINARY)).toEqual({
+      action: "cover.close_cover_tilt",
+    });
+  });
+});
+
+describe("tiltOpenClose (#405)", () => {
+  // A set-tilt-position-only cover lacks the discrete tilt services, so on/off
+  // must go through set_cover_tilt_position, not open_cover_tilt.
+  const TILT_POSITION_ONLY = CoverSupportedFeatures.support_set_tilt_position;
+  const TILT_BINARY =
+    CoverSupportedFeatures.support_open_tilt |
+    CoverSupportedFeatures.support_close_tilt;
+
+  it("uses set_cover_tilt_position for a set-tilt-position-only cover", () => {
+    expect(tiltOpenClose(true, TILT_POSITION_ONLY)).toEqual({
+      action: "cover.set_cover_tilt_position",
+      data: { tilt_position: 100 },
+    });
+    expect(tiltOpenClose(false, TILT_POSITION_ONLY)).toEqual({
+      action: "cover.set_cover_tilt_position",
+      data: { tilt_position: 0 },
+    });
+  });
+
+  it("uses the discrete tilt services when the cover has them", () => {
+    expect(tiltOpenClose(true, TILT_BINARY)).toEqual({
+      action: "cover.open_cover_tilt",
+    });
+    expect(tiltOpenClose(false, TILT_BINARY)).toEqual({
       action: "cover.close_cover_tilt",
     });
   });

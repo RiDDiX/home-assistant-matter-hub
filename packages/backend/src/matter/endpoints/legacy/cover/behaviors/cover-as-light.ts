@@ -72,16 +72,38 @@ const supportedFeaturesOf = (agent: Agent): number =>
   attributes(agent.get(HomeAssistantEntityBehavior).entity.state)
     .supported_features ?? 0;
 
+// Open/close a tilt-routed cover. A set-tilt-position-only cover has no discrete
+// tilt service, so drive it to the fully open (100) / closed (0) tilt (#405).
+export function tiltOpenClose(
+  open: boolean,
+  supportedFeatures: number,
+): HomeAssistantAction {
+  if (
+    (supportedFeatures & CoverSupportedFeatures.support_set_tilt_position) !==
+    0
+  ) {
+    return {
+      action: "cover.set_cover_tilt_position",
+      data: { tilt_position: open ? 100 : 0 },
+    };
+  }
+  return { action: open ? "cover.open_cover_tilt" : "cover.close_cover_tilt" };
+}
+
 const CoverAsLightOnOffServer = OnOffServer({
   isOn: (entity) => entity.state !== CoverDeviceState.closed,
-  turnOn: (_value, agent) =>
-    liftShouldUseTilt(supportedFeaturesOf(agent))
-      ? { action: "cover.open_cover_tilt" }
-      : { action: "cover.open_cover" },
-  turnOff: (_value, agent) =>
-    liftShouldUseTilt(supportedFeaturesOf(agent))
-      ? { action: "cover.close_cover_tilt" }
-      : { action: "cover.close_cover" },
+  turnOn: (_value, agent) => {
+    const sf = supportedFeaturesOf(agent);
+    return liftShouldUseTilt(sf)
+      ? tiltOpenClose(true, sf)
+      : { action: "cover.open_cover" };
+  },
+  turnOff: (_value, agent) => {
+    const sf = supportedFeaturesOf(agent);
+    return liftShouldUseTilt(sf)
+      ? tiltOpenClose(false, sf)
+      : { action: "cover.close_cover" };
+  },
 });
 
 const CoverAsLightLevelControlServer = LevelControlServer({

@@ -19,7 +19,10 @@ import {
   CoverAsDimmableLightType,
   CoverAsDimmableLightWithBatteryType,
 } from "./behaviors/cover-as-light.js";
-import { CoverWindowCoveringServer } from "./behaviors/cover-window-covering-server.js";
+import {
+  CoverWindowCoveringServer,
+  coverHasTilt,
+} from "./behaviors/cover-window-covering-server.js";
 
 const CoverDeviceType = (
   supportedFeatures: number,
@@ -46,7 +49,8 @@ const CoverDeviceType = (
     features.add("PositionAwareLift");
   }
 
-  if (testBit(supportedFeatures, CoverSupportedFeatures.support_open_tilt)) {
+  // Tilt on open_tilt or set_tilt_position; PA_TL still needs set_tilt_position (#405).
+  if (coverHasTilt(supportedFeatures)) {
     features.add("Tilt");
     if (
       testBit(
