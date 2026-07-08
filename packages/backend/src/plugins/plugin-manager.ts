@@ -210,7 +210,11 @@ export class PluginManager {
       throw new Error(`Plugin "${plugin.name}" is already registered`);
     }
 
-    const storage = new FilePluginStorage(this.storageDir, plugin.name);
+    const storage = new FilePluginStorage(
+      this.storageDir,
+      this.bridgeId,
+      plugin.name,
+    );
     const devices = new Map<string, PluginDevice>();
     const pluginLogger = Logger.get(`Plugin:${plugin.name}`);
 

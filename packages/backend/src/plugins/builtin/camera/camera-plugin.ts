@@ -73,6 +73,7 @@ export class CameraPlugin implements MatterHubPlugin {
           type: "string",
           title: "Camera entity ids (comma-separated)",
           description: "e.g. camera.front,camera.garage",
+          required: true,
         },
       },
     };
