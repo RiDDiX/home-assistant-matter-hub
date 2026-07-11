@@ -67,6 +67,7 @@ import { SensorDevice } from "./sensor/index.js";
 import { SirenDevice } from "./siren/index.js";
 import { DimmablePlugInUnitType } from "./switch/dimmable-plugin-unit.js";
 import { SwitchDevice } from "./switch/index.js";
+import { MountedOnOffControlType } from "./switch/mounted-on-off-control.js";
 import { VacuumDevice } from "./vacuum/index.js";
 import { ValveDevice } from "./valve/index.js";
 import { WaterHeaterDevice } from "./water-heater/index.js";
@@ -241,6 +242,9 @@ const matterDeviceTypeFactories: Partial<
   // switch instead of a plug. Plain SwitchDevice is 0x010A (a plug), so the
   // override had no effect before (#380).
   on_off_switch: (ha) => OnOffLightType.set({ homeAssistantEntity: ha }),
+  // #380: expose an HA switch as Mounted On/Off Control (0x010F).
+  mounted_on_off_control: (ha) =>
+    MountedOnOffControlType.set({ homeAssistantEntity: ha }),
   door_lock: LockDevice,
   window_covering: CoverDevice,
   thermostat: ClimateDevice,

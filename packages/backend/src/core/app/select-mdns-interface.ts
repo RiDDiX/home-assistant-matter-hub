@@ -23,6 +23,9 @@ export interface MdnsInterfaceChoice {
   // True when an external interface carries a global IPv6 that mDNS would
   // advertise but a controller may not reach on the LAN (#361).
   readonly hasGlobalIpv6: boolean;
+  // True when an OpenThread/OTBR interface (wpan*/otbr*) is present. Its
+  // mesh-local fd:: ULA gets advertised but controllers cannot route to it.
+  readonly hasThreadInterface: boolean;
 }
 
 type RawInterfaces = Record<
@@ -34,6 +37,10 @@ type RawInterfaces = Record<
 // docker0/hassio/veth*/cni* are container-internal. br-* is intentionally NOT
 // here: br-lan and friends are common real LAN bridge names.
 const DOCKER_NAME = /^(docker\d*|hassio|veth|cni)/;
+
+// wpan0/otbr* are OpenThread border-router interfaces. Their mesh-local fd::
+// ULA is not routable off the host, so mDNS must not advertise it (#388).
+const THREAD_NAME = /^(wpan|otbr)/;
 
 // 172.16.0.0/12 is the default Docker bridge range.
 function inDockerRange(ipv4: string): boolean {
@@ -58,11 +65,13 @@ export function isLinkLocalOrUla(address: string): boolean {
 export function selectMdnsInterface(raw: RawInterfaces): MdnsInterfaceChoice {
   const external: MdnsInterfaceAddrs[] = [];
   const dockerLike: string[] = [];
+  const threadLike: string[] = [];
   for (const [name, addrs] of Object.entries(raw)) {
     if (!addrs) continue;
     const usable = addrs.filter((a) => !a.internal);
     if (usable.length === 0) continue;
     if (DOCKER_NAME.test(name)) dockerLike.push(name);
+    if (THREAD_NAME.test(name)) threadLike.push(name);
     const ipv4 = usable
       .filter((a) => a.family === "IPv4")
       .map((a) => a.address);
@@ -73,12 +82,22 @@ export function selectMdnsInterface(raw: RawInterfaces): MdnsInterfaceChoice {
     if (!routable) continue;
     external.push({ name, ipv4, ipv6 });
   }
-  const lan = external.filter((i) => !DOCKER_NAME.test(i.name));
+  const lan = external.filter(
+    (i) => !DOCKER_NAME.test(i.name) && !THREAD_NAME.test(i.name),
+  );
   const selected = lan.length === 1 ? lan[0].name : undefined;
   const suspicious =
     dockerLike.length > 0 || external.some((i) => i.ipv4.some(inDockerRange));
   const hasGlobalIpv6 = external.some((i) =>
     i.ipv6.some((a) => !isLinkLocalOrUla(a)),
   );
-  return { selected, external, dockerLike, suspicious, hasGlobalIpv6 };
+  const hasThreadInterface = threadLike.length > 0;
+  return {
+    selected,
+    external,
+    dockerLike,
+    suspicious,
+    hasGlobalIpv6,
+    hasThreadInterface,
+  };
 }

@@ -467,16 +467,12 @@ export function BridgeWizard({ open, onClose, onComplete }: BridgeWizardProps) {
         margin="normal"
         helperText={t("bridgeWizard.portAutoAssign")}
       />
-      {selectedController &&
-        (selectedController.id === "alexa" ||
-          selectedController.id === "multi_controller") &&
-        currentBridge.port !== 5540 && (
-          <Alert severity="warning" sx={{ mt: 1 }}>
-            Alexa only pairs on port <strong>5540</strong>. This bridge uses{" "}
-            {currentBridge.port}, so Alexa will not discover it. Set the port
-            back to 5540 for the Alexa bridge.
-          </Alert>
-        )}
+      {currentBridge.port !== 5540 && (
+        <Alert severity="warning" sx={{ mt: 1 }}>
+          Alexa can only pair on port <strong>5540</strong>. If you plan to use
+          Alexa with this bridge, keep the port at 5540.
+        </Alert>
+      )}
       <Tooltip
         title="Exposes the entity as a standalone Matter device, e.g. so robot vacuums work with Apple Home (Siri) and Alexa. The first entity is the primary; more than one device per node is experimental."
         placement="right"

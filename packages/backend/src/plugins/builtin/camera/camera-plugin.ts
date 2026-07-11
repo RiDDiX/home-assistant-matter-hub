@@ -58,18 +58,22 @@ export class CameraPlugin implements MatterHubPlugin {
         haUrl: {
           type: "string",
           title: "Home Assistant URL",
-          description: "e.g. http://homeassistant.local:8123",
-          required: true,
+          description:
+            "e.g. http://homeassistant.local:8123. Leave empty to use the bridge's Home Assistant connection.",
+          required: false,
         },
         haToken: {
           type: "string",
           title: "Long-lived access token",
-          required: true,
+          description:
+            "Leave empty to use the bridge's Home Assistant connection.",
+          required: false,
         },
         cameras: {
           type: "string",
           title: "Camera entity ids (comma-separated)",
           description: "e.g. camera.front,camera.garage",
+          required: true,
         },
       },
     };
@@ -81,9 +85,12 @@ export class CameraPlugin implements MatterHubPlugin {
     if (!context) return;
     await this.teardown();
 
-    const { haUrl, haToken, cameras } = this.config;
+    // Fall back to the bridge's HA connection when none is set in config.
+    const haUrl = this.config.haUrl ?? context.homeAssistant?.url;
+    const haToken = this.config.haToken ?? context.homeAssistant?.accessToken;
+    const cameras = this.config.cameras;
     if (!haUrl || !haToken) {
-      this.log.info("haUrl and haToken not set, no cameras exposed");
+      this.log.info("no Home Assistant connection, no cameras exposed");
       return;
     }
     const entityIds = (cameras ?? "")

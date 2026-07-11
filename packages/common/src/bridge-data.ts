@@ -114,6 +114,13 @@ interface AllBridgeFeatureFlags {
    * that stream slider updates. Per-entity override wins over this. 0 = unset.
    */
   readonly coverSliderDebounceMs: number;
+  /**
+   * Fast Session Recovery: when a controller drops all subscriptions, clean up
+   * the dead session and re-announce after 5s instead of 60s (#386). Shortens
+   * the offline window, does not stop the controller rejecting the sub.
+   * Default: false (disabled)
+   */
+  readonly fastSessionRecovery: boolean;
 }
 
 export type BridgeFeatureFlags = Partial<AllBridgeFeatureFlags>;
@@ -155,6 +162,12 @@ export interface BridgeConfig {
    * and bypass their cached device data.
    */
   readonly serialNumberSuffix?: string;
+  /**
+   * Mixed into every bridged device uniqueId (standard bridge mode).
+   * Controllers like Alexa cache device records keyed on the uniqueId, so
+   * changing this can mint fresh identities. Applies on restart (#385).
+   */
+  readonly uniqueIdSuffix?: string;
   /**
    * Server Mode only. Rotate matter sessions older than this many hours so
    * iPhone clients re-establish CASE and re-subscribe, which unsticks

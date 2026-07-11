@@ -1,4 +1,5 @@
 import type { SensorDeviceAttributes } from "@home-assistant-matter-hub/common";
+import { DescriptorServer } from "@matter/main/behaviors";
 import { TemperatureSensorDevice } from "@matter/main/devices";
 import { EntityStateProvider } from "../../../../../services/bridges/entity-state-provider.js";
 import { HomeAssistantConfig } from "../../../../../services/home-assistant/home-assistant-config.js";
@@ -82,6 +83,7 @@ const batteryConfig = {
 };
 
 export const TemperaturePressureSensorType = TemperatureSensorDevice.with(
+  DescriptorServer,
   BasicInformationServer,
   IdentifyServer,
   HomeAssistantEntityBehavior,
@@ -91,6 +93,7 @@ export const TemperaturePressureSensorType = TemperatureSensorDevice.with(
 
 export const TemperaturePressureSensorWithBatteryType =
   TemperatureSensorDevice.with(
+    DescriptorServer,
     BasicInformationServer,
     IdentifyServer,
     HomeAssistantEntityBehavior,

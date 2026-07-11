@@ -6,8 +6,8 @@ import type { PluginStorage } from "./types.js";
 const logger = Logger.get("PluginStorage");
 
 /**
- * File-based persistent storage for a plugin instance.
- * Each plugin gets its own JSON file in the storage directory.
+ * File-based persistent storage for a plugin instance. One JSON file per bridge
+ * and plugin so plugin config edited on one bridge stays there (#373).
  */
 const SAVE_DEBOUNCE_MS = 500;
 
@@ -17,9 +17,12 @@ export class FilePluginStorage implements PluginStorage {
   private readonly filePath: string;
   private saveTimer: ReturnType<typeof setTimeout> | undefined;
 
-  constructor(storageDir: string, pluginName: string) {
-    const safePluginName = pluginName.replace(/[^a-zA-Z0-9_-]/g, "_");
-    this.filePath = path.join(storageDir, `plugin-${safePluginName}.json`);
+  constructor(storageDir: string, bridgeId: string, pluginName: string) {
+    const safe = (s: string) => s.replace(/[^a-zA-Z0-9_-]/g, "_");
+    this.filePath = path.join(
+      storageDir,
+      `plugin-${safe(bridgeId)}-${safe(pluginName)}.json`,
+    );
     this.load();
   }
 

@@ -14,6 +14,7 @@ import { IdentifyServer } from "../../../../behaviors/identify-server.js";
 import { LevelControlServer } from "../../../../behaviors/level-control-server.js";
 import { OnOffServer } from "../../../../behaviors/on-off-server.js";
 import { DefaultPowerSourceServer } from "../../../../behaviors/power-source-server.js";
+import { liftShouldUseTilt } from "./cover-window-covering-server.js";
 
 // Cover exposed as a Dimmable Light so Alexa can still drive it: level is the
 // open percentage, on/off is open/close (#372). Direct mapping, the cover
@@ -28,6 +29,11 @@ export function coverOpenness(entity: HomeAssistantEntityState): number | null {
   if (position != null) {
     return Math.min(1, Math.max(0, position / 100));
   }
+  // Tilt-only covers report tilt position, not lift position.
+  const tilt = attributes(entity).current_tilt_position;
+  if (tilt != null) {
+    return Math.min(1, Math.max(0, tilt / 100));
+  }
   if (entity.state === CoverDeviceState.open) return 1;
   if (entity.state === CoverDeviceState.closed) return 0;
   return null;
@@ -36,34 +42,74 @@ export function coverOpenness(entity: HomeAssistantEntityState): number | null {
 /** Map a light level (0..1) to the matching cover service call. */
 export function coverLevelAction(
   percent: number,
-  supportsPosition: boolean,
+  supportedFeatures: number,
 ): HomeAssistantAction {
   const position = Math.round(Math.min(1, Math.max(0, percent)) * 100);
-  if (supportsPosition) {
+  // Tilt-only covers reject lift services, so drive them through tilt (#350).
+  if (liftShouldUseTilt(supportedFeatures)) {
+    if (
+      (supportedFeatures & CoverSupportedFeatures.support_set_tilt_position) !==
+      0
+    ) {
+      return {
+        action: "cover.set_cover_tilt_position",
+        data: { tilt_position: position },
+      };
+    }
+    return {
+      action:
+        position >= 50 ? "cover.open_cover_tilt" : "cover.close_cover_tilt",
+    };
+  }
+  if ((supportedFeatures & CoverSupportedFeatures.support_set_position) !== 0) {
     return { action: "cover.set_cover_position", data: { position } };
   }
   // No position support: treat the upper half as open, the lower half as close.
   return { action: position >= 50 ? "cover.open_cover" : "cover.close_cover" };
 }
 
-const supportsPositionControl = (agent: Agent): boolean => {
-  const entity = agent.get(HomeAssistantEntityBehavior).entity.state;
-  const supportedFeatures = attributes(entity).supported_features ?? 0;
-  return (
-    (supportedFeatures & CoverSupportedFeatures.support_set_position) !== 0
-  );
-};
+const supportedFeaturesOf = (agent: Agent): number =>
+  attributes(agent.get(HomeAssistantEntityBehavior).entity.state)
+    .supported_features ?? 0;
+
+// Open/close a tilt-routed cover. A set-tilt-position-only cover has no discrete
+// tilt service, so drive it to the fully open (100) / closed (0) tilt (#405).
+export function tiltOpenClose(
+  open: boolean,
+  supportedFeatures: number,
+): HomeAssistantAction {
+  if (
+    (supportedFeatures & CoverSupportedFeatures.support_set_tilt_position) !==
+    0
+  ) {
+    return {
+      action: "cover.set_cover_tilt_position",
+      data: { tilt_position: open ? 100 : 0 },
+    };
+  }
+  return { action: open ? "cover.open_cover_tilt" : "cover.close_cover_tilt" };
+}
 
 const CoverAsLightOnOffServer = OnOffServer({
   isOn: (entity) => entity.state !== CoverDeviceState.closed,
-  turnOn: () => ({ action: "cover.open_cover" }),
-  turnOff: () => ({ action: "cover.close_cover" }),
+  turnOn: (_value, agent) => {
+    const sf = supportedFeaturesOf(agent);
+    return liftShouldUseTilt(sf)
+      ? tiltOpenClose(true, sf)
+      : { action: "cover.open_cover" };
+  },
+  turnOff: (_value, agent) => {
+    const sf = supportedFeaturesOf(agent);
+    return liftShouldUseTilt(sf)
+      ? tiltOpenClose(false, sf)
+      : { action: "cover.close_cover" };
+  },
 });
 
 const CoverAsLightLevelControlServer = LevelControlServer({
   getValuePercent: (entity) => coverOpenness(entity),
   moveToLevelPercent: (percent, agent) =>
-    coverLevelAction(percent, supportsPositionControl(agent)),
+    coverLevelAction(percent, supportedFeaturesOf(agent)),
 });
 
 const baseBehaviors = [

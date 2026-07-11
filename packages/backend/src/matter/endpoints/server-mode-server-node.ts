@@ -4,13 +4,14 @@ import type {
   EntityMappingConfig,
   HomeAssistantDeviceRegistry,
 } from "@home-assistant-matter-hub/common";
-import { Logger, Seconds } from "@matter/general";
+import { Logger } from "@matter/general";
 import type { Environment } from "@matter/main";
 import { RoboticVacuumCleanerDevice } from "@matter/main/devices";
 import { type Endpoint, ServerNode } from "@matter/main/node";
 import { DeviceTypeId, VendorId } from "@matter/main/types";
 import { sanitizeMatterString } from "../../utils/sanitize-matter-string.js";
 import { trimToLength } from "../../utils/trim-to-length.js";
+import { matterSubscriptionOptions } from "../subscription-options.js";
 
 const logger = Logger.get("ServerModeServerNode");
 
@@ -37,15 +38,10 @@ export class ServerModeServerNode extends ServerNode {
       environment: env,
       network: {
         port: bridgeData.port,
-        // Lower the subscription max interval (default 3 min) so matter.js
-        // sends its keepalive reports more often, shrinking the window where
-        // iOS can show the vacuum as "Updating" on a stale subscription (#287).
-        subscriptionOptions: {
-          maxInterval: Seconds(60),
-          // matter.js defaults, kept explicit since the type needs all three.
-          minInterval: Seconds(2),
-          randomizationWindow: Seconds(10),
-        },
+        // Shared zero-jitter window, see matterSubscriptionOptions: 60s max so
+        // iOS does not show a stale "Updating" tile (#287), no jitter so the
+        // keepalive stays inside a controller's ceiling (#386).
+        subscriptionOptions: matterSubscriptionOptions(),
       },
       productDescription: {
         name: bridgeData.name,

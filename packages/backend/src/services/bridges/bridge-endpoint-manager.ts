@@ -6,7 +6,10 @@ import type { Logger } from "@matter/general";
 import { Endpoint, type MutableEndpoint } from "@matter/main";
 import { Service } from "../../core/ioc/service.js";
 import { AggregatorEndpoint } from "../../matter/endpoints/aggregator-endpoint.js";
-import type { EntityEndpoint } from "../../matter/endpoints/entity-endpoint.js";
+import {
+  createEndpointId,
+  type EntityEndpoint,
+} from "../../matter/endpoints/entity-endpoint.js";
 import { LegacyEndpoint } from "../../matter/endpoints/legacy/legacy-endpoint.js";
 import { validateEndpointType } from "../../matter/endpoints/validate-endpoint-type.js";
 import { CameraPlugin } from "../../plugins/builtin/camera/camera-plugin.js";
@@ -591,11 +594,23 @@ export class BridgeEndpointManager extends Service {
           this.log.info(
             `Mapping changed for ${endpoint.entityId}, recreating endpoint`,
           );
+          // #404: if the recreate keeps the same endpoint id, close() (not
+          // delete()) so matter.js keeps the persisted number and Alexa keeps
+          // the device with its groups. delete() would erase it and the recreate
+          // would get a fresh number. When the id itself changes (customName
+          // edit) the number can't be kept anyway, so delete() to free it.
+          const sameId =
+            createEndpointId(endpoint.entityId, currentMapping?.customName) ===
+            endpoint.id;
           try {
-            await endpoint.delete();
+            if (sameId) {
+              await endpoint.close();
+            } else {
+              await endpoint.delete();
+            }
           } catch (e) {
             this.log.warn(
-              `Failed to delete endpoint ${endpoint.entityId} for mapping change:`,
+              `Failed to recreate endpoint ${endpoint.entityId} for mapping change:`,
               e,
             );
           }

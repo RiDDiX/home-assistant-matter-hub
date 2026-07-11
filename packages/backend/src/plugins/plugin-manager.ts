@@ -75,6 +75,7 @@ export class PluginManager {
   private readonly domainMappingOwners = new Map<string, string>();
   private readonly storageDir: string;
   private readonly bridgeId: string;
+  private readonly homeAssistant?: { url: string; accessToken: string };
   private readonly runner = new SafePluginRunner();
   private registry?: PluginRegistry;
 
@@ -98,9 +99,14 @@ export class PluginManager {
     attributes: Record<string, unknown>,
   ) => void;
 
-  constructor(bridgeId: string, storageDir: string) {
+  constructor(
+    bridgeId: string,
+    storageDir: string,
+    homeAssistant?: { url: string; accessToken: string },
+  ) {
     this.bridgeId = bridgeId;
     this.storageDir = storageDir;
+    this.homeAssistant = homeAssistant;
   }
 
   setRegistry(registry: PluginRegistry) {
@@ -204,7 +210,11 @@ export class PluginManager {
       throw new Error(`Plugin "${plugin.name}" is already registered`);
     }
 
-    const storage = new FilePluginStorage(this.storageDir, plugin.name);
+    const storage = new FilePluginStorage(
+      this.storageDir,
+      this.bridgeId,
+      plugin.name,
+    );
     const devices = new Map<string, PluginDevice>();
     const pluginLogger = Logger.get(`Plugin:${plugin.name}`);
 
@@ -212,6 +222,7 @@ export class PluginManager {
       bridgeId: this.bridgeId,
       storage,
       log: pluginLogger,
+      homeAssistant: this.homeAssistant,
 
       registerDevice: async (device: PluginDevice) => {
         const validationError = validatePluginDevice(device);

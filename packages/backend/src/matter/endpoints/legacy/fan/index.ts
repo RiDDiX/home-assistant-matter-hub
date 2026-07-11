@@ -12,6 +12,7 @@ import {
 import type { FeatureSelection } from "../../../../utils/feature-selection.js";
 import { testBit } from "../../../../utils/test-bit.js";
 import { BasicInformationServer } from "../../../behaviors/basic-information-server.js";
+import { FanSpeedMemoryBehavior } from "../../../behaviors/fan-speed-memory.js";
 import { HomeAssistantEntityBehavior } from "../../../behaviors/home-assistant-entity-behavior.js";
 import { IdentifyServer } from "../../../behaviors/identify-server.js";
 import { DefaultPowerSourceServer } from "../../../behaviors/power-source-server.js";
@@ -75,8 +76,8 @@ export function FanDevice(
     features.add("Step");
   }
 
-  // Enable Auto if fan supports preset modes (including "Auto" preset)
-  if (hasPresetMode) {
+  // Auto only if a preset really is "auto", else HA rejects the "Auto" we send (#387).
+  if (hasPresetMode && presetModes.some((m) => /auto/i.test(m))) {
     features.add("Auto");
   }
   if (testBit(supportedFeatures, FanDeviceFeature.DIRECTION)) {
@@ -86,12 +87,16 @@ export function FanDevice(
   if (testBit(supportedFeatures, FanDeviceFeature.OSCILLATE)) {
     features.add("Rocking");
   }
-  // Enable Wind mode if fan has natural/sleep preset modes
+  // Enable Wind mode if fan has english natural/sleep presets, or localized
+  // ones the user mapped via fanWindPresets (#387).
+  const windPresets = homeAssistantEntity.mapping?.fanWindPresets;
   const hasWindModes = presetModes.some(
     (m) =>
       m.toLowerCase() === "natural" ||
       m.toLowerCase() === "nature" ||
-      m.toLowerCase() === "sleep",
+      m.toLowerCase() === "sleep" ||
+      !!windPresets?.natural?.includes(m) ||
+      !!windPresets?.sleep?.includes(m),
   );
   if (hasWindModes) {
     features.add("Wind");
@@ -105,6 +110,7 @@ export function FanDevice(
         GroupsServer,
         FanOnOffServer,
         FanFanControlServer.with(...features),
+        FanSpeedMemoryBehavior,
         DefaultPowerSourceServer,
       )
     : Device.with(
@@ -114,6 +120,7 @@ export function FanDevice(
         GroupsServer,
         FanOnOffServer,
         FanFanControlServer.with(...features),
+        FanSpeedMemoryBehavior,
       );
   return device.set({ homeAssistantEntity });
 }

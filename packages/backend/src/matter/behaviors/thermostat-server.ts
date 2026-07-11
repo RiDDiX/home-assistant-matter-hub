@@ -164,19 +164,19 @@ export function repairSetpointLimits(limits: SetpointLimits): SetpointLimits {
   };
 }
 
-// matter.js validates both Heat and Cool setpoint limits on init regardless of
-// the featureMap, so leftover limits from a former heat<->cool config crash a
-// now single-feature device when the four values are out of order (code 135,
-// #381). Clear the inactive scope's limits so matter.js uses its own consistent
-// defaults. A concrete write to a disabled attribute is rejected, so undefined
-// is the only safe value.
+// matter.js validates Heat and Cool setpoint state on init no matter the
+// featureMap, so limits or an occupied setpoint left over from a former
+// heat<->cool config crash a now single-feature device (code 135, #381/#384).
+// Clear the inactive scope to undefined, the only value matter.js accepts for a
+// disabled attribute, so it falls back to its own defaults.
 // biome-ignore lint/suspicious/noExplicitAny: works across feature variants
-function clearInactiveSetpointLimits(self: any, scope: "Heat" | "Cool"): void {
+function clearInactiveSetpointState(self: any, scope: "Heat" | "Cool"): void {
   for (const key of [
     `absMin${scope}SetpointLimit`,
     `min${scope}SetpointLimit`,
     `max${scope}SetpointLimit`,
     `absMax${scope}SetpointLimit`,
+    `occupied${scope === "Heat" ? "Heating" : "Cooling"}Setpoint`,
   ]) {
     if (self.state[key] !== undefined) self.state[key] = undefined;
   }
@@ -235,7 +235,7 @@ export function thermostatPreInitialize(self: any): void {
         : 2000;
     self.state.occupiedHeatingSetpoint = heatingValue;
   } else {
-    clearInactiveSetpointLimits(self, "Heat");
+    clearInactiveSetpointState(self, "Heat");
   }
 
   // Force-set cooling values (only if Cooling feature enabled)
@@ -266,7 +266,7 @@ export function thermostatPreInitialize(self: any): void {
         : 2400;
     self.state.occupiedCoolingSetpoint = coolingValue;
   } else {
-    clearInactiveSetpointLimits(self, "Cool");
+    clearInactiveSetpointState(self, "Cool");
   }
 
   logger.debug(
@@ -278,10 +278,16 @@ export function thermostatPreInitialize(self: any): void {
   // heating/cooling.
   self.state.thermostatRunningState = runningStateAllOff;
 
-  // minSetpointDeadBand only exists with AutoMode feature.
-  // For Heating+Cooling without AutoMode, this property must not be set.
+  // minSetpointDeadBand and thermostatRunningMode only exist with AutoMode. A
+  // former AutoMode config can persist them onto a now non-AutoMode base, which
+  // fails conformance on init like the setpoints do (code 135, #384).
   if (self.features.autoMode) {
     self.state.minSetpointDeadBand = self.state.minSetpointDeadBand ?? 0;
+  } else {
+    if (self.state.minSetpointDeadBand !== undefined)
+      self.state.minSetpointDeadBand = undefined;
+    if (self.state.thermostatRunningMode !== undefined)
+      self.state.thermostatRunningMode = undefined;
   }
 
   // Set initial controlSequenceOfOperation based on enabled features.

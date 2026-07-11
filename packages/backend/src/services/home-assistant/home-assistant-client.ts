@@ -51,6 +51,14 @@ export class HomeAssistantClient extends Service {
     return this._connection;
   }
 
+  get baseUrl(): string {
+    return this.options.url;
+  }
+
+  get accessToken(): string {
+    return this.options.accessToken;
+  }
+
   constructor(
     logger: LoggerService,
     private readonly options: HomeAssistantClientProps,

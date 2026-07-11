@@ -28,6 +28,7 @@ export type MatterDeviceType =
   | "on_off_light"
   | "on_off_plugin_unit"
   | "on_off_switch"
+  | "mounted_on_off_control"
   | "ozone_sensor"
   | "pm1_sensor"
   | "pressure_sensor"
@@ -53,6 +54,13 @@ export interface ComposedSubEntity {
 }
 
 export type ClimateAutoMode = "heat" | "cool";
+
+export interface FanWindPresets {
+  // HA preset names that mean natural wind (e.g. 自然风)
+  readonly natural?: string[];
+  // HA preset names that mean sleep wind
+  readonly sleep?: string[];
+}
 
 export interface EntityMappingConfig {
   readonly entityId: string;
@@ -192,6 +200,10 @@ export interface EntityMappingConfig {
    * Value is the Matter ModeTag.
    */
   readonly customFanSpeedTags?: Record<string, number>;
+  /** Localized HA fan preset names that map to Matter wind modes (#387). */
+  readonly fanWindPresets?: FanWindPresets;
+  /** Restore the last fan speed when a controller turns the fan on, ignoring an injected value (Apple Home power button, #387). */
+  readonly fanRestoreSpeedOnPowerOn?: boolean;
   /**
    * Optional: Entity ID of a sensor that reports the room the vacuum is currently in.
    * Used for Dreame vacuums (Tasshack integration) which expose sensor.*_current_room.
@@ -230,9 +242,20 @@ export interface EntityMappingConfig {
    * Optional: expose this cover as a Dimmable Light instead of a WindowCovering.
    * Level maps to position (100% open), on/off to open/close. Alexa workaround,
    * it stopped sending cover position commands but still drives lights (#372).
-   * Keep off for Apple/Google.
+   * No stop command, and don't put it in an Alexa room or "lights" commands move
+   * it. Keep off for Apple/Google.
    */
   readonly coverExposeAsDimmableLight?: boolean;
+  /**
+   * Expose a select/input_select as an on/off switch. Controllers can't
+   * render the Matter ModeSelect type (#356), this maps on/off to two
+   * chosen options instead.
+   */
+  readonly selectExposeAsSwitch?: boolean;
+  /** Option that the switch "on" selects and reports as on. */
+  readonly selectSwitchOnOption?: string;
+  /** Option that the switch "off" selects. */
+  readonly selectSwitchOffOption?: string;
   /**
    * Optional: per-entity cover slider debounce (ms). Overrides the bridge
    * coverSliderDebounceMs flag. 0 / unset = fall back to bridge / default.
@@ -343,12 +366,19 @@ export interface EntityMappingRequest {
   readonly mopIntensityEntity?: string;
   readonly customServiceAreas?: CustomServiceArea[];
   readonly customFanSpeedTags?: Record<string, number>;
+  /** Localized HA fan preset names that map to Matter wind modes (#387). */
+  readonly fanWindPresets?: FanWindPresets;
+  /** Restore the last fan speed when a controller turns the fan on, ignoring an injected value (Apple Home power button, #387). */
+  readonly fanRestoreSpeedOnPowerOn?: boolean;
   readonly currentRoomEntity?: string;
   readonly cleanedAreaEntity?: string;
   readonly disableCustomAreaRoomModes?: boolean;
   readonly valetudoIdentifier?: string;
   readonly coverSwapOpenClose?: boolean;
   readonly coverExposeAsDimmableLight?: boolean;
+  readonly selectExposeAsSwitch?: boolean;
+  readonly selectSwitchOnOption?: string;
+  readonly selectSwitchOffOption?: string;
   readonly coverSliderDebounceMs?: number;
   readonly updateThrottleMs?: number;
   readonly disableClimateOnOff?: boolean;
@@ -392,6 +422,7 @@ export const matterDeviceTypeLabels: Record<MatterDeviceType, string> = {
   on_off_light: "On/Off Light",
   on_off_plugin_unit: "On/Off Plug-in Unit",
   on_off_switch: "On/Off Switch",
+  mounted_on_off_control: "Mounted On/Off Control (experimental)",
   ozone_sensor: "Ozone (O\u2083) Sensor",
   pm1_sensor: "PM1 Sensor",
   pressure_sensor: "Pressure Sensor",
@@ -465,6 +496,13 @@ export const matterDeviceTypeControllerSupport: Record<
     google: "yes",
     alexa: "yes",
     aqara: "yes",
+  },
+  mounted_on_off_control: {
+    apple: "no",
+    google: "no",
+    alexa: "no",
+    aqara: "yes",
+    note: "Experimental Matter 1.4 type (0x010F). SmartThings and Aqara show it as a switch. Apple, Google and Alexa don't know it yet and are expected to fall back to the advertised plug subset, not verified on real devices (#380).",
   },
   door_lock: { apple: "yes", google: "partial", alexa: "yes", aqara: "yes" },
   window_covering: { apple: "yes", google: "yes", alexa: "yes", aqara: "yes" },
@@ -692,7 +730,11 @@ export const domainToDefaultMatterTypes: Partial<
   event: ["generic_switch"],
   fan: ["air_purifier", "fan"],
   humidifier: ["humidifier_dehumidifier"],
-  input_boolean: ["on_off_plugin_unit", "on_off_switch"],
+  input_boolean: [
+    "on_off_plugin_unit",
+    "on_off_switch",
+    "mounted_on_off_control",
+  ],
   input_select: ["mode_select"],
   lawn_mower: ["robotic_lawn_mower"],
   input_button: ["generic_switch"],
@@ -728,6 +770,7 @@ export const domainToDefaultMatterTypes: Partial<
     "dishwasher",
     "on_off_plugin_unit",
     "on_off_switch",
+    "mounted_on_off_control",
     "pump",
     "water_valve",
   ],

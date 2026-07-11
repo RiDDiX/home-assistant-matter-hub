@@ -75,8 +75,7 @@ export const deviceClassMapping = (entity: HomeAssistantEntityState) => {
   const supportedFeatures = attributes(entity).supported_features ?? 0;
   const hasLift =
     (supportedFeatures & CoverSupportedFeatures.support_open) !== 0;
-  const hasTilt =
-    (supportedFeatures & CoverSupportedFeatures.support_open_tilt) !== 0;
+  const hasTilt = coverHasTilt(supportedFeatures);
   if (mapping.type === WindowCovering.WindowCoveringType.TiltBlindTiltOnly) {
     if (!hasTilt) {
       return {
@@ -176,15 +175,30 @@ const supportsTiltPositionControl = (agent: Agent): boolean => {
   );
 };
 
+// Tilt if the cover reports open_tilt or set_tilt_position. Gating on open_tilt
+// alone dropped tilt for set-tilt-position-only covers on every controller (#405).
+export const coverHasTilt = (supportedFeatures: number): boolean =>
+  (supportedFeatures & CoverSupportedFeatures.support_open_tilt) !== 0 ||
+  (supportedFeatures & CoverSupportedFeatures.support_set_tilt_position) !== 0;
+
+// True only when the cover has the discrete open/close tilt services (#405).
+const supportsOpenCloseTilt = (agent: Agent): boolean => {
+  const homeAssistant = agent.get(HomeAssistantEntityBehavior);
+  const supportedFeatures =
+    attributes(homeAssistant.entity.state).supported_features ?? 0;
+  return (supportedFeatures & CoverSupportedFeatures.support_open_tilt) !== 0;
+};
+
 /**
  * Tilt-only covers (e.g. SwitchBot Blind Tilt, supported_features=240)
  * expose no support_open, so HA rejects cover.open_cover and
  * cover.set_cover_position (#350). When the entity has tilt, Lift
- * commands from controllers must be routed to the tilt services.
+ * commands from controllers must be routed to the tilt services (tilt =
+ * open_tilt or set_tilt_position, #405).
  */
 export const liftShouldUseTilt = (supportedFeatures: number): boolean =>
   (supportedFeatures & CoverSupportedFeatures.support_open) === 0 &&
-  (supportedFeatures & CoverSupportedFeatures.support_open_tilt) !== 0;
+  coverHasTilt(supportedFeatures);
 
 const liftFallsBackToTilt = (agent: Agent): boolean => {
   const homeAssistant = agent.get(HomeAssistantEntityBehavior);
@@ -199,18 +213,6 @@ const openLiftAction = (agent: Agent) => ({
 
 const closeLiftAction = (agent: Agent) => ({
   action: shouldSwapOpenClose(agent) ? "cover.open_cover" : "cover.close_cover",
-});
-
-const openTiltAction = (agent: Agent) => ({
-  action: shouldSwapOpenClose(agent)
-    ? "cover.close_cover_tilt"
-    : "cover.open_cover_tilt",
-});
-
-const closeTiltAction = (agent: Agent) => ({
-  action: shouldSwapOpenClose(agent)
-    ? "cover.open_cover_tilt"
-    : "cover.close_cover_tilt",
 });
 
 const setTiltPositionAction = (position: number, agent: Agent) => {
@@ -231,6 +233,31 @@ const setTiltPositionAction = (position: number, agent: Agent) => {
   return {
     action: "cover.set_cover_tilt_position",
     data: { tilt_position: adjustPositionForWriting(position, agent) },
+  };
+};
+
+// Covers with open_tilt use the dedicated services; a set-tilt-position-only
+// cover has none, so tilt open/close falls back to set_cover_tilt_position at
+// the fully open (0) / closed (100) value, invert applied like the slider (#405).
+const openTiltAction = (agent: Agent) => {
+  if (!supportsOpenCloseTilt(agent)) {
+    return setTiltPositionAction(0, agent);
+  }
+  return {
+    action: shouldSwapOpenClose(agent)
+      ? "cover.close_cover_tilt"
+      : "cover.open_cover_tilt",
+  };
+};
+
+const closeTiltAction = (agent: Agent) => {
+  if (!supportsOpenCloseTilt(agent)) {
+    return setTiltPositionAction(100, agent);
+  }
+  return {
+    action: shouldSwapOpenClose(agent)
+      ? "cover.open_cover_tilt"
+      : "cover.close_cover_tilt",
   };
 };
 

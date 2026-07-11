@@ -102,4 +102,27 @@ describe("selectMdnsInterface", () => {
     });
     expect(choice.hasGlobalIpv6).toBe(false);
   });
+
+  it("flags an OTBR/Thread interface and still suggests the LAN one (#388)", () => {
+    const choice = selectMdnsInterface({
+      lo: [v4("127.0.0.1", true)],
+      eth0: [v4("192.168.1.5"), v6("fd10::1"), v6("fe80::5")],
+      wpan0: [v6("fd11::1"), v6("fe80::aaaa")],
+    });
+    expect(choice.hasThreadInterface).toBe(true);
+    // A Thread mesh-local ULA is not global and not Docker, so the existing
+    // gates miss it on their own.
+    expect(choice.hasGlobalIpv6).toBe(false);
+    expect(choice.suspicious).toBe(false);
+    // wpan0 must not dilute the LAN suggestion.
+    expect(choice.selected).toBe("eth0");
+  });
+
+  it("does not flag a host without a Thread interface", () => {
+    const choice = selectMdnsInterface({
+      lo: [v4("127.0.0.1", true)],
+      eth0: [v4("192.168.1.5"), v6("fd10::1")],
+    });
+    expect(choice.hasThreadInterface).toBe(false);
+  });
 });

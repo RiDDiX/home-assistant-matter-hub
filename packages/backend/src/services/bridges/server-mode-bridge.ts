@@ -1,11 +1,16 @@
 import {
+  alexaPairingPortProblem,
   BridgeStatus,
   type ExposedDeviceType,
   type UpdateBridgeRequest,
 } from "@home-assistant-matter-hub/common";
 import type { Logger } from "@matter/general";
 import { CommissioningServer } from "@matter/main/node";
-import { DeviceAdvertiser, SessionManager } from "@matter/main/protocol";
+import {
+  DeviceAdvertiser,
+  FabricManager,
+  SessionManager,
+} from "@matter/main/protocol";
 import type { LoggerService } from "../../core/app/logger.js";
 import type { ServerModeServerNode } from "../../matter/endpoints/server-mode-server-node.js";
 import { ensureCommissioningConfig } from "../../utils/ensure-commissioning-config.js";
@@ -22,6 +27,9 @@ import {
   ROTATION_CHECK_INTERVAL_MS,
   SESSION_MAX_AGE_HOURS_RANGE,
   seedExistingSessionStarts,
+  selectSupersededSessions,
+  staleSessionQuietWindowMs,
+  staleSessionShouldClose,
 } from "./session-rotation.js";
 
 // Auto Force Sync interval in milliseconds (90 seconds).
@@ -87,6 +95,10 @@ export class ServerModeBridge {
   // biome-ignore lint/suspicious/noExplicitAny: matter.js internal types
   private sessionDeletedHandler?: (session: any) => void;
 
+  // Warns when Alexa pairs on a non-5540 port, the fabric rolls back later (#401).
+  // biome-ignore lint/suspicious/noExplicitAny: matter.js internal types
+  private fabricAddedHandler?: (fabric: any) => void;
+
   get id(): string {
     return this.dataProvider.id;
   }
@@ -135,6 +147,7 @@ export class ServerModeBridge {
     sessions: Array<{
       id: number;
       peerNodeId: string;
+      fabricIndex: number | null;
       subscriptionCount: number;
       lastActiveMsAgo: number | null;
       lastAnyActivityMsAgo: number | null;
@@ -143,15 +156,38 @@ export class ServerModeBridge {
     }>;
     totalSessions: number;
     totalSubscriptions: number;
+    fabrics: Array<{
+      fabricIndex: number;
+      sessions: number;
+      subscriptions: number;
+    }>;
   } {
     try {
       const sessionManager = this.server.env.get(SessionManager);
       const sessions = [...sessionManager.sessions];
       let totalSubscriptions = 0;
+      const fabricMap = new Map<
+        number,
+        { sessions: number; subscriptions: number }
+      >();
       const sessionList = sessions.map((s) => {
         const subCount = s.subscriptions.size;
         totalSubscriptions += subCount;
-        // #365: per-session liveness, mirrors Bridge.getSessionInfo.
+        // #365: per-session liveness and per-fabric roll-up, mirrors
+        // Bridge.getSessionInfo so the health view matches in server mode.
+        const fi =
+          typeof s.fabric?.fabricIndex === "number"
+            ? s.fabric.fabricIndex
+            : null;
+        if (fi !== null) {
+          const existing = fabricMap.get(fi) ?? {
+            sessions: 0,
+            subscriptions: 0,
+          };
+          existing.sessions++;
+          existing.subscriptions += subCount;
+          fabricMap.set(fi, existing);
+        }
         const nowMs = Date.now();
         const lastActiveMsAgo =
           typeof s.activeTimestamp === "number" && s.activeTimestamp > 0
@@ -163,6 +199,7 @@ export class ServerModeBridge {
         return {
           id: s.id,
           peerNodeId: String(s.peerNodeId),
+          fabricIndex: fi,
           subscriptionCount: subCount,
           lastActiveMsAgo,
           lastAnyActivityMsAgo,
@@ -170,16 +207,23 @@ export class ServerModeBridge {
           ageMsFromOpen: startedAt != null ? nowMs - startedAt : null,
         };
       });
+      const fabrics = [...fabricMap.entries()].map(([fabricIndex, data]) => ({
+        fabricIndex,
+        sessions: data.sessions,
+        subscriptions: data.subscriptions,
+      }));
       return {
         sessions: sessionList,
         totalSessions: sessions.length,
         totalSubscriptions,
+        fabrics,
       };
     } catch {
       return {
         sessions: [],
         totalSessions: 0,
         totalSubscriptions: 0,
+        fabrics: [],
       };
     }
   }
@@ -234,6 +278,7 @@ export class ServerModeBridge {
         });
       }
       this.wireSessionDiagnostics();
+      this.wireFabricWarnings();
       this.startSessionRotation();
       this.scheduleWarmStart();
       logMemoryUsage(this.log, "server mode bridge running");
@@ -255,6 +300,7 @@ export class ServerModeBridge {
   ): Promise<void> {
     this.stopSessionRotation();
     this.unwireSessionDiagnostics();
+    this.unwireFabricWarnings();
     this.cancelWarmStart();
     this.stopAutoForceSync();
     await this.closeActiveSessions();
@@ -434,6 +480,41 @@ export class ServerModeBridge {
             }).catch(() => {});
           }
         }
+        // Sweep superseded sessions the #105 loop cannot: same peer+fabric
+        // sessions still holding a dead subscription escaped every cleanup
+        // path and piled up 160 deep for one flapping Echo (#400). The
+        // selector also returns the 0-sub ones the loop above just handled,
+        // so skip those here.
+        const quietWindowMs = staleSessionQuietWindowMs(
+          this.dataProvider.featureFlags,
+        );
+        const now = Date.now();
+        const supersededIds = new Set(
+          selectSupersededSessions(
+            [...sessionManager.sessions],
+            newSession,
+            quietWindowMs,
+            now,
+          ),
+        );
+        const closes: Promise<unknown>[] = [];
+        for (const s of [...sessionManager.sessions]) {
+          if (!supersededIds.has(s.id) || s.subscriptions.size === 0) continue;
+          const quietSec = Math.round((now - s.timestamp) / 1000);
+          this.log.info(
+            `Closing superseded session ${s.id} (peer ${s.peerNodeId}, ${s.subscriptions.size} subs, quiet ${quietSec}s), replaced by session ${newSession.id}`,
+          );
+          closes.push(
+            s.initiateClose().catch(() =>
+              s.initiateForceClose({
+                cause: new Error("superseded session, forcing"),
+              }),
+            ),
+          );
+        }
+        if (closes.length > 0) {
+          Promise.allSettled(closes).then(() => this.triggerMdnsReAnnounce());
+        }
       };
       this.sessionDeletedHandler = (session: {
         id: number;
@@ -457,21 +538,44 @@ export class ServerModeBridge {
     try {
       const sessionManager = this.server.env.get(SessionManager);
       for (const s of [...sessionManager.sessions]) {
-        if (s.id === sessionId && !s.isClosing && s.subscriptions.size === 0) {
-          this.log.warn(
-            `Closing stale session ${s.id} (peer ${s.peerNodeId}, no subscriptions for ${DEAD_SESSION_TIMEOUT_MS / 1000}s)`,
+        if (s.id !== sessionId || s.isClosing || s.subscriptions.size > 0) {
+          continue;
+        }
+        const idleSec = Math.round((Date.now() - s.timestamp) / 1000);
+        if (
+          !staleSessionShouldClose(
+            s,
+            staleSessionQuietWindowMs(this.dataProvider.featureFlags),
+          )
+        ) {
+          // 0 subs but recent traffic: the peer is recovering, not dead.
+          // Re-arm and only close once it goes quiet, so a controller can
+          // re-subscribe on this session instead of being forced offline (#287/#398).
+          this.log.info(
+            `Keeping session ${s.id} (peer ${s.peerNodeId}, 0 subs, last traffic ${idleSec}s ago)`,
           );
-          s.initiateClose()
-            .catch(() => {
-              // Graceful close failed (peer unreachable), force-close locally
-              return s.initiateForceClose({
-                cause: new Error("graceful close failed, forcing"),
-              });
-            })
-            .catch(() => {})
-            .finally(() => this.triggerMdnsReAnnounce());
+          this.staleSessionTimers.set(
+            sessionId,
+            setTimeout(() => {
+              this.staleSessionTimers.delete(sessionId);
+              this.closeStaleSession(sessionId);
+            }, DEAD_SESSION_TIMEOUT_MS),
+          );
           break;
         }
+        this.log.warn(
+          `Closing stale session ${s.id} (peer ${s.peerNodeId}, no subscriptions for ${DEAD_SESSION_TIMEOUT_MS / 1000}s, no traffic for ${idleSec}s)`,
+        );
+        s.initiateClose()
+          .catch(() => {
+            // Graceful close failed (peer unreachable), force-close locally
+            return s.initiateForceClose({
+              cause: new Error("graceful close failed, forcing"),
+            });
+          })
+          .catch(() => {})
+          .finally(() => this.triggerMdnsReAnnounce());
+        break;
       }
     } catch {
       // SessionManager may be disposed
@@ -483,20 +587,43 @@ export class ServerModeBridge {
       const sessionManager = this.server.env.get(SessionManager);
       const sessions = [...sessionManager.sessions];
       const closes: Promise<void>[] = [];
+      let kept = 0;
       for (const s of sessions) {
-        if (!s.isClosing && s.subscriptions.size === 0) {
-          this.log.warn(
-            `Closing dead session ${s.id} (peer ${s.peerNodeId}, no subscriptions for ${DEAD_SESSION_TIMEOUT_MS / 1000}s)`,
-          );
-          closes.push(
-            s.initiateClose().catch(() => {
-              // Graceful close failed (peer unreachable), force-close locally
-              return s.initiateForceClose({
-                cause: new Error("graceful close failed, forcing"),
-              });
-            }),
-          );
+        if (s.isClosing || s.subscriptions.size > 0) {
+          continue;
         }
+        const idleSec = Math.round((Date.now() - s.timestamp) / 1000);
+        if (
+          !staleSessionShouldClose(
+            s,
+            staleSessionQuietWindowMs(this.dataProvider.featureFlags),
+          )
+        ) {
+          // Recent traffic: leave it so the peer can re-subscribe (#287/#398).
+          this.log.info(
+            `Keeping session ${s.id} (peer ${s.peerNodeId}, 0 subs, last traffic ${idleSec}s ago)`,
+          );
+          kept++;
+          continue;
+        }
+        this.log.warn(
+          `Closing dead session ${s.id} (peer ${s.peerNodeId}, no subscriptions for ${DEAD_SESSION_TIMEOUT_MS / 1000}s, no traffic for ${idleSec}s)`,
+        );
+        closes.push(
+          s.initiateClose().catch(() => {
+            // Graceful close failed (peer unreachable), force-close locally
+            return s.initiateForceClose({
+              cause: new Error("graceful close failed, forcing"),
+            });
+          }),
+        );
+      }
+      if (kept > 0 && !this.deadSessionTimer) {
+        // Some peers are still active; re-check after another interval.
+        this.deadSessionTimer = setTimeout(() => {
+          this.deadSessionTimer = null;
+          this.closeDeadSessions();
+        }, DEAD_SESSION_TIMEOUT_MS);
       }
       if (closes.length > 0) {
         Promise.allSettled(closes).then(() => this.triggerMdnsReAnnounce());
@@ -591,6 +718,40 @@ export class ServerModeBridge {
     }
     this.staleSessionTimers.clear();
     this.sessionStartedAt.clear();
+  }
+
+  // Warn at the fabric-added event when Alexa pairs on a non-5540 port. Alexa
+  // completes AddNOC but never CASEs, so the fabric rolls back on failsafe
+  // expiry ~20s later and the committed-fabric warning path never sees it (#401).
+  private wireFabricWarnings() {
+    // Drop the old listener first so factory-reset restarts do not double-register.
+    this.unwireFabricWarnings();
+    try {
+      const fabrics = this.server.env.get(FabricManager);
+      this.fabricAddedHandler = (fabric: { rootVendorId: number }) => {
+        const port = this.dataProvider.port;
+        if (alexaPairingPortProblem(fabric.rootVendorId, port)) {
+          this.log.warn(
+            `Fabric added by Amazon Alexa (vendor ${fabric.rootVendorId}) on port ${port}. Alexa only completes pairing on port 5540, this attempt will roll back about 20s after AddNOC. Recreate the bridge on port 5540 (#401)`,
+          );
+        }
+      };
+      fabrics.events.added.on(this.fabricAddedHandler);
+    } catch {
+      // FabricManager not yet available
+    }
+  }
+
+  private unwireFabricWarnings() {
+    try {
+      const fabrics = this.server.env.get(FabricManager);
+      if (this.fabricAddedHandler) {
+        fabrics.events.added.off(this.fabricAddedHandler);
+      }
+    } catch {
+      // Already disposed
+    }
+    this.fabricAddedHandler = undefined;
   }
 
   // Start the periodic age-based session rotation (#287).

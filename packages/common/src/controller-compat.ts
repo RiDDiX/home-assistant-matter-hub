@@ -22,6 +22,15 @@ export function classifyController(
   return controllerByVendorId[vendorId];
 }
 
+// Alexa only completes the operational CASE connect on port 5540, a pairing on
+// any other port rolls back after AddNOC (#401).
+export function alexaPairingPortProblem(
+  vendorId: number,
+  port: number,
+): boolean {
+  return classifyController(vendorId) === "alexa" && port !== 5540;
+}
+
 interface DeviceTypeSupport {
   apple: ControllerSupport;
   google: ControllerSupport;

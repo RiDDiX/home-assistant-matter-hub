@@ -31,6 +31,7 @@ import { testBit } from "../../../utils/test-bit.js";
 import { BasicInformationServer } from "../../behaviors/basic-information-server.js";
 import { HaElectricalEnergyMeasurementServer } from "../../behaviors/electrical-energy-measurement-server.js";
 import { HaElectricalPowerMeasurementServer } from "../../behaviors/electrical-power-measurement-server.js";
+import { FanSpeedMemoryBehavior } from "../../behaviors/fan-speed-memory.js";
 import { HomeAssistantEntityBehavior } from "../../behaviors/home-assistant-entity-behavior.js";
 import {
   type HumidityMeasurementConfig,
@@ -220,6 +221,7 @@ export class ComposedAirPurifierEndpoint extends Endpoint {
       HomeAssistantEntityBehavior,
       FanOnOffServer,
       FanFanControlServer.with(...features),
+      FanSpeedMemoryBehavior,
     );
 
     // Add HEPA filter monitoring if available

@@ -3,6 +3,14 @@
 If you're experiencing connectivity issues with your Matter Hub and voice assistants like Apple Home, Google Home, or
 Alexa, follow this guide to address common problems.
 
+:::tip Start with the built-in diagnostics
+
+Open **Health & Diagnostics** in the HAMH web UI. The **Network Diagnostics** card lists every network interface, shows which one mDNS is bound to, and runs automated checks that flag the most common problems (for example mDNS advertising on Docker-internal or extra interfaces) with a direct hint on what to change. It is the fastest way to see what your bridge is actually advertising before you touch any settings.
+
+HAMH logs the same warnings at startup, so the add-on log is a good second place to look. The **Controller Health** card on the same page shows each connected controller and whether its link has gone stale.
+
+:::
+
 ## 1. Network Configuration and Firewall Settings
 
 ### IPv6
@@ -97,14 +105,22 @@ Many routers, access points, and managed switches have features that **filter, t
 
 ### mDNS Network Interface Binding
 
-On a host with several network interfaces (Docker bridges like `docker0` / `hassio` / `veth*`, the container's own bridge such as `eth0` on `172.16.x`, plus your real LAN NIC), Matter advertises its operational records on **all** of them and writes every interface address into those records. A controller can then latch onto a Docker-internal or otherwise unreachable address and show devices as **"No Response"** (Apple Home) or **"Offline"** (Google Home), even though pairing succeeded. A power outage or reboot can trigger this by reshuffling interfaces or addresses.
+On a host with several network interfaces, Matter advertises its operational records on **all** of them and writes every interface address into those records. A controller can then latch onto an unreachable address and show devices as **"No Response"** (Apple Home) or **"Offline"** (Google Home), even though pairing succeeded. With Google Home this often looks like the device being found during setup but failing at "connecting to device". A power outage or reboot can trigger it by reshuffling interfaces or addresses.
 
-HAMH detects this at startup and, when Docker-internal interfaces are present, logs a warning that names your likely LAN interface. Bind mDNS to that LAN interface yourself (**not** a Docker one):
+Interfaces that commonly cause this:
 
-- **HA OS add-on:** set the `mdns_network_interface` option to the LAN NIC (e.g. `end0`, `eth0`, `enp0s18`), not `docker0`, `hassio`, or any `veth*`.
+- **Docker bridges** like `docker0`, `hassio`, or `veth*`, and the container's own bridge on a `172.16.x` / `172.30.x` address. Controllers cannot reach these from the LAN.
+- **OpenThread / OTBR interfaces** (`wpan0`, `otbr*`) that appear when you also run the Thread Border Router or the official Matter Server add-on. They carry a Thread mesh-local ULA (an `fd::` address) that is not routable to the rest of your network, so a controller that picks it cannot connect.
+- A **global IPv6 address** (`2000::/3`) on your LAN NIC that a controller cannot reach back on the local network.
+
+HAMH flags this in two places: the **Network Diagnostics** card on the **Health & Diagnostics** page names the extra interfaces and suggests your likely LAN interface, and the startup log prints the same warning. Bind mDNS to your real LAN interface yourself (**not** a Docker or Thread one):
+
+- **HA OS add-on:** set the `mdns_network_interface` option to the LAN NIC (e.g. `end0`, `eth0`, `enp0s3`), not `docker0`, `hassio`, `veth*`, or `wpan0`.
 - **Plain container:** pass `--mdns-network-interface eth1` (your LAN NIC on `192.168.x`), not the Docker bridge (e.g. `eth0` on `172.16.x`), or run the container with `--network=host` (recommended for Matter).
 
-Check names and addresses with `ip addr`. After changing it on an add-on, **reboot HAOS** (not just the add-on) so mDNS re-reads addresses, then re-commission the bridge in your controller.
+If your LAN interface also carries a global IPv6 that controllers cannot reach, drop it from what mDNS advertises with `mdns_strip_global_ipv6` (add-on, both channels; stable from the next release) or `--mdns-strip-global-ipv6` (container). This keeps only the link-local and ULA addresses. It does **not** remove a Thread `fd::` address, since that is a ULA; for Thread interfaces, bind the LAN interface instead.
+
+Check names and addresses with `ip addr`, or read them straight from the Network Diagnostics card. After changing the interface on an add-on, **reboot HAOS** (not just the add-on) so mDNS re-reads addresses, then re-commission the bridge in your controller.
 
 ### Network Topology Best Practices
 
@@ -141,6 +157,12 @@ Check names and addresses with `ip addr`. After changing it on an add-on, **rebo
 - **Certified Matter Device**: Google Home may reject uncertified Matter devices.
   Follow [this guide](https://github.com/project-chip/matter.js/blob/main/docs/ECOSYSTEMS.md#google-home-ecosystem) to
   register your hub properly with Google Home.
+
+### Duplicate / ghost mDNS records after re-pairing
+
+If you see two `_matter._tcp` instances with the same fabric prefix and one of them fails to resolve, a controller or network cache is still holding a record from an earlier pairing. The bridge is not announcing it, so restarting HAMH will not clear it. Check the **Fabrics** card on the bridge page first: if it really shows 2 fabrics, factory-reset the bridge instead.
+
+To clear a stale record: remove the bridge from the controller, factory-reset the bridge in HAMH, reboot the controller hub (Nest, Apple TV, Echo) and the HA host, then re-pair. An unclean shutdown (power loss, hard kill) skips the mDNS goodbye, so old records linger until their TTL expires.
 
 ## 4. Additional Troubleshooting Tips
 

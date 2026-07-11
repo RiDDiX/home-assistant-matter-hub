@@ -8,6 +8,7 @@ import { AirPurifierDevice as Device } from "@matter/main/devices";
 import type { FeatureSelection } from "../../../../utils/feature-selection.js";
 import { testBit } from "../../../../utils/test-bit.js";
 import { BasicInformationServer } from "../../../behaviors/basic-information-server.js";
+import { FanSpeedMemoryBehavior } from "../../../behaviors/fan-speed-memory.js";
 import { HomeAssistantEntityBehavior } from "../../../behaviors/home-assistant-entity-behavior.js";
 import { IdentifyServer } from "../../../behaviors/identify-server.js";
 import { FanFanControlServer } from "../fan/behaviors/fan-fan-control-server.js";
@@ -85,6 +86,7 @@ export function AirPurifierEndpoint(
     HomeAssistantEntityBehavior,
     FanOnOffServer,
     FanFanControlServer.with(...features),
+    FanSpeedMemoryBehavior,
   );
 
   // Add HEPA filter monitoring if filter life is available (attribute or mapped sensor)

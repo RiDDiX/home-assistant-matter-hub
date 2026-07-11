@@ -134,6 +134,13 @@ export class EntityMappingStorage extends Service {
         Object.keys(request.customFanSpeedTags).length > 0
           ? request.customFanSpeedTags
           : undefined,
+      fanWindPresets:
+        request.fanWindPresets &&
+        ((request.fanWindPresets.natural?.length ?? 0) > 0 ||
+          (request.fanWindPresets.sleep?.length ?? 0) > 0)
+          ? request.fanWindPresets
+          : undefined,
+      fanRestoreSpeedOnPowerOn: request.fanRestoreSpeedOnPowerOn || undefined,
       currentRoomEntity: request.currentRoomEntity?.trim() || undefined,
       cleanedAreaEntity: request.cleanedAreaEntity?.trim() || undefined,
       disableCustomAreaRoomModes:
@@ -142,6 +149,9 @@ export class EntityMappingStorage extends Service {
       coverSwapOpenClose: request.coverSwapOpenClose || undefined,
       coverExposeAsDimmableLight:
         request.coverExposeAsDimmableLight || undefined,
+      selectExposeAsSwitch: request.selectExposeAsSwitch || undefined,
+      selectSwitchOnOption: request.selectSwitchOnOption || undefined,
+      selectSwitchOffOption: request.selectSwitchOffOption || undefined,
       coverSliderDebounceMs: sanitizeDebounceMs(request.coverSliderDebounceMs),
       updateThrottleMs: sanitizeThrottleMs(request.updateThrottleMs),
       disableClimateOnOff: request.disableClimateOnOff || undefined,
@@ -178,12 +188,19 @@ export class EntityMappingStorage extends Service {
       (!config.customServiceAreas || config.customServiceAreas.length === 0) &&
       (!config.customFanSpeedTags ||
         Object.keys(config.customFanSpeedTags).length === 0) &&
+      (!config.fanWindPresets ||
+        ((config.fanWindPresets.natural?.length ?? 0) === 0 &&
+          (config.fanWindPresets.sleep?.length ?? 0) === 0)) &&
+      !config.fanRestoreSpeedOnPowerOn &&
       !config.currentRoomEntity &&
       !config.cleanedAreaEntity &&
       !config.disableCustomAreaRoomModes &&
       !config.valetudoIdentifier &&
       !config.coverSwapOpenClose &&
       !config.coverExposeAsDimmableLight &&
+      !config.selectExposeAsSwitch &&
+      !config.selectSwitchOnOption &&
+      !config.selectSwitchOffOption &&
       !config.coverSliderDebounceMs &&
       !config.updateThrottleMs &&
       !config.disableClimateOnOff &&

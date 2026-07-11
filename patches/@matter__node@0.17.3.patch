@@ -2,7 +2,7 @@ diff --git a/dist/cjs/node/server/ServerSubscription.js b/dist/cjs/node/server/S
 index 70f2ef9a51a86033f25846ece057ec51c47c6a7c..55dd70cde5369f6abdd49459ccb579465a147cec 100644
 --- a/dist/cjs/node/server/ServerSubscription.js
 +++ b/dist/cjs/node/server/ServerSubscription.js
-@@ -638,6 +638,12 @@ class ServerSubscription {
+@@ -638,6 +638,14 @@ class ServerSubscription {
      }
    }
    async #sendUpdateMessage(lifetime, attributeFilter, eventsMinNumber, onlyWithData, session) {
@@ -10,6 +10,8 @@ index 70f2ef9a51a86033f25846ece057ec51c47c6a7c..55dd70cde5369f6abdd49459ccb57946
 +      const ownSession = this.#context.session;
 +      if (ownSession !== void 0 && !ownSession.isClosing && !ownSession.isClosed) {
 +        session = ownSession;
++      } else {
++        return false;
 +      }
 +    }
      const exchange = this.#context.initiateExchange(session ?? this.#peerAddress, import_types.INTERACTION_PROTOCOL_ID);
@@ -19,7 +21,7 @@ diff --git a/dist/esm/node/server/ServerSubscription.js b/dist/esm/node/server/S
 index b38ae47899eeb9e8606976927c74ecc1e1be6c21..d7ff06198596df2763b7b92d5e9765973554e916 100644
 --- a/dist/esm/node/server/ServerSubscription.js
 +++ b/dist/esm/node/server/ServerSubscription.js
-@@ -642,6 +642,12 @@ class ServerSubscription {
+@@ -642,6 +642,14 @@ class ServerSubscription {
      }
    }
    async #sendUpdateMessage(lifetime, attributeFilter, eventsMinNumber, onlyWithData, session) {
@@ -27,6 +29,8 @@ index b38ae47899eeb9e8606976927c74ecc1e1be6c21..d7ff06198596df2763b7b92d5e976597
 +      const ownSession = this.#context.session;
 +      if (ownSession !== void 0 && !ownSession.isClosing && !ownSession.isClosed) {
 +        session = ownSession;
++      } else {
++        return false;
 +      }
 +    }
      const exchange = this.#context.initiateExchange(session ?? this.#peerAddress, INTERACTION_PROTOCOL_ID);

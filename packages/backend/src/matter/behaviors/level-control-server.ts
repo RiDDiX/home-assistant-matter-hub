@@ -104,13 +104,14 @@ export class LevelControlServerBase extends FeaturedBase {
 
     const minLevel = 1;
     const maxLevel = 0xfe;
-    const levelRange = maxLevel - minLevel;
 
-    // Get brightness as percentage (0.0-1.0) from Home Assistant
+    // Get brightness as percentage (0.0-1.0) from Home Assistant.
+    // Map the fraction onto the full 1..254 scale (fraction * 254) so it stays
+    // in step with the config's brightness math and round-trips cleanly (#402).
     const currentLevelPercent = config.getValuePercent(state, this.agent);
     let currentLevel =
       currentLevelPercent != null
-        ? Math.round(currentLevelPercent * levelRange + minLevel)
+        ? Math.round(currentLevelPercent * maxLevel)
         : null;
 
     if (currentLevel != null) {
@@ -180,8 +181,10 @@ export class LevelControlServerBase extends FeaturedBase {
     const config = this.state.config;
     const entityId = homeAssistant.entity.entity_id;
 
-    const levelRange = this.maxLevel - this.minLevel;
-    const levelPercent = (level - this.minLevel) / levelRange;
+    // Level 1..254 maps to a full-scale 0..1 fraction (level / 254). Combined
+    // with the config's *255 this makes Google's level 30 arrive as brightness
+    // 30 instead of 29, and keeps the round-trip stable (#402).
+    const levelPercent = level / this.maxLevel;
 
     // Alexa workaround (#142, opt-in): after subscription renewal Alexa sends
     // on() followed by moveToLevel(254) within ~50ms, resetting brightness to

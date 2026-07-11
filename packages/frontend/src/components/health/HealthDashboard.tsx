@@ -33,6 +33,7 @@ import { timeAgo } from "../../time.ts";
 import { BackupRestore } from "../backup/BackupRestore.tsx";
 import { FabricIcon } from "../fabric/FabricIcon.tsx";
 import { getVendorName } from "../fabric/vendor-names.ts";
+import { FabricHealthCard } from "./FabricHealthCard.tsx";
 
 type SortField = "name" | "created";
 type SortDirection = "asc" | "desc";
@@ -81,6 +82,8 @@ interface BridgeHealthInfo {
       peerNodeId: string;
       fabricIndex: number | null;
       subscriptionCount: number;
+      lastActiveMsAgo?: number | null;
+      isPeerActive?: boolean;
     }>;
     fabricSummary?: Array<{
       fabricIndex: number;
@@ -561,6 +564,15 @@ export function HealthDashboard(props: HealthDashboardProps = {}) {
                           </Tooltip>
                         ))}
                       </Box>
+                    </Box>
+                  )}
+
+                  {bridge.connectivity && bridge.status === "running" && (
+                    <Box sx={{ mt: 1, flexShrink: 0 }}>
+                      <FabricHealthCard
+                        fabrics={bridge.fabrics}
+                        sessions={bridge.connectivity.sessions}
+                      />
                     </Box>
                   )}
 

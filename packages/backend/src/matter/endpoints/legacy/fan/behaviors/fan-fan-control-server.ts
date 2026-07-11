@@ -2,17 +2,30 @@ import {
   type FanDeviceAttributes,
   FanDeviceDirection,
   FanDeviceFeature,
+  type FanWindPresets,
   type HomeAssistantEntityState,
 } from "@home-assistant-matter-hub/common";
+import type { Agent } from "@matter/main";
 import { FanControl } from "@matter/main/clusters";
 import { testBit } from "../../../../../utils/test-bit.js";
 import {
   FanControlServer,
   type FanControlServerConfig,
 } from "../../../../behaviors/fan-control-server.js";
+import { HomeAssistantEntityBehavior } from "../../../../behaviors/home-assistant-entity-behavior.js";
 
 const attributes = (e: HomeAssistantEntityState) =>
   e.attributes as FanDeviceAttributes;
+
+// Per-entity wind preset names, falls back to empty.
+const windPresets = (agent: Agent): FanWindPresets =>
+  agent.get(HomeAssistantEntityBehavior).state.mapping?.fanWindPresets ?? {};
+
+const isEnglishNatural = (m: string) => {
+  const lower = m.toLowerCase();
+  return lower === "natural" || lower === "nature";
+};
+const isEnglishSleep = (m: string) => m.toLowerCase() === "sleep";
 
 const fanControlConfig: FanControlServerConfig = {
   getPercentage: (state) =>
@@ -40,20 +53,26 @@ const fanControlConfig: FanControlServerConfig = {
       attributes(state).supported_features ?? 0,
       FanDeviceFeature.OSCILLATE,
     ),
-  // Wind mode support - check if preset_modes contains natural/sleep
-  getWindMode: (state) => {
-    const mode = attributes(state).preset_mode?.toLowerCase();
-    if (mode === "natural" || mode === "nature") return "natural";
-    if (mode === "sleep") return "sleep";
+  // Wind mode support - localized presets via mapping, english as fallback
+  getWindMode: (state, agent) => {
+    const mode = attributes(state).preset_mode;
+    if (!mode) return undefined;
+    const presets = windPresets(agent);
+    if (presets.natural?.includes(mode)) return "natural";
+    if (presets.sleep?.includes(mode)) return "sleep";
+    if (isEnglishNatural(mode)) return "natural";
+    if (isEnglishSleep(mode)) return "sleep";
     return undefined;
   },
-  supportsWind: (state) => {
+  supportsWind: (state, agent) => {
     const modes = attributes(state).preset_modes ?? [];
+    const presets = windPresets(agent);
     return modes.some(
       (m) =>
-        m.toLowerCase() === "natural" ||
-        m.toLowerCase() === "nature" ||
-        m.toLowerCase() === "sleep",
+        isEnglishNatural(m) ||
+        isEnglishSleep(m) ||
+        !!presets.natural?.includes(m) ||
+        !!presets.sleep?.includes(m),
     );
   },
 
@@ -80,13 +99,32 @@ const fanControlConfig: FanControlServerConfig = {
     action: "fan.oscillate",
     data: { oscillating },
   }),
-  setWindMode: (mode) => ({
-    action: "fan.set_preset_mode",
-    data: {
-      preset_mode:
-        mode === "natural" ? "Natural" : mode === "sleep" ? "Sleep" : "Normal",
-    },
-  }),
+  setWindMode: (mode, agent) => {
+    const presets = windPresets(agent);
+    let presetMode: string;
+    if (mode === "natural") {
+      presetMode = presets.natural?.[0] ?? "Natural";
+    } else if (mode === "sleep") {
+      presetMode = presets.sleep?.[0] ?? "Sleep";
+    } else {
+      // "off" picks the first non-wind preset (the normal one, e.g. 直吹风)
+      const wind = new Set([
+        ...(presets.natural ?? []),
+        ...(presets.sleep ?? []),
+      ]);
+      const entityState = agent.get(HomeAssistantEntityBehavior).state.entity
+        .state;
+      const modes = attributes(entityState).preset_modes ?? [];
+      presetMode =
+        modes.find(
+          (m) => !wind.has(m) && !isEnglishNatural(m) && !isEnglishSleep(m),
+        ) ?? "Normal";
+    }
+    return {
+      action: "fan.set_preset_mode",
+      data: { preset_mode: presetMode },
+    };
+  },
 };
 
 export const FanFanControlServer = FanControlServer(fanControlConfig);

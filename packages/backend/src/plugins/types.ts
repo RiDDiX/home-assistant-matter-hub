@@ -119,6 +119,8 @@ export interface PluginContext {
   log: Logger;
   /** ID of the bridge this plugin is attached to */
   bridgeId: string;
+  /** The bridge's HA connection, so plugins don't need their own */
+  homeAssistant?: { url: string; accessToken: string };
 }
 
 /**

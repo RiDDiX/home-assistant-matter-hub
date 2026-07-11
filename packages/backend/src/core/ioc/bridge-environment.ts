@@ -65,7 +65,10 @@ export class BridgeEnvironment extends EnvironmentBase {
     let pluginRegistry: PluginRegistry | undefined;
     let pluginInstaller: PluginInstaller | undefined;
     if (this.storageLocation) {
-      pluginManager = new PluginManager(bridgeId, this.storageLocation);
+      pluginManager = new PluginManager(bridgeId, this.storageLocation, {
+        url: haClient.baseUrl,
+        accessToken: haClient.accessToken,
+      });
       pluginRegistry = new PluginRegistry(this.storageLocation);
       pluginManager.setRegistry(pluginRegistry);
       pluginInstaller = new PluginInstaller(this.storageLocation);

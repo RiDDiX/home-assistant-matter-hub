@@ -266,7 +266,9 @@ describe("createLegacyEndpointType", () => {
     const actual = uniq(endpoints.flatMap((d) => Object.keys(d.state)))
       .filter((key) => !/^\d+$/.test(key))
       .sort();
-    const expected = Object.keys(ClusterId).sort();
+    // fanSpeedMemory stays out of ClusterId on purpose: CustomStorage skips
+    // loading ClusterId-suffixed contexts, and the speed memory must persist.
+    const expected = [...Object.keys(ClusterId), "fanSpeedMemory"].sort();
     expect(actual).toEqual(expected);
   });
 });

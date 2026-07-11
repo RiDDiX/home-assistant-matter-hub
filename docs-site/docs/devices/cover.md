@@ -33,7 +33,7 @@ These flags are configured in **Bridge Settings** and apply to all covers on tha
 |------|-------------|
 | `coverDoNotInvertPercentage` | Skip percentage inversion. By default, HAMH inverts the percentage to match the Matter spec (0% = fully open, 100% = fully closed). Enable this if your cover already uses the Matter convention. **Not Matter compliant** when disabled. |
 | `coverUseHomeAssistantPercentage` | Display HA percentages directly in Matter without conversion. Useful for Alexa where percentage display may be confusing otherwise. |
-| `coverSwapOpenClose` | Swap open and close commands. Fixes reversed commands from Alexa where "open" closes the cover and vice versa. |
+| `coverSwapOpenClose` | Swap open and close commands. Fixes reversed commands from Alexa where "open" closes the cover and vice versa. At bridge level it also un-inverts the position percentage. Set it per cover in the Entity Mapping dialog to swap only open/close and leave the percentage alone (see [#406 below](#cover-swap-406)). |
 
 ## Percentage Mapping
 
@@ -58,9 +58,26 @@ By default, HAMH inverts the percentage to comply with the Matter specification.
 
 ## Troubleshooting
 
+### Alexa stopped controlling the cover
+
+Around June 2026 Alexa shows the cover and its live position, but the slider and voice commands answer "device not responding". A DEBUG log shows no `handleMovement` line, so the command never reaches the bridge, Alexa just stopped sending WindowCovering writes ([#372](https://github.com/RiDDiX/home-assistant-matter-hub/issues/372)).
+
+Workaround: set `coverExposeAsDimmableLight` per cover in the Entity Mapping dialog. Alexa still drives lights, so on/off maps to open/close and the 1-100% level maps to position. Turn it on for the covers you run from Alexa and re-add them in Alexa once.
+
+- Keep it off if you also use Apple Home or Google Home, they handle covers fine.
+- Don't put these covers in an Alexa room, or a room-wide "lights off" closes them too.
+- No stop command as a light, only on/off and position.
+- It is temporary. Once Alexa handles covers again, turn the option off, remove the light devices in Alexa, restart the bridge, and let Alexa rediscover.
+
 ### Alexa commands are reversed (open → close)
 
 Enable the `coverSwapOpenClose` feature flag in your bridge settings. This is a known Alexa behavior where the open/close direction is reversed for Matter WindowCovering devices.
+
+### Alexa: open/close right but "set to a percentage" inverted (#406) {#cover-swap-406}
+
+Alexa sends everything as a lift percentage: open/close hit the 0/100% ends, "set to N%" hits the middle, and Alexa uses opposite polarity for the two. The bridge-level `coverSwapOpenClose` also un-inverts the percentage, so turning it on fixes open/close but flips set-position (off is the reverse), and no single bridge setting gets both right.
+
+Fix: enable `coverSwapOpenClose` on the cover itself in the Entity Mapping dialog and leave the bridge-level flag off. Per cover it swaps only open/close and keeps the default percentage inversion, so open, close and set-to-N% all come out correct. One catch: saying "set to exactly 0%" or "100%" still counts as open/close.
 
 ### Percentage shows wrong value in Alexa
 

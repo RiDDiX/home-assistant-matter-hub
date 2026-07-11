@@ -61,9 +61,11 @@ By default a `moisture` or `cold` binary sensor is exposed as a plain ContactSen
 
 \*\* Alexa does not support the standalone ModeSelect device type (0x0027). The ModeSelect cluster is only recognized on specific device types like Lamp or Fan. See [Alexa Supported Device Categories](https://developer.amazon.com/en-US/docs/alexa/smarthome/supported-matter-device-categories.html) and [#273](https://github.com/RiDDiX/home-assistant-matter-hub/issues/273).
 
-\*\*\* Google Home does not support the standalone ModeSelect device type (0x0027): it is absent from Google's published Matter device types, so Google shows a generic info screen with no options control (#356). The option labels are sent correctly on the wire, this is a controller-side device-type gap, not a bridge bug. The Home Assistant Google Assistant cloud integration does expose these entities as Google "Modes", but that is a separate non-Matter path, not the HAMH bridge. Workaround: use that cloud integration, or expose the entity as an HA template switch or script. See [#356](https://github.com/RiDDiX/home-assistant-matter-hub/issues/356) and [#296](https://github.com/RiDDiX/home-assistant-matter-hub/issues/296).
+\*\*\* Google Home does not support the standalone ModeSelect device type (0x0027): it is absent from Google's published Matter device types, so Google shows a generic info screen with no options control (#356). The option labels are sent correctly on the wire, this is a controller-side device-type gap, not a bridge bug. The Home Assistant Google Assistant cloud integration does expose these entities as Google "Modes", but that is a separate non-Matter path, not the HAMH bridge. Workaround: use that cloud integration, enable the per-entity "Expose as an on/off switch" mapping (maps on/off to two chosen options, works on all controllers), or expose the entity as an HA template switch or script. See [#356](https://github.com/RiDDiX/home-assistant-matter-hub/issues/356) and [#296](https://github.com/RiDDiX/home-assistant-matter-hub/issues/296).
 
 \*\*\*\* A `weather` entity is exposed as a TemperatureSensor with Humidity and Pressure clusters stacked on one device. Temperature and Humidity should work where the standalone sensor rows do; Pressure is Google-only (see the PressureSensor row). The stacked-cluster shape on a single device is not yet community-tested, so treat these cells as expected, not confirmed.
+
+**No switch tile over Matter.** Matter has no on/off device type that controllers render as a plain "switch": every controller shows 0x010A as a plug/outlet and 0x0100 (the OnOffSwitch override) as a light. The switch tile you may know from HA's HomeKit Bridge comes from the HomeKit-native Switch service, which has no Matter equivalent. Apple's "Show as" works on Matter outlets but only offers Outlet, Light, or Fan. The Matter 1.4 Mounted On/Off Control type (experimental override) shows as a switch on SmartThings and Aqara; Apple, Google, and Alexa don't know the type and are expected to fall back to its advertised plug subset (not yet verified on real devices). For a genuine switch tile on Apple or Google, expose that entity through HA's HomeKit Bridge or Google integration in parallel ([#380](https://github.com/RiDDiX/home-assistant-matter-hub/issues/380)).
 
 ### Sources
 
@@ -86,7 +88,7 @@ A few Aqara quirks are handled for you:
 - The root `softwareVersionString` is aligned with the numeric version so bridge registration does not stall ([#316](https://github.com/RiDDiX/home-assistant-matter-hub/issues/316)).
 - `productName` is stripped of characters that crash Aqara when the `productNameFromNodeLabel` flag is on ([#330](https://github.com/RiDDiX/home-assistant-matter-hub/issues/330)).
 
-If Aqara does not show an air conditioner, set the entity's `disableClimateFanControl` flag to expose it as a plain Thermostat ([#318](https://github.com/RiDDiX/home-assistant-matter-hub/issues/318)). For naming, the `productNameFromNodeLabel` bridge flag and the per-entity `customProductName` / `customVendorId` overrides help Aqara show the device name you expect.
+If Aqara does not show an air conditioner, set the entity's `disableClimateFanControl` flag to expose it as a plain Thermostat ([#318](https://github.com/RiDDiX/home-assistant-matter-hub/issues/318)). The flag needs a full HAMH restart to take effect, and Aqara caches the bridge's device list, so remove the bridge from Aqara Home and pair it again afterwards. Alternatively, Aqara Home app 5.1.9 with controller firmware 4.3.5 or newer knows the Room Air Conditioner type natively, so updating Aqara can make the default exposure work without the flag. For naming, the `productNameFromNodeLabel` bridge flag and the per-entity `customProductName` / `customVendorId` overrides help Aqara show the device name you expect.
 
 ## Controller Profiles
 
@@ -94,10 +96,10 @@ HAMH includes built-in controller profiles that pre-configure feature flags for 
 
 | Profile | Key Settings |
 |---|---|
-| **Apple Home** | `autoForceSync: true`, `coverUseHomeAssistantPercentage: true` |
-| **Google Home** | `autoForceSync: true` |
-| **Alexa** | `autoForceSync: true`, `vacuumOnOff: true` |
-| **Multi-Controller** | `autoForceSync: true`, `vacuumOnOff: true`, `coverUseHomeAssistantPercentage: true` |
+| **Apple Home** | `autoComposedDevices: true`, `autoBatteryMapping: true`, `autoHumidityMapping: true`, `autoPressureMapping: true` |
+| **Google Home** | `autoForceSync: true`, `autoComposedDevices: true`, `autoBatteryMapping: true`, `autoHumidityMapping: true`, `autoPressureMapping: true` |
+| **Alexa** | `autoForceSync: true`, `autoBatteryMapping: true`, `autoHumidityMapping: true`, `autoPressureMapping: true`, `coverUseHomeAssistantPercentage: true` |
+| **Multi-Controller** | `autoForceSync: true`, `autoComposedDevices: true`, `autoBatteryMapping: true`, `autoHumidityMapping: true`, `autoPressureMapping: true` |
 
 See [Bridge Configuration](../getting-started/bridge-configuration.md) for details on how to select a profile.
 

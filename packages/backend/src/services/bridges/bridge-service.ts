@@ -71,8 +71,18 @@ export class BridgeService extends Service {
   }
 
   protected override async initialize() {
-    for (const data of this.bridgeStorage.bridges) {
-      const normalized = this.normalizeBridgeData(data);
+    // Snapshot first: addBridge mutates this.bridges and we may rewrite a port.
+    for (const data of [...this.bridgeStorage.bridges]) {
+      let normalized = this.normalizeBridgeData(data);
+      if (this.portUsed(normalized.port)) {
+        // Two stored bridges want the same port. Only one can bind it, so move
+        // this one to a free port instead of letting it fail offline (#378).
+        const freePort = this.getNextAvailablePort(normalized.port);
+        this.log.warn(
+          `Bridge ${normalized.name} port ${normalized.port} already in use, moved to ${freePort}`,
+        );
+        normalized = { ...normalized, port: freePort };
+      }
       await this.bridgeStorage.add(normalized);
       await this.addBridge(normalized);
     }

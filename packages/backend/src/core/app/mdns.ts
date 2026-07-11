@@ -35,12 +35,20 @@ function warnAboutAdvertising(options: MdnsOptions) {
       "Matter mDNS is advertising a global IPv6 address that controllers may not reach on the LAN, so devices can show No Response (#361). Set mdns-strip-global-ipv6 if devices stay unreachable.",
     );
   }
-  if (options.networkInterface || !choice.suspicious) {
+  if (options.networkInterface) {
     return;
   }
   const suggestion = choice.selected
     ? ` Likely LAN interface: ${choice.selected}.`
     : "";
+  if (choice.hasThreadInterface) {
+    logger.warn(
+      `Matter mDNS is advertising on an OpenThread/OTBR interface (wpan/otbr) whose mesh-local address controllers cannot reach, so devices may show offline (#388). Set mdns-network-interface to your LAN interface.${suggestion}`,
+    );
+  }
+  if (!choice.suspicious) {
+    return;
+  }
   const list = choice.external
     .map((i) => `${i.name} (${i.ipv4[0] ?? i.ipv6[0] ?? "?"})`)
     .join(", ");

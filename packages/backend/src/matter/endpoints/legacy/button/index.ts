@@ -9,8 +9,10 @@ import { IdentifyServer } from "../../../behaviors/identify-server.js";
 /**
  * Button-specific OnOffServer that auto-resets to OFF after press.
  * This prevents buttons from appearing "stuck on" in controllers like Google Home.
+ * No Lighting feature: like automation and input button, Alexa rejects a
+ * non-light OnOffPlugInUnit that advertises it (#182).
  */
-class ButtonOnOffServerBase extends Base.with("Lighting") {
+class ButtonOnOffServerBase extends Base {
   override async initialize() {
     await super.initialize();
     // Buttons are always "off" - they're momentary actions

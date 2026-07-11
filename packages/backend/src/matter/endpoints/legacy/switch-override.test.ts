@@ -31,4 +31,12 @@ describe("switch on_off_switch override (#380)", () => {
     expect(def?.deviceType).toBe(0x010a); // OnOffPlugInUnit (plug)
     expect(override?.deviceType).toBe(0x0100); // On/Off Light (switchable)
   });
+
+  // #380 experiment: the mounted_on_off_control override must emit 0x010F.
+  it("mounted_on_off_control override exposes 0x010F", () => {
+    const mounted = createLegacyEndpointType(switchEntity(), {
+      matterDeviceType: "mounted_on_off_control",
+    } as EntityMappingConfig);
+    expect(mounted?.deviceType).toBe(0x010f); // Mounted On/Off Control
+  });
 });

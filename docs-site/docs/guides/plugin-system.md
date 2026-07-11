@@ -162,9 +162,11 @@ Some device types need a live matter.js `EndpointType` (custom clusters and comm
 
 | Setting | Description |
 |---------|-------------|
-| `haUrl` | Home Assistant URL, e.g. `http://homeassistant.local:8123` |
-| `haToken` | Long-lived access token |
-| `cameras` | Camera entity ids, comma-separated |
+| `cameras` | Camera entity ids, comma-separated, e.g. `camera.front,camera.garage`. This is the only field you need to set. |
+| `haUrl` | Optional. Leave empty to reuse the bridge's Home Assistant connection. Only set it to point at a different HA. |
+| `haToken` | Optional. Leave empty to reuse the bridge's connection, or set a long-lived token to match a custom `haUrl`. |
+
+Plugin config is stored per bridge, so set the cameras on each bridge that should expose them. Upgrading from a build before this split resets the config once, so re-enter the cameras after updating.
 
 Experimental: the WebRTC media path is not verified end to end, and as of 2026 only SmartThings renders Matter cameras.
 

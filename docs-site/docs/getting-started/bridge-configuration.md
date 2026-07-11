@@ -30,9 +30,13 @@ You can access the bridge configuration by opening the web UI:
 > See [this guide](../guides/connect-multiple-fabrics.md) for details how to set this up.
 
 > [!WARNING]
-> Alexa only supports port `5540`. Therefore, you cannot create multiple bridges to connect with Alexa.
-> 
-> There are users who managed to get it work using the following approach:
+> Alexa only completes pairing on port `5540`. On any other port the pairing rolls back about 20 seconds after AddNOC (#401), so only the bridge currently on `5540` can complete Alexa pairing.
+>
+> Recommended multi-bridge setup: keep one bridge on `5540`, widen its filters to cover every entity Alexa should see, and pair Alexa with it. Other controllers are not limited to `5540`, so they can pair the other bridges or join the `5540` bridge as an extra fabric (see [this guide](../guides/connect-multiple-fabrics.md)).
+>
+> Alexa may also refuse to pair a bridge with more than about 80-100 devices.
+>
+> Last resort: shuffle ports to pair several bridges one at a time.
 > 1. Create a bridge with port 5540
 > 2. Connect your Alexa with that bridge
 > 3. Change the port of the bridge
@@ -139,6 +143,9 @@ Labels can be applied at the entity level or at the device level:
 - Use `entity_label` to match labels assigned directly to entities
 - Use `device_label` to match labels assigned to the parent device (all entities of that device will match)
 - The old `label` type still works but only matches entity labels, use the new types for explicit control
+
+> [!WARNING]
+> A `device_label` filter matches through the parent device, so deleting that device in Home Assistant drops all of its entities from the bridge even when you keep the entities themselves. The `entity_id` does not change, but the label lived on the device, so the entities stop matching. Alexa reacts to the smaller bridge by re-importing every device and dropping room and group assignments; Apple Home is unaffected because it keys on the stable device id ([#407](https://github.com/RiDDiX/home-assistant-matter-hub/issues/407)). To curate safely, put the label on the entities (`entity_label`) instead of the device, or remove the label from just the entities you want to drop. If you must delete a device that a `device_label` filter depends on, expect a one-time Alexa rediscovery and reassign the rooms once afterwards.
 
 You can use either the **display name** (e.g. `My Smart Lights`) or the **slug** (e.g. `my_smart_lights`) as the filter value. The display name is automatically resolved to the correct slug.
 
@@ -301,7 +308,7 @@ Feature flags control advanced behavior of the bridge. Configure them in the **B
 | `serverMode` | Expose device as standalone Matter device (required for Robot Vacuums with Apple Home/Alexa). Only ONE device per bridge! | `false` |
 | `productNameFromNodeLabel` | Report the node label (custom name / friendly name / entity id) as Matter `productName`. Useful for Aqara controllers that show productName as the device name. A per-entity `customProductName` still wins. | `false` |
 | `preferEntityRegistryName` | Use the entity registry name (or `original_name`) as `nodeLabel` instead of the composed `friendly_name`. HA 2026.4 prefixes `friendly_name` with the device name, breaking voice commands that relied on the short entity name. `customName` still wins. | `false` |
-| `vacuumOnOff` | Add OnOff cluster to vacuum endpoints. Required for Alexa discovery. In Server Mode, enabled by default unless explicitly set to `false`. In Bridge Mode, disabled by default. | (see description) |
+| `vacuumOnOff` | Add OnOff cluster to vacuum endpoints. Some Alexa setups need this for the vacuum to be discovered. Disabled by default in both Bridge Mode and Server Mode. | `false` |
 | `vacuumIncludeUnnamedRooms` | Include rooms without names in vacuum room selection | `false` |
 
 ## Issues with labels

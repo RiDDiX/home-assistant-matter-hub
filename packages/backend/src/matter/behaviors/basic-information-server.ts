@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import type { HomeAssistantEntityInformation } from "@home-assistant-matter-hub/common";
+import { Logger } from "@matter/general";
 import { VendorId } from "@matter/main";
 import { BridgedDeviceBasicInformationServer as Base } from "@matter/main/behaviors";
 import { BridgeDataProvider } from "../../services/bridges/bridge-data-provider.js";
@@ -7,6 +8,13 @@ import { applyPatchState } from "../../utils/apply-patch-state.js";
 import { sanitizeMatterString } from "../../utils/sanitize-matter-string.js";
 import { trimToLength } from "../../utils/trim-to-length.js";
 import { HomeAssistantEntityBehavior } from "./home-assistant-entity-behavior.js";
+
+const logger = Logger.get("BasicInformationServer");
+
+// UniqueID is fixed quality per Matter spec, so it must not change while the
+// process runs. Frozen here per bridge+entity; a uniqueIdSuffix change only
+// applies on the next HAMH restart (#385).
+const appliedUniqueIds = new Map<string, string>();
 
 export class BasicInformationServer extends Base {
   override async initialize(): Promise<void> {
@@ -69,7 +77,9 @@ export class BasicInformationServer extends Base {
         ellipse(32, device?.model) ??
         hash(32, basicInformation.productName),
       productLabel:
-        ellipse(64, device?.model) ?? hash(64, basicInformation.productLabel),
+        ellipse(64, mapping?.customProductName) ??
+        ellipse(64, device?.model) ??
+        hash(64, basicInformation.productLabel),
       hardwareVersion: basicInformation.hardwareVersion,
       softwareVersion: basicInformation.softwareVersion,
       hardwareVersionString: ellipse(64, device?.hw_version),
@@ -80,12 +90,28 @@ export class BasicInformationServer extends Base {
       serialNumber,
       // UniqueId helps controllers (especially Alexa) identify devices across
       // multiple fabric connections. Using MD5 hash of entity_id for stability.
-      uniqueId: crypto
-        .createHash("md5")
-        .update(entity.entity_id)
-        .digest("hex")
-        .substring(0, 32),
+      // uniqueIdSuffix mints a fresh identity so stale controller cloud
+      // records keyed on it can be shed (#385).
+      uniqueId: this.frozenUniqueId(entity.entity_id),
     });
+    logger.debug(
+      `[${entity.entity_id}] basicInfo vendor=${this.state.vendorName} product=${this.state.productName} label=${this.state.productLabel} serial=${this.state.serialNumber} node=${this.state.nodeLabel} uniqueId=${this.state.uniqueId}`,
+    );
+  }
+
+  private frozenUniqueId(entityId: string): string {
+    const provider = this.env.get(BridgeDataProvider);
+    const key = `${provider.id}:${entityId}`;
+    let uniqueId = appliedUniqueIds.get(key);
+    if (uniqueId == null) {
+      uniqueId = crypto
+        .createHash("md5")
+        .update(entityId + (provider.uniqueIdSuffix ?? ""))
+        .digest("hex")
+        .substring(0, 32);
+      appliedUniqueIds.set(key, uniqueId);
+    }
+    return uniqueId;
   }
 }
 

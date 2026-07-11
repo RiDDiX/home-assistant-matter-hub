@@ -314,6 +314,18 @@ const featureFlagSchema: JSONSchema7 = {
       maximum: 5000,
       default: 0,
     },
+
+    fastSessionRecovery: {
+      title: "Fast Session Recovery (Google offline workaround)",
+      description:
+        "When a controller drops all subscriptions, clean up the dead session " +
+        "and re-announce after 5 seconds instead of 60. Opt-in for Google Home " +
+        "users whose devices go offline after a cancelled subscription (#386). " +
+        "It shortens the offline window but cannot stop the controller from " +
+        "rejecting the subscription. Default off.",
+      type: "boolean",
+      default: false,
+    },
   },
 };
 
@@ -383,6 +395,17 @@ export const bridgeConfigSchema: JSONSchema7 = {
         "Append a suffix to every entity serial number on this bridge. " +
         "Useful for forcing controllers like Aqara to treat devices as new " +
         "and bypass cached device data. Leave empty for default behavior.",
+      maxLength: 16,
+    },
+    uniqueIdSuffix: {
+      title: "Unique ID Suffix",
+      type: "string",
+      description:
+        "Mixed into the unique ID of every bridged device on this bridge " +
+        "(standard bridge mode). Controllers like Alexa cache device records " +
+        "keyed on the unique ID, so setting or changing this can help mint " +
+        "fresh identities. Applies after a bridge restart, then re-discover " +
+        "in the controller. Leave empty for default behavior.",
       maxLength: 16,
     },
     sessionMaxAgeHours: {

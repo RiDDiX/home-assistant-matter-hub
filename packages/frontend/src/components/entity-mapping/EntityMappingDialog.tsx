@@ -142,6 +142,9 @@ export function EntityMappingDialog({
   const [coverSwapOpenClose, setCoverSwapOpenClose] = useState(false);
   const [coverExposeAsDimmableLight, setCoverExposeAsDimmableLight] =
     useState(false);
+  const [selectExposeAsSwitch, setSelectExposeAsSwitch] = useState(false);
+  const [selectSwitchOnOption, setSelectSwitchOnOption] = useState("");
+  const [selectSwitchOffOption, setSelectSwitchOffOption] = useState("");
   const [coverSliderDebounceMs, setCoverSliderDebounceMs] = useState("");
   const [updateThrottleMs, setUpdateThrottleMs] = useState("");
   const [disableClimateOnOff, setDisableClimateOnOff] = useState(false);
@@ -149,6 +152,8 @@ export function EntityMappingDialog({
     useState(false);
   const [climateKeepModeOnIdle, setClimateKeepModeOnIdle] = useState(false);
   const [climateExposeFan, setClimateExposeFan] = useState(false);
+  const [fanRestoreSpeedOnPowerOn, setFanRestoreSpeedOnPowerOn] =
+    useState(false);
   const [climateAutoMode, setClimateAutoMode] = useState<ClimateAutoMode | "">(
     "",
   );
@@ -163,6 +168,9 @@ export function EntityMappingDialog({
   const [customFanSpeedTagsList, setCustomFanSpeedTagsList] = useState<
     { option: string; tag: number }[]
   >([]);
+  // Comma-separated HA preset names that map to natural / sleep wind (#387)
+  const [fanNaturalPresets, setFanNaturalPresets] = useState("");
+  const [fanSleepPresets, setFanSleepPresets] = useState("");
 
   const availableModeTags = useMemo(() => {
     return Object.entries(RvcCleanModeModeTag)
@@ -219,6 +227,9 @@ export function EntityMappingDialog({
       setCoverExposeAsDimmableLight(
         currentMapping?.coverExposeAsDimmableLight || false,
       );
+      setSelectExposeAsSwitch(currentMapping?.selectExposeAsSwitch || false);
+      setSelectSwitchOnOption(currentMapping?.selectSwitchOnOption || "");
+      setSelectSwitchOffOption(currentMapping?.selectSwitchOffOption || "");
       setCoverSliderDebounceMs(
         currentMapping?.coverSliderDebounceMs != null
           ? String(currentMapping.coverSliderDebounceMs)
@@ -235,6 +246,9 @@ export function EntityMappingDialog({
       );
       setClimateKeepModeOnIdle(currentMapping?.climateKeepModeOnIdle || false);
       setClimateExposeFan(currentMapping?.climateExposeFan || false);
+      setFanRestoreSpeedOnPowerOn(
+        currentMapping?.fanRestoreSpeedOnPowerOn || false,
+      );
       setClimateAutoMode(currentMapping?.climateAutoMode || "");
       composedKeyRef.current = 0;
       setComposedEntities(
@@ -248,6 +262,12 @@ export function EntityMappingDialog({
         Object.entries(currentMapping?.customFanSpeedTags || {}).map(
           ([option, tag]) => ({ option, tag: tag as number }),
         ),
+      );
+      setFanNaturalPresets(
+        (currentMapping?.fanWindPresets?.natural || []).join(", "),
+      );
+      setFanSleepPresets(
+        (currentMapping?.fanWindPresets?.sleep || []).join(", "),
       );
     }
   }, [open, entityId, currentMapping]);
@@ -291,6 +311,20 @@ export function EntityMappingDialog({
       },
       {} as Record<string, number>,
     );
+    const splitPresets = (v: string) =>
+      v
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean);
+    const naturalPresets = splitPresets(fanNaturalPresets);
+    const sleepPresets = splitPresets(fanSleepPresets);
+    const fanWindPresets =
+      naturalPresets.length > 0 || sleepPresets.length > 0
+        ? {
+            natural: naturalPresets.length > 0 ? naturalPresets : undefined,
+            sleep: sleepPresets.length > 0 ? sleepPresets : undefined,
+          }
+        : undefined;
     onSave({
       entityId: editEntityId.trim(),
       matterDeviceType: matterDeviceType || undefined,
@@ -322,15 +356,24 @@ export function EntityMappingDialog({
         Object.keys(customFanSpeedTags).length > 0
           ? customFanSpeedTags
           : undefined,
+      fanWindPresets,
       valetudoIdentifier: valetudoIdentifier.trim() || undefined,
       coverSwapOpenClose: coverSwapOpenClose || undefined,
       coverExposeAsDimmableLight: coverExposeAsDimmableLight || undefined,
+      selectExposeAsSwitch: selectExposeAsSwitch || undefined,
+      selectSwitchOnOption: selectExposeAsSwitch
+        ? selectSwitchOnOption.trim() || undefined
+        : undefined,
+      selectSwitchOffOption: selectExposeAsSwitch
+        ? selectSwitchOffOption.trim() || undefined
+        : undefined,
       coverSliderDebounceMs: parseDebounceMs(coverSliderDebounceMs),
       updateThrottleMs: parseThrottleMs(updateThrottleMs),
       disableClimateOnOff: disableClimateOnOff || undefined,
       disableClimateFanControl: disableClimateFanControl || undefined,
       climateKeepModeOnIdle: climateKeepModeOnIdle || undefined,
       climateExposeFan: climateExposeFan || undefined,
+      fanRestoreSpeedOnPowerOn: fanRestoreSpeedOnPowerOn || undefined,
       climateAutoMode: climateAutoMode || undefined,
       composedEntities:
         composedEntities.filter((e) => e.entityId?.trim()).length > 0
@@ -366,15 +409,21 @@ export function EntityMappingDialog({
     disableCustomAreaRoomModes,
     customServiceAreas,
     customFanSpeedTagsList,
+    fanNaturalPresets,
+    fanSleepPresets,
     valetudoIdentifier,
     coverSwapOpenClose,
     coverExposeAsDimmableLight,
+    selectExposeAsSwitch,
+    selectSwitchOnOption,
+    selectSwitchOffOption,
     coverSliderDebounceMs,
     updateThrottleMs,
     disableClimateOnOff,
     disableClimateFanControl,
     climateKeepModeOnIdle,
     climateExposeFan,
+    fanRestoreSpeedOnPowerOn,
     climateAutoMode,
     composedEntities,
     onSave,
@@ -384,6 +433,11 @@ export function EntityMappingDialog({
   const showFilterLifeField =
     matterDeviceType === "air_purifier" ||
     (currentDomain === "fan" && !matterDeviceType);
+
+  // Show wind preset mapping for fans (localized natural/sleep names, #387)
+  const showFanWindPresetFields =
+    currentDomain === "fan" &&
+    (!matterDeviceType || matterDeviceType === "fan");
 
   // Show cleaning mode entity field for vacuums
   const showCleaningModeField = currentDomain === "vacuum";
@@ -406,6 +460,8 @@ export function EntityMappingDialog({
   // Show swap open/close option for covers
   const showCoverSwapField =
     matterDeviceType === "window_covering" || currentDomain === "cover";
+  const showSelectSwitchFields =
+    currentDomain === "select" || currentDomain === "input_select";
 
   // Show PIN disable option for locks
   const showLockPinField =
@@ -558,6 +614,86 @@ export function EntityMappingDialog({
             helperText="Sensor entity that provides filter life percentage (0-100%) for HEPA filter monitoring"
             domain="sensor"
           />
+        )}
+
+        {showFanWindPresetFields && (
+          <Box sx={{ mt: 2, mb: 1 }}>
+            <Typography variant="subtitle2" gutterBottom>
+              Wind Preset Mapping (optional)
+            </Typography>
+            <Typography
+              variant="caption"
+              color="text.secondary"
+              sx={{ mb: 1, display: "block" }}
+            >
+              Map localized preset names to Matter wind modes. Comma-separated
+              HA preset names, e.g. 自然风 for natural wind.
+            </Typography>
+            <TextField
+              fullWidth
+              margin="normal"
+              size="small"
+              label="Natural Wind Presets"
+              placeholder="自然风, Natural"
+              value={fanNaturalPresets}
+              onChange={(e) => setFanNaturalPresets(e.target.value)}
+            />
+            <TextField
+              fullWidth
+              margin="normal"
+              size="small"
+              label="Sleep Wind Presets"
+              placeholder="睡眠风, Sleep"
+              value={fanSleepPresets}
+              onChange={(e) => setFanSleepPresets(e.target.value)}
+            />
+          </Box>
+        )}
+
+        {currentDomain === "fan" && (
+          <FormControlLabel
+            control={
+              <Switch
+                checked={fanRestoreSpeedOnPowerOn}
+                onChange={(e) => setFanRestoreSpeedOnPowerOn(e.target.checked)}
+              />
+            }
+            label="Restore the last fan speed when turned on (Apple Home's power button injects 100%). Only a 100% or High command while off is treated as power-on; lower speeds set while off are kept, so you cannot start an off fan at full speed."
+            sx={{ mt: 1, display: "block" }}
+          />
+        )}
+
+        {showSelectSwitchFields && (
+          <>
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={selectExposeAsSwitch}
+                  onChange={(e) => setSelectExposeAsSwitch(e.target.checked)}
+                />
+              }
+              label="Expose as an on/off switch (controllers can't render select options over Matter). On and off each pick one option below. Re-pair after changing."
+              sx={{ mt: 1, display: "block" }}
+            />
+            {selectExposeAsSwitch && (
+              <Box sx={{ display: "flex", gap: 2, mt: 1 }}>
+                <TextField
+                  label="Option for ON"
+                  size="small"
+                  value={selectSwitchOnOption}
+                  onChange={(e) => setSelectSwitchOnOption(e.target.value)}
+                  helperText="Exact option text"
+                />
+                <TextField
+                  label="Option for OFF"
+                  size="small"
+                  value={selectSwitchOffOption}
+                  onChange={(e) => setSelectSwitchOffOption(e.target.value)}
+                  helperText="Exact option text"
+                />
+              </Box>
+            )}
+          </>
         )}
 
         {showCleaningModeField && (
@@ -1091,7 +1227,7 @@ export function EntityMappingDialog({
                   }
                 />
               }
-              label="Expose as plain Thermostat (drop FanControl), workaround for controllers like Aqara that don't recognise the air conditioner device type"
+              label="Expose as plain Thermostat (drop FanControl), workaround for controllers like Aqara that don't recognise the air conditioner device type. Needs a full HAMH restart, then re-pair the bridge in the controller (Aqara caches the device list)"
               sx={{ mt: 1, display: "block" }}
             />
             <FormControlLabel

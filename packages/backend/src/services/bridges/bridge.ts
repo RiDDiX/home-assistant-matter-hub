@@ -1,4 +1,6 @@
 import {
+  alexaPairingPortProblem,
+  type BridgeFeatureFlags,
   BridgeStatus,
   type ExposedDeviceType,
   type UpdateBridgeRequest,
@@ -6,7 +8,11 @@ import {
 import type { Environment } from "@matter/general";
 import type { Endpoint } from "@matter/main";
 import { CommissioningServer } from "@matter/main/node";
-import { DeviceAdvertiser, SessionManager } from "@matter/main/protocol";
+import {
+  DeviceAdvertiser,
+  FabricManager,
+  SessionManager,
+} from "@matter/main/protocol";
 import type { BetterLogger, LoggerService } from "../../core/app/logger.js";
 import { BridgeServerNode } from "../../matter/endpoints/bridge-server-node.js";
 import { ensureCommissioningConfig } from "../../utils/ensure-commissioning-config.js";
@@ -22,6 +28,9 @@ import {
   ROTATION_CHECK_INTERVAL_MS,
   SESSION_MAX_AGE_HOURS_RANGE,
   seedExistingSessionStarts,
+  selectSupersededSessions,
+  staleSessionQuietWindowMs,
+  staleSessionShouldClose,
 } from "./session-rotation.js";
 
 // Auto Force Sync interval in milliseconds (90 seconds).
@@ -35,6 +44,16 @@ const AUTO_FORCE_SYNC_INTERVAL_MS = 90_000;
 // where the controller holds a stale CASE session and never re-subscribes
 // because it doesn't know the server canceled its subscriptions (#266).
 const DEAD_SESSION_TIMEOUT_MS = 60_000;
+
+// fastSessionRecovery: drop the dead session after 5s, not 60s (#386).
+// Keep a few seconds so a normal re-subscribe isn't cut off.
+const FAST_DEAD_SESSION_TIMEOUT_MS = 5_000;
+
+export function deadSessionTimeoutMs(flags?: BridgeFeatureFlags): number {
+  return flags?.fastSessionRecovery
+    ? FAST_DEAD_SESSION_TIMEOUT_MS
+    : DEAD_SESSION_TIMEOUT_MS;
+}
 
 // On shutdown, wait at most this long for active sessions to close cleanly.
 // A clean close tells the controller to drop its CASE session right away
@@ -82,6 +101,10 @@ export class Bridge {
   private sessionAddedHandler?: (session: any) => void;
   // biome-ignore lint/suspicious/noExplicitAny: matter.js internal types
   private sessionDeletedHandler?: (session: any) => void;
+
+  // Warns when Alexa pairs on a non-5540 port, the fabric rolls back later (#401).
+  // biome-ignore lint/suspicious/noExplicitAny: matter.js internal types
+  private fabricAddedHandler?: (fabric: any) => void;
 
   get id() {
     return this.dataProvider.id;
@@ -333,6 +356,7 @@ export class Bridge {
       }
 
       this.wireSessionDiagnostics();
+      this.wireFabricWarnings();
       this.startSessionRotation();
       logMemoryUsage(this.log, "bridge running");
       diagnosticEventBus.emit("bridge_started", `Bridge started`, {
@@ -362,6 +386,7 @@ export class Bridge {
 
   private async runStop(code: BridgeStatus, reason: string) {
     this.unwireSessionDiagnostics();
+    this.unwireFabricWarnings();
     this.stopAutoForceSync();
     await this.closeActiveSessions();
     await this.endpointManager.stopPlugins();
@@ -445,12 +470,15 @@ export class Bridge {
             `All subscriptions lost, ${sessions.length} session(s) still active, waiting for controller to re-subscribe`,
           );
           if (!this.deadSessionTimer) {
+            const timeoutMs = deadSessionTimeoutMs(
+              this.dataProvider.featureFlags,
+            );
             this.deadSessionTimer = setTimeout(() => {
               this.deadSessionTimer = null;
               this.closeDeadSessions();
-            }, DEAD_SESSION_TIMEOUT_MS);
+            }, timeoutMs);
             this.log.info(
-              `Scheduled dead session cleanup in ${DEAD_SESSION_TIMEOUT_MS / 1000}s`,
+              `Scheduled dead session cleanup in ${timeoutMs / 1000}s`,
             );
           }
         } else if (totalSubs > 0 && this.deadSessionTimer) {
@@ -473,7 +501,7 @@ export class Bridge {
             setTimeout(() => {
               this.staleSessionTimers.delete(session.id);
               this.closeStaleSession(session.id);
-            }, DEAD_SESSION_TIMEOUT_MS),
+            }, deadSessionTimeoutMs(this.dataProvider.featureFlags)),
           );
         } else if (
           session.subscriptions.size > 0 &&
@@ -523,6 +551,41 @@ export class Bridge {
             }).catch(() => {});
           }
         }
+        // Sweep superseded sessions the #105 loop cannot: same peer+fabric
+        // sessions still holding a dead subscription escaped every cleanup
+        // path and piled up 160 deep for one flapping Echo (#400). The
+        // selector also returns the 0-sub ones the loop above just handled,
+        // so skip those here.
+        const quietWindowMs = staleSessionQuietWindowMs(
+          this.dataProvider.featureFlags,
+        );
+        const now = Date.now();
+        const supersededIds = new Set(
+          selectSupersededSessions(
+            [...sessionManager.sessions],
+            newSession,
+            quietWindowMs,
+            now,
+          ),
+        );
+        const closes: Promise<unknown>[] = [];
+        for (const s of [...sessionManager.sessions]) {
+          if (!supersededIds.has(s.id) || s.subscriptions.size === 0) continue;
+          const quietSec = Math.round((now - s.timestamp) / 1000);
+          this.log.info(
+            `Closing superseded session ${s.id} (peer ${s.peerNodeId}, ${s.subscriptions.size} subs, quiet ${quietSec}s), replaced by session ${newSession.id}`,
+          );
+          closes.push(
+            s.initiateClose().catch(() =>
+              s.initiateForceClose({
+                cause: new Error("superseded session, forcing"),
+              }),
+            ),
+          );
+        }
+        if (closes.length > 0) {
+          Promise.allSettled(closes).then(() => this.triggerMdnsReAnnounce());
+        }
       };
       this.sessionDeletedHandler = (session: {
         id: number;
@@ -557,21 +620,44 @@ export class Bridge {
     try {
       const sessionManager = this.server.env.get(SessionManager);
       for (const s of [...sessionManager.sessions]) {
-        if (s.id === sessionId && !s.isClosing && s.subscriptions.size === 0) {
-          this.log.warn(
-            `Closing stale session ${s.id} (peer ${s.peerNodeId}, no subscriptions for ${DEAD_SESSION_TIMEOUT_MS / 1000}s)`,
+        if (s.id !== sessionId || s.isClosing || s.subscriptions.size > 0) {
+          continue;
+        }
+        const idleSec = Math.round((Date.now() - s.timestamp) / 1000);
+        if (
+          !staleSessionShouldClose(
+            s,
+            staleSessionQuietWindowMs(this.dataProvider.featureFlags),
+          )
+        ) {
+          // 0 subs but recent traffic: the peer is recovering, not dead.
+          // Re-arm and only close once it goes quiet, so a controller can
+          // re-subscribe on this session instead of being forced offline (#287/#398).
+          this.log.info(
+            `Keeping session ${s.id} (peer ${s.peerNodeId}, 0 subs, last traffic ${idleSec}s ago)`,
           );
-          s.initiateClose()
-            .catch(() => {
-              // Graceful close failed (peer unreachable), force-close locally
-              return s.initiateForceClose({
-                cause: new Error("graceful close failed, forcing"),
-              });
-            })
-            .catch(() => {})
-            .finally(() => this.triggerMdnsReAnnounce());
+          this.staleSessionTimers.set(
+            sessionId,
+            setTimeout(() => {
+              this.staleSessionTimers.delete(sessionId);
+              this.closeStaleSession(sessionId);
+            }, deadSessionTimeoutMs(this.dataProvider.featureFlags)),
+          );
           break;
         }
+        this.log.warn(
+          `Closing stale session ${s.id} (peer ${s.peerNodeId}, no subscriptions for ${deadSessionTimeoutMs(this.dataProvider.featureFlags) / 1000}s, no traffic for ${idleSec}s)`,
+        );
+        s.initiateClose()
+          .catch(() => {
+            // Graceful close failed (peer unreachable), force-close locally
+            return s.initiateForceClose({
+              cause: new Error("graceful close failed, forcing"),
+            });
+          })
+          .catch(() => {})
+          .finally(() => this.triggerMdnsReAnnounce());
+        break;
       }
     } catch {
       // SessionManager may be disposed
@@ -583,23 +669,46 @@ export class Bridge {
       const sessionManager = this.server.env.get(SessionManager);
       const sessions = [...sessionManager.sessions];
       const closes: Promise<void>[] = [];
+      let kept = 0;
       for (const s of sessions) {
-        if (!s.isClosing && s.subscriptions.size === 0) {
-          this.log.warn(
-            `Closing dead session ${s.id} (peer ${s.peerNodeId}, no subscriptions for ${DEAD_SESSION_TIMEOUT_MS / 1000}s)`,
-          );
-          closes.push(
-            s.initiateClose().catch(() => {
-              // Graceful close failed (peer unreachable), force-close locally
-              return s.initiateForceClose({
-                cause: new Error("graceful close failed, forcing"),
-              });
-            }),
-          );
+        if (s.isClosing || s.subscriptions.size > 0) {
+          continue;
         }
+        const idleSec = Math.round((Date.now() - s.timestamp) / 1000);
+        if (
+          !staleSessionShouldClose(
+            s,
+            staleSessionQuietWindowMs(this.dataProvider.featureFlags),
+          )
+        ) {
+          // Recent traffic: leave it so the peer can re-subscribe (#287/#398).
+          this.log.info(
+            `Keeping session ${s.id} (peer ${s.peerNodeId}, 0 subs, last traffic ${idleSec}s ago)`,
+          );
+          kept++;
+          continue;
+        }
+        this.log.warn(
+          `Closing dead session ${s.id} (peer ${s.peerNodeId}, no subscriptions for ${deadSessionTimeoutMs(this.dataProvider.featureFlags) / 1000}s, no traffic for ${idleSec}s)`,
+        );
+        closes.push(
+          s.initiateClose().catch(() => {
+            // Graceful close failed (peer unreachable), force-close locally
+            return s.initiateForceClose({
+              cause: new Error("graceful close failed, forcing"),
+            });
+          }),
+        );
       }
       if (closes.length > 0) {
         Promise.allSettled(closes).then(() => this.triggerMdnsReAnnounce());
+      }
+      if (kept > 0 && !this.deadSessionTimer) {
+        // Some peers are still active; re-check after another interval.
+        this.deadSessionTimer = setTimeout(() => {
+          this.deadSessionTimer = null;
+          this.closeDeadSessions();
+        }, deadSessionTimeoutMs(this.dataProvider.featureFlags));
       }
     } catch {
       // SessionManager may be disposed
@@ -692,6 +801,40 @@ export class Bridge {
     this.staleSessionTimers.clear();
     this.stopSessionRotation();
     this.sessionStartedAt.clear();
+  }
+
+  // Warn at the fabric-added event when Alexa pairs on a non-5540 port. Alexa
+  // completes AddNOC but never CASEs, so the fabric rolls back on failsafe
+  // expiry ~20s later and the committed-fabric warning path never sees it (#401).
+  private wireFabricWarnings() {
+    // Drop the old listener first so factory-reset restarts do not double-register.
+    this.unwireFabricWarnings();
+    try {
+      const fabrics = this.server.env.get(FabricManager);
+      this.fabricAddedHandler = (fabric: { rootVendorId: number }) => {
+        const port = this.dataProvider.port;
+        if (alexaPairingPortProblem(fabric.rootVendorId, port)) {
+          this.log.warn(
+            `Fabric added by Amazon Alexa (vendor ${fabric.rootVendorId}) on port ${port}. Alexa only completes pairing on port 5540, this attempt will roll back about 20s after AddNOC. Recreate the bridge on port 5540 (#401)`,
+          );
+        }
+      };
+      fabrics.events.added.on(this.fabricAddedHandler);
+    } catch {
+      // FabricManager not yet available
+    }
+  }
+
+  private unwireFabricWarnings() {
+    try {
+      const fabrics = this.server.env.get(FabricManager);
+      if (this.fabricAddedHandler) {
+        fabrics.events.added.off(this.fabricAddedHandler);
+      }
+    } catch {
+      // Already disposed
+    }
+    this.fabricAddedHandler = undefined;
   }
 
   private stopAutoForceSync() {

@@ -3,6 +3,7 @@ import type { BridgeData } from "@home-assistant-matter-hub/common";
 import { AggregatorEndpoint } from "@matter/main/endpoints";
 import { type Node, ServerNode } from "@matter/main/node";
 import { VendorId } from "@matter/main/types";
+import { matterSubscriptionOptions } from "../../matter/subscription-options.js";
 import { trimToLength } from "../trim-to-length.js";
 
 export type BridgeServerNodeConfig =
@@ -16,6 +17,7 @@ export function createBridgeServerConfig(
     id: data.id,
     network: {
       port: data.port,
+      subscriptionOptions: matterSubscriptionOptions(),
     },
     productDescription: {
       name: data.name,
