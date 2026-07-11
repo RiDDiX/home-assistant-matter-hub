@@ -42,10 +42,10 @@ function buildEntityPayload(
   registry: BridgeRegistry,
   entityId: string,
 ): HomeAssistantEntityInformation | undefined {
-  const state = registry.initialState(entityId);
+  const state = registry.initialStateIncludingUnfiltered(entityId);
   if (!state) return undefined;
-  const entity = registry.entity(entityId);
-  const deviceRegistry = registry.deviceOf(entityId);
+  const entity = registry.entityIncludingUnfiltered(entityId);
+  const deviceRegistry = registry.deviceOfIncludingUnfiltered(entityId);
   return {
     entity_id: entityId,
     state,
@@ -145,7 +145,8 @@ export class UserComposedEndpoint extends Endpoint {
       const subPayload = buildEntityPayload(registry, sub.entityId);
       if (!subPayload) {
         logger.warn(
-          `Cannot find entity state for composed sub-entity ${sub.entityId}`,
+          `Cannot find state for composed sub-entity ${sub.entityId}, ` +
+            `it does not exist in Home Assistant (removed or renamed?)`,
         );
         continue;
       }

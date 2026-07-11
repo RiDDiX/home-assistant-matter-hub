@@ -36,6 +36,28 @@ If your sensor hub also reports power consumption:
 
 ---
 
+## Composed Sub-Entities
+
+Group arbitrary Home Assistant entities under a single Matter device. Set `composedEntities` on the primary entity's mapping and each listed entity becomes a sub-device of the primary. The sub-entities are absorbed into the composed device and stop appearing as standalone Matter devices.
+
+Unlike auto-mapping, which only pulls in humidity/pressure/battery/power sensors on the same HA device, this lets you pick any entities you want, and they do **not** need to match the bridge filter. You choose them from the full HA registry in the UI.
+
+**Requirements:** Enable the `autoComposedDevices` feature flag on the bridge. Each sub-entity may set a `matterDeviceType` to control how it is exposed.
+
+Example, a Hue Motion sensor exposed as one device with occupancy, illuminance, and temperature sub-devices:
+
+```json
+{
+  "entityId": "binary_sensor.hue_motion_occupancy",
+  "composedEntities": [
+    { "entityId": "sensor.hue_motion_illuminance", "matterDeviceType": "light_sensor" },
+    { "entityId": "sensor.hue_motion_temperature", "matterDeviceType": "temperature_sensor" }
+  ]
+}
+```
+
+---
+
 ## Air Purifier with Sensors
 
 Maps a fan entity as an air purifier with temperature, humidity, and HEPA filter monitoring.

@@ -67,6 +67,25 @@ export class BridgeRegistry {
     return this._states[entityId];
   }
 
+  // composed sub-entities may sit outside the bridge filter (#408), so these
+  // fall back to the full HA registry. keep them separate from the strict
+  // accessors above, every other caller must stay filtered.
+  initialStateIncludingUnfiltered(entityId: string) {
+    return this._states[entityId] ?? this.registry.states[entityId];
+  }
+  entityIncludingUnfiltered(entityId: string) {
+    return this._entities[entityId] ?? this.registry.entities[entityId];
+  }
+  deviceOfIncludingUnfiltered(
+    entityId: string,
+  ): HomeAssistantDeviceRegistry | undefined {
+    const entity = this.entityIncludingUnfiltered(entityId);
+    if (!entity) return undefined;
+    return (
+      this._devices[entity.device_id] ?? this.registry.devices[entity.device_id]
+    );
+  }
+
   /**
    * Find a battery sensor entity that belongs to the same HA device.
    * Returns the entity_id of the battery sensor, or undefined if none found.
