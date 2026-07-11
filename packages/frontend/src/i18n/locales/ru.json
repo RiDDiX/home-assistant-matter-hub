@@ -62,6 +62,7 @@
   "nav": {
     "bridges": "Мосты",
     "devices": "Все устройства",
+    "standaloneDevices": "Автономные устройства",
     "health": "Состояние и диагностика",
     "diagnostics": "События в реальном времени",
     "settings": "Настройки",
@@ -73,6 +74,29 @@
     "systemLogs": "Системные журналы",
     "lightMode": "Светлая тема",
     "darkMode": "Тёмная тема"
+  },
+  "standaloneDevices": {
+    "title": "Автономные устройства",
+    "subtitle": "Каждое устройство работает на собственном Matter-узле со своим кодом сопряжения, а не внутри моста.",
+    "create": "Добавить устройство",
+    "name": "Название",
+    "entity": "Сущность",
+    "entityHelp": "Выберите сущность Home Assistant для публикации.",
+    "additionalEntity": "Дополнительная сущность",
+    "addEntity": "Добавить ещё сущность",
+    "multiHint": "Первая сущность является основной и определяет название устройства. Более одной сущности на устройство — экспериментальная функция.",
+    "creating": "Создание",
+    "empty": "Автономных устройств пока нет. Добавьте одно, чтобы представить отдельную сущность как самостоятельное Matter-устройство.",
+    "noEntity": "нет сущности",
+    "openBridge": "Открыть детали и сопряжение",
+    "created": "Автономное устройство создано",
+    "createFailed": "Не удалось создать устройство",
+    "deleted": "Автономное устройство удалено",
+    "deleteFailed": "Не удалось удалить устройство",
+    "entityInvalid": "Укажите один идентификатор сущности, например vacuum.living_room, маски (wildcards) не допускаются.",
+    "entityProblem": "проблема с сущностью",
+    "confirmDeleteTitle": "Удалить автономное устройство",
+    "confirmDeleteMessage": "Это удалит Matter-узел устройства и отвяжет его от ваших контроллеров. Действие необратимо."
   },
   "status": {
     "error": "Ошибка",
@@ -88,6 +112,12 @@
   },
   "settings": {
     "title": "Настройки",
+    "recovery": {
+      "title": "Автовосстановление",
+      "hint": "Периодически перезапускает мосты, которые не удалось запустить. Затрагиваются только неисправные мосты.",
+      "enabled": "Включено",
+      "interval": "Интервал (секунды)"
+    },
     "language": "Язык",
     "languageDescription": "Выберите язык интерфейса.",
     "checkUpdates": "Проверить обновления",
@@ -287,6 +317,7 @@
     "ascending": "По возрастанию",
     "descending": "По убыванию",
     "connectedTo": "Подключено к",
+    "controllerWarningsTitle": "Некоторые устройства могут не отображаться в подключённом контроллере:",
     "autoRecovery": "Автовосстановление",
     "recoveryAttempts": "Попытки восстановления",
     "fabrics": "фабрик",
@@ -324,16 +355,18 @@
     "match": "Совпадение",
     "existing": "Существует",
     "autoDetect": "Автоопределение (по умолчанию)",
-    "loadFailed": "Не удалось загрузить привязки объектов",
-    "noMappings": "Пользовательские привязки не настроены. Используйте привязки для переопределения типов Matter-устройств, установки пользовательских имён или отключения отдельных объектов.",
-    "applying": "Применение...",
-    "applyCount": "Применить {{count}} привязку(и)",
     "customProductName": "Custom Product Name",
     "customProductNameHelp": "Override the product name (model) reported to Matter controllers. Some controllers (e.g. Aqara) display this as the device name.",
     "customVendorName": "Custom Vendor Name",
     "customVendorNameHelp": "Override the vendor/manufacturer name reported to Matter controllers.",
     "customSerialNumber": "Custom Serial Number",
-    "customSerialNumberHelp": "Override the serial number reported to Matter controllers."
+    "customSerialNumberHelp": "Override the serial number reported to Matter controllers.",
+    "customVendorId": "Пользовательский Vendor ID",
+    "customVendorIdHelp": "Переопределяет числовой Vendor ID Matter (например, 0x115F для Aqara). Только в режиме моста. Диапазон 1..0xFFFE.",
+    "loadFailed": "Не удалось загрузить привязки объектов",
+    "noMappings": "Пользовательские привязки не настроены. Используйте привязки для переопределения типов Matter-устройств, установки пользовательских имён или отключения отдельных объектов.",
+    "applying": "Применение...",
+    "applyCount": "Применить {{count}} привязку(и)"
   },
   "notFound": {
     "title": "Страница не найдена",
@@ -582,7 +615,8 @@
   },
   "footer": {
     "github": "GitHub",
-    "documentation": "Документация"
+    "documentation": "Документация",
+    "support": "Поддержка"
   },
   "languageSwitcher": {
     "disclaimer": "Переводы могут быть неполными.",

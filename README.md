@@ -498,7 +498,7 @@ Matter relies heavily on **mDNS (multicast DNS)** for device discovery and reach
 - **Keep the path simple**: Avoid placing access points or managed switches between your Matter bridge (Home Assistant) and your Home Hub (HomePod/Apple TV)
 - **Use wired connections** where possible for Home Hubs and the Home Assistant host
 - **Same subnet**: All Matter devices, controllers, and the bridge must be on the same Layer 2 network / subnet
-- **IPv6**: Matter requires IPv6, do not disable it. For VLAN setups, configure **ULA addresses** (`fd00::/8`), not just link-local (`fe80::`). See [Troubleshooting](https://home-assistant-matter-hub.riddix.dev/guides/connectivity-issues#ipv6) and [Discussion #39](https://github.com/RiDDiX/home-assistant-matter-hub/discussions/39)
+- **IPv6**: Matter requires IPv6, do not disable it. For VLAN setups, configure **ULA addresses** (`fd00::/8`), not just link-local (`fe80::`). See [Troubleshooting](https://riddix.github.io/home-assistant-matter-hub/guides/connectivity-issues#ipv6) and [Discussion #39](https://github.com/RiDDiX/home-assistant-matter-hub/discussions/39)
 
 </details>
 
