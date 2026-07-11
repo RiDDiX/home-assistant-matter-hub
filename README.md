@@ -37,7 +37,7 @@ of port forwarding etc.
 
 | Channel | Branch | Current Version | Description |
 |---------|--------|-----------------|-------------|
-| **Stable** | `main` | v2.0.48 | Production-ready, recommended for most users |
+| **Stable** | `main` | v2.0.49 | Production-ready, recommended for most users |
 | **Alpha** | `alpha` | v2.1.0-alpha.x (next) | Currently level with Stable; next pre-release lands here first |
 | **Testing** | `testing` | v4.1.0-testing.x | ⚠️ **Highly unstable!** Experimental features, may break |
 
@@ -61,9 +61,24 @@ Re-assign the affected devices to their rooms after they reconnect. See the [doc
 ## 🎉 What's New
 
 <details>
-<summary><strong>📦 Stable Features (v2.0.48)</strong> - Click to expand</summary>
+<summary><strong>📦 Stable Features (v2.0.49)</strong> - Click to expand</summary>
 
-**New in v2.0.48:**
+**New in v2.0.49:**
+
+- 🌀 **Fan speed restore**: speed is remembered across transactions and restarts, localized wind presets map through, Auto is gated on a real auto preset, and an opt-in restores speed on power-on ([#387](https://github.com/RiDDiX/home-assistant-matter-hub/issues/387))
+- 📡 **Session recovery hardening**: subscription jitter dropped, superseded sessions of a reconnecting peer swept, stale sessions closed only after a real quiet period, plus opt-in fast recovery ([#386](https://github.com/RiDDiX/home-assistant-matter-hub/issues/386), [#400](https://github.com/RiDDiX/home-assistant-matter-hub/issues/400), [#398](https://github.com/RiDDiX/home-assistant-matter-hub/issues/398), [#287](https://github.com/RiDDiX/home-assistant-matter-hub/issues/287))
+- 🩺 **Per-fabric controller health card** on the bridge page
+- 🔢 **Endpoint number kept on mapping change** so Alexa no longer re-adds the device ([#404](https://github.com/RiDDiX/home-assistant-matter-hub/issues/404)), plus a **unique-id suffix** to shed stale controller records ([#385](https://github.com/RiDDiX/home-assistant-matter-hub/issues/385))
+- 🔘 **`select` as an On/Off Switch** ([#356](https://github.com/RiDDiX/home-assistant-matter-hub/issues/356)), plus an **experimental mounted On/Off** control type ([#380](https://github.com/RiDDiX/home-assistant-matter-hub/issues/380))
+- 🪟 **Tilt for `set_tilt_position`-only covers** ([#405](https://github.com/RiDDiX/home-assistant-matter-hub/issues/405)), and **tilt-only cover-as-light** uses the tilt channel ([#350](https://github.com/RiDDiX/home-assistant-matter-hub/issues/350))
+- 🚨 **Warns on a non-5540 Alexa bridge** ([#401](https://github.com/RiDDiX/home-assistant-matter-hub/issues/401)) and on an **OTBR Thread mDNS interface** ([#388](https://github.com/RiDDiX/home-assistant-matter-hub/issues/388))
+- 📷 **Camera plugin config scoped per bridge** ([#373](https://github.com/RiDDiX/home-assistant-matter-hub/issues/373))
+- 🔌 **Clashing bridge port reassigned on load** ([#378](https://github.com/RiDDiX/home-assistant-matter-hub/issues/378))
+- 🧩 **Composed sub-entities compose even outside the bridge filter** ([#408](https://github.com/RiDDiX/home-assistant-matter-hub/issues/408)), and **composed sensors list all device types** ([#214](https://github.com/RiDDiX/home-assistant-matter-hub/issues/214))
+- 🔒 **Unbolt maps to `lock.unlock`** not open ([#397](https://github.com/RiDDiX/home-assistant-matter-hub/issues/397)), **level-to-brightness uses one scale** ([#402](https://github.com/RiDDiX/home-assistant-matter-hub/issues/402)), **button drops the Lighting feature** ([#182](https://github.com/RiDDiX/home-assistant-matter-hub/issues/182)), and **stale cooling/auto state is cleared** ([#384](https://github.com/RiDDiX/home-assistant-matter-hub/issues/384))
+- 🌍 **Russian translations** added ([#409](https://github.com/RiDDiX/home-assistant-matter-hub/issues/409)) and **zh-TW completed**
+
+**Previously in v2.0.48:**
 
 - 🌡️ Cooling-only thermostats no longer drop and re-pair after a switch to cool; a leftover Heat setpoint limit was crashing init ([#381](https://github.com/RiDDiX/home-assistant-matter-hub/issues/381))
 - 📝 The Settings update box now shows the full release notes instead of cutting them off
@@ -220,7 +235,7 @@ Re-assign the affected devices to their rooms after they reconnect. See the [doc
 <details>
 <summary><strong>🧪 Alpha Features (v2.1.0-alpha.x)</strong> - Click to expand</summary>
 
-**Alpha is currently level with Stable (v2.0.46).** All alpha work up to the latest pre-release has been promoted into v2.0.46. New alpha work continues from the next pre-release tag onward and will appear here as development progresses.
+**Alpha is currently level with Stable (v2.0.49).** All alpha work up to the latest pre-release has been promoted into v2.0.49. New alpha work continues from the next pre-release tag onward and will appear here as development progresses.
 
 </details>
 

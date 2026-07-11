@@ -53,9 +53,42 @@ Home, ...) are not placed in the same network segment. Please make sure to revie
 ## What's New
 
 <details>
-<summary><strong>📦 Stable (v2.0.46) - Current</strong></summary>
+<summary><strong>📦 Stable (v2.0.49) - Current</strong></summary>
 
-**New in v2.0.46:**
+**New in v2.0.49:**
+
+- 🌀 **Fan speed restore**: speed is remembered across transactions and restarts, localized wind presets map through, Auto is gated on a real auto preset, and an opt-in restores speed on power-on ([#387](https://github.com/RiDDiX/home-assistant-matter-hub/issues/387))
+- 📡 **Session recovery hardening**: subscription jitter dropped, superseded sessions of a reconnecting peer swept, stale sessions closed only after a real quiet period, plus opt-in fast recovery ([#386](https://github.com/RiDDiX/home-assistant-matter-hub/issues/386), [#400](https://github.com/RiDDiX/home-assistant-matter-hub/issues/400), [#398](https://github.com/RiDDiX/home-assistant-matter-hub/issues/398), [#287](https://github.com/RiDDiX/home-assistant-matter-hub/issues/287))
+- 🩺 **Per-fabric controller health card** on the bridge page
+- 🔢 **Endpoint number kept on mapping change** so Alexa no longer re-adds the device ([#404](https://github.com/RiDDiX/home-assistant-matter-hub/issues/404)), plus a **unique-id suffix** to shed stale controller records ([#385](https://github.com/RiDDiX/home-assistant-matter-hub/issues/385))
+- 🔘 **`select` as an On/Off Switch** ([#356](https://github.com/RiDDiX/home-assistant-matter-hub/issues/356)), plus an **experimental mounted On/Off** control type ([#380](https://github.com/RiDDiX/home-assistant-matter-hub/issues/380))
+- 🪟 **Tilt for `set_tilt_position`-only covers** ([#405](https://github.com/RiDDiX/home-assistant-matter-hub/issues/405)), and **tilt-only cover-as-light** uses the tilt channel ([#350](https://github.com/RiDDiX/home-assistant-matter-hub/issues/350))
+- 🚨 **Warns on a non-5540 Alexa bridge** ([#401](https://github.com/RiDDiX/home-assistant-matter-hub/issues/401)) and on an **OTBR Thread mDNS interface** ([#388](https://github.com/RiDDiX/home-assistant-matter-hub/issues/388))
+- 📷 **Camera plugin config scoped per bridge** ([#373](https://github.com/RiDDiX/home-assistant-matter-hub/issues/373))
+- 🔌 **Clashing bridge port reassigned on load** ([#378](https://github.com/RiDDiX/home-assistant-matter-hub/issues/378))
+- 🧩 **Composed sub-entities compose even outside the bridge filter** ([#408](https://github.com/RiDDiX/home-assistant-matter-hub/issues/408)), and **composed sensors list all device types** ([#214](https://github.com/RiDDiX/home-assistant-matter-hub/issues/214))
+- 🔒 **Unbolt maps to `lock.unlock`** not open ([#397](https://github.com/RiDDiX/home-assistant-matter-hub/issues/397)), **level-to-brightness uses one scale** ([#402](https://github.com/RiDDiX/home-assistant-matter-hub/issues/402)), **button drops the Lighting feature** ([#182](https://github.com/RiDDiX/home-assistant-matter-hub/issues/182)), and **stale cooling/auto state is cleared** ([#384](https://github.com/RiDDiX/home-assistant-matter-hub/issues/384))
+- 🌍 **Russian translations** added ([#409](https://github.com/RiDDiX/home-assistant-matter-hub/issues/409)) and **zh-TW completed**
+
+**Previously in v2.0.48:**
+
+- 🌡️ Cooling-only thermostats no longer drop and re-pair after a switch to cool; a leftover Heat setpoint limit was crashing init ([#381](https://github.com/RiDDiX/home-assistant-matter-hub/issues/381))
+- 📝 The Settings update box now shows the full release notes instead of cutting them off
+
+**Previously in v2.0.47:**
+
+- 💧 Leak and freeze `binary_sensor`s now default to a Matter 1.3 **Contact Sensor** so Alexa stays stable; the Matter 1.4 Water Leak, Water Freeze, and Rain detector types are selectable per entity through the device-type override ([#365](https://github.com/RiDDiX/home-assistant-matter-hub/issues/365))
+- 💡 **Lights no longer auto-attach power/energy clusters**; map a light's power or energy sensor explicitly with `powerEntity`/`energyEntity` if you want the readout ([#374](https://github.com/RiDDiX/home-assistant-matter-hub/issues/374))
+- 🔘 The **On/Off Switch** device-type override now exposes a real On/Off Light instead of a no-op plug ([#380](https://github.com/RiDDiX/home-assistant-matter-hub/issues/380))
+- 🔍 New **`manufacturer` entity-filter matcher** ([#382](https://github.com/RiDDiX/home-assistant-matter-hub/issues/382))
+- 🌀 Opt-in: turning the **companion fan** off now turns the AC off too ([#309](https://github.com/RiDDiX/home-assistant-matter-hub/issues/309))
+- 🩺 **Reliability & health**: configurable auto-recovery with failure timestamps, controller-compatibility warnings on each bridge page, and per-entity device-health on the dashboard
+- 🖥️ **Standalone (non-vacuum) devices in server mode**, plus `lawn_mower` entities exposed as a robotic mower
+- 🪟 Cover exposed as a **dimmable light** for Alexa routines ([#372](https://github.com/RiDDiX/home-assistant-matter-hub/issues/372)), per-entity **update throttle** ([#351](https://github.com/RiDDiX/home-assistant-matter-hub/issues/351)), **charging-state sensor** mapping ([#377](https://github.com/RiDDiX/home-assistant-matter-hub/issues/377))
+- 📷 Experimental built-in **WebRTC camera plugin** (SmartThings-only, media path not verified yet)
+- 🧵 **matter.js 0.17.3**
+
+**Previously in v2.0.46:**
 
 - ❄️ Opt-in **companion fan** for climate ACs: a per-entity toggle exposes the AC's fan as its own Matter fan endpoint, the setting is persisted, and fan-speed presets are now ordered low→high ([#309](https://github.com/RiDDiX/home-assistant-matter-hub/issues/309))
 - 🌦️ **Weather domain support**: `weather.*` entities are exposed as a composed Temperature + Humidity + Pressure sensor read from the entity's attributes (pressure converted to hPa, shown on Google Home)
@@ -191,7 +224,7 @@ Home, ...) are not placed in the same network segment. Please make sure to revie
 <details>
 <summary><strong>🧪 Alpha (v2.1.0-alpha.x)</strong></summary>
 
-**Alpha is currently level with Stable (v2.0.46).** All alpha work up to the latest pre-release has been promoted into v2.0.46. New alpha work continues from the next pre-release tag onward and will appear here as development progresses. See the [Alpha Features Guide](./guides/alpha-features.md) for installation instructions.
+**Alpha is currently level with Stable (v2.0.49).** All alpha work up to the latest pre-release has been promoted into v2.0.49. New alpha work continues from the next pre-release tag onward and will appear here as development progresses. See the [Alpha Features Guide](./guides/alpha-features.md) for installation instructions.
 
 </details>
 
