@@ -144,6 +144,9 @@ Labels can be applied at the entity level or at the device level:
 - Use `device_label` to match labels assigned to the parent device (all entities of that device will match)
 - The old `label` type still works but only matches entity labels, use the new types for explicit control
 
+> [!WARNING]
+> A `device_label` filter matches through the parent device, so deleting that device in Home Assistant drops all of its entities from the bridge even when you keep the entities themselves. The `entity_id` does not change, but the label lived on the device, so the entities stop matching. Alexa reacts to the smaller bridge by re-importing every device and dropping room and group assignments; Apple Home is unaffected because it keys on the stable device id ([#407](https://github.com/RiDDiX/home-assistant-matter-hub/issues/407)). To curate safely, put the label on the entities (`entity_label`) instead of the device, or remove the label from just the entities you want to drop. If you must delete a device that a `device_label` filter depends on, expect a one-time Alexa rediscovery and reassign the rooms once afterwards.
+
 You can use either the **display name** (e.g. `My Smart Lights`) or the **slug** (e.g. `my_smart_lights`) as the filter value. The display name is automatically resolved to the correct slug.
 
 > [!TIP]
