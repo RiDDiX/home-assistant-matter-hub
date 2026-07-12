@@ -1,7 +1,7 @@
 import type { HomeAssistantEntityInformation } from "@home-assistant-matter-hub/common";
 import { Logger } from "@matter/general";
 import { LevelControlServer as Base } from "@matter/main/behaviors";
-import type { LevelControl } from "@matter/main/clusters/level-control";
+import { LevelControl } from "@matter/main/clusters/level-control";
 import { BridgeDataProvider } from "../../services/bridges/bridge-data-provider.js";
 import { applyPatchState } from "../../utils/apply-patch-state.js";
 import type { FeatureSelection } from "../../utils/feature-selection.js";
