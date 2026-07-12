@@ -190,7 +190,6 @@ export class LevelControlServerBase extends FeaturedBase {
     }
 
     // Convert current percentage to Matter level scale (1..254)
-    const levelRange = this.maxLevel - this.minLevel;
     const currentLevel = Math.round(currentPercent * this.maxLevel);
 
     const direction = stepMode === LevelControl.StepMode.Up ? 1 : -1;
