@@ -273,6 +273,33 @@ describe("createLegacyEndpointType", () => {
   });
 });
 
+describe("explicit matterDeviceType battery (#408)", () => {
+  const entity = createEntity<BinarySensorDeviceAttributes>(
+    "binary_sensor.occ",
+    "on",
+    { device_class: BinarySensorDeviceClass.Occupancy },
+  );
+
+  it("adds a power source when a battery entity is mapped", () => {
+    const type = createLegacyEndpointType(entity, {
+      entityId: "binary_sensor.occ",
+      matterDeviceType: "occupancy_sensor",
+      batteryEntity: "sensor.battery",
+    });
+    expect(type).toBeDefined();
+    expect(type!.behaviors).toHaveProperty("powerSource");
+  });
+
+  it("has no power source without a battery entity", () => {
+    const type = createLegacyEndpointType(entity, {
+      entityId: "binary_sensor.occ",
+      matterDeviceType: "occupancy_sensor",
+    });
+    expect(type).toBeDefined();
+    expect(type!.behaviors).not.toHaveProperty("powerSource");
+  });
+});
+
 function createEntity<T extends {} = {}>(
   entityId: string,
   state: string,

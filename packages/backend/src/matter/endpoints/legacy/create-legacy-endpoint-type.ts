@@ -8,6 +8,7 @@ import { Logger } from "@matter/general";
 import type { EndpointType } from "@matter/main";
 import { FixedLabelServer } from "@matter/main/behaviors";
 import type { HomeAssistantEntityBehavior } from "../../behaviors/home-assistant-entity-behavior.js";
+import { DefaultPowerSourceServer } from "../../behaviors/power-source-server.js";
 import { validateEndpointType } from "../validate-endpoint-type.js";
 import { AirPurifierEndpoint } from "./air-purifier/index.js";
 import {
@@ -100,6 +101,12 @@ export function createLegacyEndpointType(
     const overrideFactory = matterDeviceTypeFactories[mapping.matterDeviceType];
     if (overrideFactory) {
       type = overrideFactory({ entity, customName, mapping });
+      // Explicit device types skip the domain path that swaps in battery
+      // variants, so attach a power source when a battery entity is mapped
+      // and the type does not already carry one (e.g. vacuum).
+      if (type && mapping.batteryEntity && !hasPowerSource(type)) {
+        type = addPowerSource(type);
+      }
     }
   }
 
@@ -175,6 +182,20 @@ function addFixedLabel(type: EndpointType, areaName: string): EndpointType {
     ...type,
     behaviors: { ...type.behaviors, fixedLabel },
   } as EndpointType;
+}
+
+function hasPowerSource(type: EndpointType): boolean {
+  return "powerSource" in type.behaviors;
+}
+
+function addPowerSource(type: EndpointType): EndpointType {
+  const mutable = type as EndpointType & {
+    with(...behaviors: unknown[]): EndpointType;
+  };
+  if (typeof mutable.with === "function") {
+    return mutable.with(DefaultPowerSourceServer);
+  }
+  return type;
 }
 
 const deviceCtrs: Partial<

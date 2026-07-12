@@ -42,6 +42,8 @@ Group arbitrary Home Assistant entities under a single Matter device. Set `compo
 
 Unlike auto-mapping, which only pulls in humidity/pressure/battery/power sensors on the same HA device, this lets you pick any entities you want, and they do **not** need to match the bridge filter. You choose them from the full HA registry in the UI.
 
+The device battery sensor (auto-mapped via `autoBatteryMapping` or an explicit `batteryEntity`) is attached to the composed device so controllers show its battery level.
+
 **Requirements:** Enable the `autoComposedDevices` feature flag on the bridge. Each sub-entity may set a `matterDeviceType` to control how it is exposed.
 
 Example, a Hue Motion sensor exposed as one device with occupancy, illuminance, and temperature sub-devices:
