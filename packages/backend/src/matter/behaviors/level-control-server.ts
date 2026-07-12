@@ -176,6 +176,48 @@ export class LevelControlServerBase extends FeaturedBase {
     return super.stepWithOnOff(request);
   }
 
+  override stepLogic(stepMode: LevelControl.StepMode, stepSize: number) {
+    const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);
+    const config = this.state.config;
+    const entityId = homeAssistant.entity.entity_id;
+
+    const currentPercent = config.getValuePercent(
+      homeAssistant.entity.state,
+      this.agent,
+    );
+    if (currentPercent == null) {
+      return;
+    }
+
+    // Convert current percentage to Matter level scale (1..254)
+    const levelRange = this.maxLevel - this.minLevel;
+    const currentLevel = Math.round(currentPercent * this.maxLevel);
+
+    const direction = stepMode === LevelControl.StepMode.Up ? 1 : -1;
+    const targetLevel = Math.max(
+      this.minLevel,
+      Math.min(this.maxLevel, currentLevel + stepSize * direction),
+    );
+
+    if (currentLevel === targetLevel) {
+      return;
+    }
+
+    const targetPercent = targetLevel / this.maxLevel;
+    const action = config.moveToLevelPercent(targetPercent, this.agent);
+
+    // Update currentLevel immediately so controllers get instant feedback
+    this.state.currentLevel = targetLevel;
+    const now = Date.now();
+    sweepOptimisticLevel(now);
+    optimisticLevelState.set(entityId, {
+      expectedLevel: targetLevel,
+      timestamp: now,
+    });
+
+    homeAssistant.callAction(action);
+  }
+
   override moveToLevelLogic(level: number) {
     const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);
     const config = this.state.config;

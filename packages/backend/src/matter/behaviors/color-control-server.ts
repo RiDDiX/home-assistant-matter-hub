@@ -312,6 +312,76 @@ export class ColorControlServerBase extends FeaturedBase {
     return super.moveToColorTemperature(request);
   }
 
+  override stepColorTemperatureLogic(
+    stepMode: ColorControl.StepMode,
+    stepSize: number,
+  ) {
+    const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);
+    const current = homeAssistant.entity.state;
+    const currentKelvin = this.state.config.getCurrentKelvin(
+      current,
+      this.agent,
+    );
+
+    // Get range from the entity because the method parameters default to 0
+    const minimumKelvin = this.state.config.getMinColorTempKelvin(
+      current,
+      this.agent,
+    );
+    const maximumKelvin = this.state.config.getMaxColorTempKelvin(
+      current,
+      this.agent,
+    );
+    if (
+      currentKelvin == null ||
+      minimumKelvin == null ||
+      maximumKelvin == null
+    ) {
+      return;
+    }
+
+    const currentMireds =
+      ColorConverter.temperatureKelvinToMireds(currentKelvin);
+
+    const direction = stepMode === ColorControl.StepMode.Up ? 1 : -1;
+    const steppedMireds = currentMireds + stepSize * direction;
+    const steppedKelvin =
+      ColorConverter.temperatureMiredsToKelvin(steppedMireds);
+
+    if (steppedKelvin == null) {
+      return;
+    }
+
+    const targetKelvin = Math.max(
+      minimumKelvin,
+      Math.min(maximumKelvin, steppedKelvin),
+    );
+
+    if (currentKelvin === targetKelvin) {
+      return;
+    }
+
+    const targetMireds =
+      ColorConverter.temperatureKelvinToMireds(targetKelvin);
+    const action = this.state.config.setTemperature(targetKelvin, this.agent);
+    this.applyTransition(action);
+    applyPatchState(this.state, {
+      colorTemperatureMireds: targetMireds,
+      colorMode: ColorControl.ColorMode.ColorTemperatureMireds,
+      enhancedColorMode: ColorControl.EnhancedColorMode.ColorTemperatureMireds,
+    });
+    optimisticColorState.set(homeAssistant.entityId, {
+      colorTemperatureMireds: targetMireds,
+      timestamp: Date.now(),
+    });
+
+    if (this.isLightOff()) {
+      pendingColorStaging.set(homeAssistant.entityId, action.data ?? {});
+      return;
+    }
+    homeAssistant.callAction(action);
+  }
+
   override moveToColorTemperatureLogic(targetMireds: number) {
     const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);
     const current = homeAssistant.entity.state;
