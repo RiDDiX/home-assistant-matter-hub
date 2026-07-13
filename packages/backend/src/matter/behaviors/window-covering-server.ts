@@ -64,29 +64,56 @@ export interface WindowCoveringConfig {
   setTiltPosition: ValueSetter<number>;
 }
 
+// Everything needed for a debounced HA call. entityId and actions must be
+// captured before setTimeout because the agent context expires after the
+// command handler returns.
+interface CoverPendingAction {
+  action: HomeAssistantAction;
+  entityId: string;
+  actions: HomeAssistantActions;
+}
+
+// matter.js runs each controller command on a throwaway proxy instance, so
+// instance fields reset every call and the second slider command can't
+// clearTimeout the first command's timer, firing both HA actions and making
+// coverSliderDebounceMs a no-op. Keep the debounce timers and pending actions
+// in a module-level registry keyed by the persistent Endpoint object instead,
+// following the RvcRunMode session precedent (#411).
+interface CoverDebounceState {
+  liftTimer: ReturnType<typeof setTimeout> | null;
+  tiltTimer: ReturnType<typeof setTimeout> | null;
+  pendingLift: CoverPendingAction | null;
+  pendingTilt: CoverPendingAction | null;
+  // Track when the last command was received to implement two-phase debounce
+  lastLiftCommandTime: number;
+  lastTiltCommandTime: number;
+}
+
+const coverDebounce = new WeakMap<object, CoverDebounceState>();
+
+function getCoverDebounce(endpoint: object): CoverDebounceState {
+  let st = coverDebounce.get(endpoint);
+  if (!st) {
+    st = {
+      liftTimer: null,
+      tiltTimer: null,
+      pendingLift: null,
+      pendingTilt: null,
+      lastLiftCommandTime: 0,
+      lastTiltCommandTime: 0,
+    };
+    coverDebounce.set(endpoint, st);
+  }
+  return st;
+}
+
 export class WindowCoveringServerBase extends FeaturedBase {
   declare state: WindowCoveringServerBase.State;
 
-  private liftDebounceTimer: ReturnType<typeof setTimeout> | null = null;
-  private tiltDebounceTimer: ReturnType<typeof setTimeout> | null = null;
-  // Track when the last command was received to implement two-phase debounce
-  private lastLiftCommandTime = 0;
-  private lastTiltCommandTime = 0;
-  // Track lift direction to skip redundant tilt on downOrClose / upOrOpen (#246)
+  // Written and read within one synchronous command (upOrOpen fires lift then
+  // tilt on the same instance), so these stay as instance fields (#246).
   private lastLiftMovementMs = 0;
   private lastLiftMovementDirection: MovementDirection | null = null;
-  // Store everything needed for debounced HA calls - entityId and actions service
-  // must be captured before setTimeout because agent context expires after command handler
-  private pendingLiftAction: {
-    action: HomeAssistantAction;
-    entityId: string;
-    actions: HomeAssistantActions;
-  } | null = null;
-  private pendingTiltAction: {
-    action: HomeAssistantAction;
-    entityId: string;
-    actions: HomeAssistantActions;
-  } | null = null;
   // Two-phase debounce: longer for first command (quick swipe sends initial step value),
   // shorter for subsequent commands during drag
   private static readonly DEBOUNCE_INITIAL_MS = 400;
@@ -110,16 +137,20 @@ export class WindowCoveringServerBase extends FeaturedBase {
   }
 
   override async [Symbol.asyncDispose]() {
-    if (this.liftDebounceTimer) {
-      clearTimeout(this.liftDebounceTimer);
-      this.liftDebounceTimer = null;
+    // this.endpoint is valid on the dispose instance, so this clears the real
+    // timers held in the registry (the fields on this instance never held them).
+    const st = coverDebounce.get(this.endpoint);
+    if (st) {
+      if (st.liftTimer) {
+        clearTimeout(st.liftTimer);
+      }
+      if (st.tiltTimer) {
+        clearTimeout(st.tiltTimer);
+      }
+      st.pendingLift = null;
+      st.pendingTilt = null;
+      coverDebounce.delete(this.endpoint);
     }
-    if (this.tiltDebounceTimer) {
-      clearTimeout(this.tiltDebounceTimer);
-      this.tiltDebounceTimer = null;
-    }
-    this.pendingLiftAction = null;
-    this.pendingTiltAction = null;
     await super[Symbol.asyncDispose]();
   }
 
@@ -434,13 +465,14 @@ export class WindowCoveringServerBase extends FeaturedBase {
     const action = config.setLiftPosition(targetPosition, this.agent);
     const entityId = homeAssistant.entityId;
     const actions = this.env.get(HomeAssistantActions);
-    this.pendingLiftAction = { action, entityId, actions };
+    const st = getCoverDebounce(this.endpoint);
+    st.pendingLift = { action, entityId, actions };
 
     // Two-phase debounce for GH quick swipes; coverSliderDebounceMs collapses
     // both phases into one window for controllers that stream slider updates.
     const now = Date.now();
-    const timeSinceLastCommand = now - this.lastLiftCommandTime;
-    this.lastLiftCommandTime = now;
+    const timeSinceLastCommand = now - st.lastLiftCommandTime;
+    st.lastLiftCommandTime = now;
 
     const isFirstInSequence =
       timeSinceLastCommand >
@@ -457,18 +489,20 @@ export class WindowCoveringServerBase extends FeaturedBase {
       `Lift command: target=${targetPosition}%, debounce=${debounceMs}ms (${overrideMs != null ? "override" : isFirstInSequence ? "initial" : "subsequent"})`,
     );
 
-    if (this.liftDebounceTimer) {
-      clearTimeout(this.liftDebounceTimer);
+    // The registry lives on the persistent endpoint, so this clears the
+    // previous command's live timer and only the last pending action fires.
+    if (st.liftTimer) {
+      clearTimeout(st.liftTimer);
     }
-    this.liftDebounceTimer = setTimeout(() => {
-      this.liftDebounceTimer = null;
-      if (this.pendingLiftAction) {
+    st.liftTimer = setTimeout(() => {
+      st.liftTimer = null;
+      if (st.pendingLift) {
         const {
           action: pendingAction,
           entityId: eid,
           actions: act,
-        } = this.pendingLiftAction;
-        this.pendingLiftAction = null;
+        } = st.pendingLift;
+        st.pendingLift = null;
         act.call(pendingAction, eid);
       }
     }, debounceMs);
@@ -509,12 +543,13 @@ export class WindowCoveringServerBase extends FeaturedBase {
     const action = config.setTiltPosition(targetPosition, this.agent);
     const entityId = homeAssistant.entityId;
     const actions = this.env.get(HomeAssistantActions);
-    this.pendingTiltAction = { action, entityId, actions };
+    const st = getCoverDebounce(this.endpoint);
+    st.pendingTilt = { action, entityId, actions };
 
     // Same two-phase / override logic as lift.
     const now = Date.now();
-    const timeSinceLastCommand = now - this.lastTiltCommandTime;
-    this.lastTiltCommandTime = now;
+    const timeSinceLastCommand = now - st.lastTiltCommandTime;
+    st.lastTiltCommandTime = now;
 
     const isFirstInSequence =
       timeSinceLastCommand >
@@ -531,18 +566,20 @@ export class WindowCoveringServerBase extends FeaturedBase {
       `Tilt command: target=${targetPosition}%, debounce=${debounceMs}ms (${overrideMs != null ? "override" : isFirstInSequence ? "initial" : "subsequent"})`,
     );
 
-    if (this.tiltDebounceTimer) {
-      clearTimeout(this.tiltDebounceTimer);
+    // Registry-held timer, so a later tilt command cancels this one's pending
+    // action instead of both firing.
+    if (st.tiltTimer) {
+      clearTimeout(st.tiltTimer);
     }
-    this.tiltDebounceTimer = setTimeout(() => {
-      this.tiltDebounceTimer = null;
-      if (this.pendingTiltAction) {
+    st.tiltTimer = setTimeout(() => {
+      st.tiltTimer = null;
+      if (st.pendingTilt) {
         const {
           action: pendingAction,
           entityId: eid,
           actions: act,
-        } = this.pendingTiltAction;
-        this.pendingTiltAction = null;
+        } = st.pendingTilt;
+        st.pendingTilt = null;
         act.call(pendingAction, eid);
       }
     }, debounceMs);
