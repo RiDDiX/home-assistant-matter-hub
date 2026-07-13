@@ -28,6 +28,7 @@ import {
 import "@xyflow/react/dist/style.css";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { collectLeafEndpoints } from "../../components/endpoints/collect-leaf-endpoints.ts";
 import { getEndpointName } from "../../components/endpoints/EndpointName.tsx";
 import { BridgeNode } from "../../components/network-map/nodes/BridgeNode.tsx";
 import { DeviceNode } from "../../components/network-map/nodes/DeviceNode.tsx";
@@ -46,16 +47,6 @@ const nodeTypes = {
   fabric: FabricNode,
   failed: FailedNode,
 };
-
-function collectLeafEndpoints(endpoint: EndpointData): EndpointData[] {
-  if (!endpoint.parts || endpoint.parts.length === 0) {
-    if (endpoint.endpoint !== 0) {
-      return [endpoint];
-    }
-    return [];
-  }
-  return endpoint.parts.flatMap(collectLeafEndpoints);
-}
 
 interface LayoutConfig {
   hubX: number;
@@ -96,7 +87,10 @@ function buildGraph(
   // Pre-calculate per-bridge section heights for dynamic vertical positioning
   const bridgeSections = bridges.map((bridge) => {
     const rootEndpoint = devicesByBridge[bridge.id];
-    const devices = rootEndpoint ? collectLeafEndpoints(rootEndpoint) : [];
+    // the map skips endpoint 0 (the root/aggregator node)
+    const devices = rootEndpoint
+      ? collectLeafEndpoints(rootEndpoint).filter((ep) => ep.endpoint !== 0)
+      : [];
     const failedCount = bridge.failedEntities?.length ?? 0;
     const totalItems = devices.length + failedCount;
     const rows = Math.min(totalItems, layout.devicesPerColumn);
