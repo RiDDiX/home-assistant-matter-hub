@@ -361,8 +361,7 @@ export class ColorControlServerBase extends FeaturedBase {
       return;
     }
 
-    const targetMireds =
-      ColorConverter.temperatureKelvinToMireds(targetKelvin);
+    const targetMireds = ColorConverter.temperatureKelvinToMireds(targetKelvin);
     const action = this.state.config.setTemperature(targetKelvin, this.agent);
     this.applyTransition(action);
     applyPatchState(this.state, {
