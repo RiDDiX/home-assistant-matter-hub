@@ -189,8 +189,18 @@ export class LevelControlServerBase extends FeaturedBase {
       return;
     }
 
-    // Convert current percentage to Matter level scale (1..254)
-    const currentLevel = Math.round(currentPercent * this.maxLevel);
+    // Step from the optimistic Matter level so rapid steps accumulate. Only
+    // trust it while a fresh optimistic write is still pending; once that
+    // expires (or never existed) the HA read wins, so a command HA never
+    // confirmed can't seed later steps.
+    const now = Date.now();
+    const optimistic = optimisticLevelState.get(entityId);
+    const optimisticFresh =
+      optimistic != null && now - optimistic.timestamp <= OPTIMISTIC_TIMEOUT_MS;
+    const currentLevel =
+      optimisticFresh && this.state.currentLevel != null
+        ? this.state.currentLevel
+        : Math.round(currentPercent * this.maxLevel);
 
     const direction = stepMode === LevelControl.StepMode.Up ? 1 : -1;
     const targetLevel = Math.max(
@@ -207,7 +217,6 @@ export class LevelControlServerBase extends FeaturedBase {
 
     // Update currentLevel immediately so controllers get instant feedback
     this.state.currentLevel = targetLevel;
-    const now = Date.now();
     sweepOptimisticLevel(now);
     optimisticLevelState.set(entityId, {
       expectedLevel: targetLevel,

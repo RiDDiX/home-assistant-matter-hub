@@ -340,11 +340,37 @@ export class ColorControlServerBase extends FeaturedBase {
       return;
     }
 
+    // Step from the optimistic Matter mireds so rapid steps accumulate. Only
+    // trust it while a fresh optimistic write is still pending; once that
+    // expires (or never existed) the HA read wins, so a command HA never
+    // confirmed can't seed later steps.
+    const optimistic = optimisticColorState.get(homeAssistant.entityId);
+    const optimisticFresh =
+      optimistic?.colorTemperatureMireds != null &&
+      Date.now() - optimistic.timestamp <= OPTIMISTIC_TIMEOUT_MS;
     const currentMireds =
-      ColorConverter.temperatureKelvinToMireds(currentKelvin);
+      optimisticFresh && this.state.colorTemperatureMireds != null
+        ? this.state.colorTemperatureMireds
+        : ColorConverter.temperatureKelvinToMireds(currentKelvin);
 
     const direction = stepMode === ColorControl.StepMode.Up ? 1 : -1;
-    const steppedMireds = currentMireds + stepSize * direction;
+
+    // Clamp into the device mireds range before converting, so a large
+    // overshoot lands on the boundary instead of dropping to a null kelvin.
+    const minMireds = ColorConverter.temperatureKelvinToMireds(maximumKelvin);
+    const maxMireds = ColorConverter.temperatureKelvinToMireds(minimumKelvin);
+    const steppedMireds = Math.max(
+      minMireds,
+      Math.min(maxMireds, currentMireds + stepSize * direction),
+    );
+
+    // No-op only when the step lands exactly on its own base (e.g. already at a
+    // boundary). Compare in the mireds base the step used, not the stale HA
+    // read, else a reversing step back to the HA value gets dropped.
+    if (steppedMireds === currentMireds) {
+      return;
+    }
+
     const steppedKelvin =
       ColorConverter.temperatureMiredsToKelvin(steppedMireds);
 
@@ -356,10 +382,6 @@ export class ColorControlServerBase extends FeaturedBase {
       minimumKelvin,
       Math.min(maximumKelvin, steppedKelvin),
     );
-
-    if (currentKelvin === targetKelvin) {
-      return;
-    }
 
     const targetMireds = ColorConverter.temperatureKelvinToMireds(targetKelvin);
     const action = this.state.config.setTemperature(targetKelvin, this.agent);
