@@ -167,6 +167,8 @@ HAMH sends your Home Assistant area names to Matter controllers using the FixedL
 
 The FixedLabel data is kept in the bridge for future controller support. The room name is limited to 16 characters per the Matter spec, longer HA area names are truncated automatically.
 
+If the old Google Assistant cloud integration used to sort your devices into rooms, that worked through Google's own cloud API and its `roomHint` field. Matter has no equivalent a bridge could send, which is why the behavior changed ([#413](https://github.com/RiDDiX/home-assistant-matter-hub/issues/413)).
+
 ## How do I control Media Player playback?
 
 Media players now support Play, Pause, Stop, Next Track, and Previous Track controls through Matter. However, not all controllers support these features yet. Volume control is also available.
