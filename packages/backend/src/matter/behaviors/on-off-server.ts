@@ -40,6 +40,24 @@ type OnOffCallback = (
   agent: Agent,
 ) => HomeAssistantAction | undefined;
 
+// Override device types (on_off_plugin_unit, on_off_switch) route through this
+// behavior instead of the valve/cover domain factory, so their native
+// open/close wiring is skipped. homeassistant.turn_on/off is a no-op for those
+// domains, so map them to the right service here (#65).
+export function defaultOnOffAction(
+  entityId: string,
+  on: boolean,
+): HomeAssistantAction {
+  const domain = entityId.split(".")[0];
+  if (domain === "valve") {
+    return { action: on ? "valve.open_valve" : "valve.close_valve" };
+  }
+  if (domain === "cover") {
+    return { action: on ? "cover.open_cover" : "cover.close_cover" };
+  }
+  return { action: on ? "homeassistant.turn_on" : "homeassistant.turn_off" };
+}
+
 export interface OnOffConfig {
   isOn?: ValueGetter<boolean>;
   turnOn?: OnOffCallback | null;
@@ -95,7 +113,7 @@ class OnOffServerBase extends Base {
     const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);
     const action = turnOn
       ? turnOn(void 0, this.agent)
-      : { action: "homeassistant.turn_on" as const };
+      : defaultOnOffAction(homeAssistant.entityId, true);
     // Set onOff immediately so the controller gets instant feedback in the
     // command response. Without this, Apple Home shows "Turning on..." until
     // the async HA WebSocket state update arrives.
@@ -131,7 +149,7 @@ class OnOffServerBase extends Base {
     const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);
     const action = turnOff
       ? turnOff(void 0, this.agent)
-      : { action: "homeassistant.turn_off" as const };
+      : defaultOnOffAction(homeAssistant.entityId, false);
     // Set onOff immediately so the controller gets instant feedback in the
     // command response. Without this, Apple Home shows "Turning off..." until
     // the async HA WebSocket state update arrives (#219).
