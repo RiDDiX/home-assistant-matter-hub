@@ -40,7 +40,7 @@ export class Options {
 
   get mdns(): MdnsOptions {
     return {
-      ipv4: true,
+      ipv4: !this.startOptions.mdnsDisableIpv4,
       networkInterface: notEmpty(this.startOptions.mdnsNetworkInterface),
       stripGlobalIpv6: this.startOptions.mdnsStripGlobalIpv6 ?? false,
     };

@@ -55,6 +55,7 @@ export APP_VERSION="${APP_VERSION:-$(bashio::addon.version)}"
 exec home-assistant-matter-hub start \
   --log-level=$(bashio::config 'app_log_level') \
   --disable-log-colors=$(bashio::config 'disable_log_colors') \
+  --mdns-disable-ipv4=$(bashio::config 'mdns_disable_ipv4' 'false') \
   --mdns-network-interface="$(bashio::config 'mdns_network_interface')" \
   --mdns-strip-global-ipv6=$(bashio::config 'mdns_strip_global_ipv6' 'false') \
   --storage-location=/config/data \
