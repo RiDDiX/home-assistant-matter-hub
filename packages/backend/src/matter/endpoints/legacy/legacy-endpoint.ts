@@ -175,6 +175,34 @@ export class LegacyEndpoint extends EntityEndpoint {
         }
       }
 
+      // 3b. Auto-assign a problem/safety sensor to smoke/CO alarms so it drives
+      // hardwareFaultAlert (#408). Gated exactly like battery mapping above.
+      const alarmDeviceClass = (state.attributes as { device_class?: string })
+        .device_class;
+      const isSmokeCoAlarm =
+        mapping?.matterDeviceType === "smoke_co_alarm" ||
+        (entityId.startsWith("binary_sensor.") &&
+          (alarmDeviceClass === "smoke" ||
+            alarmDeviceClass === "carbon_monoxide" ||
+            alarmDeviceClass === "gas"));
+      if (
+        registry.isAutoBatteryMappingEnabled() &&
+        !mapping?.faultEntity &&
+        isSmokeCoAlarm
+      ) {
+        const faultEntityId = registry.findProblemEntityForDevice(
+          entity.device_id,
+        );
+        if (faultEntityId && faultEntityId !== entityId) {
+          effectiveMapping = {
+            ...effectiveMapping,
+            entityId: effectiveMapping?.entityId ?? entityId,
+            faultEntity: faultEntityId,
+          };
+          logger.debug(`Auto-assigned fault ${faultEntityId} to ${entityId}`);
+        }
+      }
+
       // 4. Auto-assign power entity to switch/plug entities.
       // Not lights: an outlet's indicator light would grab the outlet's power
       // sensor, and electrical clusters on a light endpoint break Aqara (#374).

@@ -137,6 +137,12 @@ export interface EntityMappingConfig {
    */
   readonly batteryEntity?: string;
   /**
+   * Optional: Entity ID of a problem/safety binary sensor on the same device.
+   * Drives hardwareFaultAlert on a smoke/CO alarm (#408).
+   * Example: "binary_sensor.smoke_problem"
+   */
+  readonly faultEntity?: string;
+  /**
    * Optional: Entity ID of a charging-state sensor for a vacuum, so the Matter
    * batChargeState comes from a dedicated sensor (e.g. Xiaomi charging_state)
    * instead of being inferred from docked + battery level (#377).
