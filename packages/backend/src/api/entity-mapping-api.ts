@@ -46,6 +46,8 @@ export function entityMappingApi(
       chargingStateEntity: body.chargingStateEntity,
       roomEntities: body.roomEntities,
       disableLockPin: body.disableLockPin,
+      lockUsercodeService: body.lockUsercodeService,
+      lockUsercodeSlot: body.lockUsercodeSlot,
       powerEntity: body.powerEntity,
       energyEntity: body.energyEntity,
       suctionLevelEntity: body.suctionLevelEntity,

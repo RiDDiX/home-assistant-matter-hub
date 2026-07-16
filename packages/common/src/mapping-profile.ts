@@ -21,6 +21,8 @@ export interface MappingProfileEntry {
   readonly batteryEntity?: string;
   readonly roomEntities?: string[];
   readonly disableLockPin?: boolean;
+  readonly lockUsercodeService?: string;
+  readonly lockUsercodeSlot?: number;
   readonly powerEntity?: string;
   readonly energyEntity?: string;
   readonly suctionLevelEntity?: string;

@@ -164,6 +164,15 @@ export interface EntityMappingConfig {
    */
   readonly disableLockPin?: boolean;
   /**
+   * Optional: HA service that programs a usercode on the physical lock when a
+   * controller sets or clears the PIN credential, e.g.
+   * zwave_js.set_lock_usercode or zha.set_lock_user_code. Opt-in, leave unset
+   * to keep the PIN only in HAMH.
+   */
+  readonly lockUsercodeService?: string;
+  /** Optional: physical code slot to program, default 1. */
+  readonly lockUsercodeSlot?: number;
+  /**
    * Optional: Entity ID of a power sensor (device_class: power, unit: W).
    * Adds ElectricalPowerMeasurement cluster to show real-time power consumption.
    * Example: "sensor.smart_plug_power"
@@ -366,6 +375,8 @@ export interface EntityMappingRequest {
   readonly chargingStateEntity?: string;
   readonly roomEntities?: string[];
   readonly disableLockPin?: boolean;
+  readonly lockUsercodeService?: string;
+  readonly lockUsercodeSlot?: number;
   readonly powerEntity?: string;
   readonly energyEntity?: string;
   readonly suctionLevelEntity?: string;

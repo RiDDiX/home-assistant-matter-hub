@@ -120,6 +120,8 @@ export class EntityMappingStorage extends Service {
       chargingStateEntity: request.chargingStateEntity?.trim() || undefined,
       roomEntities: roomEntities.length > 0 ? roomEntities : undefined,
       disableLockPin: request.disableLockPin || undefined,
+      lockUsercodeService: request.lockUsercodeService?.trim() || undefined,
+      lockUsercodeSlot: sanitizeUsercodeSlot(request.lockUsercodeSlot),
       powerEntity: request.powerEntity?.trim() || undefined,
       energyEntity: request.energyEntity?.trim() || undefined,
       pressureEntity: request.pressureEntity?.trim() || undefined,
@@ -180,6 +182,8 @@ export class EntityMappingStorage extends Service {
       !config.chargingStateEntity &&
       !config.roomEntities &&
       !config.disableLockPin &&
+      !config.lockUsercodeService &&
+      config.lockUsercodeSlot === undefined &&
       !config.powerEntity &&
       !config.energyEntity &&
       !config.pressureEntity &&
@@ -239,6 +243,17 @@ function sanitizeVendorId(value: unknown): number | undefined {
   }
   const n = typeof value === "string" ? Number(value) : value;
   if (typeof n !== "number" || !Number.isInteger(n) || n < 1 || n > 0xfffe) {
+    return undefined;
+  }
+  return n;
+}
+
+function sanitizeUsercodeSlot(value: unknown): number | undefined {
+  if (value === undefined || value === null || value === "") {
+    return undefined;
+  }
+  const n = typeof value === "string" ? Number(value) : value;
+  if (typeof n !== "number" || !Number.isInteger(n) || n < 1) {
     return undefined;
   }
   return n;

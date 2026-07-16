@@ -89,6 +89,14 @@ function parseThrottleMs(value: string): number | undefined {
   return Math.min(60000, Math.round(n));
 }
 
+function parseUsercodeSlot(value: string): number | undefined {
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+  const n = Number(trimmed);
+  if (!Number.isInteger(n) || n < 1) return undefined;
+  return n;
+}
+
 interface EntityMappingDialogProps {
   open: boolean;
   entityId: string;
@@ -125,6 +133,8 @@ export function EntityMappingDialog({
   const [batteryEntity, setBatteryEntity] = useState("");
   const [roomEntities, setRoomEntities] = useState<string[]>([]);
   const [disableLockPin, setDisableLockPin] = useState(false);
+  const [lockUsercodeService, setLockUsercodeService] = useState("");
+  const [lockUsercodeSlot, setLockUsercodeSlot] = useState("");
   const [powerEntity, setPowerEntity] = useState("");
   const [energyEntity, setEnergyEntity] = useState("");
   const [suctionLevelEntity, setSuctionLevelEntity] = useState("");
@@ -206,6 +216,12 @@ export function EntityMappingDialog({
       setBatteryEntity(currentMapping?.batteryEntity || "");
       setRoomEntities(currentMapping?.roomEntities || []);
       setDisableLockPin(currentMapping?.disableLockPin || false);
+      setLockUsercodeService(currentMapping?.lockUsercodeService || "");
+      setLockUsercodeSlot(
+        currentMapping?.lockUsercodeSlot != null
+          ? String(currentMapping.lockUsercodeSlot)
+          : "",
+      );
       setPowerEntity(currentMapping?.powerEntity || "");
       setEnergyEntity(currentMapping?.energyEntity || "");
       setSuctionLevelEntity(currentMapping?.suctionLevelEntity || "");
@@ -344,6 +360,8 @@ export function EntityMappingDialog({
       customServiceAreas:
         customServiceAreas.length > 0 ? customServiceAreas : undefined,
       disableLockPin: disableLockPin || undefined,
+      lockUsercodeService: lockUsercodeService.trim() || undefined,
+      lockUsercodeSlot: parseUsercodeSlot(lockUsercodeSlot),
       powerEntity: powerEntity.trim() || undefined,
       energyEntity: energyEntity.trim() || undefined,
       suctionLevelEntity: suctionLevelEntity.trim() || undefined,
@@ -399,6 +417,8 @@ export function EntityMappingDialog({
     batteryEntity,
     roomEntities,
     disableLockPin,
+    lockUsercodeService,
+    lockUsercodeSlot,
     powerEntity,
     energyEntity,
     suctionLevelEntity,
@@ -1194,16 +1214,37 @@ export function EntityMappingDialog({
         )}
 
         {showLockPinField && (
-          <FormControlLabel
-            control={
-              <Switch
-                checked={disableLockPin}
-                onChange={(e) => setDisableLockPin(e.target.checked)}
-              />
-            }
-            label="Disable PIN requirement for this lock"
-            sx={{ mt: 1, display: "block" }}
-          />
+          <>
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={disableLockPin}
+                  onChange={(e) => setDisableLockPin(e.target.checked)}
+                />
+              }
+              label="Disable PIN requirement for this lock"
+              sx={{ mt: 1, display: "block" }}
+            />
+            <TextField
+              label="Physical lock usercode service"
+              size="small"
+              fullWidth
+              value={lockUsercodeService}
+              onChange={(e) => setLockUsercodeService(e.target.value)}
+              helperText="Opt-in: also program the physical lock when a controller sets/clears the PIN, e.g. zwave_js.set_lock_usercode or zha.set_lock_user_code. Leave empty to keep the PIN only in HAMH."
+              sx={{ mt: 1, display: "block" }}
+            />
+            <TextField
+              label="Code slot"
+              type="number"
+              size="small"
+              value={lockUsercodeSlot}
+              onChange={(e) => setLockUsercodeSlot(e.target.value)}
+              helperText="Code slot on the physical lock, default 1"
+              slotProps={{ htmlInput: { min: 1, step: 1 } }}
+              sx={{ mt: 1, display: "block" }}
+            />
+          </>
         )}
 
         {showClimateOnOffField && (

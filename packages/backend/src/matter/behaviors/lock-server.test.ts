@@ -8,6 +8,8 @@ import {
   applySetUser,
   buildGetCredentialStatusResponse,
   buildGetUserResponse,
+  buildUsercodeClearAction,
+  buildUsercodeSetAction,
   normalizeSupportedIndex,
 } from "./lock-server.js";
 
@@ -473,5 +475,39 @@ describe("applyClearCredential", () => {
       },
     });
     expect(storage.hasCredential(ENTITY)).toBe(true);
+  });
+});
+
+describe("usercode passthrough builders (#418)", () => {
+  it("zwave_js set uses the usercode key", () => {
+    expect(
+      buildUsercodeSetAction("zwave_js.set_lock_usercode", 3, "4321"),
+    ).toEqual({
+      action: "zwave_js.set_lock_usercode",
+      data: { code_slot: 3, usercode: "4321" },
+    });
+  });
+
+  it("zha set uses the user_code key", () => {
+    expect(buildUsercodeSetAction("zha.set_lock_user_code", 2, "1111")).toEqual(
+      {
+        action: "zha.set_lock_user_code",
+        data: { code_slot: 2, user_code: "1111" },
+      },
+    );
+  });
+
+  it("zwave_js clear derives from the set service", () => {
+    expect(buildUsercodeClearAction("zwave_js.set_lock_usercode", 3)).toEqual({
+      action: "zwave_js.clear_lock_usercode",
+      data: { code_slot: 3 },
+    });
+  });
+
+  it("zha clear derives from the set service", () => {
+    expect(buildUsercodeClearAction("zha.set_lock_user_code", 2)).toEqual({
+      action: "zha.clear_lock_user_code",
+      data: { code_slot: 2 },
+    });
   });
 });

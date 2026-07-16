@@ -8,6 +8,7 @@ import {
   StatusCode,
   StatusResponseError,
 } from "@matter/main/types";
+import type { HomeAssistantAction } from "../../services/home-assistant/home-assistant-actions.js";
 import { LockCredentialStorage } from "../../services/storage/lock-credential-storage.js";
 import { applyPatchState } from "../../utils/apply-patch-state.js";
 import { HomeAssistantEntityBehavior } from "./home-assistant-entity-behavior.js";
@@ -36,6 +37,51 @@ export function normalizeSupportedIndex(
     return SUPPORTED_SLOT;
   }
   return null;
+}
+
+/**
+ * Opt-in passthrough that also programs the physical lock slot via an
+ * integration-specific HA service when the PIN credential changes (#418).
+ */
+export interface UsercodePassthrough {
+  service: string;
+  slot: number;
+  callAction: (action: HomeAssistantAction) => void;
+}
+
+// zha names the PIN field user_code, z-wave calls it usercode.
+export function buildUsercodeSetAction(
+  service: string,
+  slot: number,
+  pin: string,
+): HomeAssistantAction {
+  const pinKey = service.split(".")[0] === "zha" ? "user_code" : "usercode";
+  return { action: service, data: { code_slot: slot, [pinKey]: pin } };
+}
+
+export function buildUsercodeClearAction(
+  service: string,
+  slot: number,
+): HomeAssistantAction {
+  return {
+    action: service.replace(".set_", ".clear_"),
+    data: { code_slot: slot },
+  };
+}
+
+// Reads the passthrough config off the entity mapping. Undefined = feature off.
+function usercodePassthroughFrom(
+  homeAssistant: HomeAssistantEntityBehavior,
+): UsercodePassthrough | undefined {
+  const service = homeAssistant.state.mapping?.lockUsercodeService?.trim();
+  if (!service) {
+    return undefined;
+  }
+  return {
+    service,
+    slot: homeAssistant.state.mapping?.lockUsercodeSlot ?? 1,
+    callAction: (action) => homeAssistant.callAction(action),
+  };
 }
 
 type EnvLike = {
@@ -172,6 +218,7 @@ export async function applySetCredential(
   entityId: string,
   request: DoorLock.SetCredentialRequest,
   fabricIndex: number | undefined,
+  passthrough?: UsercodePassthrough,
 ): Promise<DoorLock.SetCredentialResponse> {
   if (
     request.credential.credentialType !== DoorLock.CredentialType.Pin ||
@@ -201,6 +248,10 @@ export async function applySetCredential(
       lastModifiedFabricIndex: fabricIndex,
       creatorFabricIndex: fabricIndex,
     });
+    // Fire and forget: a failed physical program still reports success.
+    passthrough?.callAction(
+      buildUsercodeSetAction(passthrough.service, passthrough.slot, pinCode),
+    );
   }
   return {
     status: Status.Success,
@@ -236,10 +287,14 @@ export async function applyClearCredential(
   env: EnvLike,
   entityId: string,
   request: DoorLock.ClearCredentialRequest,
+  passthrough?: UsercodePassthrough,
 ): Promise<void> {
   if (request.credential === null) {
     const storage = env.get(LockCredentialStorage);
     await storage.deleteCredential(entityId);
+    passthrough?.callAction(
+      buildUsercodeClearAction(passthrough.service, passthrough.slot),
+    );
     return;
   }
   if (
@@ -248,6 +303,34 @@ export async function applyClearCredential(
   ) {
     const storage = env.get(LockCredentialStorage);
     await storage.deleteCredential(entityId);
+    passthrough?.callAction(
+      buildUsercodeClearAction(passthrough.service, passthrough.slot),
+    );
+  }
+}
+
+/**
+ * Apply Matter ClearUser to storage. Handles the single supported slot and the
+ * 0xFFFE clear-all index. When a PIN credential was actually stored we also
+ * clear the physical slot, so ClearUser can't leave a working code on the lock.
+ */
+export async function applyClearUser(
+  env: EnvLike,
+  entityId: string,
+  request: DoorLock.ClearUserRequest,
+  passthrough?: UsercodePassthrough,
+): Promise<void> {
+  const slot = normalizeSupportedIndex(request.userIndex);
+  if (slot === null && request.userIndex !== 0xfffe) {
+    return;
+  }
+  const storage = env.get(LockCredentialStorage);
+  const hadCredential = storage.hasCredential(entityId);
+  await storage.deleteCredential(entityId);
+  if (hadCredential) {
+    passthrough?.callAction(
+      buildUsercodeClearAction(passthrough.service, passthrough.slot),
+    );
   }
 }
 
@@ -473,12 +556,13 @@ class LockServerWithPinBase extends PinCredentialBase {
   }
 
   override async clearUser(request: DoorLock.ClearUserRequest): Promise<void> {
-    const slot = normalizeSupportedIndex(request.userIndex);
-    if (slot !== null || request.userIndex === 0xfffe) {
-      const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);
-      const storage = this.env.get(LockCredentialStorage);
-      await storage.deleteCredential(homeAssistant.entityId);
-    }
+    const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);
+    await applyClearUser(
+      this.env,
+      homeAssistant.entityId,
+      request,
+      usercodePassthroughFrom(homeAssistant),
+    );
   }
 
   override async setCredential(
@@ -490,6 +574,7 @@ class LockServerWithPinBase extends PinCredentialBase {
       homeAssistant.entityId,
       request,
       this.context.fabric,
+      usercodePassthroughFrom(homeAssistant),
     );
   }
 
@@ -508,7 +593,12 @@ class LockServerWithPinBase extends PinCredentialBase {
     request: DoorLock.ClearCredentialRequest,
   ): Promise<void> {
     const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);
-    await applyClearCredential(this.env, homeAssistant.entityId, request);
+    await applyClearCredential(
+      this.env,
+      homeAssistant.entityId,
+      request,
+      usercodePassthroughFrom(homeAssistant),
+    );
   }
 }
 
@@ -723,12 +813,13 @@ class LockServerWithPinAndUnboltBase extends PinCredentialUnboltBase {
   }
 
   override async clearUser(request: DoorLock.ClearUserRequest): Promise<void> {
-    const slot = normalizeSupportedIndex(request.userIndex);
-    if (slot !== null || request.userIndex === 0xfffe) {
-      const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);
-      const storage = this.env.get(LockCredentialStorage);
-      await storage.deleteCredential(homeAssistant.entityId);
-    }
+    const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);
+    await applyClearUser(
+      this.env,
+      homeAssistant.entityId,
+      request,
+      usercodePassthroughFrom(homeAssistant),
+    );
   }
 
   override async setCredential(
@@ -740,6 +831,7 @@ class LockServerWithPinAndUnboltBase extends PinCredentialUnboltBase {
       homeAssistant.entityId,
       request,
       this.context.fabric,
+      usercodePassthroughFrom(homeAssistant),
     );
   }
 
@@ -758,7 +850,12 @@ class LockServerWithPinAndUnboltBase extends PinCredentialUnboltBase {
     request: DoorLock.ClearCredentialRequest,
   ): Promise<void> {
     const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);
-    await applyClearCredential(this.env, homeAssistant.entityId, request);
+    await applyClearCredential(
+      this.env,
+      homeAssistant.entityId,
+      request,
+      usercodePassthroughFrom(homeAssistant),
+    );
   }
 }
 
