@@ -126,6 +126,30 @@ If the advertised IPv4 address is unroutable (for example podman without host ne
 
 Check names and addresses with `ip addr`, or read them straight from the Network Diagnostics card. After changing the interface on an add-on, **reboot HAOS** (not just the add-on) so mDNS re-reads addresses, then re-commission the bridge in your controller.
 
+### OTBR route trap across ULA VLANs
+
+Running the Thread Border Router (OTBR) add-on next to HAMH needs a second fix beyond interface binding. The bridge works until OTBR starts, then goes offline on any controller that sits on a different ULA VLAN. Pinning `mdns_network_interface` to the LAN NIC fixes the mDNS side (the correct routable `fd::` address is advertised again), but pairing still ends in `peer-unresponsive` and the request only travels one way.
+
+The cause is a kernel route the OTBR agent injects on the host: an external route for `fc00::/7` via `wpan0` (visible in the OTBR log as it adds an external route `fc00::/7` in kernel). `fc00::/7` covers **every** `fd::` ULA network and is more specific than the `::/0` default, so return packets to a controller on another ULA VLAN (e.g. `fd30::/64`) get routed into the Thread mesh and dropped. The pairing request arrives, the reply never does, and the controller times out.
+
+Add a more specific static route on the HA host so LAN-bound ULA traffic bypasses the `/7` trap, one route per remote ULA VLAN that hosts a controller:
+
+```bash
+# Adjust connection name, interface, VLAN prefix and gateway per setup.
+# The gateway is your router's link-local address on the HA LAN interface:
+nmcli connection modify "Supervisor enp0s18" +ipv6.routes "fd30::/64 fe80::1"
+nmcli connection up "Supervisor enp0s18"
+```
+
+Verify the LAN route wins over `wpan0`:
+
+```bash
+# Must show the LAN interface, not wpan0:
+ip -6 route get fd30::30:xxxx:xxxx:xxxx:xxxx
+```
+
+See [Discussion #388](https://github.com/RiDDiX/home-assistant-matter-hub/discussions/388) for the full trace.
+
 ### Network Topology Best Practices
 
 - **Keep the path simple**: Avoid placing access points or managed switches between your Matter bridge (Home Assistant) and your Home Hub (HomePod/Apple TV)
