@@ -47,6 +47,8 @@ If you only see `fe80::` addresses and no `fd` prefixes, ULA is not configured.
 
 **After changing IPv6 settings** on your router or Home Assistant host, **reboot HAOS** (not just the add-on). The mDNS service reads network addresses at startup and Docker containers may not see interface changes until the host restarts.
 
+HAMH now watches the interface addresses and re-announces with the current set when it changes, so a dynamic ISP IPv6 prefix change no longer leaves controllers stuck on a dead global address. On link-local-only LANs `mdns_strip_global_ipv6` stays the robust choice, since a stripped set never moves when the ISP prefix rotates.
+
 See [Discussion #39](https://github.com/RiDDiX/home-assistant-matter-hub/discussions/39) for a detailed explanation of IPv6 behavior with Matter.
 
 :::

@@ -1,3 +1,4 @@
+import * as os from "node:os";
 import {
   alexaPairingPortProblem,
   type BridgeFeatureFlags,
@@ -6,15 +7,22 @@ import {
   type UpdateBridgeRequest,
 } from "@home-assistant-matter-hub/common";
 import type { Environment } from "@matter/general";
-import type { Endpoint } from "@matter/main";
+import { type Endpoint, Network } from "@matter/main";
 import { CommissioningServer } from "@matter/main/node";
 import {
   DeviceAdvertiser,
+  type Fabric,
   FabricManager,
+  MdnsService,
   SessionManager,
 } from "@matter/main/protocol";
+import { FilteredNetwork } from "../../core/app/filtered-network.js";
 import type { BetterLogger, LoggerService } from "../../core/app/logger.js";
 import { BridgeServerNode } from "../../matter/endpoints/bridge-server-node.js";
+import {
+  collectAdvertisedAddresses,
+  runMdnsAddressWatchTick,
+} from "../../matter/mdns-address-watch.js";
 import { ensureCommissioningConfig } from "../../utils/ensure-commissioning-config.js";
 import { isHeapUnderPressure, logMemoryUsage } from "../../utils/log-memory.js";
 import { diagnosticEventBus } from "../diagnostics/diagnostic-event-bus.js";
@@ -61,6 +69,11 @@ export function deadSessionTimeoutMs(flags?: BridgeFeatureFlags): number {
 // a controller showing the bridge as unresponsive after a restart.
 const SHUTDOWN_SESSION_CLOSE_TIMEOUT_MS = 2_500;
 
+// How often to re-check the interface addresses mDNS advertises. A dynamic ISP
+// IPv6 prefix change swaps the global address behind the cached operational
+// records, so poll and re-announce when the set moves (#415).
+const MDNS_ADDRESS_CHECK_INTERVAL_MS = 60_000;
+
 export class Bridge {
   private readonly log: BetterLogger;
   readonly server: BridgeServerNode;
@@ -84,6 +97,15 @@ export class Bridge {
   private sessionStartedAt = new Map<number, number>();
   private rotationTimer: ReturnType<typeof setInterval> | null = null;
   private maxSessionAgeMs = 0;
+
+  // Watches the advertised interface addresses so a dynamic ISP IPv6 prefix
+  // change forces a fresh operational announcement (#415).
+  private mdnsAddressTimer: ReturnType<typeof setInterval> | null = null;
+  private advertisedAddressSnapshot: string[] = [];
+  // Skip a tick while the previous one is still awaiting refresh, so a slow
+  // refreshOperationalAdvertisement can't overlap and re-announce off a stale
+  // snapshot.
+  private mdnsCheckInFlight = false;
 
   // Serialize concurrent lifecycle calls so auto-recovery and a manual
   // restartBridge can't race past each other's Starting/Stopping states.
@@ -358,6 +380,7 @@ export class Bridge {
       this.wireSessionDiagnostics();
       this.wireFabricWarnings();
       this.startSessionRotation();
+      this.startMdnsAddressWatch();
       logMemoryUsage(this.log, "bridge running");
       diagnosticEventBus.emit("bridge_started", `Bridge started`, {
         bridgeId: this.id,
@@ -766,6 +789,10 @@ export class Bridge {
   private triggerMdnsReAnnounce() {
     try {
       const advertiser = this.server.env.get(DeviceAdvertiser);
+      // restartAdvertisement re-sends the cached records for live fabrics but
+      // does not rebuild them; refreshOperationalAdvertisement (used by the
+      // address watch for #415) is what re-runs the address lookup. This path
+      // only needs the controller poked to reconnect, so keep it as is.
       advertiser.restartAdvertisement();
       this.log.info("Triggered mDNS re-announcement after session cleanup");
     } catch {
@@ -800,6 +827,7 @@ export class Bridge {
     }
     this.staleSessionTimers.clear();
     this.stopSessionRotation();
+    this.stopMdnsAddressWatch();
     this.sessionStartedAt.clear();
   }
 
@@ -871,6 +899,84 @@ export class Bridge {
       clearInterval(this.rotationTimer);
       this.rotationTimer = null;
     }
+  }
+
+  // Poll the interface addresses mDNS advertises and re-announce when they
+  // change. matter.js caches the operational records at first announcement, so
+  // a dynamic ISP IPv6 prefix change keeps advertising the dead global address
+  // until a restart (#415). refreshOperationalAdvertisement re-runs the lookup.
+  private startMdnsAddressWatch() {
+    this.stopMdnsAddressWatch();
+    const { netInterface, stripGlobalIpv6, ipv4Enabled } =
+      this.readMdnsWatchSettings();
+    this.advertisedAddressSnapshot = collectAdvertisedAddresses(
+      os.networkInterfaces(),
+      netInterface,
+      stripGlobalIpv6,
+      ipv4Enabled,
+    );
+    this.mdnsAddressTimer = setInterval(() => {
+      if (this.mdnsCheckInFlight) return;
+      this.mdnsCheckInFlight = true;
+      this.checkAdvertisedAddresses()
+        .catch((e) => {
+          this.log.warn("mDNS address check failed:", e);
+        })
+        .finally(() => {
+          this.mdnsCheckInFlight = false;
+        });
+    }, MDNS_ADDRESS_CHECK_INTERVAL_MS);
+  }
+
+  private stopMdnsAddressWatch() {
+    if (this.mdnsAddressTimer) {
+      clearInterval(this.mdnsAddressTimer);
+      this.mdnsAddressTimer = null;
+    }
+  }
+
+  // Read the mDNS settings the shared setup applied. MdnsService lives on the
+  // root env and stripGlobalIpv6 swaps in a FilteredNetwork, so both are
+  // visible from the bridge env.
+  private readMdnsWatchSettings(): {
+    netInterface?: string;
+    stripGlobalIpv6: boolean;
+    ipv4Enabled: boolean;
+  } {
+    try {
+      const mdns = this.server.env.get(MdnsService);
+      const stripGlobalIpv6 =
+        this.server.env.get(Network) instanceof FilteredNetwork;
+      return {
+        netInterface: mdns.limitedToNetInterface,
+        stripGlobalIpv6,
+        ipv4Enabled: mdns.enableIpv4,
+      };
+    } catch {
+      return { stripGlobalIpv6: false, ipv4Enabled: true };
+    }
+  }
+
+  private async checkAdvertisedAddresses() {
+    const { netInterface, stripGlobalIpv6, ipv4Enabled } =
+      this.readMdnsWatchSettings();
+    const advertiser = this.server.env.get(DeviceAdvertiser);
+    const fabrics = this.server.env.get(FabricManager);
+    this.advertisedAddressSnapshot = await runMdnsAddressWatchTick({
+      readInterfaces: () => os.networkInterfaces(),
+      netInterface,
+      stripGlobalIpv6,
+      ipv4Enabled,
+      currentSnapshot: this.advertisedAddressSnapshot,
+      fabrics: () => fabrics.fabrics,
+      refresh: (fabric) =>
+        advertiser.refreshOperationalAdvertisement(fabric as Fabric),
+      onChange: (prev, curr) => {
+        this.log.warn(
+          `Advertised address set changed (${prev.length} -> ${curr.length} addresses), re-announcing operational mDNS (#415)`,
+        );
+      },
+    });
   }
 
   // Resolve the rotation max age. Bridge config wins, then the env var. An
