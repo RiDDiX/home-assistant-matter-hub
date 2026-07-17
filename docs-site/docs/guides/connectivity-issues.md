@@ -120,6 +120,8 @@ HAMH flags this in two places: the **Network Diagnostics** card on the **Health 
 
 If your LAN interface also carries a global IPv6 that controllers cannot reach, drop it from what mDNS advertises with `mdns_strip_global_ipv6` (add-on, both channels; stable from the next release) or `--mdns-strip-global-ipv6` (container). This keeps only the link-local and ULA addresses. It does **not** remove a Thread `fd::` address, since that is a ULA; for Thread interfaces, bind the LAN interface instead.
 
+If the advertised IPv4 address is unroutable (for example podman without host networking behind an avahi reflector), force controllers onto IPv6 with `mdns_disable_ipv4` (add-on) or `--mdns-disable-ipv4` (container). This stops mDNS advertising IPv4 so only IPv6 is used. Only reach for it when IPv4 is the problem: an IPv6-only advertisement leaves controllers without IPv6 connectivity (some older Alexa or Google Home hubs) unable to discover the bridge.
+
 Check names and addresses with `ip addr`, or read them straight from the Network Diagnostics card. After changing the interface on an add-on, **reboot HAOS** (not just the add-on) so mDNS re-reads addresses, then re-commission the bridge in your controller.
 
 ### Network Topology Best Practices

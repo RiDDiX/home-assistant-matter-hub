@@ -89,7 +89,7 @@ export class Options {
       basePath: normalizeBasePath(this.startOptions.httpBasePath),
       auth,
       mdnsInterface: notEmpty(this.startOptions.mdnsNetworkInterface),
-      mdnsIpv4: true,
+      mdnsIpv4: !this.startOptions.mdnsDisableIpv4,
     };
   }
 
