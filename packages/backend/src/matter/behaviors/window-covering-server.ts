@@ -426,11 +426,32 @@ export class WindowCoveringServerBase extends FeaturedBase {
   }
 
   override handleStopMovement() {
+    // Clear any pending lift and tilt actions to prevent duplicate calls
+    const st = getCoverDebounce(this.endpoint);
+    if (st.liftTimer) {
+      clearTimeout(st.liftTimer);
+      st.liftTimer = null;
+    }
+    if (st.tiltTimer) {
+      clearTimeout(st.tiltTimer);
+      st.tiltTimer = null;
+    }
+    st.pendingLift = null;
+    st.pendingTilt = null;
+    
     const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);
     homeAssistant.callAction(this.state.config.stopCover(void 0, this.agent));
   }
 
   private handleLiftOpen() {
+    // Clear any pending lift actions to prevent duplicate calls
+    const st = getCoverDebounce(this.endpoint);
+    if (st.liftTimer) {
+      clearTimeout(st.liftTimer);
+      st.liftTimer = null;
+    }
+    st.pendingLift = null;
+    
     const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);
     const action = this.state.config.openCoverLift(void 0, this.agent);
     logger.info(`handleLiftOpen: calling action=${action.action}`);
@@ -438,6 +459,14 @@ export class WindowCoveringServerBase extends FeaturedBase {
   }
 
   private handleLiftClose() {
+    // Clear any pending lift actions to prevent duplicate calls
+    const st = getCoverDebounce(this.endpoint);
+    if (st.liftTimer) {
+      clearTimeout(st.liftTimer);
+      st.liftTimer = null;
+    }
+    st.pendingLift = null;
+    
     const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);
     const action = this.state.config.closeCoverLift(void 0, this.agent);
     logger.info(`handleLiftClose: calling action=${action.action}`);
@@ -509,6 +538,14 @@ export class WindowCoveringServerBase extends FeaturedBase {
   }
 
   private handleTiltOpen() {
+    // Clear any pending tilt actions to prevent duplicate calls
+    const st = getCoverDebounce(this.endpoint);
+    if (st.tiltTimer) {
+      clearTimeout(st.tiltTimer);
+      st.tiltTimer = null;
+    }
+    st.pendingTilt = null;
+    
     const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);
     homeAssistant.callAction(
       this.state.config.openCoverTilt(void 0, this.agent),
@@ -516,6 +553,14 @@ export class WindowCoveringServerBase extends FeaturedBase {
   }
 
   private handleTiltClose() {
+    // Clear any pending tilt actions to prevent duplicate calls
+    const st = getCoverDebounce(this.endpoint);
+    if (st.tiltTimer) {
+      clearTimeout(st.tiltTimer);
+      st.tiltTimer = null;
+    }
+    st.pendingTilt = null;
+    
     const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);
     homeAssistant.callAction(
       this.state.config.closeCoverTilt(void 0, this.agent),
