@@ -9,6 +9,7 @@ import {
   createCameraEndpointType,
   defaultSensorParams,
 } from "./camera-endpoint.js";
+import { parseCameraList } from "./camera-tcp-requirement.js";
 import { WebRtcBridge } from "./webrtc-bridge.js";
 
 interface CameraConfig {
@@ -121,10 +122,7 @@ export class CameraPlugin implements MatterHubPlugin {
       this.log.info("no Home Assistant connection, no cameras exposed");
       return;
     }
-    const entityIds = (cameras ?? "")
-      .split(",")
-      .map((s) => s.trim())
-      .filter(Boolean);
+    const entityIds = parseCameraList(cameras);
     if (entityIds.length === 0) {
       this.log.info("no camera entity ids configured");
       return;

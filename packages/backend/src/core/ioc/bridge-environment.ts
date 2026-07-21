@@ -1,6 +1,10 @@
 import type { BridgeData } from "@home-assistant-matter-hub/common";
 import type { Environment, Logger } from "@matter/general";
 import { ServerModeServerNode } from "../../matter/endpoints/server-mode-server-node.js";
+import {
+  bridgeNeedsTcpForCameras,
+  CAMERA_TCP_CONFIG,
+} from "../../plugins/builtin/camera/camera-tcp-requirement.js";
 import { PluginInstaller } from "../../plugins/plugin-installer.js";
 import { PluginManager } from "../../plugins/plugin-manager.js";
 import { PluginRegistry } from "../../plugins/plugin-registry.js";
@@ -151,6 +155,19 @@ export class BridgeEnvironmentFactory extends BridgeFactory {
       initialData,
       this.storageLocation,
     );
+    const loggerService = env.get(LoggerService);
+
+    // #419: a bridge with cameras persisted needs Matter over TCP on start.
+    const tcp =
+      this.storageLocation &&
+      bridgeNeedsTcpForCameras(this.storageLocation, initialData.id)
+        ? CAMERA_TCP_CONFIG
+        : undefined;
+    if (tcp) {
+      loggerService
+        .get("BridgeEnvironmentFactory")
+        .info("matter over tcp enabled, cameras configured (#419)");
+    }
 
     class BridgeWithEnvironment extends Bridge {
       override async dispose(): Promise<void> {
@@ -161,9 +178,10 @@ export class BridgeEnvironmentFactory extends BridgeFactory {
 
     const bridge = new BridgeWithEnvironment(
       env,
-      env.get(LoggerService),
+      loggerService,
       await env.load(BridgeDataProvider),
       await env.load(BridgeEndpointManager),
+      tcp ? { tcp } : undefined,
     );
     await bridge.initialize();
     return bridge;

@@ -136,3 +136,22 @@ describe("camera endpoint bring-up (#419)", () => {
     expect(s.viewport).toEqual({ x1: 0, y1: 0, x2: 1280, y2: 720 });
   });
 });
+
+// #419: guards the matter.js network shape the camera-tcp path depends on.
+describe("bridge server node tcp shape (#419)", () => {
+  it("round-trips network.tcp through ServerNode.create", async () => {
+    server = await ServerNode.create({
+      // biome-ignore lint/suspicious/noExplicitAny: env valid at runtime
+      environment: env as any,
+      id: `camera419-tcp-${counter++}`,
+      network: { port: 0, tcp: { incoming: true, outgoing: false } },
+      commissioning: { passcode: 20202021, discriminator: 3840 },
+      basicInformation: { vendorId: VendorId(0xfff1), productId: 0x8000 },
+    });
+    // biome-ignore lint/suspicious/noExplicitAny: read network state
+    expect((server.state.network as any).tcp).toEqual({
+      incoming: true,
+      outgoing: false,
+    });
+  });
+});

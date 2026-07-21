@@ -23,6 +23,10 @@ import {
   collectAdvertisedAddresses,
   runMdnsAddressWatchTick,
 } from "../../matter/mdns-address-watch.js";
+import {
+  CAMERA_TCP_CONFIG,
+  parseCameraList,
+} from "../../plugins/builtin/camera/camera-tcp-requirement.js";
 import { ensureCommissioningConfig } from "../../utils/ensure-commissioning-config.js";
 import { isHeapUnderPressure, logMemoryUsage } from "../../utils/log-memory.js";
 import { diagnosticEventBus } from "../diagnostics/diagnostic-event-bus.js";
@@ -282,7 +286,48 @@ export class Bridge {
     pluginName: string,
     config: Record<string, unknown>,
   ): Promise<boolean> {
-    return this.endpointManager.updatePluginConfig(pluginName, config);
+    const result = await this.endpointManager.updatePluginConfig(
+      pluginName,
+      config,
+    );
+    // only when the save actually landed, else tcp state drifts from storage
+    if (result && pluginName === "camera") {
+      await this.applyCameraTcp(config);
+    }
+    return result;
+  }
+
+  // #419: cameras need Matter over TCP because the WebRTC offer exceeds the UDP
+  // message size. Match the bridge listener to the saved camera list. Changing
+  // network config takes effect on (re)start, so bounce the bridge if running.
+  private async applyCameraTcp(config: Record<string, unknown>): Promise<void> {
+    const want = parseCameraList(config.cameras).length > 0;
+    const have = !!this.server.state.network.tcp;
+    if (want === have) {
+      return;
+    }
+    this.log.info(
+      want
+        ? "cameras configured, enabling matter over tcp (#419)"
+        : "no cameras left, disabling matter over tcp (#419)",
+    );
+    const running = this.status.code === BridgeStatus.Running;
+    if (running) {
+      await this.stop();
+    }
+    try {
+      await this.server.set({
+        network: { tcp: want ? CAMERA_TCP_CONFIG : undefined },
+      });
+    } catch (e) {
+      this.log.warn(
+        "Could not apply tcp live, restart matterhub to apply it:",
+        e,
+      );
+    }
+    if (running) {
+      await this.start();
+    }
   }
 
   constructor(
@@ -290,12 +335,16 @@ export class Bridge {
     logger: LoggerService,
     private readonly dataProvider: BridgeDataProvider,
     private readonly endpointManager: BridgeEndpointManager,
+    private readonly serverOptions?: {
+      tcp?: { incoming: boolean; outgoing: boolean };
+    },
   ) {
     this.log = logger.get(`Bridge / ${dataProvider.id}`);
     this.server = new BridgeServerNode(
       env,
       this.dataProvider,
       this.endpointManager.root,
+      this.serverOptions,
     );
     const { basicInformation } = this.dataProvider;
     this.log.debugCtx("Root bridge BasicInformation configured", {

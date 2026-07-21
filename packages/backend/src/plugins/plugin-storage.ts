@@ -11,6 +11,20 @@ const logger = Logger.get("PluginStorage");
  */
 const SAVE_DEBOUNCE_MS = 500;
 
+// Path of the JSON file backing one bridge+plugin pair. Shared so #419 can
+// read a bridge's camera config without instantiating the storage.
+export function pluginStorageFilePath(
+  storageDir: string,
+  bridgeId: string,
+  pluginName: string,
+): string {
+  const safe = (s: string) => s.replace(/[^a-zA-Z0-9_-]/g, "_");
+  return path.join(
+    storageDir,
+    `plugin-${safe(bridgeId)}-${safe(pluginName)}.json`,
+  );
+}
+
 export class FilePluginStorage implements PluginStorage {
   private data: Record<string, unknown> = {};
   private dirty = false;
@@ -18,11 +32,7 @@ export class FilePluginStorage implements PluginStorage {
   private saveTimer: ReturnType<typeof setTimeout> | undefined;
 
   constructor(storageDir: string, bridgeId: string, pluginName: string) {
-    const safe = (s: string) => s.replace(/[^a-zA-Z0-9_-]/g, "_");
-    this.filePath = path.join(
-      storageDir,
-      `plugin-${safe(bridgeId)}-${safe(pluginName)}.json`,
-    );
+    this.filePath = pluginStorageFilePath(storageDir, bridgeId, pluginName);
     this.load();
   }
 
