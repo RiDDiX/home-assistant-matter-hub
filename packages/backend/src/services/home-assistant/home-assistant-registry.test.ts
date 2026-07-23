@@ -102,4 +102,37 @@ describe("HomeAssistantRegistry", () => {
     await expect(initPromise).resolves.toBeUndefined();
     expect(fake.connection.sendMessagePromise).toHaveBeenCalled();
   });
+
+  it("times out a hung get_states query instead of blocking Promise.all forever", async () => {
+    const fake = makeConnection();
+    fake.connection.sendMessagePromise = vi.fn((message: { type: string }) => {
+      if (message.type === "get_states") {
+        // The socket stays open but never answers this one query.
+        return new Promise(() => {});
+      }
+      return Promise.resolve([]);
+    }) as unknown as Connection["sendMessagePromise"];
+    const client = { connection: fake.connection } as HomeAssistantClient;
+    const registry = new HomeAssistantRegistry(client, {
+      ...defaultOptions,
+      messageTimeoutMs: 50,
+    });
+    const internal = registry as unknown as {
+      runRegistryQueries(): Promise<boolean>;
+    };
+
+    const outcome = internal.runRegistryQueries().then(
+      () => "resolved" as const,
+      () => "rejected" as const,
+    );
+    // Bounds the assertion in fake-timer time so a still-hanging query fails
+    // the expectation cleanly instead of tripping vitest's real-time timeout.
+    const probe = new Promise<"hung">((resolve) => {
+      setTimeout(() => resolve("hung"), 1000);
+    });
+
+    const race = Promise.race([outcome, probe]);
+    await vi.runAllTimersAsync();
+    await expect(race).resolves.toBe("rejected");
+  });
 });

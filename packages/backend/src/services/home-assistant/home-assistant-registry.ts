@@ -5,11 +5,12 @@ import type {
   HomeAssistantEntityState,
 } from "@home-assistant-matter-hub/common";
 import { Logger } from "@matter/general";
-import { getStates } from "home-assistant-js-websocket";
+import type { HassEntity } from "home-assistant-js-websocket";
 import { fromPairs, keyBy, keys, uniq, values } from "lodash-es";
 import { Service } from "../../core/ioc/service.js";
 import { logMemoryUsage } from "../../utils/log-memory.js";
 import { withRetry } from "../../utils/retry.js";
+import { sendHaMessage } from "../../utils/send-ha-message.js";
 import {
   getAreaRegistry,
   getDeviceRegistry,
@@ -178,7 +179,11 @@ export class HomeAssistantRegistry extends Service {
     const [entityRegistry, statesList, deviceRegistry, labels, areas] =
       await Promise.all([
         getRegistry(connection, timeoutMs),
-        getStates(connection),
+        sendHaMessage<HassEntity[]>(
+          connection,
+          { type: "get_states" },
+          timeoutMs,
+        ),
         getDeviceRegistry(connection, timeoutMs),
         getLabelRegistry(connection, timeoutMs).catch(
           () => [] as HomeAssistantLabel[],
