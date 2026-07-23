@@ -225,7 +225,7 @@ describe("coverSliderDebounceMs collapses back-to-back slider commands (#411)", 
     expect(positionCalls).toHaveLength(0);
   });
 
-  it("stop command clears both lift and tilt pending actions", async () => {
+  it("stop command clears the pending lift action", async () => {
     // Test that stop commands also clear pending actions
     const endpoint = await mount(LIFT_WITH_POSITION, {
       entityId: "cover.blind",
