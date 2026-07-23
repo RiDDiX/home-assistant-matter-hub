@@ -97,6 +97,15 @@ function parseUsercodeSlot(value: string): number | undefined {
   return n;
 }
 
+// PIN length attributes are uint8, the Matter spec keeps them 1..20.
+function parsePinLength(value: string): number | undefined {
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+  const n = Number(trimmed);
+  if (!Number.isInteger(n) || n < 1 || n > 20) return undefined;
+  return n;
+}
+
 interface EntityMappingDialogProps {
   open: boolean;
   entityId: string;
@@ -135,6 +144,8 @@ export function EntityMappingDialog({
   const [disableLockPin, setDisableLockPin] = useState(false);
   const [lockUsercodeService, setLockUsercodeService] = useState("");
   const [lockUsercodeSlot, setLockUsercodeSlot] = useState("");
+  const [lockPinMinLength, setLockPinMinLength] = useState("");
+  const [lockPinMaxLength, setLockPinMaxLength] = useState("");
   const [powerEntity, setPowerEntity] = useState("");
   const [energyEntity, setEnergyEntity] = useState("");
   const [suctionLevelEntity, setSuctionLevelEntity] = useState("");
@@ -220,6 +231,16 @@ export function EntityMappingDialog({
       setLockUsercodeSlot(
         currentMapping?.lockUsercodeSlot != null
           ? String(currentMapping.lockUsercodeSlot)
+          : "",
+      );
+      setLockPinMinLength(
+        currentMapping?.lockPinMinLength != null
+          ? String(currentMapping.lockPinMinLength)
+          : "",
+      );
+      setLockPinMaxLength(
+        currentMapping?.lockPinMaxLength != null
+          ? String(currentMapping.lockPinMaxLength)
           : "",
       );
       setPowerEntity(currentMapping?.powerEntity || "");
@@ -362,6 +383,8 @@ export function EntityMappingDialog({
       disableLockPin: disableLockPin || undefined,
       lockUsercodeService: lockUsercodeService.trim() || undefined,
       lockUsercodeSlot: parseUsercodeSlot(lockUsercodeSlot),
+      lockPinMinLength: parsePinLength(lockPinMinLength),
+      lockPinMaxLength: parsePinLength(lockPinMaxLength),
       powerEntity: powerEntity.trim() || undefined,
       energyEntity: energyEntity.trim() || undefined,
       suctionLevelEntity: suctionLevelEntity.trim() || undefined,
@@ -419,6 +442,8 @@ export function EntityMappingDialog({
     disableLockPin,
     lockUsercodeService,
     lockUsercodeSlot,
+    lockPinMinLength,
+    lockPinMaxLength,
     powerEntity,
     energyEntity,
     suctionLevelEntity,
@@ -1242,6 +1267,26 @@ export function EntityMappingDialog({
               onChange={(e) => setLockUsercodeSlot(e.target.value)}
               helperText="Code slot on the physical lock, default 1"
               slotProps={{ htmlInput: { min: 1, step: 1 } }}
+              sx={{ mt: 1, display: "block" }}
+            />
+            <TextField
+              label="Min PIN length"
+              type="number"
+              size="small"
+              value={lockPinMinLength}
+              onChange={(e) => setLockPinMinLength(e.target.value)}
+              helperText="Override advertised minimum PIN length (1-20). Default 4. Set min = max for locks that require an exact length."
+              slotProps={{ htmlInput: { min: 1, max: 20, step: 1 } }}
+              sx={{ mt: 1, display: "block" }}
+            />
+            <TextField
+              label="Max PIN length"
+              type="number"
+              size="small"
+              value={lockPinMaxLength}
+              onChange={(e) => setLockPinMaxLength(e.target.value)}
+              helperText="Override advertised maximum PIN length (1-20). Default 8. Controllers cache both lengths at pairing, re-pair the bridge after changing them."
+              slotProps={{ htmlInput: { min: 1, max: 20, step: 1 } }}
               sx={{ mt: 1, display: "block" }}
             />
           </>

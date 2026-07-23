@@ -48,6 +48,8 @@ export function entityMappingApi(
       disableLockPin: body.disableLockPin,
       lockUsercodeService: body.lockUsercodeService,
       lockUsercodeSlot: body.lockUsercodeSlot,
+      lockPinMinLength: body.lockPinMinLength,
+      lockPinMaxLength: body.lockPinMaxLength,
       powerEntity: body.powerEntity,
       energyEntity: body.energyEntity,
       suctionLevelEntity: body.suctionLevelEntity,

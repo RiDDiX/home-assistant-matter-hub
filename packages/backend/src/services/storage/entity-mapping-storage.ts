@@ -103,6 +103,11 @@ export class EntityMappingStorage extends Service {
     // Filter roomEntities to only include non-empty strings
     const roomEntities = request.roomEntities?.filter((e) => e?.trim()) || [];
 
+    const pinLengths = sanitizePinLengths(
+      request.lockPinMinLength,
+      request.lockPinMaxLength,
+    );
+
     const config: EntityMappingConfig = {
       entityId: request.entityId,
       matterDeviceType: request.matterDeviceType,
@@ -122,6 +127,8 @@ export class EntityMappingStorage extends Service {
       disableLockPin: request.disableLockPin || undefined,
       lockUsercodeService: request.lockUsercodeService?.trim() || undefined,
       lockUsercodeSlot: sanitizeUsercodeSlot(request.lockUsercodeSlot),
+      lockPinMinLength: pinLengths.min,
+      lockPinMaxLength: pinLengths.max,
       powerEntity: request.powerEntity?.trim() || undefined,
       energyEntity: request.energyEntity?.trim() || undefined,
       pressureEntity: request.pressureEntity?.trim() || undefined,
@@ -184,6 +191,8 @@ export class EntityMappingStorage extends Service {
       !config.disableLockPin &&
       !config.lockUsercodeService &&
       config.lockUsercodeSlot === undefined &&
+      config.lockPinMinLength === undefined &&
+      config.lockPinMaxLength === undefined &&
       !config.powerEntity &&
       !config.energyEntity &&
       !config.pressureEntity &&
@@ -257,6 +266,34 @@ function sanitizeUsercodeSlot(value: unknown): number | undefined {
     return undefined;
   }
   return n;
+}
+
+// PIN length attributes are uint8, the Matter spec keeps them 1..20. Reject
+// anything outside that range rather than silently clamping (#418).
+function sanitizePinLength(value: unknown): number | undefined {
+  if (value === undefined || value === null || value === "") {
+    return undefined;
+  }
+  const n = typeof value === "string" ? Number(value) : value;
+  if (typeof n !== "number" || !Number.isInteger(n) || n < 1 || n > 20) {
+    return undefined;
+  }
+  return n;
+}
+
+// Drop both bounds when the effective range is impossible. A lone bound is
+// checked against the default counterpart (4/8), otherwise min 15 with max
+// unset would be stored while the lock still advertises the 4/8 fallback.
+function sanitizePinLengths(
+  min: unknown,
+  max: unknown,
+): { min: number | undefined; max: number | undefined } {
+  const lo = sanitizePinLength(min);
+  const hi = sanitizePinLength(max);
+  if ((lo ?? 4) > (hi ?? 8)) {
+    return { min: undefined, max: undefined };
+  }
+  return { min: lo, max: hi };
 }
 
 function sanitizeDebounceMs(value: unknown): number | undefined {

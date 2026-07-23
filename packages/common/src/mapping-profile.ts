@@ -23,6 +23,8 @@ export interface MappingProfileEntry {
   readonly disableLockPin?: boolean;
   readonly lockUsercodeService?: string;
   readonly lockUsercodeSlot?: number;
+  readonly lockPinMinLength?: number;
+  readonly lockPinMaxLength?: number;
   readonly powerEntity?: string;
   readonly energyEntity?: string;
   readonly suctionLevelEntity?: string;

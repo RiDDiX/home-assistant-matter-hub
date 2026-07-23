@@ -84,6 +84,43 @@ function usercodePassthroughFrom(
   };
 }
 
+// min/maxPinCodeLength are uint8, Matter spec keeps them 1..20.
+const DEFAULT_MIN_PIN_LENGTH = 4;
+const DEFAULT_MAX_PIN_LENGTH = 8;
+const PIN_LENGTH_SPEC_MIN = 1;
+const PIN_LENGTH_SPEC_MAX = 20;
+
+function clampPinLength(value: number | undefined): number | undefined {
+  if (
+    value === undefined ||
+    !Number.isInteger(value) ||
+    value < PIN_LENGTH_SPEC_MIN ||
+    value > PIN_LENGTH_SPEC_MAX
+  ) {
+    return undefined;
+  }
+  return value;
+}
+
+// Per-entity PIN length override (#418). A lock that wants an exact length sets
+// min == max so controllers advertise the right bounds. Falls back to 4/8 when
+// unset or inconsistent (min > max).
+function effectivePinCodeLengths(homeAssistant: HomeAssistantEntityBehavior): {
+  min: number;
+  max: number;
+} {
+  const min =
+    clampPinLength(homeAssistant.state.mapping?.lockPinMinLength) ??
+    DEFAULT_MIN_PIN_LENGTH;
+  const max =
+    clampPinLength(homeAssistant.state.mapping?.lockPinMaxLength) ??
+    DEFAULT_MAX_PIN_LENGTH;
+  if (min > max) {
+    return { min: DEFAULT_MIN_PIN_LENGTH, max: DEFAULT_MAX_PIN_LENGTH };
+  }
+  return { min, max };
+}
+
 type EnvLike = {
   get: (type: typeof LockCredentialStorage) => LockCredentialStorage;
 };
@@ -453,6 +490,7 @@ class LockServerWithPinBase extends PinCredentialBase {
     const hasPinConfigured =
       !isPinDisabledByMapping &&
       hasStoredCredentialHelper(this.env, homeAssistant.entityId);
+    const pinLengths = effectivePinCodeLengths(homeAssistant);
 
     applyPatchState(this.state, {
       lockState: this.state.config.getLockState(entity.state, this.agent),
@@ -473,8 +511,8 @@ class LockServerWithPinBase extends PinCredentialBase {
       numberOfPinUsersSupported: 1,
       numberOfTotalUsersSupported: 1,
       numberOfCredentialsSupportedPerUser: 1,
-      maxPinCodeLength: 8,
-      minPinCodeLength: 4,
+      maxPinCodeLength: pinLengths.max,
+      minPinCodeLength: pinLengths.min,
       requirePinForRemoteOperation: hasPinConfigured,
     });
   }
@@ -683,6 +721,7 @@ class LockServerWithPinAndUnboltBase extends PinCredentialUnboltBase {
     const hasPinConfigured =
       !isPinDisabledByMapping &&
       hasStoredCredentialHelper(this.env, homeAssistant.entityId);
+    const pinLengths = effectivePinCodeLengths(homeAssistant);
 
     applyPatchState(this.state, {
       lockState: this.state.config.getLockState(entity.state, this.agent),
@@ -703,8 +742,8 @@ class LockServerWithPinAndUnboltBase extends PinCredentialUnboltBase {
       numberOfPinUsersSupported: 1,
       numberOfTotalUsersSupported: 1,
       numberOfCredentialsSupportedPerUser: 1,
-      maxPinCodeLength: 8,
-      minPinCodeLength: 4,
+      maxPinCodeLength: pinLengths.max,
+      minPinCodeLength: pinLengths.min,
       requirePinForRemoteOperation: hasPinConfigured,
     });
   }

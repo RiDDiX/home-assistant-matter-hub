@@ -173,6 +173,15 @@ export interface EntityMappingConfig {
   /** Optional: physical code slot to program, default 1. */
   readonly lockUsercodeSlot?: number;
   /**
+   * Optional: Override the advertised minimum PIN length (uint8, 1..20).
+   * Some physical locks accept only an exact length; controllers enforce the
+   * advertised bounds in their PIN UI. Default 4. Set min == max for a fixed
+   * length (#418). Fixed attributes, controllers cache them until re-pair.
+   */
+  readonly lockPinMinLength?: number;
+  /** Optional: Override the advertised maximum PIN length (uint8, 1..20). Default 8. */
+  readonly lockPinMaxLength?: number;
+  /**
    * Optional: Entity ID of a power sensor (device_class: power, unit: W).
    * Adds ElectricalPowerMeasurement cluster to show real-time power consumption.
    * Example: "sensor.smart_plug_power"
@@ -377,6 +386,8 @@ export interface EntityMappingRequest {
   readonly disableLockPin?: boolean;
   readonly lockUsercodeService?: string;
   readonly lockUsercodeSlot?: number;
+  readonly lockPinMinLength?: number;
+  readonly lockPinMaxLength?: number;
   readonly powerEntity?: string;
   readonly energyEntity?: string;
   readonly suctionLevelEntity?: string;
