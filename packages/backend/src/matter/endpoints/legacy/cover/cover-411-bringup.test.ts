@@ -118,8 +118,20 @@ async function slideLift(endpoint: Endpoint, liftPercent100thsValue: number) {
   });
 }
 
+async function slideTilt(endpoint: Endpoint, tiltPercent100thsValue: number) {
+  await endpoint.act(async (agent) => {
+    // biome-ignore lint/suspicious/noExplicitAny: drive the controller command
+    const a = agent as any;
+    await a.windowCovering.goToTiltPercentage({ tiltPercent100thsValue });
+  });
+}
+
 // open + close + set_position.
 const LIFT_WITH_POSITION = 1 + 2 + 4; // 7
+
+// Tilt-only (e.g. SwitchBot Blind Tilt): open_tilt + close_tilt + stop_tilt +
+// set_tilt_position, no support_open (#350).
+const TILT_ONLY = 16 + 32 + 64 + 128; // 240
 
 describe("coverSliderDebounceMs collapses back-to-back slider commands (#411)", () => {
   it("fires one set_cover_position for the last target within the window", async () => {
@@ -255,5 +267,40 @@ describe("coverSliderDebounceMs collapses back-to-back slider commands (#411)", 
     // Should have exactly one stop_cover call and no set_cover_position calls
     expect(stopCalls).toHaveLength(1);
     expect(positionCalls).toHaveLength(0);
+  });
+});
+
+describe("tilt-only cover: discrete tilt command must clear a stale pendingLift tilt action (#350, #411)", () => {
+  it("goToLiftPercentage then goToTiltPercentage(open) fires the discrete tilt action once, no stale set_cover_tilt_position", async () => {
+    // On a tilt-only cover, setLiftPosition falls back to tilt (#350), so
+    // goToLiftPercentage schedules a debounced set_cover_tilt_position action
+    // in the LIFT slot. A later discrete tilt command only cleared the tilt
+    // slot, so the stale lift-slot tilt action fired anyway ~debounce later.
+    const endpoint = await mount(TILT_ONLY, {
+      entityId: "cover.blind",
+      coverSliderDebounceMs: 1200,
+    });
+
+    calls.length = 0;
+
+    // Lift command on a tilt-only cover: arms pendingLift with a tilt action.
+    await slideLift(endpoint, 5000);
+
+    // Discrete tilt open: fires immediately and must also drop the stale
+    // pendingLift tilt action, not just pendingTilt.
+    await slideTilt(endpoint, 0);
+
+    // Wait past the debounce so the stale pendingLift would fire if not cleared.
+    await delay(1500);
+
+    const tiltOpenCalls = calls.filter(
+      (c) => c.action === "cover.open_cover_tilt",
+    );
+    const tiltPositionCalls = calls.filter(
+      (c) => c.action === "cover.set_cover_tilt_position",
+    );
+
+    expect(tiltOpenCalls).toHaveLength(1);
+    expect(tiltPositionCalls).toHaveLength(0);
   });
 });

@@ -529,7 +529,10 @@ export class WindowCoveringServerBase extends FeaturedBase {
   }
 
   private handleTiltOpen() {
-    clearPendingTilt(getCoverDebounce(this.endpoint));
+    const st = getCoverDebounce(this.endpoint);
+    clearPendingTilt(st);
+    // tilt-only covers park tilt actions in the lift slot, #350
+    if (st.pendingLift?.action.action.includes("tilt")) clearPendingLift(st);
 
     const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);
     homeAssistant.callAction(
@@ -538,7 +541,10 @@ export class WindowCoveringServerBase extends FeaturedBase {
   }
 
   private handleTiltClose() {
-    clearPendingTilt(getCoverDebounce(this.endpoint));
+    const st = getCoverDebounce(this.endpoint);
+    clearPendingTilt(st);
+    // tilt-only covers park tilt actions in the lift slot, #350
+    if (st.pendingLift?.action.action.includes("tilt")) clearPendingLift(st);
 
     const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);
     homeAssistant.callAction(
