@@ -107,6 +107,24 @@ function getCoverDebounce(endpoint: object): CoverDebounceState {
   return st;
 }
 
+// A discrete open/close/stop must drop a pending debounced position, or the
+// stale set_cover_position fires afterwards and the cover moves again (#411).
+function clearPendingLift(st: CoverDebounceState) {
+  if (st.liftTimer) {
+    clearTimeout(st.liftTimer);
+    st.liftTimer = null;
+  }
+  st.pendingLift = null;
+}
+
+function clearPendingTilt(st: CoverDebounceState) {
+  if (st.tiltTimer) {
+    clearTimeout(st.tiltTimer);
+    st.tiltTimer = null;
+  }
+  st.pendingTilt = null;
+}
+
 export class WindowCoveringServerBase extends FeaturedBase {
   declare state: WindowCoveringServerBase.State;
 
@@ -141,14 +159,8 @@ export class WindowCoveringServerBase extends FeaturedBase {
     // timers held in the registry (the fields on this instance never held them).
     const st = coverDebounce.get(this.endpoint);
     if (st) {
-      if (st.liftTimer) {
-        clearTimeout(st.liftTimer);
-      }
-      if (st.tiltTimer) {
-        clearTimeout(st.tiltTimer);
-      }
-      st.pendingLift = null;
-      st.pendingTilt = null;
+      clearPendingLift(st);
+      clearPendingTilt(st);
       coverDebounce.delete(this.endpoint);
     }
     await super[Symbol.asyncDispose]();
@@ -426,11 +438,17 @@ export class WindowCoveringServerBase extends FeaturedBase {
   }
 
   override handleStopMovement() {
+    const st = getCoverDebounce(this.endpoint);
+    clearPendingLift(st);
+    clearPendingTilt(st);
+
     const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);
     homeAssistant.callAction(this.state.config.stopCover(void 0, this.agent));
   }
 
   private handleLiftOpen() {
+    clearPendingLift(getCoverDebounce(this.endpoint));
+
     const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);
     const action = this.state.config.openCoverLift(void 0, this.agent);
     logger.info(`handleLiftOpen: calling action=${action.action}`);
@@ -438,6 +456,8 @@ export class WindowCoveringServerBase extends FeaturedBase {
   }
 
   private handleLiftClose() {
+    clearPendingLift(getCoverDebounce(this.endpoint));
+
     const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);
     const action = this.state.config.closeCoverLift(void 0, this.agent);
     logger.info(`handleLiftClose: calling action=${action.action}`);
@@ -509,6 +529,11 @@ export class WindowCoveringServerBase extends FeaturedBase {
   }
 
   private handleTiltOpen() {
+    const st = getCoverDebounce(this.endpoint);
+    clearPendingTilt(st);
+    // tilt-only covers park tilt actions in the lift slot, #350
+    if (st.pendingLift?.action.action.includes("tilt")) clearPendingLift(st);
+
     const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);
     homeAssistant.callAction(
       this.state.config.openCoverTilt(void 0, this.agent),
@@ -516,6 +541,11 @@ export class WindowCoveringServerBase extends FeaturedBase {
   }
 
   private handleTiltClose() {
+    const st = getCoverDebounce(this.endpoint);
+    clearPendingTilt(st);
+    // tilt-only covers park tilt actions in the lift slot, #350
+    if (st.pendingLift?.action.action.includes("tilt")) clearPendingLift(st);
+
     const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);
     homeAssistant.callAction(
       this.state.config.closeCoverTilt(void 0, this.agent),

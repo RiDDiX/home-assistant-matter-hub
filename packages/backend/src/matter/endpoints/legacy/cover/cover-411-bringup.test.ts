@@ -118,8 +118,20 @@ async function slideLift(endpoint: Endpoint, liftPercent100thsValue: number) {
   });
 }
 
+async function slideTilt(endpoint: Endpoint, tiltPercent100thsValue: number) {
+  await endpoint.act(async (agent) => {
+    // biome-ignore lint/suspicious/noExplicitAny: drive the controller command
+    const a = agent as any;
+    await a.windowCovering.goToTiltPercentage({ tiltPercent100thsValue });
+  });
+}
+
 // open + close + set_position.
 const LIFT_WITH_POSITION = 1 + 2 + 4; // 7
+
+// Tilt-only (e.g. SwitchBot Blind Tilt): open_tilt + close_tilt + stop_tilt +
+// set_tilt_position, no support_open (#350).
+const TILT_ONLY = 16 + 32 + 64 + 128; // 240
 
 describe("coverSliderDebounceMs collapses back-to-back slider commands (#411)", () => {
   it("fires one set_cover_position for the last target within the window", async () => {
@@ -159,5 +171,136 @@ describe("coverSliderDebounceMs collapses back-to-back slider commands (#411)", 
     );
     expect(positionCalls).toHaveLength(1);
     expect((positionCalls[0].data as { position?: number }).position).toBe(49);
+  });
+
+  it("lift to 33% followed by lift to 0% results in single cover.open_cover call", async () => {
+    // This reproduces the exact scenario from logs:
+    // 1. goToLiftPercentage(3300) -> handleGoToLiftPosition(3300) -> schedules debounced set_cover_position(67)
+    // 2. goToLiftPercentage(0) -> handleLiftOpen() -> should clear pending action and call cover.open_cover
+    // Before the fix: both the debounced set_cover_position and immediate cover.open_cover would fire
+    // After the fix: only cover.open_cover should fire
+    const endpoint = await mount(LIFT_WITH_POSITION, {
+      entityId: "cover.blind",
+      // Use a long debounce to ensure the first command would normally fire
+      coverSliderDebounceMs: 1200,
+    });
+
+    calls.length = 0;
+
+    // First command: lift to 33% (3300 in Matter 100ths)
+    // This should schedule a debounced set_cover_position call
+    await slideLift(endpoint, 3300);
+
+    // Second command: lift to 0% (fully open)
+    // This should trigger handleLiftOpen() which should clear the pending debounced action
+    await slideLift(endpoint, 0);
+
+    // Wait long enough for any debounced actions to have fired if they weren't cleared
+    await delay(1500);
+
+    // Filter for the actions we care about
+    const openCalls = calls.filter((c) => c.action === "cover.open_cover");
+    const positionCalls = calls.filter(
+      (c) => c.action === "cover.set_cover_position",
+    );
+
+    // Should have exactly one open_cover call and no set_cover_position calls
+    expect(openCalls).toHaveLength(1);
+    expect(positionCalls).toHaveLength(0);
+  });
+
+  it("lift to 67% followed by lift to 100% results in single cover.close_cover call", async () => {
+    // Test the close boundary as well
+    const endpoint = await mount(LIFT_WITH_POSITION, {
+      entityId: "cover.blind",
+      coverSliderDebounceMs: 1200,
+    });
+
+    calls.length = 0;
+
+    // First command: lift to 67% (6700 in Matter 100ths)
+    await slideLift(endpoint, 6700);
+
+    // Second command: lift to 100% (fully closed)
+    await slideLift(endpoint, 10000);
+
+    // Wait for any debounced actions
+    await delay(1500);
+
+    const closeCalls = calls.filter((c) => c.action === "cover.close_cover");
+    const positionCalls = calls.filter(
+      (c) => c.action === "cover.set_cover_position",
+    );
+
+    // Should have exactly one close_cover call and no set_cover_position calls
+    expect(closeCalls).toHaveLength(1);
+    expect(positionCalls).toHaveLength(0);
+  });
+
+  it("stop command clears the pending lift action", async () => {
+    // Test that stop commands also clear pending actions
+    const endpoint = await mount(LIFT_WITH_POSITION, {
+      entityId: "cover.blind",
+      coverSliderDebounceMs: 1200,
+    });
+
+    calls.length = 0;
+
+    // First command: lift to 50%
+    await slideLift(endpoint, 5000);
+
+    // Send stop command
+    await endpoint.act(async (agent) => {
+      // biome-ignore lint/suspicious/noExplicitAny: drive the stop command
+      const a = agent as any;
+      await a.windowCovering.stopMotion({});
+    });
+
+    // Wait for any debounced actions
+    await delay(1500);
+
+    const stopCalls = calls.filter((c) => c.action === "cover.stop_cover");
+    const positionCalls = calls.filter(
+      (c) => c.action === "cover.set_cover_position",
+    );
+
+    // Should have exactly one stop_cover call and no set_cover_position calls
+    expect(stopCalls).toHaveLength(1);
+    expect(positionCalls).toHaveLength(0);
+  });
+});
+
+describe("tilt-only cover: discrete tilt command must clear a stale pendingLift tilt action (#350, #411)", () => {
+  it("goToLiftPercentage then goToTiltPercentage(open) fires the discrete tilt action once, no stale set_cover_tilt_position", async () => {
+    // On a tilt-only cover, setLiftPosition falls back to tilt (#350), so
+    // goToLiftPercentage schedules a debounced set_cover_tilt_position action
+    // in the LIFT slot. A later discrete tilt command only cleared the tilt
+    // slot, so the stale lift-slot tilt action fired anyway ~debounce later.
+    const endpoint = await mount(TILT_ONLY, {
+      entityId: "cover.blind",
+      coverSliderDebounceMs: 1200,
+    });
+
+    calls.length = 0;
+
+    // Lift command on a tilt-only cover: arms pendingLift with a tilt action.
+    await slideLift(endpoint, 5000);
+
+    // Discrete tilt open: fires immediately and must also drop the stale
+    // pendingLift tilt action, not just pendingTilt.
+    await slideTilt(endpoint, 0);
+
+    // Wait past the debounce so the stale pendingLift would fire if not cleared.
+    await delay(1500);
+
+    const tiltOpenCalls = calls.filter(
+      (c) => c.action === "cover.open_cover_tilt",
+    );
+    const tiltPositionCalls = calls.filter(
+      (c) => c.action === "cover.set_cover_tilt_position",
+    );
+
+    expect(tiltOpenCalls).toHaveLength(1);
+    expect(tiltPositionCalls).toHaveLength(0);
   });
 });
