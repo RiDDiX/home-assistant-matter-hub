@@ -9,6 +9,7 @@ import hu from "./locales/hu.json";
 import it from "./locales/it.json";
 import ja from "./locales/ja.json";
 import pl from "./locales/pl.json";
+import ptBR from "./locales/pt-br.json";
 import ru from "./locales/ru.json";
 import sv from "./locales/sv.json";
 import th from "./locales/th.json";
@@ -110,6 +111,7 @@ i18n
       tr: { translation: tr },
       ru: { translation: ru },
       pl: { translation: pl },
+      "pt-BR": { translation: ptBR },
     },
     fallbackLng: "en",
     interpolation: {
