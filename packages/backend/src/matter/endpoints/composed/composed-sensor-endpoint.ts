@@ -123,14 +123,16 @@ function createEndpointId(entityId: string, customName?: string): string {
   return baseName.replace(/\./g, "_").replace(/\s+/g, "_");
 }
 
+// sub-entities may sit outside the bridge filter (#426, like #408); all three
+// accessors must be unfiltered together, the strict deviceOf throws otherwise.
 function buildEntityPayload(
   registry: BridgeRegistry,
   entityId: string,
 ): HomeAssistantEntityInformation | undefined {
-  const state = registry.initialState(entityId);
+  const state = registry.initialStateIncludingUnfiltered(entityId);
   if (!state) return undefined;
-  const entity = registry.entity(entityId);
-  const deviceRegistry = registry.deviceOf(entityId);
+  const entity = registry.entityIncludingUnfiltered(entityId);
+  const deviceRegistry = registry.deviceOfIncludingUnfiltered(entityId);
   return {
     entity_id: entityId,
     state,
