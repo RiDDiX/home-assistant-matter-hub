@@ -236,6 +236,17 @@ HA's automatic migration adds old names as Assist voice aliases, but those only 
 
 See [#276](https://github.com/RiDDiX/home-assistant-matter-hub/issues/276) for discussion.
 
+## How do I move a device to another integration without losing it in my voice assistant?
+
+HAMH identifies a device by its `entity_id`: the Matter unique id is a hash of it and the endpoint number is stored under it. As long as the new entity ends up with the exact same `entity_id`, controllers keep the device with its rooms, groups and automations.
+
+1. Stop the HAMH add-on (a stopped bridge keeps its endpoint numbers, a device that just disappears while the bridge runs loses its number after a grace period).
+2. Migrate the device (e.g. unpair from the old hub, pair to the new stick).
+3. Rename the new entity to the exact old `entity_id` in Home Assistant.
+4. Start HAMH again. The device re-attaches under the same Matter identity.
+
+Keep the custom names and entity mappings too: they are keyed by `entity_id`, and a `customName` also feeds the stored endpoint identity, so changing it counts as a new device.
+
 ## What's the difference between Stable and Alpha?
 
 - **Stable** (v2.0.49): Production-ready, recommended for daily use
