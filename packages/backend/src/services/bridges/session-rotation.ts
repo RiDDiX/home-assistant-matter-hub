@@ -24,6 +24,22 @@ export function parseSessionMaxAgeHours(
   return n;
 }
 
+// When all subscriptions are lost but sessions remain active, wait this
+// long before force-closing the dead sessions. This breaks the deadlock
+// where the controller holds a stale CASE session and never re-subscribes
+// because it doesn't know the server canceled its subscriptions (#266).
+export const DEAD_SESSION_TIMEOUT_MS = 60_000;
+
+// fastSessionRecovery: drop the dead session after 5s, not 60s (#386).
+// Keep a few seconds so a normal re-subscribe isn't cut off.
+export const FAST_DEAD_SESSION_TIMEOUT_MS = 5_000;
+
+export function deadSessionTimeoutMs(flags?: BridgeFeatureFlags): number {
+  return flags?.fastSessionRecovery
+    ? FAST_DEAD_SESSION_TIMEOUT_MS
+    : DEAD_SESSION_TIMEOUT_MS;
+}
+
 // How long a 0-sub session must be fully silent before it counts as dead.
 // isPeerActive alone only covers ~4s of received traffic, which closed
 // briefly-quiet Apple hub sessions and wedged them on "Updating..." (#398).

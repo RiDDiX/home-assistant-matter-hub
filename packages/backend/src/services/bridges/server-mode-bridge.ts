@@ -32,6 +32,7 @@ import type {
 import type { ServerModeEndpointManager } from "./server-mode-endpoint-manager.js";
 import {
   DEFAULT_SESSION_MAX_AGE_HOURS,
+  deadSessionTimeoutMs,
   parseSessionMaxAgeHours,
   ROTATION_CHECK_INTERVAL_MS,
   SESSION_MAX_AGE_HOURS_RANGE,
@@ -46,12 +47,6 @@ import {
 // Matter controllers. matter.js handles subscription keepalive internally
 // via empty DataReports every ~sendInterval.
 const AUTO_FORCE_SYNC_INTERVAL_MS = 90_000;
-
-// When all subscriptions are lost but sessions remain active, wait this
-// long before force-closing the dead sessions. This breaks the deadlock
-// where the controller holds a stale CASE session and never re-subscribes
-// because it doesn't know the server canceled its subscriptions (#266).
-const DEAD_SESSION_TIMEOUT_MS = 60_000;
 
 // On shutdown, wait at most this long for active sessions to close cleanly.
 // A clean close tells the controller to drop its CASE session right away
@@ -431,17 +426,34 @@ export class ServerModeBridge {
         this.log.debug(
           `Session ${session.id} (peer ${session.peerNodeId}): subscriptions=${session.subscriptions.size} | total: sessions=${sessions.length} subscriptions=${totalSubs}`,
         );
+        diagnosticEventBus.emit(
+          "subscription_changed",
+          `Session ${session.id}: ${session.subscriptions.size} subs (total ${totalSubs})`,
+          {
+            bridgeId: this.data.id,
+            bridgeName: this.data.name,
+            details: {
+              sessionId: session.id,
+              sessionSubs: session.subscriptions.size,
+              totalSessions: sessions.length,
+              totalSubs,
+            },
+          },
+        );
         if (totalSubs === 0 && sessions.length > 0) {
           this.log.warn(
             `All subscriptions lost, ${sessions.length} session(s) still active, waiting for controller to re-subscribe`,
           );
           if (!this.deadSessionTimer) {
+            const timeoutMs = deadSessionTimeoutMs(
+              this.dataProvider.featureFlags,
+            );
             this.deadSessionTimer = setTimeout(() => {
               this.deadSessionTimer = null;
               this.closeDeadSessions();
-            }, DEAD_SESSION_TIMEOUT_MS);
+            }, timeoutMs);
             this.log.info(
-              `Scheduled dead session cleanup in ${DEAD_SESSION_TIMEOUT_MS / 1000}s`,
+              `Scheduled dead session cleanup in ${timeoutMs / 1000}s`,
             );
           }
         } else if (totalSubs > 0 && this.deadSessionTimer) {
@@ -464,7 +476,7 @@ export class ServerModeBridge {
             setTimeout(() => {
               this.staleSessionTimers.delete(session.id);
               this.closeStaleSession(session.id);
-            }, DEAD_SESSION_TIMEOUT_MS),
+            }, deadSessionTimeoutMs(this.dataProvider.featureFlags)),
           );
         } else if (
           session.subscriptions.size > 0 &&
@@ -484,6 +496,15 @@ export class ServerModeBridge {
         this.sessionStartedAt.set(newSession.id, Date.now());
         this.log.info(
           `Session opened: id=${newSession.id} peer=${newSession.peerNodeId}`,
+        );
+        diagnosticEventBus.emit(
+          "session_opened",
+          `Session ${newSession.id} opened (peer ${newSession.peerNodeId})`,
+          {
+            bridgeId: this.data.id,
+            bridgeName: this.data.name,
+            details: { sessionId: newSession.id },
+          },
         );
         // Clean up stale sessions from the same peer that have lost all
         // subscriptions. matter.js 0.16.10 CaseServer does not close
@@ -550,6 +571,18 @@ export class ServerModeBridge {
         this.log.warn(
           `Session closed: id=${session.id} peer=${session.peerNodeId} | remaining sessions=${sessions.length}`,
         );
+        diagnosticEventBus.emit(
+          "session_closed",
+          `Session ${session.id} closed (peer ${session.peerNodeId})`,
+          {
+            bridgeId: this.data.id,
+            bridgeName: this.data.name,
+            details: {
+              sessionId: session.id,
+              remainingSessions: sessions.length,
+            },
+          },
+        );
       };
       sessionManager.sessions.added.on(this.sessionAddedHandler);
       sessionManager.sessions.deleted.on(this.sessionDeletedHandler);
@@ -584,12 +617,12 @@ export class ServerModeBridge {
             setTimeout(() => {
               this.staleSessionTimers.delete(sessionId);
               this.closeStaleSession(sessionId);
-            }, DEAD_SESSION_TIMEOUT_MS),
+            }, deadSessionTimeoutMs(this.dataProvider.featureFlags)),
           );
           break;
         }
         this.log.warn(
-          `Closing stale session ${s.id} (peer ${s.peerNodeId}, no subscriptions for ${DEAD_SESSION_TIMEOUT_MS / 1000}s, no traffic for ${idleSec}s)`,
+          `Closing stale session ${s.id} (peer ${s.peerNodeId}, no subscriptions for ${deadSessionTimeoutMs(this.dataProvider.featureFlags) / 1000}s, no traffic for ${idleSec}s)`,
         );
         s.initiateClose()
           .catch(() => {
@@ -632,7 +665,7 @@ export class ServerModeBridge {
           continue;
         }
         this.log.warn(
-          `Closing dead session ${s.id} (peer ${s.peerNodeId}, no subscriptions for ${DEAD_SESSION_TIMEOUT_MS / 1000}s, no traffic for ${idleSec}s)`,
+          `Closing dead session ${s.id} (peer ${s.peerNodeId}, no subscriptions for ${deadSessionTimeoutMs(this.dataProvider.featureFlags) / 1000}s, no traffic for ${idleSec}s)`,
         );
         closes.push(
           s.initiateClose().catch(() => {
@@ -648,7 +681,7 @@ export class ServerModeBridge {
         this.deadSessionTimer = setTimeout(() => {
           this.deadSessionTimer = null;
           this.closeDeadSessions();
-        }, DEAD_SESSION_TIMEOUT_MS);
+        }, deadSessionTimeoutMs(this.dataProvider.featureFlags));
       }
       if (closes.length > 0) {
         Promise.allSettled(closes).then(() => this.triggerMdnsReAnnounce());

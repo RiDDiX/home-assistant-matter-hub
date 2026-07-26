@@ -1,7 +1,6 @@
 import * as os from "node:os";
 import {
   alexaPairingPortProblem,
-  type BridgeFeatureFlags,
   BridgeStatus,
   type ExposedDeviceType,
   type UpdateBridgeRequest,
@@ -36,6 +35,7 @@ import type {
 } from "./bridge-data-provider.js";
 import type { BridgeEndpointManager } from "./bridge-endpoint-manager.js";
 import {
+  deadSessionTimeoutMs,
   parseSessionMaxAgeHours,
   ROTATION_CHECK_INTERVAL_MS,
   SESSION_MAX_AGE_HOURS_RANGE,
@@ -50,22 +50,6 @@ import {
 // Matter controllers. matter.js handles subscription keepalive internally
 // via empty DataReports every ~sendInterval.
 const AUTO_FORCE_SYNC_INTERVAL_MS = 90_000;
-
-// When all subscriptions are lost but sessions remain active, wait this
-// long before force-closing the dead sessions. This breaks the deadlock
-// where the controller holds a stale CASE session and never re-subscribes
-// because it doesn't know the server canceled its subscriptions (#266).
-const DEAD_SESSION_TIMEOUT_MS = 60_000;
-
-// fastSessionRecovery: drop the dead session after 5s, not 60s (#386).
-// Keep a few seconds so a normal re-subscribe isn't cut off.
-const FAST_DEAD_SESSION_TIMEOUT_MS = 5_000;
-
-export function deadSessionTimeoutMs(flags?: BridgeFeatureFlags): number {
-  return flags?.fastSessionRecovery
-    ? FAST_DEAD_SESSION_TIMEOUT_MS
-    : DEAD_SESSION_TIMEOUT_MS;
-}
 
 // On shutdown, wait at most this long for active sessions to close cleanly.
 // A clean close tells the controller to drop its CASE session right away
