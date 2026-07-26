@@ -45,7 +45,9 @@ export function createEndpointId(
 export function getMappedEntityIds(mapping?: EntityMappingConfig): string[] {
   if (!mapping) return [];
   const ids: string[] = [];
-  if (mapping.batteryEntity) ids.push(mapping.batteryEntity);
+  if (mapping.batteryEntity && !mapping.disableBatteryMapping) {
+    ids.push(mapping.batteryEntity);
+  }
   if (mapping.faultEntity) ids.push(mapping.faultEntity);
   if (mapping.chargingStateEntity) ids.push(mapping.chargingStateEntity);
   if (mapping.temperatureEntity) ids.push(mapping.temperatureEntity);

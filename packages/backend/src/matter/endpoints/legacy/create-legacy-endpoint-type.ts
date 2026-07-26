@@ -92,6 +92,23 @@ export function createLegacyEndpointType(
   areaName?: string,
   options?: LegacyEndpointOptions,
 ): EndpointType | undefined {
+  // Some integrations (e.g. Xiaomi Home) report a bogus battery sensor on
+  // mains-powered devices, which the auto battery mapper then attaches,
+  // causing a false low-battery warning. disableBatteryMapping strips both
+  // battery/battery_level attributes and a mapped batteryEntity here, the
+  // one place every domain factory below reads them from (#427). Shallow
+  // copies only, never mutate the registry's entity/mapping objects.
+  if (mapping?.disableBatteryMapping) {
+    entity = {
+      ...entity,
+      state: {
+        ...entity.state,
+        attributes: stripBatteryAttributes(entity.state.attributes),
+      },
+    };
+    mapping = { ...mapping, batteryEntity: undefined };
+  }
+
   const domain = entity.entity_id.split(".")[0] as HomeAssistantDomain;
   const customName = mapping?.customName;
 
@@ -186,6 +203,24 @@ function addFixedLabel(type: EndpointType, areaName: string): EndpointType {
 
 function hasPowerSource(type: EndpointType): boolean {
   return "powerSource" in type.behaviors;
+}
+
+/**
+ * Shallow copy of the entity attributes with the battery/battery_level keys
+ * removed, so domain factories that fall back to the entity's own battery
+ * attribute (rather than a mapped batteryEntity) don't pick a WithBattery
+ * variant either (#427).
+ */
+function stripBatteryAttributes(
+  attributes: HomeAssistantEntityInformation["state"]["attributes"],
+): HomeAssistantEntityInformation["state"]["attributes"] {
+  const stripped = { ...attributes } as typeof attributes & {
+    battery?: number;
+    battery_level?: number;
+  };
+  delete stripped.battery;
+  delete stripped.battery_level;
+  return stripped;
 }
 
 function addPowerSource(type: EndpointType): EndpointType {

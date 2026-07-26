@@ -20,6 +20,12 @@ function getBatteryPercent(
   agent: Agent,
 ): number | null {
   const homeAssistant = agent.get(HomeAssistantEntityBehavior);
+  // disableBatteryMapping means no battery info for this entity, at init and on
+  // every update. Runtime updates restore the alarm's own battery attribute, so
+  // the reader itself has to honor the flag (#427).
+  if (homeAssistant.state.mapping?.disableBatteryMapping) {
+    return null;
+  }
   const batteryEntity = homeAssistant.state.mapping?.batteryEntity;
   if (batteryEntity) {
     const stateProvider = agent.env.get(EntityStateProvider);

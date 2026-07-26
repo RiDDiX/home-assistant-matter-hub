@@ -115,8 +115,12 @@ export class UserComposedEndpoint extends Endpoint {
     }
 
     // Auto-mapped or explicit battery lives on the parent so controllers show
-    // the device battery, not on a random sub-endpoint.
-    if (config.mapping?.batteryEntity) {
+    // the device battery, not on a random sub-endpoint. Skipped when
+    // disableBatteryMapping is set (#427), even if a batteryEntity is also
+    // (contradictorily) configured.
+    const hasParentBattery =
+      !!config.mapping?.batteryEntity && !config.mapping?.disableBatteryMapping;
+    if (hasParentBattery) {
       parentType = parentType.with(DefaultPowerSourceServer);
     }
 
@@ -126,7 +130,7 @@ export class UserComposedEndpoint extends Endpoint {
     const mappedIds: string[] = [];
 
     // Keep the battery entity subscribed even when it is out of the bridge filter.
-    if (config.mapping?.batteryEntity) {
+    if (hasParentBattery && config.mapping?.batteryEntity) {
       mappedIds.push(config.mapping.batteryEntity);
     }
 

@@ -19,6 +19,7 @@ export interface MappingProfileEntry {
   readonly humidityEntity?: string;
   readonly pressureEntity?: string;
   readonly batteryEntity?: string;
+  readonly disableBatteryMapping?: boolean;
   readonly roomEntities?: string[];
   readonly disableLockPin?: boolean;
   readonly lockUsercodeService?: string;

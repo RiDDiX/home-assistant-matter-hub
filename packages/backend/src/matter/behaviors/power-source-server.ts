@@ -164,6 +164,12 @@ export function PowerSourceServer(config: PowerSourceConfig) {
 export const defaultBatteryConfig: PowerSourceConfig = {
   getBatteryPercent: (entity, agent) => {
     const homeAssistant = agent.get(HomeAssistantEntityBehavior);
+    // No battery info for this entity when the flag is set, at init and on every
+    // update. Runtime updates restore the entity's own battery attribute, so the
+    // reader has to honor the flag directly (#427).
+    if (homeAssistant.state.mapping?.disableBatteryMapping) {
+      return null;
+    }
     const batteryEntity = homeAssistant.state.mapping?.batteryEntity;
     if (batteryEntity) {
       const stateProvider = agent.env.get(EntityStateProvider);

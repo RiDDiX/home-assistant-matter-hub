@@ -13,8 +13,12 @@ export function getVacuumBatteryPercent(
   entity: HomeAssistantEntityState,
   agent: Agent,
 ): number | null {
-  const mapped = agent.get(HomeAssistantEntityBehavior).state.mapping
-    ?.batteryEntity;
+  const mapping = agent.get(HomeAssistantEntityBehavior).state.mapping;
+  // No battery info for this vacuum when the flag is set. The vacuum always gets
+  // a PowerSource, so init strips the attribute but a live update restores it,
+  // unless the reader honors the flag on every read (#427).
+  if (mapping?.disableBatteryMapping) return null;
+  const mapped = mapping?.batteryEntity;
   if (mapped) {
     const battery = agent.env
       .get(EntityStateProvider)

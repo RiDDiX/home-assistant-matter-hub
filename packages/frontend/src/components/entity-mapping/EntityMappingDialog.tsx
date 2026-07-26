@@ -140,6 +140,7 @@ export function EntityMappingDialog({
   const [humidityEntity, setHumidityEntity] = useState("");
   const [pressureEntity, setPressureEntity] = useState("");
   const [batteryEntity, setBatteryEntity] = useState("");
+  const [disableBatteryMapping, setDisableBatteryMapping] = useState(false);
   const [roomEntities, setRoomEntities] = useState<string[]>([]);
   const [disableLockPin, setDisableLockPin] = useState(false);
   const [lockUsercodeService, setLockUsercodeService] = useState("");
@@ -225,6 +226,7 @@ export function EntityMappingDialog({
       setHumidityEntity(currentMapping?.humidityEntity || "");
       setPressureEntity(currentMapping?.pressureEntity || "");
       setBatteryEntity(currentMapping?.batteryEntity || "");
+      setDisableBatteryMapping(currentMapping?.disableBatteryMapping || false);
       setRoomEntities(currentMapping?.roomEntities || []);
       setDisableLockPin(currentMapping?.disableLockPin || false);
       setLockUsercodeService(currentMapping?.lockUsercodeService || "");
@@ -377,6 +379,7 @@ export function EntityMappingDialog({
       humidityEntity: humidityEntity.trim() || undefined,
       pressureEntity: pressureEntity.trim() || undefined,
       batteryEntity: batteryEntity.trim() || undefined,
+      disableBatteryMapping: disableBatteryMapping || undefined,
       roomEntities: roomEntities.length > 0 ? roomEntities : undefined,
       customServiceAreas:
         customServiceAreas.length > 0 ? customServiceAreas : undefined,
@@ -438,6 +441,7 @@ export function EntityMappingDialog({
     humidityEntity,
     pressureEntity,
     batteryEntity,
+    disableBatteryMapping,
     roomEntities,
     disableLockPin,
     lockUsercodeService,
@@ -1459,6 +1463,17 @@ export function EntityMappingDialog({
             />
           }
           label="Disable this entity (exclude from bridge)"
+        />
+
+        <FormControlLabel
+          control={
+            <Switch
+              checked={disableBatteryMapping}
+              onChange={(e) => setDisableBatteryMapping(e.target.checked)}
+            />
+          }
+          label="Disable battery mapping (skip an auto-detected or manually mapped battery sensor for this entity; use when an integration like Xiaomi Home reports a bogus battery sensor on a mains-powered device, causing a false low-battery warning in Matter controllers)"
+          sx={{ mt: 1, display: "block" }}
         />
 
         <TextField

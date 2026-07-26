@@ -137,6 +137,15 @@ export interface EntityMappingConfig {
    */
   readonly batteryEntity?: string;
   /**
+   * Optional: Skip attaching a battery source to this entity, whether from a
+   * same-device auto-mapped sensor or the entity's own battery/battery_level
+   * attribute. Some integrations (e.g. Xiaomi Home) report a bogus battery
+   * sensor on mains-powered devices, causing a false low-battery warning in
+   * Matter controllers.
+   * Default: false (battery mapping applies normally)
+   */
+  readonly disableBatteryMapping?: boolean;
+  /**
    * Optional: Entity ID of a problem/safety binary sensor on the same device.
    * Drives hardwareFaultAlert on a smoke/CO alarm (#408).
    * Example: "binary_sensor.smoke_problem"
@@ -381,6 +390,7 @@ export interface EntityMappingRequest {
   readonly humidityEntity?: string;
   readonly pressureEntity?: string;
   readonly batteryEntity?: string;
+  readonly disableBatteryMapping?: boolean;
   readonly chargingStateEntity?: string;
   readonly roomEntities?: string[];
   readonly disableLockPin?: boolean;

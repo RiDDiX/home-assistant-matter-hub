@@ -156,7 +156,8 @@ export class LegacyEndpoint extends EntityEndpoint {
       const isVacuum = entityId.startsWith("vacuum.");
       if (
         (registry.isAutoBatteryMappingEnabled() || isVacuum) &&
-        !mapping?.batteryEntity
+        !mapping?.batteryEntity &&
+        !mapping?.disableBatteryMapping
       ) {
         const batteryEntityId = registry.findBatteryEntityForDevice(
           entity.device_id,
@@ -430,7 +431,9 @@ export class LegacyEndpoint extends EntityEndpoint {
           primaryEntityId: entityId,
           humidityEntityId: effectiveMapping?.humidityEntity,
           pressureEntityId: effectiveMapping?.pressureEntity,
-          batteryEntityId: effectiveMapping?.batteryEntity,
+          batteryEntityId: effectiveMapping?.disableBatteryMapping
+            ? undefined
+            : effectiveMapping?.batteryEntity,
           powerEntityId: effectiveMapping?.powerEntity,
           energyEntityId: effectiveMapping?.energyEntity,
           customName: effectiveMapping?.customName,
@@ -468,7 +471,9 @@ export class LegacyEndpoint extends EntityEndpoint {
             primaryEntityId: entityId,
             temperatureEntityId,
             humidityEntityId,
-            batteryEntityId: effectiveMapping?.batteryEntity,
+            batteryEntityId: effectiveMapping?.disableBatteryMapping
+              ? undefined
+              : effectiveMapping?.batteryEntity,
             powerEntityId: effectiveMapping?.powerEntity,
             energyEntityId: effectiveMapping?.energyEntity,
             mapping: effectiveMapping,
