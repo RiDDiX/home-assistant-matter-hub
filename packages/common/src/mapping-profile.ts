@@ -44,6 +44,7 @@ export interface MappingProfileEntry {
   readonly climateKeepModeOnIdle?: boolean;
   readonly climateExposeFan?: boolean;
   readonly climateAutoMode?: ClimateAutoMode;
+  readonly disableMomentaryFlip?: boolean;
 }
 
 export interface MappingProfile {

@@ -347,6 +347,16 @@ export interface EntityMappingConfig {
    * vendor-specific room cleaning commands.
    */
   readonly cleanAreaRooms?: import("./domains/vacuum.js").CleanAreaRoom[];
+  /**
+   * Optional: Skip the optimistic on/off flip for momentary entities (script,
+   * scene, automation, input_button, button). These normally report on, then
+   * auto-reset to off about a second later, so controllers don't show a
+   * stuck "on" state. Some Echo devices wedge on that unsolicited on->off
+   * report pair until restarted (#423). When set, the state stays off and no
+   * report is sent; the underlying HA action still fires.
+   * Default: false (report the on/off flip normally)
+   */
+  readonly disableMomentaryFlip?: boolean;
 }
 
 export interface CustomServiceArea {
@@ -425,6 +435,7 @@ export interface EntityMappingRequest {
   readonly climateExposeFan?: boolean;
   readonly climateAutoMode?: ClimateAutoMode;
   readonly composedEntities?: ComposedSubEntity[];
+  readonly disableMomentaryFlip?: boolean;
 }
 
 export interface EntityMappingResponse {

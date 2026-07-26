@@ -245,6 +245,7 @@ export function backupApi(
                     fanWindPresets: config.fanWindPresets,
                     fanRestoreSpeedOnPowerOn: config.fanRestoreSpeedOnPowerOn,
                     composedEntities: config.composedEntities,
+                    disableMomentaryFlip: config.disableMomentaryFlip,
                   });
                   mappingsRestored++;
                 }
@@ -436,6 +437,7 @@ export function backupApi(
                   customFanSpeedTags: config.customFanSpeedTags,
                   fanWindPresets: config.fanWindPresets,
                   composedEntities: config.composedEntities,
+                  disableMomentaryFlip: config.disableMomentaryFlip,
                 });
                 mappingsRestored++;
               }

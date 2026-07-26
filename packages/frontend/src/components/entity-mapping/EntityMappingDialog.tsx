@@ -179,6 +179,7 @@ export function EntityMappingDialog({
   const [climateAutoMode, setClimateAutoMode] = useState<ClimateAutoMode | "">(
     "",
   );
+  const [disableMomentaryFlip, setDisableMomentaryFlip] = useState(false);
   const composedKeyRef = useRef(0);
   const [composedEntities, setComposedEntities] = useState<
     (ComposedSubEntity & { _key: number })[]
@@ -289,6 +290,7 @@ export function EntityMappingDialog({
         currentMapping?.fanRestoreSpeedOnPowerOn || false,
       );
       setClimateAutoMode(currentMapping?.climateAutoMode || "");
+      setDisableMomentaryFlip(currentMapping?.disableMomentaryFlip || false);
       composedKeyRef.current = 0;
       setComposedEntities(
         (currentMapping?.composedEntities || []).map((e) => ({
@@ -419,6 +421,7 @@ export function EntityMappingDialog({
       climateExposeFan: climateExposeFan || undefined,
       fanRestoreSpeedOnPowerOn: fanRestoreSpeedOnPowerOn || undefined,
       climateAutoMode: climateAutoMode || undefined,
+      disableMomentaryFlip: disableMomentaryFlip || undefined,
       composedEntities:
         composedEntities.filter((e) => e.entityId?.trim()).length > 0
           ? composedEntities
@@ -474,6 +477,7 @@ export function EntityMappingDialog({
     climateExposeFan,
     fanRestoreSpeedOnPowerOn,
     climateAutoMode,
+    disableMomentaryFlip,
     composedEntities,
     onSave,
   ]);
@@ -529,6 +533,16 @@ export function EntityMappingDialog({
       currentDomain === "light" ||
       matterDeviceType === "on_off_plugin_unit" ||
       matterDeviceType === "dimmable_plugin_unit");
+
+  // Show momentary-flip disable option for entities that only pulse on then
+  // auto-reset off (no real "on" state to hold), the source of the Echo
+  // wedge in #423.
+  const showMomentaryFlipField =
+    currentDomain === "script" ||
+    currentDomain === "scene" ||
+    currentDomain === "automation" ||
+    currentDomain === "input_button" ||
+    currentDomain === "button";
 
   const availableTypes = Object.entries(matterDeviceTypeLabels) as [
     MatterDeviceType,
@@ -1475,6 +1489,19 @@ export function EntityMappingDialog({
           label="Disable battery mapping (skip an auto-detected or manually mapped battery sensor for this entity; use when an integration like Xiaomi Home reports a bogus battery sensor on a mains-powered device, causing a false low-battery warning in Matter controllers)"
           sx={{ mt: 1, display: "block" }}
         />
+
+        {showMomentaryFlipField && (
+          <FormControlLabel
+            control={
+              <Switch
+                checked={disableMomentaryFlip}
+                onChange={(e) => setDisableMomentaryFlip(e.target.checked)}
+              />
+            }
+            label="Do not report the on/off flip after a run. Try this when Alexa devices on script bridges stop responding."
+            sx={{ mt: 1, display: "block" }}
+          />
+        )}
 
         <TextField
           fullWidth

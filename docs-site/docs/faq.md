@@ -109,6 +109,14 @@ This is typically caused by stale sessions, Alexa goes offline but the bridge ke
 
 See [#105](https://github.com/RiDDiX/home-assistant-matter-hub/issues/105) for details.
 
+## Alexa stops responding to any device after running a script/scene
+
+Script, scene, automation, and input_button entities are momentary, they report "on" then automatically reset to "off" about a second later, since there is no Matter scene device type to represent them properly. Some Echo devices get stuck on that on/off report pair: after running one of these, Alexa stops forwarding commands to the whole bridge until it is restarted.
+
+If this happens on a bridge with script/scene/automation/input_button/button entities, open **Entity Mapping** for the affected entity and enable **"Do not report the on/off flip after a run"** (`disableMomentaryFlip`). The Home Assistant action still runs, but the entity no longer reports the flip, so Alexa has nothing to choke on.
+
+See [#423](https://github.com/RiDDiX/home-assistant-matter-hub/issues/423).
+
 ## My cover / blinds open and close commands are inverted
 
 Matter and Home Assistant use different conventions for cover position percentages. Use the bridge feature flags to fix this:

@@ -76,6 +76,7 @@ export function entityMappingApi(
       climateExposeFan: body.climateExposeFan,
       climateAutoMode: body.climateAutoMode,
       composedEntities: body.composedEntities,
+      disableMomentaryFlip: body.disableMomentaryFlip,
     };
 
     const config = await mappingStorage.setMapping(request);

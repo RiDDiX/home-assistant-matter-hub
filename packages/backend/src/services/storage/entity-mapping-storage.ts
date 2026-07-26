@@ -172,6 +172,7 @@ export class EntityMappingStorage extends Service {
       composedEntities:
         request.composedEntities?.filter((e) => e.entityId?.trim()) ??
         undefined,
+      disableMomentaryFlip: request.disableMomentaryFlip || undefined,
     };
 
     if (
@@ -223,7 +224,8 @@ export class EntityMappingStorage extends Service {
       !config.climateKeepModeOnIdle &&
       !config.climateExposeFan &&
       !config.climateAutoMode &&
-      (!config.composedEntities || config.composedEntities.length === 0)
+      (!config.composedEntities || config.composedEntities.length === 0) &&
+      !config.disableMomentaryFlip
     ) {
       bridgeMap.delete(request.entityId);
     } else {

@@ -114,10 +114,19 @@ class OnOffServerBase extends Base {
     const action = turnOn
       ? turnOn(void 0, this.agent)
       : defaultOnOffAction(homeAssistant.entityId, true);
-    // Set onOff immediately so the controller gets instant feedback in the
-    // command response. Without this, Apple Home shows "Turning on..." until
-    // the async HA WebSocket state update arrives.
-    applyPatchState(this.state, { onOff: true });
+    // Momentary entities (script/scene/automation/input_button) normally get
+    // an optimistic onOff true plus a ~1s auto-reset to false, producing an
+    // unsolicited on->off report pair per activation. Some Echo devices wedge
+    // on that pair until restarted (#423). disableMomentaryFlip skips both:
+    // the HA action still fires, but the state stays off and nothing reports.
+    const skipMomentaryFlip =
+      turnOff === null && homeAssistant.state.mapping?.disableMomentaryFlip;
+    if (!skipMomentaryFlip) {
+      // Set onOff immediately so the controller gets instant feedback in the
+      // command response. Without this, Apple Home shows "Turning on..." until
+      // the async HA WebSocket state update arrives.
+      applyPatchState(this.state, { onOff: true });
+    }
     if (!action) {
       // Callback explicitly returned undefined = skip HA action
       // (e.g., climate already on, no need to send turn_on)
@@ -126,16 +135,18 @@ class OnOffServerBase extends Base {
     logger.info(`[${homeAssistant.entityId}] Turning ON -> ${action.action}`);
     // Notify LevelControlServer about turn-on for Alexa brightness workaround
     notifyLightTurnedOn(homeAssistant.entityId);
-    const now = Date.now();
-    sweepOptimisticOnOff(now);
-    optimisticOnOffState.set(homeAssistant.entityId, {
-      expectedOnOff: true,
-      timestamp: now,
-    });
+    if (!skipMomentaryFlip) {
+      const now = Date.now();
+      sweepOptimisticOnOff(now);
+      optimisticOnOffState.set(homeAssistant.entityId, {
+        expectedOnOff: true,
+        timestamp: now,
+      });
+    }
     homeAssistant.callAction(action);
     // Auto-reset for momentary actions (scenes, automations) so controllers
     // don't show a permanently "on" state after activation.
-    if (turnOff === null) {
+    if (turnOff === null && !skipMomentaryFlip) {
       setTimeout(this.callback(this.autoReset), 1000);
     }
   }

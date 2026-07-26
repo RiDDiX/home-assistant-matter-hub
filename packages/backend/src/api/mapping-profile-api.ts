@@ -49,6 +49,7 @@ function configToProfileEntry(
     climateKeepModeOnIdle: config.climateKeepModeOnIdle,
     climateExposeFan: config.climateExposeFan,
     climateAutoMode: config.climateAutoMode,
+    disableMomentaryFlip: config.disableMomentaryFlip,
   };
 }
 
@@ -219,6 +220,7 @@ export function mappingProfileApi(
           climateKeepModeOnIdle: entry.climateKeepModeOnIdle,
           climateExposeFan: entry.climateExposeFan,
           climateAutoMode: entry.climateAutoMode,
+          disableMomentaryFlip: entry.disableMomentaryFlip,
         });
         applied++;
       } catch (e) {
