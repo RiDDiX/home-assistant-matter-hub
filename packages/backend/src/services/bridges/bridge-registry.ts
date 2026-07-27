@@ -373,6 +373,12 @@ export class BridgeRegistry {
     return this.dataProvider.featureFlags?.vacuumOnOff === true;
   }
 
+  // Consume frozen device identities (#404). Seeding always runs; only
+  // consumption of the stored endpoint id/anchor is gated on this flag.
+  isStableIdentityEnabled(): boolean {
+    return this.dataProvider.featureFlags?.stableIdentity === true;
+  }
+
   /**
    * Check if the vacuum OnOff cluster should be included for server-mode vacuums.
    * Defaults to OFF. OnOff is NOT part of the RoboticVacuumCleaner (0x74) device

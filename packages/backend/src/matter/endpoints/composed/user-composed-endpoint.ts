@@ -62,6 +62,12 @@ export interface UserComposedConfig {
   composedEntities: ComposedSubEntity[];
   customName?: string;
   areaName?: string;
+  // Resolved stable endpoint id (keyed on the primary entity). Falls back to the
+  // entity_id derivation when unset (#404).
+  endpointId?: string;
+  // Identity anchor (the primary's seed entity_id) so the parent freezes
+  // uniqueId/serialNumber across a rename of the primary (#404).
+  identityAnchor?: string;
 }
 
 /**
@@ -124,7 +130,8 @@ export class UserComposedEndpoint extends Endpoint {
       parentType = parentType.with(DefaultPowerSourceServer);
     }
 
-    const endpointId = createEndpointId(primaryEntityId, config.customName);
+    const endpointId =
+      config.endpointId ?? createEndpointId(primaryEntityId, config.customName);
     const parts: Endpoint[] = [];
     const subEndpointMap = new Map<string, Endpoint>();
     const mappedIds: string[] = [];
@@ -223,6 +230,7 @@ export class UserComposedEndpoint extends Endpoint {
         entity: primaryPayload,
         customName: config.customName,
         mapping: config.mapping,
+        identityAnchor: config.identityAnchor,
       },
     });
 

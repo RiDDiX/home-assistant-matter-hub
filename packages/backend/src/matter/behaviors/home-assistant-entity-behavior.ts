@@ -55,6 +55,12 @@ export namespace HomeAssistantEntityBehavior {
     customName?: string;
     /** Entity mapping configuration (optional, used for advanced features like filter life sensor) */
     mapping?: EntityMappingConfig;
+    /**
+     * Stable identity anchor for uniqueId/serialNumber. Set to the entity_id the
+     * identity was first seeded under, so those stay frozen across HA renames.
+     * Undefined falls back to the live entity_id (legacy behaviour).
+     */
+    identityAnchor?: string;
   }
 
   export class Events extends EventEmitter {

@@ -12,6 +12,7 @@ import type { HomeAssistantClient } from "../services/home-assistant/home-assist
 import type { HomeAssistantRegistry } from "../services/home-assistant/home-assistant-registry.js";
 import type { AppSettingsStorage } from "../services/storage/app-settings-storage.js";
 import type { BridgeStorage } from "../services/storage/bridge-storage.js";
+import type { EntityIdentityStorage } from "../services/storage/entity-identity-storage.js";
 import type { EntityMappingStorage } from "../services/storage/entity-mapping-storage.js";
 import type { LockCredentialStorage } from "../services/storage/lock-credential-storage.js";
 import { accessLogger } from "./access-log.js";
@@ -68,6 +69,7 @@ export class WebApi extends Service {
     private readonly haRegistry: HomeAssistantRegistry,
     private readonly bridgeStorage: BridgeStorage,
     private readonly mappingStorage: EntityMappingStorage,
+    private readonly identityStorage: EntityIdentityStorage,
     private readonly lockCredentialStorage: LockCredentialStorage,
     private readonly settingsStorage: AppSettingsStorage,
     private readonly backupService: BackupService,
@@ -94,7 +96,10 @@ export class WebApi extends Service {
     api
       .use(express.json())
       .use(nocache())
-      .use("/matter", matterApi(this.bridgeService, this.haRegistry))
+      .use(
+        "/matter",
+        matterApi(this.bridgeService, this.haRegistry, this.identityStorage),
+      )
       .use(
         "/health",
         healthApi(
@@ -110,7 +115,10 @@ export class WebApi extends Service {
         "/device-images",
         deviceImageApi(this.props.storageLocation, this.haRegistry),
       )
-      .use("/entity-mappings", entityMappingApi(this.mappingStorage))
+      .use(
+        "/entity-mappings",
+        entityMappingApi(this.mappingStorage, this.identityStorage),
+      )
       .use("/mapping-profiles", mappingProfileApi(this.mappingStorage))
       .use("/lock-credentials", lockCredentialApi(this.lockCredentialStorage))
       .use(

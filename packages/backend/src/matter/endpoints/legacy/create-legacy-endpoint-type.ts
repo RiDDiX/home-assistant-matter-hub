@@ -91,6 +91,7 @@ export function createLegacyEndpointType(
   mapping?: EntityMappingConfig,
   areaName?: string,
   options?: LegacyEndpointOptions,
+  identityAnchor?: string,
 ): EndpointType | undefined {
   // Some integrations (e.g. Xiaomi Home) report a bogus battery sensor on
   // mains-powered devices, which the auto battery mapper then attaches,
@@ -111,13 +112,16 @@ export function createLegacyEndpointType(
 
   const domain = entity.entity_id.split(".")[0] as HomeAssistantDomain;
   const customName = mapping?.customName;
+  // Build the behavior state once so identityAnchor rides along to every factory
+  // and BasicInformationServer freezes uniqueId/serial to it (#404).
+  const ha = { entity, customName, mapping, identityAnchor };
 
   let type: EndpointType | undefined;
 
   if (mapping?.matterDeviceType) {
     const overrideFactory = matterDeviceTypeFactories[mapping.matterDeviceType];
     if (overrideFactory) {
-      type = overrideFactory({ entity, customName, mapping });
+      type = overrideFactory(ha);
       // Explicit device types skip the domain path that swaps in battery
       // variants, so attach a power source when a battery entity is mapped
       // and the type does not already carry one (e.g. vacuum).
@@ -131,14 +135,14 @@ export function createLegacyEndpointType(
     // Vacuum needs special handling for the vacuumOnOff feature flag
     if (domain === "vacuum") {
       type = VacuumDevice(
-        { entity, customName, mapping },
+        ha,
         options?.vacuumOnOff,
         options?.cleaningModeOptions,
       );
     } else {
       const factory = deviceCtrs[domain];
       if (factory) {
-        type = factory({ entity, customName, mapping });
+        type = factory(ha);
       } else if (options?.pluginDomainMappings?.has(domain)) {
         const mappedType = options.pluginDomainMappings.get(domain)!;
         const mappedFactory =
@@ -147,7 +151,7 @@ export function createLegacyEndpointType(
           legacyLogger.info(
             `Using plugin domain mapping for "${domain}" → "${mappedType}"`,
           );
-          type = mappedFactory({ entity, customName, mapping });
+          type = mappedFactory(ha);
         }
       } else {
         return undefined;

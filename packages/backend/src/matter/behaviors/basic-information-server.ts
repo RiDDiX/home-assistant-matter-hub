@@ -32,6 +32,9 @@ export class BasicInformationServer extends Base {
     const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);
     const device = entity.deviceRegistry;
     const mapping = homeAssistant.state.mapping;
+    // Frozen identity anchor: read from state (stable across transactions), never
+    // an instance field. Falls back to the live entity_id when unset (#404).
+    const anchor = homeAssistant.state.identityAnchor ?? entity.entity_id;
     const registryName = featureFlags?.preferEntityRegistryName
       ? (entity.registry?.name ?? entity.registry?.original_name)
       : undefined;
@@ -55,7 +58,7 @@ export class BasicInformationServer extends Base {
     const rawSerial =
       ellipse(maxRawLen, mapping?.customSerialNumber) ??
       registrySerial ??
-      hash(maxRawLen, entity.entity_id);
+      hash(maxRawLen, anchor);
     const serialNumber =
       rawSerial && serialNumberSuffix
         ? `${rawSerial}${serialNumberSuffix}`
@@ -92,21 +95,21 @@ export class BasicInformationServer extends Base {
       // multiple fabric connections. Using MD5 hash of entity_id for stability.
       // uniqueIdSuffix mints a fresh identity so stale controller cloud
       // records keyed on it can be shed (#385).
-      uniqueId: this.frozenUniqueId(entity.entity_id),
+      uniqueId: this.frozenUniqueId(anchor),
     });
     logger.debug(
       `[${entity.entity_id}] basicInfo vendor=${this.state.vendorName} product=${this.state.productName} label=${this.state.productLabel} serial=${this.state.serialNumber} node=${this.state.nodeLabel} uniqueId=${this.state.uniqueId}`,
     );
   }
 
-  private frozenUniqueId(entityId: string): string {
+  private frozenUniqueId(anchor: string): string {
     const provider = this.env.get(BridgeDataProvider);
-    const key = `${provider.id}:${entityId}`;
+    const key = `${provider.id}:${anchor}`;
     let uniqueId = appliedUniqueIds.get(key);
     if (uniqueId == null) {
       uniqueId = crypto
         .createHash("md5")
-        .update(entityId + (provider.uniqueIdSuffix ?? ""))
+        .update(anchor + (provider.uniqueIdSuffix ?? ""))
         .digest("hex")
         .substring(0, 32);
       appliedUniqueIds.set(key, uniqueId);

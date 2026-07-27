@@ -31,6 +31,7 @@ export class ServerModeVacuumEndpoint extends EntityEndpoint {
     registry: BridgeRegistry,
     entityId: string,
     mapping?: EntityMappingConfig,
+    endpointId?: string,
   ): Promise<ServerModeVacuumEndpoint | undefined> {
     const deviceRegistry = registry.deviceOf(entityId);
     let state = registry.initialState(entityId);
@@ -262,6 +263,7 @@ export class ServerModeVacuumEndpoint extends EntityEndpoint {
       entityId,
       customName,
       mappedIds,
+      endpointId,
     );
   }
 
@@ -274,8 +276,9 @@ export class ServerModeVacuumEndpoint extends EntityEndpoint {
     entityId: string,
     customName?: string,
     mappedEntityIds?: string[],
+    endpointId?: string,
   ) {
-    super(type, entityId, customName, mappedEntityIds);
+    super(type, entityId, customName, mappedEntityIds, endpointId);
     // Debounce state updates to batch rapid changes into a single transaction.
     // HA sends vacuum state updates every 5-10s even when unchanged.
     // Without debouncing, each triggers a separate Matter.js transaction.

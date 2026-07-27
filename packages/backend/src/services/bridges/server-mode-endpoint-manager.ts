@@ -16,9 +16,15 @@ import { isHeapUnderPressure } from "../../utils/log-memory.js";
 import { subscribeEntities } from "../home-assistant/api/subscribe-entities.js";
 import type { HomeAssistantClient } from "../home-assistant/home-assistant-client.js";
 import type { HomeAssistantStates } from "../home-assistant/home-assistant-registry.js";
+import type { EntityIdentityStorage } from "../storage/entity-identity-storage.js";
 import type { EntityMappingStorage } from "../storage/entity-mapping-storage.js";
 import type { BridgeDataProvider } from "./bridge-data-provider.js";
 import type { BridgeRegistry } from "./bridge-registry.js";
+import {
+  IdentityResolver,
+  identityKey,
+  type ResolvedIdentity,
+} from "./identity-resolver.js";
 
 // Hard cap so a wildcard matcher cannot mint dozens of root endpoints (#301).
 export const MAX_SERVER_MODE_DEVICES = 10;
@@ -50,15 +56,22 @@ export class ServerModeEndpointManager extends Service {
     return [...this.endpoints.values()].map((entry) => entry.endpoint);
   }
 
+  private readonly identityResolver: IdentityResolver;
+
   constructor(
     private readonly serverNode: ServerModeServerNode,
     private readonly client: HomeAssistantClient,
     private readonly registry: BridgeRegistry,
     private readonly mappingStorage: EntityMappingStorage,
+    identityStorage: EntityIdentityStorage,
     private readonly dataProvider: BridgeDataProvider,
     private readonly log: Logger,
   ) {
     super("ServerModeEndpointManager");
+    this.identityResolver = new IdentityResolver(
+      identityStorage,
+      mappingStorage,
+    );
   }
 
   private getEntityMapping(entityId: string): EntityMappingConfig | undefined {
@@ -147,6 +160,20 @@ export class ServerModeEndpointManager extends Service {
     }
   }
 
+  // Like removeEndpoints but close() keeps the persisted number pre-allocated,
+  // so a same-id recreate reuses it. Used on rename and same-id recreates (#404).
+  private async closeEndpoint(entityId: string): Promise<void> {
+    const entry = this.endpoints.get(entityId);
+    if (!entry) return;
+    try {
+      await entry.endpoint.close();
+    } catch (e) {
+      this.log.warn(`Failed to close endpoint ${entityId}:`, e);
+    }
+    this.serverNode.forgetDevice(entry.endpoint);
+    this.endpoints.delete(entityId);
+  }
+
   async refreshDevices(): Promise<void> {
     this.registry.refresh();
     this._failedEntities = [];
@@ -182,11 +209,55 @@ export class ServerModeEndpointManager extends Service {
         );
       }
 
-      // drop endpoints whose entity no longer matches the filter
+      // Phase 0: resolve stable identities up front so a rename maps to its
+      // existing endpoint id and keeps the device number (#404).
+      const stableIdentity =
+        this.dataProvider.featureFlags?.stableIdentity === true;
+      const resolvedByEntity = new Map<string, ResolvedIdentity>();
+      const endpointIdToEntity = new Map<string, string>();
+      const claimedEndpointIds = new Map<string, string>();
+      for (const entityId of orderedIds) {
+        const entityInfo = {
+          entity_id: entityId,
+          registry: this.registry.entity(entityId),
+        };
+        const resolved = await this.identityResolver.resolveIdentity(
+          this.dataProvider.id,
+          entityInfo,
+          this.getEntityMapping(entityId),
+          {
+            stableIdentity,
+            isEndpointIdTaken: (id, key) =>
+              claimedEndpointIds.has(id) && claimedEndpointIds.get(id) !== key,
+          },
+        );
+        resolvedByEntity.set(entityId, resolved);
+        claimedEndpointIds.set(
+          resolved.endpointId,
+          identityKey(entityInfo) ?? `\u0000e:${entityId}`,
+        );
+        endpointIdToEntity.set(resolved.endpointId, entityId);
+      }
+
+      // drop endpoints whose entity no longer matches the filter. A rename keeps
+      // its endpoint id under a different entity, so close() (keep number)
+      // instead of delete() (frees number) for those (#404).
       const keep = new Set(orderedIds);
       const removed = [...this.endpoints.keys()].filter((id) => !keep.has(id));
       let structureChanged = removed.length > 0;
-      await this.removeEndpoints(removed);
+      const genuinelyRemoved: string[] = [];
+      for (const oldId of removed) {
+        const entry = this.endpoints.get(oldId);
+        const claimant = entry
+          ? endpointIdToEntity.get(entry.endpoint.id)
+          : undefined;
+        if (entry && claimant != null && claimant !== oldId) {
+          await this.closeEndpoint(oldId);
+        } else {
+          genuinelyRemoved.push(oldId);
+        }
+      }
+      await this.removeEndpoints(genuinelyRemoved);
 
       for (const entityId of orderedIds) {
         const mapping = this.getEntityMapping(entityId);
@@ -212,9 +283,16 @@ export class ServerModeEndpointManager extends Service {
           this.log.debug(`Device endpoint already exists for ${entityId}`);
           continue;
         }
+        const resolved = resolvedByEntity.get(entityId);
         if (existing) {
           this.log.info(`Mapping changed for ${entityId}, recreating endpoint`);
-          await this.removeEndpoints([entityId]);
+          // Keep the number when the id is unchanged (protected entity, or a
+          // customName edit that does not move the frozen id) (#404).
+          if (resolved && existing.endpoint.id === resolved.endpointId) {
+            await this.closeEndpoint(entityId);
+          } else {
+            await this.removeEndpoints([entityId]);
+          }
           structureChanged = true;
         }
 
@@ -232,7 +310,9 @@ export class ServerModeEndpointManager extends Service {
         }
 
         // matter.js rejects duplicate endpoint ids at startup
-        const endpointId = createEndpointId(entityId, mapping?.customName);
+        const endpointId =
+          resolved?.endpointId ??
+          createEndpointId(entityId, mapping?.customName);
         const collision = [...this.endpoints.entries()].find(
           ([, entry]) => entry.endpoint.id === endpointId,
         );
@@ -264,13 +344,19 @@ export class ServerModeEndpointManager extends Service {
           // so they appear standalone, which Apple Siri and Alexa require.
           const endpoint =
             domain === "vacuum"
-              ? await this.createServerModeVacuumEndpoint(entityId, mapping)
+              ? await this.createServerModeVacuumEndpoint(
+                  entityId,
+                  mapping,
+                  resolved?.endpointId,
+                )
               : await LegacyEndpoint.create(
                   this.registry,
                   entityId,
                   mapping,
                   undefined,
                   true,
+                  resolved?.endpointId,
+                  resolved?.anchorEntityId,
                 );
 
           if (!endpoint) {
@@ -356,7 +442,13 @@ export class ServerModeEndpointManager extends Service {
   private async createServerModeVacuumEndpoint(
     entityId: string,
     mapping?: EntityMappingConfig,
+    endpointId?: string,
   ): Promise<EntityEndpoint | undefined> {
-    return ServerModeVacuumEndpoint.create(this.registry, entityId, mapping);
+    return ServerModeVacuumEndpoint.create(
+      this.registry,
+      entityId,
+      mapping,
+      endpointId,
+    );
   }
 }

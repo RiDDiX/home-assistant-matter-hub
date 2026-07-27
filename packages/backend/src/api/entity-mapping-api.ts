@@ -1,9 +1,11 @@
 import type { EntityMappingRequest } from "@home-assistant-matter-hub/common";
 import express from "express";
+import type { EntityIdentityStorage } from "../services/storage/entity-identity-storage.js";
 import type { EntityMappingStorage } from "../services/storage/entity-mapping-storage.js";
 
 export function entityMappingApi(
   mappingStorage: EntityMappingStorage,
+  identityStorage: EntityIdentityStorage,
 ): express.Router {
   const router = express.Router();
 
@@ -92,6 +94,9 @@ export function entityMappingApi(
   router.delete("/:bridgeId", async (req, res) => {
     const { bridgeId } = req.params;
     await mappingStorage.deleteBridgeMappings(bridgeId);
+    // Drop the bridge's frozen identities too, so a re-created bridge with the
+    // same id starts fresh instead of inheriting stale anchors (#404).
+    await identityStorage.deleteBridgeIdentities(bridgeId);
     res.status(204).send();
   });
 

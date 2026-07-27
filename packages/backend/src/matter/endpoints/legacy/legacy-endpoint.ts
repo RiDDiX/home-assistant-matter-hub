@@ -44,6 +44,8 @@ export class LegacyEndpoint extends EntityEndpoint {
     mapping?: EntityMappingConfig,
     pluginDomainMappings?: Map<string, string>,
     standalone = false,
+    endpointId?: string,
+    identityAnchor?: string,
   ): Promise<LegacyEndpoint | undefined> {
     const deviceRegistry = registry.deviceOf(entityId);
     let state = registry.initialState(entityId);
@@ -404,6 +406,8 @@ export class LegacyEndpoint extends EntityEndpoint {
         composedEntities: effectiveMapping.composedEntities,
         customName: effectiveMapping?.customName,
         areaName: composedAreaName,
+        endpointId,
+        identityAnchor,
       });
       if (composed) {
         return composed as unknown as LegacyEndpoint;
@@ -438,6 +442,8 @@ export class LegacyEndpoint extends EntityEndpoint {
           energyEntityId: effectiveMapping?.energyEntity,
           customName: effectiveMapping?.customName,
           areaName: composedAreaName,
+          endpointId,
+          identityAnchor,
         });
         // Return as LegacyEndpoint-compatible (duck typed: entityId + updateStates)
         return composed as unknown as LegacyEndpoint;
@@ -479,6 +485,8 @@ export class LegacyEndpoint extends EntityEndpoint {
             mapping: effectiveMapping,
             customName: effectiveMapping?.customName,
             areaName: composedAreaName,
+            endpointId,
+            identityAnchor,
           });
           if (composed) {
             return composed as unknown as LegacyEndpoint;
@@ -506,6 +514,8 @@ export class LegacyEndpoint extends EntityEndpoint {
           mapping: effectiveMapping,
           customName: effectiveMapping?.customName,
           areaName: composedAreaName,
+          endpointId,
+          identityAnchor,
         });
         if (composed) {
           return composed as unknown as LegacyEndpoint;
@@ -552,11 +562,17 @@ export class LegacyEndpoint extends EntityEndpoint {
     }
 
     const areaName = registry.getAreaName(entityId);
-    let type = createLegacyEndpointType(payload, effectiveMapping, areaName, {
-      vacuumOnOff: registry.isVacuumOnOffEnabled(),
-      cleaningModeOptions,
-      pluginDomainMappings,
-    });
+    let type = createLegacyEndpointType(
+      payload,
+      effectiveMapping,
+      areaName,
+      {
+        vacuumOnOff: registry.isVacuumOnOffEnabled(),
+        cleaningModeOptions,
+        pluginDomainMappings,
+      },
+      identityAnchor,
+    );
     if (!type) {
       return;
     }
@@ -572,6 +588,7 @@ export class LegacyEndpoint extends EntityEndpoint {
       customName,
       mappedIds,
       effectiveMapping?.updateThrottleMs,
+      endpointId,
     );
   }
 
@@ -581,8 +598,9 @@ export class LegacyEndpoint extends EntityEndpoint {
     customName?: string,
     mappedEntityIds?: string[],
     throttleMs?: number,
+    endpointId?: string,
   ) {
-    super(type, entityId, customName, mappedEntityIds);
+    super(type, entityId, customName, mappedEntityIds, endpointId);
     // Batch rapid HA updates into a single Matter transaction. Home Assistant
     // often sends several attribute updates back to back (e.g. media player:
     // volume + source + play state); a 50ms debounce coalesces them and stays

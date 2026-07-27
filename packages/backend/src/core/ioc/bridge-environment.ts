@@ -18,6 +18,7 @@ import { ServerModeBridge } from "../../services/bridges/server-mode-bridge.js";
 import { ServerModeEndpointManager } from "../../services/bridges/server-mode-endpoint-manager.js";
 import { HomeAssistantClient } from "../../services/home-assistant/home-assistant-client.js";
 import { HomeAssistantRegistry } from "../../services/home-assistant/home-assistant-registry.js";
+import { EntityIdentityStorage } from "../../services/storage/entity-identity-storage.js";
 import { EntityMappingStorage } from "../../services/storage/entity-mapping-storage.js";
 import { LoggerService } from "../app/logger.js";
 import type { AppEnvironment } from "./app-environment.js";
@@ -84,6 +85,7 @@ export class BridgeEnvironment extends EnvironmentBase {
         await this.load(HomeAssistantClient),
         this.get(BridgeRegistry),
         await this.load(EntityMappingStorage),
+        await this.load(EntityIdentityStorage),
         bridgeId,
         this.endpointManagerLogger,
         pluginManager,
@@ -203,6 +205,7 @@ export class BridgeEnvironmentFactory extends BridgeFactory {
       await env.load(HomeAssistantClient),
       env.get(BridgeRegistry),
       await env.load(EntityMappingStorage),
+      await env.load(EntityIdentityStorage),
       dataProvider,
       loggerService.get("ServerModeEndpointManager"),
     );

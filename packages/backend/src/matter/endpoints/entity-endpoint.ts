@@ -12,8 +12,9 @@ export abstract class EntityEndpoint extends Endpoint {
     readonly entityId: string,
     customName?: string,
     mappedEntityIds?: string[],
+    endpointId?: string,
   ) {
-    super(type, { id: createEndpointId(entityId, customName) });
+    super(type, { id: endpointId ?? createEndpointId(entityId, customName) });
     this.mappedEntityIds = mappedEntityIds ?? [];
   }
 

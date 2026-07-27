@@ -10,6 +10,7 @@ import express from "express";
 import type { BridgeService } from "../services/bridges/bridge-service.js";
 import { testMatchers } from "../services/bridges/matcher/matches-entity-filter.js";
 import type { HomeAssistantRegistry } from "../services/home-assistant/home-assistant-registry.js";
+import type { EntityIdentityStorage } from "../services/storage/entity-identity-storage.js";
 import { endpointToJson } from "../utils/json/endpoint-to-json.js";
 
 const ajv = new Ajv();
@@ -17,6 +18,7 @@ const ajv = new Ajv();
 export function matterApi(
   bridgeService: BridgeService,
   haRegistry?: HomeAssistantRegistry,
+  identityStorage?: EntityIdentityStorage,
 ): express.Router {
   const router = express.Router();
   router.get("/", (_, res) => {
@@ -111,6 +113,10 @@ export function matterApi(
     const bridgeId = req.params.bridgeId;
     try {
       await bridgeService.delete(bridgeId);
+      // Drop the bridge's frozen identities too, so a re-created bridge never
+      // inherits stale anchors. Mirrors the entity-mapping whole-bridge delete
+      // (#404).
+      await identityStorage?.deleteBridgeIdentities(bridgeId);
       res.status(204).send();
     } catch (e) {
       res.status(500).json({
@@ -127,6 +133,11 @@ export function matterApi(
       return;
     }
     try {
+      // A factory reset erases the persisted endpoint numbers, so the frozen
+      // identities no longer map to anything. Drop them BEFORE factoryReset:
+      // it restarts the bridge and refreshes devices internally, and that
+      // rebuild would otherwise re-seed against the wiped matter.js store (#404).
+      await identityStorage?.deleteBridgeIdentities(bridgeId);
       await bridge.factoryReset();
       await bridge.start();
       res.status(200).json(bridge.data);
