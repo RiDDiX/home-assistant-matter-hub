@@ -91,6 +91,21 @@ interface CoverDebounceState {
 
 const coverDebounce = new WeakMap<object, CoverDebounceState>();
 
+// When a Matter controller starts a move but the HA integration never surfaces
+// an opening/closing transitional state (e.g. SONOFF via SonoffLAN), we hold an
+// optimistic Opening/Closing so the controller gets a moving->stopped edge (#429).
+// If HA never confirms completion, drop the optimistic status after this long so
+// the controller can't show "Opening" forever.
+const DEFAULT_OPTIMISTIC_MOVEMENT_TIMEOUT_MS = 120_000; // 120s safety net
+let optimisticMovementTimeoutMs = DEFAULT_OPTIMISTIC_MOVEMENT_TIMEOUT_MS;
+
+// Test seam: shrink the safety timeout so the expiry path is reachable without a
+// 120s wait. Production code never calls this.
+export function setOptimisticMovementTimeoutMsForTests(ms: number): void {
+  optimisticMovementTimeoutMs = ms;
+}
+export { DEFAULT_OPTIMISTIC_MOVEMENT_TIMEOUT_MS };
+
 function getCoverDebounce(endpoint: object): CoverDebounceState {
   let st = coverDebounce.get(endpoint);
   if (!st) {
@@ -123,6 +138,45 @@ function clearPendingTilt(st: CoverDebounceState) {
     st.tiltTimer = null;
   }
   st.pendingTilt = null;
+}
+
+// Optimistic movement per axis (#429). A Matter command records the direction it
+// started and when, so update() can hold that Opening/Closing until HA confirms
+// completion, a StopMotion arrives, or the safety timeout elapses. Keyed on the
+// persistent endpoint for the same reason as coverDebounce: matter.js runs each
+// command on a throwaway instance, so instance fields would not survive to the
+// later HA onChange tick.
+interface CoverOptimisticAxis {
+  status: MovementStatus;
+  startedAt: number;
+  // Active safety-net timer that writes Stopped if HA never confirms (#429).
+  timer: ReturnType<typeof setTimeout> | null;
+}
+
+interface CoverOptimisticState {
+  lift: CoverOptimisticAxis | null;
+  tilt: CoverOptimisticAxis | null;
+}
+
+const coverOptimistic = new WeakMap<object, CoverOptimisticState>();
+
+function getCoverOptimistic(endpoint: object): CoverOptimisticState {
+  let st = coverOptimistic.get(endpoint);
+  if (!st) {
+    st = { lift: null, tilt: null };
+    coverOptimistic.set(endpoint, st);
+  }
+  return st;
+}
+
+// Drop an optimistic entry and cancel its safety timer together, so no stray
+// timeout writes Stopped after the entry was already resolved (#429).
+function clearOptimisticAxis(st: CoverOptimisticState, axis: "lift" | "tilt") {
+  const entry = st[axis];
+  if (entry?.timer) {
+    clearTimeout(entry.timer);
+  }
+  st[axis] = null;
 }
 
 export class WindowCoveringServerBase extends FeaturedBase {
@@ -162,6 +216,13 @@ export class WindowCoveringServerBase extends FeaturedBase {
       clearPendingLift(st);
       clearPendingTilt(st);
       coverDebounce.delete(this.endpoint);
+    }
+    const optimistic = coverOptimistic.get(this.endpoint);
+    if (optimistic) {
+      // Cancel the safety timers before dropping the registry entry.
+      clearOptimisticAxis(optimistic, "lift");
+      clearOptimisticAxis(optimistic, "tilt");
+      coverOptimistic.delete(this.endpoint);
     }
     await super[Symbol.asyncDispose]();
   }
@@ -243,23 +304,78 @@ export class WindowCoveringServerBase extends FeaturedBase {
     );
     const currentTilt100ths = currentTilt != null ? currentTilt * 100 : null;
 
-    // When cover is stopped, target position MUST equal current position.
-    // This is critical for Matter controllers to correctly display the cover state.
-    // Without this, Google Home and other controllers may show stale positions.
-    const isStopped = movementStatus === MovementStatus.Stopped;
+    // Overlay optimistic movement (#429). A Matter command may have written an
+    // Opening/Closing that HA cannot confirm with a transitional state (SONOFF
+    // via SonoffLAN only ever reports open/closed). HA transitional states always
+    // win and drop the guess; otherwise hold the optimistic value until the axis
+    // reaches its commanded target, a StopMotion arrives, or the timeout elapses.
+    const optimistic = getCoverOptimistic(this.endpoint);
+    const resolveAxisStatus = (
+      axis: "lift" | "tilt",
+      positionAware: boolean,
+      current100ths: number | null,
+      existingTarget: number | null | undefined,
+    ): MovementStatus => {
+      if (movementStatus !== MovementStatus.Stopped) {
+        clearOptimisticAxis(optimistic, axis);
+        return movementStatus;
+      }
+      const entry = optimistic[axis];
+      if (!entry) {
+        return MovementStatus.Stopped;
+      }
+      // Position-aware axes complete when current meets the commanded target.
+      // Same 1% tolerance the command-skip guards use (handleGoToLiftPosition /
+      // handleGoToTiltPosition), so a landing a fraction of a percent shy of the
+      // target still counts as reached instead of sticking on "moving" forever.
+      // Non-position-aware axes have no target to compare, so they clear only via
+      // HA transitional states, StopMotion, or the timeout.
+      const reachedTarget =
+        positionAware &&
+        current100ths != null &&
+        existingTarget != null &&
+        Math.abs(current100ths - existingTarget) < 100;
+      const expired =
+        Date.now() - entry.startedAt >= optimisticMovementTimeoutMs;
+      if (reachedTarget || expired) {
+        clearOptimisticAxis(optimistic, axis);
+        return MovementStatus.Stopped;
+      }
+      return entry.status;
+    };
 
-    // When movement is initiated externally (HA / physical button), no Matter
-    // command sets targetPosition. The stale target (equal to the previous
-    // stopped position) misleads Apple Home which derives the displayed
-    // direction from current-vs-target, not only from operationalStatus.
-    // Fix: if the existing target doesn't agree with the movement direction,
-    // override it with the direction limit (#268).
+    const liftStatus = this.features.lift
+      ? resolveAxisStatus(
+          "lift",
+          this.features.positionAwareLift,
+          currentLift100ths,
+          this.state.targetPositionLiftPercent100ths,
+        )
+      : MovementStatus.Stopped;
+    const tiltStatus = this.features.tilt
+      ? resolveAxisStatus(
+          "tilt",
+          this.features.positionAwareTilt,
+          currentTilt100ths,
+          this.state.targetPositionTiltPercent100ths,
+        )
+      : MovementStatus.Stopped;
+    // Matter global mirrors matter.js: whichever axis moves, lift winning ties.
+    const globalStatus =
+      liftStatus !== MovementStatus.Stopped ? liftStatus : tiltStatus;
+
+    // When an axis is stopped, its target MUST equal its current position, or
+    // controllers such as Google Home show a stale position. When it moves with
+    // no Matter command (HA / physical button) the stale target misleads Apple
+    // Home, which derives direction from current-vs-target, so override it with
+    // the direction limit (#268). Driven per axis by the effective status above.
     const inferTarget = (
+      status: MovementStatus,
       current100ths: number | null,
       existing100ths: number | null | undefined,
     ): number | null => {
-      if (isStopped) return current100ths;
-      if (movementStatus === MovementStatus.Opening) {
+      if (status === MovementStatus.Stopped) return current100ths;
+      if (status === MovementStatus.Opening) {
         // Moving towards 0 (open). Keep target only if it is ahead (< current).
         if (
           existing100ths != null &&
@@ -270,7 +386,7 @@ export class WindowCoveringServerBase extends FeaturedBase {
         }
         return 0;
       }
-      if (movementStatus === MovementStatus.Closing) {
+      if (status === MovementStatus.Closing) {
         // Moving towards 10000 (closed). Keep target only if it is ahead (> current).
         if (
           existing100ths != null &&
@@ -285,7 +401,7 @@ export class WindowCoveringServerBase extends FeaturedBase {
     };
 
     logger.debug(
-      `Cover update for ${entity.entity_id}: state=${state.state}, lift=${currentLift}%, tilt=${currentTilt}%, movement=${MovementStatus[movementStatus]}`,
+      `Cover update for ${entity.entity_id}: state=${state.state}, lift=${currentLift}%, tilt=${currentTilt}%, ha=${MovementStatus[movementStatus]}, effective=${MovementStatus[globalStatus]}`,
     );
 
     const overrideType = config.getCoverType?.(state, this.agent);
@@ -301,7 +417,8 @@ export class WindowCoveringServerBase extends FeaturedBase {
       this.state.operationalStatus as { global?: number } | undefined
     )?.global;
     const startedMoving =
-      !isStopped && previousStatus === MovementStatus.Stopped;
+      globalStatus !== MovementStatus.Stopped &&
+      previousStatus === MovementStatus.Stopped;
 
     const appliedPatch = applyPatchState<WindowCoveringServerBase.State>(
       this.state,
@@ -327,6 +444,7 @@ export class WindowCoveringServerBase extends FeaturedBase {
         ...(this.features.positionAwareLift
           ? {
               targetPositionLiftPercent100ths: inferTarget(
+                liftStatus,
                 currentLift100ths,
                 this.state.targetPositionLiftPercent100ths,
               ),
@@ -335,15 +453,16 @@ export class WindowCoveringServerBase extends FeaturedBase {
         ...(this.features.positionAwareTilt
           ? {
               targetPositionTiltPercent100ths: inferTarget(
+                tiltStatus,
                 currentTilt100ths,
                 this.state.targetPositionTiltPercent100ths,
               ),
             }
           : {}),
         operationalStatus: {
-          global: movementStatus,
-          ...(this.features.lift ? { lift: movementStatus } : {}),
-          ...(this.features.tilt ? { tilt: movementStatus } : {}),
+          global: globalStatus,
+          ...(this.features.lift ? { lift: liftStatus } : {}),
+          ...(this.features.tilt ? { tilt: tiltStatus } : {}),
         },
         ...(this.features.positionAwareLift && !startedMoving
           ? {
@@ -368,6 +487,120 @@ export class WindowCoveringServerBase extends FeaturedBase {
         `Cover ${entity.entity_id} state changed: ${JSON.stringify(appliedPatch)}`,
       );
     }
+  }
+
+  // Write operationalStatus for the moved axis in the command interaction while
+  // preserving the other axis. matter.js's own reactors are disabled (#328), so
+  // this is the only writer. Global mirrors matter.js: lift wins, else tilt.
+  private writeOperationalStatus(overrides: {
+    lift?: MovementStatus;
+    tilt?: MovementStatus;
+  }) {
+    const current = this.state.operationalStatus as
+      | { global?: MovementStatus; lift?: MovementStatus; tilt?: MovementStatus }
+      | undefined;
+    const lift = this.features.lift
+      ? (overrides.lift ?? current?.lift ?? MovementStatus.Stopped)
+      : undefined;
+    const tilt = this.features.tilt
+      ? (overrides.tilt ?? current?.tilt ?? MovementStatus.Stopped)
+      : undefined;
+    const global =
+      lift != null && lift !== MovementStatus.Stopped
+        ? lift
+        : (tilt ?? MovementStatus.Stopped);
+    this.state.operationalStatus = {
+      global,
+      ...(this.features.lift ? { lift } : {}),
+      ...(this.features.tilt ? { tilt } : {}),
+    };
+  }
+
+  // Record the optimistic direction and emit it now so a controller gets the
+  // moving->stopped edge even when HA never reports a transitional state (#429).
+  private startOptimisticMovement(axis: "lift" | "tilt", status: MovementStatus) {
+    const optimistic = getCoverOptimistic(this.endpoint);
+    // A fresh movement on this axis supersedes any pending safety timer.
+    clearOptimisticAxis(optimistic, axis);
+
+    // Capture plain values before the timer: the agent context and this proxy
+    // instance expire after the handler, so the callback may only touch the
+    // persistent endpoint (see this file's header comment and #429).
+    const endpoint = this.endpoint;
+    const hasLift = this.features.lift;
+    const hasTilt = this.features.tilt;
+    const hasPositionLift = this.features.positionAwareLift;
+    const hasPositionTilt = this.features.positionAwareTilt;
+    const startedAt = Date.now();
+
+    // The passive expiry in update() only runs on the next HA onChange. If HA
+    // falls silent after the command, this timer writes Stopped instead,
+    // keeping the other axis' status. No agent context here, hence setStateOf.
+    const timer = setTimeout(() => {
+      void (async () => {
+        try {
+          const st = coverOptimistic.get(endpoint);
+          const entry = st?.[axis];
+          if (
+            !entry ||
+            Date.now() - entry.startedAt < optimisticMovementTimeoutMs
+          ) {
+            return;
+          }
+          st[axis] = null; // this timer is the one firing; nothing to clear
+          const other = axis === "lift" ? "tilt" : "lift";
+          const otherStatus = st[other]?.status ?? MovementStatus.Stopped;
+          const liftStatus =
+            axis === "lift" ? MovementStatus.Stopped : otherStatus;
+          const tiltStatus =
+            axis === "tilt" ? MovementStatus.Stopped : otherStatus;
+          const global =
+            liftStatus !== MovementStatus.Stopped ? liftStatus : tiltStatus;
+          // Stopped requires target = current, and target rides before
+          // operationalStatus on the wire, same as update().
+          const wc = (
+            endpoint.state as {
+              windowCovering?: {
+                currentPositionLiftPercent100ths?: number | null;
+                currentPositionTiltPercent100ths?: number | null;
+              };
+            }
+          ).windowCovering ?? {};
+          await endpoint.setStateOf(WindowCoveringServerBase, {
+            ...(axis === "lift" &&
+            hasPositionLift &&
+            wc.currentPositionLiftPercent100ths != null
+              ? {
+                  targetPositionLiftPercent100ths:
+                    wc.currentPositionLiftPercent100ths,
+                }
+              : {}),
+            ...(axis === "tilt" &&
+            hasPositionTilt &&
+            wc.currentPositionTiltPercent100ths != null
+              ? {
+                  targetPositionTiltPercent100ths:
+                    wc.currentPositionTiltPercent100ths,
+                }
+              : {}),
+            operationalStatus: {
+              global,
+              ...(hasLift ? { lift: liftStatus } : {}),
+              ...(hasTilt ? { tilt: tiltStatus } : {}),
+            },
+          });
+        } catch (error) {
+          logger.debug(
+            `Optimistic ${axis} timeout write failed (endpoint may be closing): ${error}`,
+          );
+        }
+      })();
+    }, optimisticMovementTimeoutMs);
+    // A safety net must not keep the event loop alive by itself.
+    (timer as { unref?: () => void }).unref?.();
+
+    optimistic[axis] = { status, startedAt, timer };
+    this.writeOperationalStatus({ [axis]: status });
   }
 
   override async handleMovement(
@@ -442,12 +675,28 @@ export class WindowCoveringServerBase extends FeaturedBase {
     clearPendingLift(st);
     clearPendingTilt(st);
 
+    // The stop ends any optimistic move: drop the entries (and their safety
+    // timers) and report Stopped now so a controller clears its optimistic label
+    // even if HA sends no follow-up.
+    const optimistic = getCoverOptimistic(this.endpoint);
+    clearOptimisticAxis(optimistic, "lift");
+    clearOptimisticAxis(optimistic, "tilt");
+    this.writeOperationalStatus({
+      ...(this.features.lift ? { lift: MovementStatus.Stopped } : {}),
+      ...(this.features.tilt ? { tilt: MovementStatus.Stopped } : {}),
+    });
+
     const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);
     homeAssistant.callAction(this.state.config.stopCover(void 0, this.agent));
   }
 
   private handleLiftOpen() {
     clearPendingLift(getCoverDebounce(this.endpoint));
+
+    // Matter open intent = moving towards 0 = Opening, independent of the HA
+    // swap flag (swap only picks which HA service fires, not the Matter-side
+    // direction the controller sees).
+    this.startOptimisticMovement("lift", MovementStatus.Opening);
 
     const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);
     const action = this.state.config.openCoverLift(void 0, this.agent);
@@ -457,6 +706,9 @@ export class WindowCoveringServerBase extends FeaturedBase {
 
   private handleLiftClose() {
     clearPendingLift(getCoverDebounce(this.endpoint));
+
+    // Matter close intent = moving towards 10000 = Closing (swap-independent).
+    this.startOptimisticMovement("lift", MovementStatus.Closing);
 
     const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);
     const action = this.state.config.closeCoverLift(void 0, this.agent);
@@ -477,6 +729,18 @@ export class WindowCoveringServerBase extends FeaturedBase {
     }
     // Update target immediately for UI feedback
     this.state.targetPositionLiftPercent100ths = targetPercent100ths;
+    // Direction in the controller's own numeric space: it compares the target it
+    // sent against the current position it sees. Higher 100ths = more closed, so
+    // target above current = Closing. This stays self-consistent even under
+    // coverUseHomeAssistantPercentage because both numbers live in the same stored
+    // attribute space the controller reads, which is what clears its label (#429).
+    this.startOptimisticMovement(
+      "lift",
+      currentPositionMatter != null &&
+        targetPercent100ths < currentPositionMatter
+        ? MovementStatus.Opening
+        : MovementStatus.Closing,
+    );
     // Capture EVERYTHING needed for the debounced callback NOW while context is valid
     // The agent context expires after the command handler returns, so we must not
     // access any behavior properties (including entityId) inside setTimeout
@@ -534,6 +798,8 @@ export class WindowCoveringServerBase extends FeaturedBase {
     // tilt-only covers park tilt actions in the lift slot, #350
     if (st.pendingLift?.action.action.includes("tilt")) clearPendingLift(st);
 
+    this.startOptimisticMovement("tilt", MovementStatus.Opening);
+
     const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);
     homeAssistant.callAction(
       this.state.config.openCoverTilt(void 0, this.agent),
@@ -545,6 +811,8 @@ export class WindowCoveringServerBase extends FeaturedBase {
     clearPendingTilt(st);
     // tilt-only covers park tilt actions in the lift slot, #350
     if (st.pendingLift?.action.action.includes("tilt")) clearPendingLift(st);
+
+    this.startOptimisticMovement("tilt", MovementStatus.Closing);
 
     const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);
     homeAssistant.callAction(
@@ -565,6 +833,14 @@ export class WindowCoveringServerBase extends FeaturedBase {
     }
     // Update target immediately for UI feedback
     this.state.targetPositionTiltPercent100ths = targetPercent100ths;
+    // Same controller-space direction derivation as lift (#429).
+    this.startOptimisticMovement(
+      "tilt",
+      currentPositionMatter != null &&
+        targetPercent100ths < currentPositionMatter
+        ? MovementStatus.Opening
+        : MovementStatus.Closing,
+    );
     // Capture EVERYTHING needed for the debounced callback NOW while context is valid
     // The agent context expires after the command handler returns, so we must not
     // access any behavior properties (including entityId) inside setTimeout
