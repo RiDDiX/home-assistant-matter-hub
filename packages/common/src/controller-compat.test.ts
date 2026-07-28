@@ -117,6 +117,44 @@ describe("computeControllerWarnings", () => {
   });
 });
 
+describe("energy device type support", () => {
+  it("solar power (0x0017) no longer counts as supported on Google", () => {
+    // id 23 google was corrected off "yes": a hard "no" must now warn.
+    const warnings = computeControllerWarnings(
+      ["google"],
+      [{ entityId: "sensor.pv", deviceTypeId: 0x17 }],
+    );
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0].note).toContain("SolarPower");
+  });
+
+  it("electrical meter (0x0514) warns on Apple and Alexa but not Google", () => {
+    // id 1300: apple/alexa no, google yes, aqara unknown.
+    const warnings = computeControllerWarnings(
+      ["apple", "google", "alexa", "aqara"],
+      [{ entityId: "sensor.meter", deviceTypeId: 0x514 }],
+    );
+    expect(warnings.map((w) => w.controller).sort()).toEqual([
+      "alexa",
+      "apple",
+    ]);
+    expect(warnings[0].note).toContain("ElectricalMeter");
+  });
+
+  it("battery storage (0x0018) warns everywhere except Aqara", () => {
+    // id 24: apple/google/alexa no, aqara yes.
+    const warnings = computeControllerWarnings(
+      ["apple", "google", "alexa", "aqara"],
+      [{ entityId: "sensor.battery", deviceTypeId: 0x18 }],
+    );
+    expect(warnings.map((w) => w.controller).sort()).toEqual([
+      "alexa",
+      "apple",
+      "google",
+    ]);
+  });
+});
+
 describe("controllerWarningsForFabrics", () => {
   it("derives warnings from a fabric's root vendor id", () => {
     const warnings = controllerWarningsForFabrics(

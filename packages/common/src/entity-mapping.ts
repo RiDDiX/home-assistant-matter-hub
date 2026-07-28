@@ -12,6 +12,7 @@ export type MatterDeviceType =
   | "dimmable_light"
   | "dimmable_plugin_unit"
   | "door_lock"
+  | "electrical_meter"
   | "electrical_sensor"
   | "extended_color_light"
   | "fan"
@@ -38,6 +39,7 @@ export type MatterDeviceType =
   | "robot_vacuum_cleaner"
   | "robotic_lawn_mower"
   | "smoke_co_alarm"
+  | "solar_power"
   | "speaker"
   | "temperature_sensor"
   | "thermostat"
@@ -202,6 +204,33 @@ export interface EntityMappingConfig {
    * Example: "sensor.smart_plug_energy"
    */
   readonly energyEntity?: string;
+  /**
+   * Optional: Entity ID of a voltage sensor (device_class: voltage, unit: V).
+   * Folds voltage into the ElectricalPowerMeasurement cluster of this device.
+   * Example: "sensor.smart_plug_voltage"
+   */
+  readonly voltageEntity?: string;
+  /**
+   * Optional: Entity ID of a current sensor (device_class: current, unit: A).
+   * Folds current into the ElectricalPowerMeasurement cluster of this device.
+   * Example: "sensor.smart_plug_current"
+   */
+  readonly currentEntity?: string;
+  /**
+   * Optional: Entity ID of a power sensor (device_class: power, unit: W) for a
+   * home battery, positive on discharge and negative on charge. Adds an
+   * ElectricalPowerMeasurement to a BatteryStorage device; on the Matter side
+   * charging shows as imported (positive) and discharging as exported (negative).
+   * Example: "sensor.home_battery_power"
+   */
+  readonly batteryPowerEntity?: string;
+  /**
+   * Optional: Entity ID of an energy sensor (device_class: energy, unit: kWh)
+   * for a home battery. Adds ElectricalEnergyMeasurement to a BatteryStorage
+   * device to show lifetime throughput.
+   * Example: "sensor.home_battery_energy"
+   */
+  readonly batteryEnergyEntity?: string;
   /**
    * Optional: Entity ID of a select entity that controls the vacuum suction level.
    * Used for Dreame/Roborock vacuums where suction level is a separate select entity.
@@ -410,6 +439,10 @@ export interface EntityMappingRequest {
   readonly lockPinMaxLength?: number;
   readonly powerEntity?: string;
   readonly energyEntity?: string;
+  readonly voltageEntity?: string;
+  readonly currentEntity?: string;
+  readonly batteryPowerEntity?: string;
+  readonly batteryEnergyEntity?: string;
   readonly suctionLevelEntity?: string;
   readonly mopIntensityEntity?: string;
   readonly customServiceAreas?: CustomServiceArea[];
@@ -455,7 +488,8 @@ export const matterDeviceTypeLabels: Record<MatterDeviceType, string> = {
   dimmable_light: "Dimmable Light",
   dimmable_plugin_unit: "Dimmable Plug-in Unit",
   door_lock: "Door Lock",
-  electrical_sensor: "Electrical Sensor (Power/Energy/Voltage/Current)",
+  electrical_meter: "Electrical Meter (Power/Energy/Voltage/Current)",
+  electrical_sensor: "Electrical Sensor (Solar Power, legacy)",
   extended_color_light: "Extended Color Light",
   fan: "Fan",
   flow_sensor: "Flow Sensor",
@@ -481,6 +515,7 @@ export const matterDeviceTypeLabels: Record<MatterDeviceType, string> = {
   robot_vacuum_cleaner: "Robot Vacuum Cleaner",
   robotic_lawn_mower: "Robotic Lawn Mower",
   smoke_co_alarm: "Smoke/CO Alarm",
+  solar_power: "Solar Power (Generation)",
   speaker: "Speaker",
   temperature_sensor: "Temperature Sensor",
   thermostat: "Thermostat",
@@ -662,12 +697,26 @@ export const matterDeviceTypeControllerSupport: Record<
   },
   radon_sensor: { apple: "no", google: "no", alexa: "partial", aqara: "yes" },
   pm1_sensor: { apple: "no", google: "no", alexa: "partial", aqara: "yes" },
+  electrical_meter: {
+    apple: "no",
+    google: "yes",
+    alexa: "no",
+    aqara: "unknown",
+    note: "Google Home and SmartThings show an ElectricalMeter (0x0514); Apple and Alexa do not surface standalone power/energy.",
+  },
   electrical_sensor: {
     apple: "no",
     google: "no",
     alexa: "unknown",
     aqara: "unknown",
-    note: "Power/energy is rarely shown unless it is on a smart plug.",
+    note: "Legacy SolarPower (0x0017) alias. Google does not list it; pick Electrical Meter for consumption.",
+  },
+  solar_power: {
+    apple: "no",
+    google: "no",
+    alexa: "unknown",
+    aqara: "unknown",
+    note: "SolarPower (0x0017) for generation. Only SmartThings renders it standalone today.",
   },
   battery_storage: {
     apple: "no",
@@ -801,6 +850,7 @@ export const domainToDefaultMatterTypes: Partial<
     "air_quality_sensor",
     "battery_storage",
     "carbon_monoxide_sensor",
+    "electrical_meter",
     "electrical_sensor",
     "formaldehyde_sensor",
     "humidity_sensor",
@@ -810,6 +860,7 @@ export const domainToDefaultMatterTypes: Partial<
     "pm1_sensor",
     "pressure_sensor",
     "radon_sensor",
+    "solar_power",
     "temperature_sensor",
     "tvoc_sensor",
   ],

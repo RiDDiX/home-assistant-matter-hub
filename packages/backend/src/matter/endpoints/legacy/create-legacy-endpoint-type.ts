@@ -51,7 +51,9 @@ import { ScriptDevice } from "./script/index.js";
 import { InputSelectDevice, SelectDevice } from "./select/index.js";
 import { AirQualitySensorType } from "./sensor/devices/air-quality-sensor.js";
 import { BatterySensorType } from "./sensor/devices/battery-sensor.js";
+import { batteryStorageEssType } from "./sensor/devices/battery-storage-ess.js";
 import { CarbonMonoxideSensorType } from "./sensor/devices/carbon-monoxide-sensor.js";
+import { ElectricalMeterType } from "./sensor/devices/electrical-meter.js";
 import { ElectricalSensorType } from "./sensor/devices/electrical-sensor.js";
 import { FlowSensorType } from "./sensor/devices/flow-sensor.js";
 import { FormaldehydeSensorType } from "./sensor/devices/formaldehyde-sensor.js";
@@ -323,7 +325,13 @@ const matterDeviceTypeFactories: Partial<
   flow_sensor: (ha) => FlowSensorType.set({ homeAssistantEntity: ha }),
   air_quality_sensor: (ha) =>
     AirQualitySensorType.set({ homeAssistantEntity: ha }),
-  battery_storage: (ha) => BatterySensorType.set({ homeAssistantEntity: ha }),
+  battery_storage: (ha) => {
+    // A mapped power/energy sensor upgrades the battery to a full ESS endpoint.
+    if (ha.mapping?.batteryPowerEntity || ha.mapping?.batteryEnergyEntity) {
+      return batteryStorageEssType(ha.mapping).set({ homeAssistantEntity: ha });
+    }
+    return BatterySensorType.set({ homeAssistantEntity: ha });
+  },
   tvoc_sensor: (ha) => TvocSensorType.set({ homeAssistantEntity: ha }),
   carbon_monoxide_sensor: (ha) =>
     CarbonMonoxideSensorType.set({ homeAssistantEntity: ha }),
@@ -334,8 +342,12 @@ const matterDeviceTypeFactories: Partial<
     FormaldehydeSensorType.set({ homeAssistantEntity: ha }),
   radon_sensor: (ha) => RadonSensorType.set({ homeAssistantEntity: ha }),
   pm1_sensor: (ha) => Pm1SensorType.set({ homeAssistantEntity: ha }),
+  electrical_meter: (ha) =>
+    ElectricalMeterType.set({ homeAssistantEntity: ha }),
+  // Legacy SolarPower alias, kept for existing mappings.
   electrical_sensor: (ha) =>
     ElectricalSensorType.set({ homeAssistantEntity: ha }),
+  solar_power: (ha) => ElectricalSensorType.set({ homeAssistantEntity: ha }),
   contact_sensor: (ha) => ContactSensorType.set({ homeAssistantEntity: ha }),
   motion_sensor: (ha) => MotionSensorType.set({ homeAssistantEntity: ha }),
   occupancy_sensor: (ha) =>

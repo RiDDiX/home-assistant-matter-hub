@@ -60,6 +60,10 @@ export function getMappedEntityIds(mapping?: EntityMappingConfig): string[] {
   if (mapping.filterLifeEntity) ids.push(mapping.filterLifeEntity);
   if (mapping.powerEntity) ids.push(mapping.powerEntity);
   if (mapping.energyEntity) ids.push(mapping.energyEntity);
+  if (mapping.voltageEntity) ids.push(mapping.voltageEntity);
+  if (mapping.currentEntity) ids.push(mapping.currentEntity);
+  if (mapping.batteryPowerEntity) ids.push(mapping.batteryPowerEntity);
+  if (mapping.batteryEnergyEntity) ids.push(mapping.batteryEnergyEntity);
   if (mapping.currentRoomEntity) ids.push(mapping.currentRoomEntity);
   if (mapping.cleanedAreaEntity) ids.push(mapping.cleanedAreaEntity);
   if (mapping.composedEntities) {

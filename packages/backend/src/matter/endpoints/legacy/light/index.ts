@@ -76,13 +76,19 @@ export function LightDevice(
           : OnOffLightType;
   const hasPowerEntity = !!homeAssistantEntity.mapping?.powerEntity;
   const hasEnergyEntity = !!homeAssistantEntity.mapping?.energyEntity;
+  // Voltage/current can be mapped on their own, so gate the power cluster on
+  // any of the three or that data would be dropped.
+  const hasElectricalPower =
+    hasPowerEntity ||
+    !!homeAssistantEntity.mapping?.voltageEntity ||
+    !!homeAssistantEntity.mapping?.currentEntity;
 
   // biome-ignore lint/suspicious/noExplicitAny: Union type doesn't support .with() directly
   let device: any = deviceType;
-  if (hasPowerEntity || hasEnergyEntity) {
+  if (hasElectricalPower || hasEnergyEntity) {
     device = device.with(HaPowerTopologyServer);
   }
-  if (hasPowerEntity) {
+  if (hasElectricalPower) {
     device = device.with(HaElectricalPowerMeasurementServer);
   }
   if (hasEnergyEntity) {

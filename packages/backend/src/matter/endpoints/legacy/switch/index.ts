@@ -42,16 +42,22 @@ export function SwitchDevice(
   const hasBatteryEntity = !!homeAssistantEntity.mapping?.batteryEntity;
   const hasPowerEntity = !!homeAssistantEntity.mapping?.powerEntity;
   const hasEnergyEntity = !!homeAssistantEntity.mapping?.energyEntity;
+  // Voltage/current can be mapped on their own, so gate the power cluster on
+  // any of the three or that data would be dropped.
+  const hasElectricalPower =
+    hasPowerEntity ||
+    !!homeAssistantEntity.mapping?.voltageEntity ||
+    !!homeAssistantEntity.mapping?.currentEntity;
 
   let device =
     hasBatteryAttr || hasBatteryEntity
       ? SwitchWithBatteryEndpointType
       : SwitchEndpointType;
 
-  if (hasPowerEntity || hasEnergyEntity) {
+  if (hasElectricalPower || hasEnergyEntity) {
     device = device.with(HaPowerTopologyServer);
   }
-  if (hasPowerEntity) {
+  if (hasElectricalPower) {
     device = device.with(HaElectricalPowerMeasurementServer);
   }
   if (hasEnergyEntity) {

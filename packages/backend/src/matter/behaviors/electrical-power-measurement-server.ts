@@ -7,8 +7,10 @@ import { HomeAssistantEntityBehavior } from "./home-assistant-entity-behavior.js
 
 const logger = Logger.get("ElectricalPowerMeasurementServer");
 
+const FeaturedBase = Base.with("AlternatingCurrent");
+
 // biome-ignore lint/correctness/noUnusedVariables: Used via namespace below
-class ElectricalPowerMeasurementServerBase extends Base {
+class ElectricalPowerMeasurementServerBase extends FeaturedBase {
   declare state: ElectricalPowerMeasurementServerBase.State;
 
   override async initialize() {
@@ -30,30 +32,51 @@ class ElectricalPowerMeasurementServerBase extends Base {
 
   private update() {
     const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);
-    const powerEntity = homeAssistant.state.mapping?.powerEntity;
+    const mapping = homeAssistant.state.mapping;
+    const powerEntity = mapping?.powerEntity;
+    const voltageEntity = mapping?.voltageEntity;
+    const currentEntity = mapping?.currentEntity;
 
-    if (!powerEntity) return;
+    if (!powerEntity && !voltageEntity && !currentEntity) return;
 
     const stateProvider = this.agent.env.get(EntityStateProvider);
-    const powerWatts = stateProvider.getNumericState(powerEntity);
+    // Skip null values to avoid validation errors; only patch what is present.
+    const patch: {
+      activePower?: number;
+      voltage?: number;
+      activeCurrent?: number;
+    } = {};
 
-    // Matter uses milliwatts (int64)
-    // Only update if we have a valid value - skip null to avoid validation errors
-    if (powerWatts == null) return;
+    if (powerEntity) {
+      const powerWatts = stateProvider.getNumericState(powerEntity);
+      // Matter uses milliwatts (int64)
+      if (powerWatts != null) patch.activePower = Math.round(powerWatts * 1000);
+    }
+    if (voltageEntity) {
+      const volts = stateProvider.getNumericState(voltageEntity);
+      // Matter uses millivolts
+      if (volts != null) patch.voltage = Math.round(volts * 1000);
+    }
+    if (currentEntity) {
+      const amps = stateProvider.getNumericState(currentEntity);
+      // Matter uses milliamps
+      if (amps != null) patch.activeCurrent = Math.round(amps * 1000);
+    }
 
-    const activePower = Math.round(powerWatts * 1000);
-    applyPatchState(this.state, { activePower });
+    if (Object.keys(patch).length > 0) applyPatchState(this.state, patch);
   }
 }
 
 namespace ElectricalPowerMeasurementServerBase {
-  export class State extends Base.State {}
+  export class State extends FeaturedBase.State {}
 }
 
 export const HaElectricalPowerMeasurementServer =
   ElectricalPowerMeasurementServerBase.set({
     powerMode: ElectricalPowerMeasurement.PowerMode.Ac,
-    numberOfMeasurementTypes: 1,
+    // Voltage and current are folded onto this endpoint when mapped, so the
+    // accuracy list carries an entry for each reported measurement type.
+    numberOfMeasurementTypes: 3,
     accuracy: [
       {
         measurementType: ElectricalPowerMeasurement.MeasurementType.ActivePower,
@@ -65,6 +88,33 @@ export const HaElectricalPowerMeasurementServer =
             rangeMin: -1_000_000,
             rangeMax: 100_000_000,
             fixedMax: 1000, // 1W accuracy
+          },
+        ],
+      },
+      {
+        measurementType: ElectricalPowerMeasurement.MeasurementType.Voltage,
+        measured: true,
+        minMeasuredValue: 0,
+        maxMeasuredValue: 1_000_000, // 1000V in mV
+        accuracyRanges: [
+          {
+            rangeMin: 0,
+            rangeMax: 1_000_000,
+            fixedMax: 1000, // 1V accuracy
+          },
+        ],
+      },
+      {
+        measurementType:
+          ElectricalPowerMeasurement.MeasurementType.ActiveCurrent,
+        measured: true,
+        minMeasuredValue: -1_000_000, // -1000A in mA
+        maxMeasuredValue: 1_000_000, // 1000A in mA
+        accuracyRanges: [
+          {
+            rangeMin: -1_000_000,
+            rangeMax: 1_000_000,
+            fixedMax: 1000, // 1A accuracy
           },
         ],
       },

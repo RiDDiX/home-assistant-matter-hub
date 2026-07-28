@@ -28,7 +28,9 @@ Rows flagged with a footnote number link to the vendor source that establishes t
 | `sensor` | IlluminanceSensor | ✅ | ✅ [¹](#sources) | ✅ [²](#sources) | ❓ | ✅ |
 | `sensor` | FlowSensor | ❌ [⁵](#sources) | ✅ [¹](#sources) | ❌ [²](#sources) | ❓ | ❓ |
 | `sensor` | AirQualitySensor | ✅ | ✅ [¹](#sources) | ✅ [²](#sources) | ✅ [⁴](#sources) | ❓ |
-| `sensor` | ElectricalSensor | ❓ | ❓ | ❓ | ❓ | ❓ |
+| `sensor` | ElectricalMeter | ❌ | ✅ | ❌ | ❓ | ✅ |
+| `sensor` (override) | SolarPower | ❌ | ❌ | ❓ | ❓ | ✅ |
+| `sensor` (override) | BatteryStorage | ❌ | ❌ | ❌ | ✅ | ❓ |
 | `binary_sensor` | ContactSensor | ✅ | ✅ [¹](#sources) | ✅ [²](#sources) | ✅ [⁴](#sources) | ✅ |
 | `binary_sensor` | OccupancySensor | ✅ | ✅ [¹](#sources) | ✅ [²](#sources) | ✅ [⁴](#sources) | ✅ |
 | `binary_sensor` | SmokeCoAlarm | ✅ [⁵](#sources) | ✅ | ✅ [²](#sources) | ✅ [⁴](#sources) | ✅ |

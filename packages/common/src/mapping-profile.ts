@@ -28,6 +28,10 @@ export interface MappingProfileEntry {
   readonly lockPinMaxLength?: number;
   readonly powerEntity?: string;
   readonly energyEntity?: string;
+  readonly voltageEntity?: string;
+  readonly currentEntity?: string;
+  readonly batteryPowerEntity?: string;
+  readonly batteryEnergyEntity?: string;
   readonly suctionLevelEntity?: string;
   readonly mopIntensityEntity?: string;
   readonly customServiceAreas?: CustomServiceArea[];

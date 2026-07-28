@@ -76,6 +76,20 @@ const extractHaDiagnostics = (
       mappings.push({ label: "Power", entity: mapping.powerEntity });
     if (typeof mapping.energyEntity === "string")
       mappings.push({ label: "Energy", entity: mapping.energyEntity });
+    if (typeof mapping.voltageEntity === "string")
+      mappings.push({ label: "Voltage", entity: mapping.voltageEntity });
+    if (typeof mapping.currentEntity === "string")
+      mappings.push({ label: "Current", entity: mapping.currentEntity });
+    if (typeof mapping.batteryPowerEntity === "string")
+      mappings.push({
+        label: "Battery Power",
+        entity: mapping.batteryPowerEntity,
+      });
+    if (typeof mapping.batteryEnergyEntity === "string")
+      mappings.push({
+        label: "Battery Energy",
+        entity: mapping.batteryEnergyEntity,
+      });
     if (typeof mapping.filterLifeEntity === "string")
       mappings.push({
         label: "Filter Life",

@@ -8,9 +8,10 @@ import { diagnosticEventBus } from "../../../../services/diagnostics/diagnostic-
 import type { HomeAssistantEntityBehavior } from "../../../behaviors/home-assistant-entity-behavior.js";
 import { AirQualitySensorType } from "./devices/air-quality-sensor.js";
 import { BatterySensorType } from "./devices/battery-sensor.js";
+import { batteryStorageEssType } from "./devices/battery-storage-ess.js";
 import { CarbonMonoxideSensorType } from "./devices/carbon-monoxide-sensor.js";
 import { Co2SensorType } from "./devices/co2-sensor.js";
-import { ElectricalSensorType } from "./devices/electrical-sensor.js";
+import { ElectricalMeterType } from "./devices/electrical-meter.js";
 import { FlowSensorType } from "./devices/flow-sensor.js";
 import { HumiditySensorType } from "./devices/humidity-sensor.js";
 import { IlluminanceSensorType } from "./devices/illuminance-sensor.js";
@@ -159,9 +160,17 @@ export function SensorDevice(
     deviceClass === SensorDeviceClass.voltage ||
     deviceClass === SensorDeviceClass.current
   ) {
-    return ElectricalSensorType.set({ homeAssistantEntity });
+    // Consumption sensors default to ElectricalMeter (0x0514), which Google and
+    // SmartThings render. SolarPower (0x0017) stays behind the solar_power /
+    // electrical_sensor overrides for generation.
+    return ElectricalMeterType.set({ homeAssistantEntity });
   }
   if (deviceClass === SensorDeviceClass.battery) {
+    // A battery with mapped power/energy sensors becomes a full BatteryStorage
+    // ESS; a plain percent sensor keeps the lighter battery type.
+    if (mapping?.batteryPowerEntity || mapping?.batteryEnergyEntity) {
+      return batteryStorageEssType(mapping).set({ homeAssistantEntity });
+    }
     return BatterySensorType.set({ homeAssistantEntity });
   }
   if (deviceClass) {

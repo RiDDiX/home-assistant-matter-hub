@@ -260,6 +260,19 @@ describe("createLegacyEndpointType", () => {
   it("should not use any unknown clusterId", () => {
     const entities = Object.values(testEntities).flat();
     const devices = entities.map((entity) => createLegacyEndpointType(entity));
+    // A mapped battery upgrades to the BatteryStorage ESS type, which keeps
+    // powerTopology covered now that the meter default dropped it.
+    devices.push(
+      createLegacyEndpointType(
+        createEntity<SensorDeviceAttributes>("sensor.batt_ess", "80", {
+          device_class: SensorDeviceClass.battery,
+        }),
+        {
+          entityId: "sensor.batt_ess",
+          batteryPowerEntity: "sensor.batt_power",
+        },
+      ),
+    );
     const endpoints = devices
       .filter((d): d is EndpointType => d != null)
       .map((endpointType) => new Endpoint(endpointType));

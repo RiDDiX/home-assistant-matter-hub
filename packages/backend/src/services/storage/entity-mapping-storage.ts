@@ -132,6 +132,10 @@ export class EntityMappingStorage extends Service {
       lockPinMaxLength: pinLengths.max,
       powerEntity: request.powerEntity?.trim() || undefined,
       energyEntity: request.energyEntity?.trim() || undefined,
+      voltageEntity: request.voltageEntity?.trim() || undefined,
+      currentEntity: request.currentEntity?.trim() || undefined,
+      batteryPowerEntity: request.batteryPowerEntity?.trim() || undefined,
+      batteryEnergyEntity: request.batteryEnergyEntity?.trim() || undefined,
       pressureEntity: request.pressureEntity?.trim() || undefined,
       suctionLevelEntity: request.suctionLevelEntity?.trim() || undefined,
       mopIntensityEntity: request.mopIntensityEntity?.trim() || undefined,
@@ -198,6 +202,10 @@ export class EntityMappingStorage extends Service {
       config.lockPinMaxLength === undefined &&
       !config.powerEntity &&
       !config.energyEntity &&
+      !config.voltageEntity &&
+      !config.currentEntity &&
+      !config.batteryPowerEntity &&
+      !config.batteryEnergyEntity &&
       !config.pressureEntity &&
       !config.suctionLevelEntity &&
       !config.mopIntensityEntity &&

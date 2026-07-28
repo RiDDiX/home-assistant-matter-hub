@@ -149,6 +149,10 @@ export function EntityMappingDialog({
   const [lockPinMaxLength, setLockPinMaxLength] = useState("");
   const [powerEntity, setPowerEntity] = useState("");
   const [energyEntity, setEnergyEntity] = useState("");
+  const [voltageEntity, setVoltageEntity] = useState("");
+  const [currentEntity, setCurrentEntity] = useState("");
+  const [batteryPowerEntity, setBatteryPowerEntity] = useState("");
+  const [batteryEnergyEntity, setBatteryEnergyEntity] = useState("");
   const [suctionLevelEntity, setSuctionLevelEntity] = useState("");
   const [mopIntensityEntity, setMopIntensityEntity] = useState("");
   const [currentRoomEntity, setCurrentRoomEntity] = useState("");
@@ -248,6 +252,10 @@ export function EntityMappingDialog({
       );
       setPowerEntity(currentMapping?.powerEntity || "");
       setEnergyEntity(currentMapping?.energyEntity || "");
+      setVoltageEntity(currentMapping?.voltageEntity || "");
+      setCurrentEntity(currentMapping?.currentEntity || "");
+      setBatteryPowerEntity(currentMapping?.batteryPowerEntity || "");
+      setBatteryEnergyEntity(currentMapping?.batteryEnergyEntity || "");
       setSuctionLevelEntity(currentMapping?.suctionLevelEntity || "");
       setMopIntensityEntity(currentMapping?.mopIntensityEntity || "");
       setCurrentRoomEntity(currentMapping?.currentRoomEntity || "");
@@ -392,6 +400,10 @@ export function EntityMappingDialog({
       lockPinMaxLength: parsePinLength(lockPinMaxLength),
       powerEntity: powerEntity.trim() || undefined,
       energyEntity: energyEntity.trim() || undefined,
+      voltageEntity: voltageEntity.trim() || undefined,
+      currentEntity: currentEntity.trim() || undefined,
+      batteryPowerEntity: batteryPowerEntity.trim() || undefined,
+      batteryEnergyEntity: batteryEnergyEntity.trim() || undefined,
       suctionLevelEntity: suctionLevelEntity.trim() || undefined,
       mopIntensityEntity: mopIntensityEntity.trim() || undefined,
       currentRoomEntity: currentRoomEntity.trim() || undefined,
@@ -453,6 +465,10 @@ export function EntityMappingDialog({
     lockPinMaxLength,
     powerEntity,
     energyEntity,
+    voltageEntity,
+    currentEntity,
+    batteryPowerEntity,
+    batteryEnergyEntity,
     suctionLevelEntity,
     mopIntensityEntity,
     currentRoomEntity,
@@ -529,10 +545,25 @@ export function EntityMappingDialog({
     // on_off_switch is exposed as a plain On/Off Light, which carries no
     // power/energy clusters, so don't offer those fields for it (#380).
     matterDeviceType !== "on_off_switch" &&
+    // The electrical-meter types render their own companion group below, so
+    // don't double up when one of those is picked for a switch/light.
+    matterDeviceType !== "electrical_meter" &&
+    matterDeviceType !== "solar_power" &&
+    matterDeviceType !== "electrical_sensor" &&
     (currentDomain === "switch" ||
       currentDomain === "light" ||
       matterDeviceType === "on_off_plugin_unit" ||
       matterDeviceType === "dimmable_plugin_unit");
+
+  // Show the full power/energy/voltage/current group for electrical meters, so
+  // one device folds separate sensors into a single ElectricalMeter endpoint.
+  const showElectricalMeterFields =
+    matterDeviceType === "electrical_meter" ||
+    matterDeviceType === "solar_power" ||
+    matterDeviceType === "electrical_sensor";
+
+  // Show battery power/energy fields to expose a home battery as an ESS.
+  const showBatteryEnergyFields = matterDeviceType === "battery_storage";
 
   // Show momentary-flip disable option for entities that only pulse on then
   // auto-reset off (no real "on" state to hold), the source of the Echo
@@ -1049,6 +1080,80 @@ export function EntityMappingDialog({
               label="Energy Sensor (optional)"
               placeholder="sensor.smart_plug_energy"
               helperText="Sensor with device_class: energy (kWh), adds cumulative energy measurement to this device"
+              domain="sensor"
+            />
+            <EntityAutocomplete
+              value={voltageEntity}
+              onChange={setVoltageEntity}
+              label="Voltage Sensor (optional)"
+              placeholder="sensor.smart_plug_voltage"
+              helperText="Sensor with device_class: voltage (V), folds voltage into the power measurement"
+              domain="sensor"
+            />
+            <EntityAutocomplete
+              value={currentEntity}
+              onChange={setCurrentEntity}
+              label="Current Sensor (optional)"
+              placeholder="sensor.smart_plug_current"
+              helperText="Sensor with device_class: current (A), folds current into the power measurement"
+              domain="sensor"
+            />
+          </>
+        )}
+
+        {showElectricalMeterFields && (
+          <>
+            <EntityAutocomplete
+              value={powerEntity}
+              onChange={setPowerEntity}
+              label="Power Sensor (optional)"
+              placeholder="sensor.grid_power"
+              helperText="Sensor with device_class: power (W). Leave empty to use this entity's own value."
+              domain="sensor"
+            />
+            <EntityAutocomplete
+              value={energyEntity}
+              onChange={setEnergyEntity}
+              label="Energy Sensor (optional)"
+              placeholder="sensor.grid_energy"
+              helperText="Sensor with device_class: energy (kWh), adds cumulative energy to this meter"
+              domain="sensor"
+            />
+            <EntityAutocomplete
+              value={voltageEntity}
+              onChange={setVoltageEntity}
+              label="Voltage Sensor (optional)"
+              placeholder="sensor.grid_voltage"
+              helperText="Sensor with device_class: voltage (V), folded into this meter"
+              domain="sensor"
+            />
+            <EntityAutocomplete
+              value={currentEntity}
+              onChange={setCurrentEntity}
+              label="Current Sensor (optional)"
+              placeholder="sensor.grid_current"
+              helperText="Sensor with device_class: current (A), folded into this meter"
+              domain="sensor"
+            />
+          </>
+        )}
+
+        {showBatteryEnergyFields && (
+          <>
+            <EntityAutocomplete
+              value={batteryPowerEntity}
+              onChange={setBatteryPowerEntity}
+              label="Battery Power Sensor (optional)"
+              placeholder="sensor.home_battery_power"
+              helperText="Sensor with device_class: power (W). Positive on discharge, negative on charge. Exposes the battery as an ESS."
+              domain="sensor"
+            />
+            <EntityAutocomplete
+              value={batteryEnergyEntity}
+              onChange={setBatteryEnergyEntity}
+              label="Battery Energy Sensor (optional)"
+              placeholder="sensor.home_battery_energy"
+              helperText="Sensor with device_class: energy (kWh), adds lifetime throughput to the battery"
               domain="sensor"
             />
           </>

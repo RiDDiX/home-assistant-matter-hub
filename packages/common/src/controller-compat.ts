@@ -102,7 +102,14 @@ const deviceTypeIdSupport: Record<number, DeviceTypeSupport> = {
     google: "no",
     alexa: "unknown",
     aqara: "unknown",
-    note: "Power/energy is rarely shown unless it is on a smart plug.",
+    note: "SolarPower is only rendered standalone by SmartThings today.",
+  },
+  1300: {
+    apple: "no",
+    google: "yes",
+    alexa: "no",
+    aqara: "unknown",
+    note: "ElectricalMeter shows in Google Home and SmartThings; Apple and Alexa do not surface standalone power/energy.",
   },
   24: {
     apple: "no",
