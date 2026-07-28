@@ -3,7 +3,7 @@ import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
 
-// #287: the local @matter/node patch (patches/@matter__node@0.17.5.patch)
+// #287: the local @matter/node patch (patches/@matter__node@0.17.7.patch)
 // routes subscription keepalives onto the subscription's own session, and when
 // that session is gone it skips the keepalive instead of misrouting it onto
 // another session of the peer. These assertions fail loudly when an install

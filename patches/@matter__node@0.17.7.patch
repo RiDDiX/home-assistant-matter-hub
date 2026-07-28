@@ -1,8 +1,8 @@
 diff --git a/dist/cjs/node/server/ServerSubscription.js b/dist/cjs/node/server/ServerSubscription.js
-index ccbdfe942cd237b262a06ce1506277246ee8399a..7ce1bb5d8600b02982a07f725a42113aea8a9758 100644
+index 00511a1045a387e1c7a57d42a323b9092795df47..a5d7169ea0ae65c39c0df8420b46ed3d76ec9e12 100644
 --- a/dist/cjs/node/server/ServerSubscription.js
 +++ b/dist/cjs/node/server/ServerSubscription.js
-@@ -660,6 +660,14 @@ class ServerSubscription {
+@@ -667,6 +667,14 @@ class ServerSubscription {
      }
    }
    async #sendUpdateMessage(lifetime, attributeFilter, eventsMinNumber, onlyWithData, session) {
@@ -18,10 +18,10 @@ index ccbdfe942cd237b262a06ce1506277246ee8399a..7ce1bb5d8600b02982a07f725a42113a
      if (exchange === void 0) {
        return false;
 diff --git a/dist/esm/node/server/ServerSubscription.js b/dist/esm/node/server/ServerSubscription.js
-index d74af17cbc673249e63e5452327bf37e73061cf4..4fb9ba33e9d31cff9bd41371bd4b71fe9040f484 100644
+index 28bfefa2b9bafeb3ce12d058d7833b3d29fcff87..cfa5c2736493ceb89ec7e513f91161bcc43c4d33 100644
 --- a/dist/esm/node/server/ServerSubscription.js
 +++ b/dist/esm/node/server/ServerSubscription.js
-@@ -664,6 +664,14 @@ class ServerSubscription {
+@@ -671,6 +671,14 @@ class ServerSubscription {
      }
    }
    async #sendUpdateMessage(lifetime, attributeFilter, eventsMinNumber, onlyWithData, session) {

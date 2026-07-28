@@ -70,7 +70,7 @@ export function createCameraEndpointType(
         },
       ],
       maxContentBufferSize: 1_048_576, // one snapshot jpeg in flight
-      // ImageControl attributes: matter.js 0.17.5 conformance forces the
+      // ImageControl attributes: matter.js conformance (since 0.17.5) forces the
       // feature. Controllers can write these but the proxied HA media path
       // never applies a transform.
       imageRotation: 0,
