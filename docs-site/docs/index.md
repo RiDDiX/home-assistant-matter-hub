@@ -53,9 +53,29 @@ Home, ...) are not placed in the same network segment. Please make sure to revie
 ## What's New
 
 <details>
-<summary><strong>📦 Stable (v2.0.49) - Current</strong></summary>
+<summary><strong>📦 Stable (v2.0.50) - Current</strong></summary>
 
-**New in v2.0.49:**
+**New in v2.0.50:**
+
+- 🆔 **Stable device identity (opt-in)**: endpoints keep their identity when an entity is renamed or re-registered, keyed on the HA registry unique id; enable the `stableIdentity` feature flag per bridge ([#404](https://github.com/RiDDiX/home-assistant-matter-hub/issues/404), [#407](https://github.com/RiDDiX/home-assistant-matter-hub/issues/407))
+- ⚡ **Energy suite stage 1**: consumption sensors expose an **Electrical Meter** that Google Home and SmartThings render, home batteries become a **Battery Storage** device with signed charge/discharge power and lifetime energy, and voltage/current/energy sensors group onto one endpoint via new mapping fields
+- 🪟 **Covers report their own movement**: controllers get the moving-to-stopped edge even when the integration never reports opening/closing, clears the stuck "Opening" on Echo Show ([#429](https://github.com/RiDDiX/home-assistant-matter-hub/issues/429)), and discrete commands cancel a pending slider action ([#411](https://github.com/RiDDiX/home-assistant-matter-hub/issues/411))
+- 🧙 **Commissioning preflight in the wizard**: port, mDNS and controller checks with fix-it buttons before the QR code, plus a label guard and an empty-filter block
+- 🔋 **Per-entity "Disable battery mapping"** switch ([#427](https://github.com/RiDDiX/home-assistant-matter-hub/issues/427))
+- 🧩 **Auto-grouped sensors read sub-entities past the bridge filter** ([#426](https://github.com/RiDDiX/home-assistant-matter-hub/issues/426))
+- 📡 **mDNS records refresh when interface addresses change**, recovers Google Home after an IPv6 prefix change ([#415](https://github.com/RiDDiX/home-assistant-matter-hub/issues/415)), and **mDNS IPv4 can be disabled** ([#417](https://github.com/RiDDiX/home-assistant-matter-hub/issues/417))
+- 🖥 **Server mode shares the dead-session timeout and session diagnostics** ([#428](https://github.com/RiDDiX/home-assistant-matter-hub/issues/428))
+- 🔒 **Per-lock PIN length overrides** and an **opt-in passthrough that programs the physical lock usercode** ([#418](https://github.com/RiDDiX/home-assistant-matter-hub/issues/418))
+- 🔘 **Opt-in to suppress the momentary on/off flip for scripts** ([#423](https://github.com/RiDDiX/home-assistant-matter-hub/issues/423))
+- 🚨 **Smoke alarms report battery, fault and expressed state** ([#408](https://github.com/RiDDiX/home-assistant-matter-hub/issues/408))
+- 💡 **Light level and color-temperature step control** ([#412](https://github.com/RiDDiX/home-assistant-matter-hub/issues/412))
+- 📷 **Camera bridges enable Matter-over-TCP** for SmartThings live view, and camera endpoints set the mandatory AV stream attributes ([#419](https://github.com/RiDDiX/home-assistant-matter-hub/issues/419))
+- 🔧 **Valve and cover overrides route On/Off to their services** ([#65](https://github.com/RiDDiX/home-assistant-matter-hub/issues/65))
+- 🌍 **Brazilian Portuguese** added ([#420](https://github.com/RiDDiX/home-assistant-matter-hub/issues/420))
+- 🧵 **matter.js 0.17.7**
+- ⬆️ Dependency vulnerabilities resolved (websocket-driver, react-router 8, fast-uri, js-yaml and friends)
+
+**Previously in v2.0.49:**
 
 - 🌀 **Fan speed restore**: speed is remembered across transactions and restarts, localized wind presets map through, Auto is gated on a real auto preset, and an opt-in restores speed on power-on ([#387](https://github.com/RiDDiX/home-assistant-matter-hub/issues/387))
 - 📡 **Session recovery hardening**: subscription jitter dropped, superseded sessions of a reconnecting peer swept, stale sessions closed only after a real quiet period, plus opt-in fast recovery ([#386](https://github.com/RiDDiX/home-assistant-matter-hub/issues/386), [#400](https://github.com/RiDDiX/home-assistant-matter-hub/issues/400), [#398](https://github.com/RiDDiX/home-assistant-matter-hub/issues/398), [#287](https://github.com/RiDDiX/home-assistant-matter-hub/issues/287))
@@ -224,7 +244,7 @@ Home, ...) are not placed in the same network segment. Please make sure to revie
 <details>
 <summary><strong>🧪 Alpha (v2.1.0-alpha.x)</strong></summary>
 
-**Alpha is currently level with Stable (v2.0.49).** All alpha work up to the latest pre-release has been promoted into v2.0.49. New alpha work continues from the next pre-release tag onward and will appear here as development progresses. See the [Alpha Features Guide](./guides/alpha-features.md) for installation instructions.
+**Alpha is currently level with Stable (v2.0.50).** All alpha work up to the latest pre-release has been promoted into v2.0.50. New alpha work continues from the next pre-release tag onward and will appear here as development progresses. See the [Alpha Features Guide](./guides/alpha-features.md) for installation instructions.
 
 </details>
 
