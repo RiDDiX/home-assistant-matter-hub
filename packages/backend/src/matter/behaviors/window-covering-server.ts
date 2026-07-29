@@ -497,7 +497,11 @@ export class WindowCoveringServerBase extends FeaturedBase {
     tilt?: MovementStatus;
   }) {
     const current = this.state.operationalStatus as
-      | { global?: MovementStatus; lift?: MovementStatus; tilt?: MovementStatus }
+      | {
+          global?: MovementStatus;
+          lift?: MovementStatus;
+          tilt?: MovementStatus;
+        }
       | undefined;
     const lift = this.features.lift
       ? (overrides.lift ?? current?.lift ?? MovementStatus.Stopped)
@@ -518,7 +522,10 @@ export class WindowCoveringServerBase extends FeaturedBase {
 
   // Record the optimistic direction and emit it now so a controller gets the
   // moving->stopped edge even when HA never reports a transitional state (#429).
-  private startOptimisticMovement(axis: "lift" | "tilt", status: MovementStatus) {
+  private startOptimisticMovement(
+    axis: "lift" | "tilt",
+    status: MovementStatus,
+  ) {
     const optimistic = getCoverOptimistic(this.endpoint);
     // A fresh movement on this axis supersedes any pending safety timer.
     clearOptimisticAxis(optimistic, axis);
@@ -558,14 +565,15 @@ export class WindowCoveringServerBase extends FeaturedBase {
             liftStatus !== MovementStatus.Stopped ? liftStatus : tiltStatus;
           // Stopped requires target = current, and target rides before
           // operationalStatus on the wire, same as update().
-          const wc = (
-            endpoint.state as {
-              windowCovering?: {
-                currentPositionLiftPercent100ths?: number | null;
-                currentPositionTiltPercent100ths?: number | null;
-              };
-            }
-          ).windowCovering ?? {};
+          const wc =
+            (
+              endpoint.state as {
+                windowCovering?: {
+                  currentPositionLiftPercent100ths?: number | null;
+                  currentPositionTiltPercent100ths?: number | null;
+                };
+              }
+            ).windowCovering ?? {};
           await endpoint.setStateOf(WindowCoveringServerBase, {
             ...(axis === "lift" &&
             hasPositionLift &&
