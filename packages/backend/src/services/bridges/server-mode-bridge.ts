@@ -41,6 +41,10 @@ import {
   staleSessionQuietWindowMs,
   staleSessionShouldClose,
 } from "./session-rotation.js";
+import {
+  type SubscriptionSummary,
+  summarizeSubscriptions,
+} from "./subscription-summary.js";
 import { decideWedgeRotation } from "./wedge-watchdog.js";
 
 // Marks an InteractionServer whose onNewExchange we already wrapped so re-wiring
@@ -180,6 +184,7 @@ export class ServerModeBridge {
       peerNodeId: string;
       fabricIndex: number | null;
       subscriptionCount: number;
+      subscriptions: SubscriptionSummary[];
       lastActiveMsAgo: number | null;
       lastAnyActivityMsAgo: number | null;
       lastImRequestMsAgo: number | null;
@@ -207,6 +212,7 @@ export class ServerModeBridge {
         totalSubscriptions += subCount;
         // #365: per-session liveness and per-fabric roll-up, mirrors
         // Bridge.getSessionInfo so the health view matches in server mode.
+        const subscriptions = summarizeSubscriptions(s.subscriptions);
         const fi =
           typeof s.fabric?.fabricIndex === "number"
             ? s.fabric.fabricIndex
@@ -235,6 +241,7 @@ export class ServerModeBridge {
           peerNodeId: String(s.peerNodeId),
           fabricIndex: fi,
           subscriptionCount: subCount,
+          subscriptions,
           lastActiveMsAgo,
           lastAnyActivityMsAgo,
           lastImRequestMsAgo,

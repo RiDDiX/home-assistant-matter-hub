@@ -82,6 +82,10 @@ interface BridgeHealthInfo {
       peerNodeId: string;
       fabricIndex: number | null;
       subscriptionCount: number;
+      subscriptions?: Array<{
+        scope: "wildcard" | "endpoint-specific" | "unknown";
+        endpointIds: number[];
+      }>;
       lastActiveMsAgo?: number | null;
       isPeerActive?: boolean;
     }>;

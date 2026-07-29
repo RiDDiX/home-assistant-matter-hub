@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { summarizeFabricHealth } from "./fabric-health.ts";
+import {
+  describeSubscriptionScope,
+  summarizeFabricHealth,
+} from "./fabric-health.ts";
 
 const GOOGLE = 24582;
 const APPLE = 4937;
@@ -41,5 +44,67 @@ describe("summarizeFabricHealth", () => {
     expect(fabric.connected).toBe(false);
     expect(fabric.stale).toBe(false);
     expect(fabric.subscriptions).toBe(0);
+    expect(fabric.subscriptionScope).toBeNull();
+  });
+
+  it("rolls a fabric's subscription scopes into a single descriptor", () => {
+    const [google] = summarizeFabricHealth(
+      [{ fabricIndex: 1, rootVendorId: GOOGLE, label: "Home" }],
+      [
+        {
+          fabricIndex: 1,
+          subscriptionCount: 2,
+          subscriptions: [
+            { scope: "endpoint-specific", endpointIds: [7] },
+            { scope: "endpoint-specific", endpointIds: [3, 7] },
+          ],
+        },
+      ],
+    );
+    expect(google.subscriptionScope).toEqual({
+      kind: "endpoint-specific",
+      endpointIds: [3, 7],
+    });
+  });
+});
+
+describe("describeSubscriptionScope", () => {
+  it("returns null for no summaries", () => {
+    expect(describeSubscriptionScope([])).toBeNull();
+  });
+
+  it("lets a wildcard win over endpoint-specific", () => {
+    expect(
+      describeSubscriptionScope([
+        { scope: "endpoint-specific", endpointIds: [1] },
+        { scope: "wildcard", endpointIds: [] },
+      ]),
+    ).toEqual({ kind: "wildcard" });
+  });
+
+  it("prefers unknown over endpoint-specific when no wildcard", () => {
+    expect(
+      describeSubscriptionScope([
+        { scope: "endpoint-specific", endpointIds: [1] },
+        { scope: "unknown", endpointIds: [] },
+      ]),
+    ).toEqual({ kind: "unknown" });
+  });
+
+  it("dedupes and sorts endpoint ids", () => {
+    expect(
+      describeSubscriptionScope([
+        { scope: "endpoint-specific", endpointIds: [9, 2] },
+        { scope: "endpoint-specific", endpointIds: [2] },
+      ]),
+    ).toEqual({ kind: "endpoint-specific", endpointIds: [2, 9] });
+  });
+
+  it("returns null for endpoint-specific with no concrete endpoints", () => {
+    expect(
+      describeSubscriptionScope([
+        { scope: "endpoint-specific", endpointIds: [] },
+      ]),
+    ).toBeNull();
   });
 });

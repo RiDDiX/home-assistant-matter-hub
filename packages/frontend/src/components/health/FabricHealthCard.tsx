@@ -39,6 +39,16 @@ export function FabricHealthCard({
               : f.stale
                 ? { label: t("health.stale"), color: "warning" as const }
                 : { label: t("health.connected"), color: "success" as const };
+            const scopeText =
+              f.subscriptionScope == null
+                ? null
+                : f.subscriptionScope.kind === "wildcard"
+                  ? t("health.scopeWildcard")
+                  : f.subscriptionScope.kind === "unknown"
+                    ? t("health.scopeUnknown")
+                    : t("health.scopeEndpoints", {
+                        endpoints: f.subscriptionScope.endpointIds.join(", "),
+                      });
             return (
               <Box
                 key={f.fabricIndex}
@@ -64,6 +74,7 @@ export function FabricHealthCard({
                         seconds: Math.round(f.lastActiveMsAgo / 1000),
                       })}`
                     : ""}
+                  {scopeText ? ` | ${scopeText}` : ""}
                 </Typography>
               </Box>
             );

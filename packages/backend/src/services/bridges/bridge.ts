@@ -44,6 +44,10 @@ import {
   staleSessionQuietWindowMs,
   staleSessionShouldClose,
 } from "./session-rotation.js";
+import {
+  type SubscriptionSummary,
+  summarizeSubscriptions,
+} from "./subscription-summary.js";
 import { decideWedgeRotation } from "./wedge-watchdog.js";
 
 // Marks an InteractionServer whose onNewExchange we already wrapped so re-wiring
@@ -149,6 +153,7 @@ export class Bridge {
       peerNodeId: string;
       fabricIndex: number | null;
       subscriptionCount: number;
+      subscriptions: SubscriptionSummary[];
       lastActiveMsAgo: number | null;
       lastAnyActivityMsAgo: number | null;
       lastImRequestMsAgo: number | null;
@@ -174,6 +179,9 @@ export class Bridge {
       const sessionList = sessions.map((s) => {
         const subCount = s.subscriptions.size;
         totalSubscriptions += subCount;
+        // Scope descriptor per subscription so the health view can tell a
+        // whole-node wildcard from an endpoint-specific one (#365 class).
+        const subscriptions = summarizeSubscriptions(s.subscriptions);
         const fi =
           typeof s.fabric?.fabricIndex === "number"
             ? s.fabric.fabricIndex
@@ -205,6 +213,7 @@ export class Bridge {
           peerNodeId: String(s.peerNodeId),
           fabricIndex: fi,
           subscriptionCount: subCount,
+          subscriptions,
           lastActiveMsAgo,
           lastAnyActivityMsAgo,
           lastImRequestMsAgo,
