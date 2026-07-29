@@ -177,6 +177,8 @@ export class EntityMappingStorage extends Service {
       currentEntity: request.currentEntity?.trim() || undefined,
       batteryPowerEntity: request.batteryPowerEntity?.trim() || undefined,
       batteryEnergyEntity: request.batteryEnergyEntity?.trim() || undefined,
+      chargingSwitchEntity: request.chargingSwitchEntity?.trim() || undefined,
+      currentLimitEntity: request.currentLimitEntity?.trim() || undefined,
       pressureEntity: request.pressureEntity?.trim() || undefined,
       suctionLevelEntity: request.suctionLevelEntity?.trim() || undefined,
       mopIntensityEntity: request.mopIntensityEntity?.trim() || undefined,
@@ -247,6 +249,8 @@ export class EntityMappingStorage extends Service {
       !config.currentEntity &&
       !config.batteryPowerEntity &&
       !config.batteryEnergyEntity &&
+      !config.chargingSwitchEntity &&
+      !config.currentLimitEntity &&
       !config.pressureEntity &&
       !config.suctionLevelEntity &&
       !config.mopIntensityEntity &&

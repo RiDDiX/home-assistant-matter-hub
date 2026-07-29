@@ -14,6 +14,7 @@ export type MatterDeviceType =
   | "door_lock"
   | "electrical_meter"
   | "electrical_sensor"
+  | "evse"
   | "extended_color_light"
   | "fan"
   | "flow_sensor"
@@ -232,6 +233,19 @@ export interface EntityMappingConfig {
    */
   readonly batteryEnergyEntity?: string;
   /**
+   * Optional: Entity ID of a switch that starts and stops charging for an EVSE.
+   * EnableCharging turns it on, Disable turns it off.
+   * Example: "switch.wallbox_charging"
+   */
+  readonly chargingSwitchEntity?: string;
+  /**
+   * Optional: Entity ID of a number entity (amperes) that sets an EVSE's charge
+   * current limit. EnableCharging writes the requested maximum here (clamped to
+   * a sane range) and its live value feeds MaximumChargeCurrent.
+   * Example: "number.wallbox_current_limit"
+   */
+  readonly currentLimitEntity?: string;
+  /**
    * Optional: Entity ID of a select entity that controls the vacuum suction level.
    * Used for Dreame/Roborock vacuums where suction level is a separate select entity.
    * When configured, intensity variants (Quiet/Max) are added to each cleaning mode,
@@ -443,6 +457,8 @@ export interface EntityMappingRequest {
   readonly currentEntity?: string;
   readonly batteryPowerEntity?: string;
   readonly batteryEnergyEntity?: string;
+  readonly chargingSwitchEntity?: string;
+  readonly currentLimitEntity?: string;
   readonly suctionLevelEntity?: string;
   readonly mopIntensityEntity?: string;
   readonly customServiceAreas?: CustomServiceArea[];
@@ -490,6 +506,7 @@ export const matterDeviceTypeLabels: Record<MatterDeviceType, string> = {
   door_lock: "Door Lock",
   electrical_meter: "Electrical Meter (Power/Energy/Voltage/Current)",
   electrical_sensor: "Electrical Sensor (Solar Power, legacy)",
+  evse: "EV Charger (EVSE)",
   extended_color_light: "Extended Color Light",
   fan: "Fan",
   flow_sensor: "Flow Sensor",
@@ -725,6 +742,13 @@ export const matterDeviceTypeControllerSupport: Record<
     aqara: "yes",
     note: "Aqara lists battery storage; others show battery inside a device.",
   },
+  evse: {
+    apple: "no",
+    google: "no",
+    alexa: "no",
+    aqara: "yes",
+    note: "HA and Aqara render EnergyEvse; SmartThings announced support, unconfirmed. Bridged EVSE can break Alexa device recognition, keep it off Alexa bridges.",
+  },
   contact_sensor: { apple: "yes", google: "yes", alexa: "yes", aqara: "yes" },
   motion_sensor: { apple: "yes", google: "yes", alexa: "yes", aqara: "yes" },
   occupancy_sensor: {
@@ -852,6 +876,7 @@ export const domainToDefaultMatterTypes: Partial<
     "carbon_monoxide_sensor",
     "electrical_meter",
     "electrical_sensor",
+    "evse",
     "formaldehyde_sensor",
     "humidity_sensor",
     "light_sensor",
@@ -868,6 +893,7 @@ export const domainToDefaultMatterTypes: Partial<
   siren: ["on_off_plugin_unit"],
   switch: [
     "dishwasher",
+    "evse",
     "on_off_plugin_unit",
     "on_off_switch",
     "mounted_on_off_control",

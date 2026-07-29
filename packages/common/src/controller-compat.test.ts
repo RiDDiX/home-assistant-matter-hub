@@ -153,6 +153,20 @@ describe("energy device type support", () => {
       "google",
     ]);
   });
+
+  it("energy evse (0x050C) warns everywhere except Aqara", () => {
+    // id 1292: apple/google/alexa no, aqara yes.
+    const warnings = computeControllerWarnings(
+      ["apple", "google", "alexa", "aqara"],
+      [{ entityId: "sensor.wallbox", deviceTypeId: 0x50c }],
+    );
+    expect(warnings.map((w) => w.controller).sort()).toEqual([
+      "alexa",
+      "apple",
+      "google",
+    ]);
+    expect(warnings[0].note).toContain("Alexa");
+  });
 });
 
 describe("controllerWarningsForFabrics", () => {

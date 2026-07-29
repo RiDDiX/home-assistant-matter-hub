@@ -118,6 +118,13 @@ const deviceTypeIdSupport: Record<number, DeviceTypeSupport> = {
     aqara: "yes",
     note: "Aqara lists battery storage; others show battery inside a device.",
   },
+  1292: {
+    apple: "no",
+    google: "no",
+    alexa: "no",
+    aqara: "yes",
+    note: "HA and Aqara render EnergyEvse; SmartThings announced support, unconfirmed. Bridged EVSE can break Alexa device recognition, keep it off Alexa bridges.",
+  },
   39: {
     apple: "no",
     google: "no",

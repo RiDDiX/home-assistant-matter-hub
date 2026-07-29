@@ -59,6 +59,8 @@ export function entityMappingApi(
       currentEntity: body.currentEntity,
       batteryPowerEntity: body.batteryPowerEntity,
       batteryEnergyEntity: body.batteryEnergyEntity,
+      chargingSwitchEntity: body.chargingSwitchEntity,
+      currentLimitEntity: body.currentLimitEntity,
       suctionLevelEntity: body.suctionLevelEntity,
       mopIntensityEntity: body.mopIntensityEntity,
       customServiceAreas: body.customServiceAreas,

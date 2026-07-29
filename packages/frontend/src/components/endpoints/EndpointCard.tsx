@@ -153,6 +153,8 @@ interface HomeAssistantEntityState {
     currentEntity?: string;
     batteryPowerEntity?: string;
     batteryEnergyEntity?: string;
+    chargingSwitchEntity?: string;
+    currentLimitEntity?: string;
   };
 }
 
@@ -257,6 +259,18 @@ export const EndpointCard = ({
       mappings.push({
         label: "Battery Energy",
         entity: mapping.batteryEnergyEntity,
+      });
+    }
+    if (mapping?.chargingSwitchEntity) {
+      mappings.push({
+        label: "Charging Switch",
+        entity: mapping.chargingSwitchEntity,
+      });
+    }
+    if (mapping?.currentLimitEntity) {
+      mappings.push({
+        label: "Current Limit",
+        entity: mapping.currentLimitEntity,
       });
     }
     return mappings;

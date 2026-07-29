@@ -55,6 +55,7 @@ import { batteryStorageEssType } from "./sensor/devices/battery-storage-ess.js";
 import { CarbonMonoxideSensorType } from "./sensor/devices/carbon-monoxide-sensor.js";
 import { ElectricalMeterType } from "./sensor/devices/electrical-meter.js";
 import { ElectricalSensorType } from "./sensor/devices/electrical-sensor.js";
+import { energyEvseType } from "./sensor/devices/energy-evse.js";
 import { FlowSensorType } from "./sensor/devices/flow-sensor.js";
 import { FormaldehydeSensorType } from "./sensor/devices/formaldehyde-sensor.js";
 import { HumiditySensorType } from "./sensor/devices/humidity-sensor.js";
@@ -348,6 +349,7 @@ const matterDeviceTypeFactories: Partial<
   electrical_sensor: (ha) =>
     ElectricalSensorType.set({ homeAssistantEntity: ha }),
   solar_power: (ha) => ElectricalSensorType.set({ homeAssistantEntity: ha }),
+  evse: (ha) => energyEvseType().set({ homeAssistantEntity: ha }),
   contact_sensor: (ha) => ContactSensorType.set({ homeAssistantEntity: ha }),
   motion_sensor: (ha) => MotionSensorType.set({ homeAssistantEntity: ha }),
   occupancy_sensor: (ha) =>
