@@ -1,0 +1,79 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { Environment, VariableService } from "@matter/general";
+import { StorageService } from "@matter/main";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { AppStorage } from "./app-storage.js";
+import { EntityMappingStorage } from "./entity-mapping-storage.js";
+
+let dir: string;
+let env: Environment;
+let appStorage: AppStorage;
+
+beforeEach(async () => {
+  dir = mkdtempSync(join(tmpdir(), "hamh-mapping-"));
+  env = new Environment("test", Environment.default);
+  env.get(VariableService).set("storage.path", dir);
+  appStorage = new AppStorage(env.get(StorageService));
+  await appStorage.construction;
+});
+
+afterEach(async () => {
+  await appStorage.dispose().catch(() => {});
+  rmSync(dir, { recursive: true, force: true });
+});
+
+function missingSince(m: unknown): string | undefined {
+  return (m as { missingSince?: string } | undefined)?.missingSince;
+}
+
+describe("EntityMappingStorage orphan tombstone", () => {
+  it("marks once keeping first-seen, and round-trips missingSince through a flushed reload", async () => {
+    const storage = new EntityMappingStorage(appStorage);
+    await storage.construction;
+    await storage.setMapping({
+      bridgeId: "b",
+      entityId: "light.x",
+      customName: "Lamp",
+    });
+
+    storage.markMappingMissing("b", "light.x", "2026-07-01T00:00:00.000Z");
+    // a later pass must not overwrite the first-seen time
+    storage.markMappingMissing("b", "light.x", "2026-07-05T00:00:00.000Z");
+    await storage.flush();
+
+    const reloaded = new EntityMappingStorage(appStorage);
+    await reloaded.construction;
+    expect(missingSince(reloaded.getMapping("b", "light.x"))).toBe(
+      "2026-07-01T00:00:00.000Z",
+    );
+
+    reloaded.clearMappingMissing("b", "light.x");
+    expect(missingSince(reloaded.getMapping("b", "light.x"))).toBeUndefined();
+  });
+
+  it("no-ops mark/clear when there is no such mapping", async () => {
+    const storage = new EntityMappingStorage(appStorage);
+    await storage.construction;
+    // must not throw and must not conjure a record
+    storage.markMappingMissing("b", "nope", "2026-07-01T00:00:00.000Z");
+    storage.clearMappingMissing("b", "nope");
+    expect(storage.getMapping("b", "nope")).toBeUndefined();
+  });
+
+  it("loads an old mapping that predates the missingSince field", async () => {
+    const ctx = appStorage.createContext("entity-mappings");
+    await ctx.set("data", {
+      version: 1,
+      mappings: { b: [{ entityId: "light.legacy", customName: "Old" }] },
+      // biome-ignore lint/suspicious/noExplicitAny: raw stored shape
+    } as any);
+
+    const storage = new EntityMappingStorage(appStorage);
+    await storage.construction;
+    const loaded = storage.getMapping("b", "light.legacy");
+    expect(loaded?.customName).toBe("Old");
+    expect(missingSince(loaded)).toBeUndefined();
+  });
+});

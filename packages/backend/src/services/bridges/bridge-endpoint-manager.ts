@@ -25,6 +25,12 @@ import type { HomeAssistantClient } from "../home-assistant/home-assistant-clien
 import type { HomeAssistantStates } from "../home-assistant/home-assistant-registry.js";
 import type { EntityIdentityStorage } from "../storage/entity-identity-storage.js";
 import type { EntityMappingStorage } from "../storage/entity-mapping-storage.js";
+import {
+  buildPresentEntityIds,
+  buildPresentIdentityKeys,
+  stampIdentityPresence,
+  stampMappingPresence,
+} from "../storage/orphan-cleanup.js";
 import type { BridgeRegistry } from "./bridge-registry.js";
 import { EntityIsolationService } from "./entity-isolation-service.js";
 import {
@@ -80,7 +86,7 @@ export class BridgeEndpointManager extends Service {
     private readonly client: HomeAssistantClient,
     private readonly registry: BridgeRegistry,
     private readonly mappingStorage: EntityMappingStorage,
-    identityStorage: EntityIdentityStorage,
+    private readonly identityStorage: EntityIdentityStorage,
     private readonly bridgeId: string,
     private readonly log: Logger,
     private readonly pluginManager?: PluginManager,
@@ -589,6 +595,24 @@ export class BridgeEndpointManager extends Service {
         this.mappingFingerprints.set(entityId, fp);
       }
     }
+
+    // Reconcile orphan tombstones against the FULL HA registry (keyed by the
+    // rename-stable identity key, so a rename, a filter change, or a scope
+    // narrowing never reads as a removal). Stamp/clear only, never delete.
+    const fullEntities = this.registry.fullEntities;
+    stampIdentityPresence(
+      this.identityStorage,
+      this.bridgeId,
+      buildPresentIdentityKeys(fullEntities),
+    );
+    // Same reconcile for stray custom mappings, keyed by entity_id: it catches a
+    // flag-off rename that left the mapping at the old id and keyless entities
+    // that have no identity record.
+    stampMappingPresence(
+      this.mappingStorage,
+      this.bridgeId,
+      buildPresentEntityIds(fullEntities),
+    );
 
     const existingEndpoints: EntityEndpoint[] = [];
     const now = Date.now();

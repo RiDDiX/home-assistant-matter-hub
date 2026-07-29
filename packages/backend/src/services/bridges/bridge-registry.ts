@@ -69,6 +69,12 @@ export class BridgeRegistry {
     return this._states[entityId];
   }
 
+  // The complete HA entity set (unfiltered). Used by orphan tombstone stamping
+  // so a filter change or a scope narrowing never looks like a removal.
+  get fullEntities() {
+    return this.registry.entities;
+  }
+
   // composed sub-entities may sit outside the bridge filter (#408), so these
   // fall back to the full HA registry. keep them separate from the strict
   // accessors above, every other caller must stay filtered.

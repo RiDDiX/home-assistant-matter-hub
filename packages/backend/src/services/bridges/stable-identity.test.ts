@@ -57,13 +57,29 @@ class FakeIdentityStorage {
     }
     bm.set(k, r);
   }
+  markIdentityMissing(b: string, k: string, nowIso: string) {
+    const r = this.m.get(b)?.get(k);
+    if (!r || r.missingSince != null) return;
+    r.missingSince = nowIso;
+  }
+  clearIdentityMissing(b: string, k: string) {
+    const r = this.m.get(b)?.get(k);
+    if (!r || r.missingSince == null) return;
+    r.missingSince = undefined;
+  }
+  async deleteIdentity(b: string, k: string) {
+    this.m.get(b)?.delete(k);
+  }
   async deleteBridgeIdentities(b: string) {
     this.m.delete(b);
   }
 }
 
 class FakeMappingStorage {
-  private m = new Map<string, Map<string, EntityMappingConfig>>();
+  private m = new Map<
+    string,
+    Map<string, EntityMappingConfig & { missingSince?: string }>
+  >();
   put(b: string, cfg: EntityMappingConfig) {
     let bm = this.m.get(b);
     if (!bm) {
@@ -77,6 +93,16 @@ class FakeMappingStorage {
   }
   getMappingsForBridge(b: string) {
     return [...(this.m.get(b)?.values() ?? [])];
+  }
+  markMappingMissing(b: string, e: string, nowIso: string) {
+    const r = this.m.get(b)?.get(e);
+    if (!r || r.missingSince != null) return;
+    r.missingSince = nowIso;
+  }
+  clearMappingMissing(b: string, e: string) {
+    const r = this.m.get(b)?.get(e);
+    if (!r || r.missingSince == null) return;
+    r.missingSince = undefined;
   }
   // biome-ignore lint/suspicious/noExplicitAny: mirrors the request shape loosely
   async setMapping(req: any) {
@@ -751,6 +777,87 @@ describe("stable identity through BridgeEndpointManager (#404)", () => {
     expect(first!.id).toBe("switch_s");
     expect(second!.id).toBe("switch_s");
   });
+
+  it("stamps missingSince when the entity leaves the full registry, clears on return, never auto-deletes (orphan cleanup)", async () => {
+    const ha = makeHa();
+    setEntity(ha, "switch.orphan", { unique_id: "U", platform: "hue" });
+    const identity = new FakeIdentityStorage();
+    const manager = await buildManager(
+      ha,
+      makeProvider("bridge-orphan", { stableIdentity: true }),
+      new FakeMappingStorage(),
+      identity,
+    );
+    const key = identityKey({
+      entity_id: "switch.orphan",
+      registry: reg("U", "hue"),
+    })!;
+
+    await manager.refreshDevices();
+    // present: record seeded, no tombstone
+    expect(identity.getIdentity("bridge-orphan", key)).toBeDefined();
+    expect(
+      identity.getIdentity("bridge-orphan", key)?.missingSince,
+    ).toBeUndefined();
+
+    // removed from HA entirely
+    removeEntity(ha, "switch.orphan");
+    await manager.refreshDevices();
+    // record survives (not auto-deleted) and is tombstoned
+    const stamped = identity.getIdentity("bridge-orphan", key);
+    expect(stamped).toBeDefined();
+    expect(typeof stamped?.missingSince).toBe("string");
+
+    // reappears under the same unique_id: tombstone cleared
+    setEntity(ha, "switch.orphan", { unique_id: "U", platform: "hue" });
+    await manager.refreshDevices();
+    expect(identity.getIdentity("bridge-orphan", key)).toBeDefined();
+    expect(
+      identity.getIdentity("bridge-orphan", key)?.missingSince,
+    ).toBeUndefined();
+  });
+
+  it("does not tombstone a present entity that the bridge filter excludes (full registry, not filtered)", async () => {
+    const ha = makeHa();
+    // in the bridge (matches switch.*)
+    setEntity(ha, "switch.keep", { unique_id: "UK", platform: "hue" });
+    // present in HA but outside this bridge's switch.* filter
+    setEntity(ha, "sensor.excluded", { unique_id: "UX", platform: "hue" });
+    const identity = new FakeIdentityStorage();
+    // a record already exists for the excluded entity (seeded while it was in
+    // scope, before a filter narrowing). It must not be tombstoned while the
+    // entity is still present in the FULL registry.
+    const excludedKey = identityKey({
+      entity_id: "sensor.excluded",
+      registry: reg("UX", "hue"),
+    })!;
+    identity.setIdentity("bridge-filtered", excludedKey, {
+      endpointId: "sensor_excluded",
+      anchorEntityId: "sensor.excluded",
+      lastEntityId: "sensor.excluded",
+    });
+
+    const manager = await buildManager(
+      ha,
+      makeProvider("bridge-filtered", { stableIdentity: true }),
+      new FakeMappingStorage(),
+      identity,
+    );
+    await manager.refreshDevices();
+
+    // switch.keep is in the bridge and got its record seeded...
+    const keepKey = identityKey({
+      entity_id: "switch.keep",
+      registry: reg("UK", "hue"),
+    })!;
+    expect(identity.getIdentity("bridge-filtered", keepKey)).toBeDefined();
+    // ...and the excluded-but-present entity was NOT tombstoned, because
+    // stamping reads the full registry, not the bridge's filtered set. Were it
+    // to read the filtered set, sensor.excluded would be absent and stamped.
+    expect(
+      identity.getIdentity("bridge-filtered", excludedKey)?.missingSince,
+    ).toBeUndefined();
+  });
 });
 
 describe("composed device stable identity through BridgeEndpointManager (#404)", () => {
@@ -902,5 +1009,23 @@ describe("identity lifecycle through the matter API (#404)", () => {
     });
 
     expect(identity.getBridgeIdentities(bridgeId).size).toBe(0);
+  });
+
+  it("orphan routes 404 on an unknown bridge, mirroring factory-reset (API consistency)", async () => {
+    const identity = new FakeIdentityStorage();
+    const bridgeService = { bridges: [{ id: "bridge-known" }] };
+
+    await withRouter(bridgeService, identity, async (baseUrl) => {
+      const get = await fetch(
+        `${baseUrl}/matter/bridges/bridge-unknown/orphans`,
+      );
+      expect(get.status).toBe(404);
+
+      const post = await fetch(
+        `${baseUrl}/matter/bridges/bridge-unknown/actions/cleanup-orphans`,
+        { method: "POST" },
+      );
+      expect(post.status).toBe(404);
+    });
   });
 });

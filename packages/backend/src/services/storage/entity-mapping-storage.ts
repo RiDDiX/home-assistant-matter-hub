@@ -8,16 +8,34 @@ import type { AppStorage } from "./app-storage.js";
 
 type StorageObjectType = { [key: string]: SupportedStorageTypes };
 
+// The persisted shape: a mapping config plus an optional orphan tombstone.
+// missingSince is the ISO time the mapping's entity first went absent from the
+// FULL HA registry, aged out by the manual orphan cleanup (see orphan-cleanup.ts).
+// It is a storage concern kept off EntityMappingConfig, so controllers and the
+// mapping editor never read it; a setMapping edit rebuilds a clean config and
+// drops it.
+type StoredMapping = EntityMappingConfig & { missingSince?: string };
+
 interface StoredMappings {
   version: number;
-  mappings: Record<string, EntityMappingConfig[]>;
+  mappings: Record<string, StoredMapping[]>;
 }
 
+// missingSince is an additive optional field: records serialise as opaque
+// objects, so an old record without it loads with it undefined and a new record
+// writes it inline. That round-trips both ways, so no version bump / migrate is
+// required and CURRENT_VERSION stays 1 (mirrors entity-identity-storage).
 const CURRENT_VERSION = 1;
+
+// mark/clearMappingMissing are called for every mapping on every refresh pass,
+// so their persist is debounced to coalesce a steady state into a single write.
+// dispose flushes any pending write.
+const PERSIST_DEBOUNCE_MS = 500;
 
 export class EntityMappingStorage extends Service {
   private storage!: StorageContext;
-  private mappings: Map<string, Map<string, EntityMappingConfig>> = new Map();
+  private mappings: Map<string, Map<string, StoredMapping>> = new Map();
+  private persistTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(private readonly appStorage: AppStorage) {
     super("EntityMappingStorage");
@@ -26,6 +44,10 @@ export class EntityMappingStorage extends Service {
   protected override async initialize() {
     this.storage = this.appStorage.createContext("entity-mappings");
     await this.load();
+  }
+
+  override async dispose(): Promise<void> {
+    await this.flush();
   }
 
   private async load(): Promise<void> {
@@ -45,7 +67,7 @@ export class EntityMappingStorage extends Service {
     }
 
     for (const [bridgeId, configs] of Object.entries(data.mappings)) {
-      const bridgeMap = new Map<string, EntityMappingConfig>();
+      const bridgeMap = new Map<string, StoredMapping>();
       for (const config of configs) {
         bridgeMap.set(config.entityId, config);
       }
@@ -67,6 +89,12 @@ export class EntityMappingStorage extends Service {
   }
 
   private async persist(): Promise<void> {
+    // An immediate write also cancels a pending debounced one, so mark/clear
+    // never re-writes what a setMapping just flushed.
+    if (this.persistTimer) {
+      clearTimeout(this.persistTimer);
+      this.persistTimer = null;
+    }
     const data: StoredMappings = {
       version: CURRENT_VERSION,
       mappings: {},
@@ -77,6 +105,19 @@ export class EntityMappingStorage extends Service {
     }
 
     await this.storage.set("data", data as unknown as StorageObjectType);
+  }
+
+  private schedulePersist(): void {
+    if (this.persistTimer) return;
+    this.persistTimer = setTimeout(() => {
+      this.persistTimer = null;
+      void this.persist();
+    }, PERSIST_DEBOUNCE_MS);
+  }
+
+  // Flush any pending debounced write, used on dispose and by tests.
+  async flush(): Promise<void> {
+    await this.persist();
   }
 
   getMappingsForBridge(bridgeId: string): EntityMappingConfig[] {
@@ -255,6 +296,25 @@ export class EntityMappingStorage extends Service {
   async deleteBridgeMappings(bridgeId: string): Promise<void> {
     this.mappings.delete(bridgeId);
     await this.persist();
+  }
+
+  // Stamp the tombstone the first time a mapping's entity is absent from HA.
+  // Keeps the first-seen time on later passes and no-ops once stamped, so a
+  // steady absence does not churn the debounced persist.
+  markMappingMissing(bridgeId: string, entityId: string, nowIso: string): void {
+    const record = this.mappings.get(bridgeId)?.get(entityId);
+    if (!record || record.missingSince != null) return;
+    record.missingSince = nowIso;
+    this.schedulePersist();
+  }
+
+  // Clear the tombstone when the entity is present again. No-ops when there is
+  // nothing to clear, so an all-present bridge writes nothing on refresh.
+  clearMappingMissing(bridgeId: string, entityId: string): void {
+    const record = this.mappings.get(bridgeId)?.get(entityId);
+    if (!record || record.missingSince == null) return;
+    delete record.missingSince;
+    this.schedulePersist();
   }
 }
 

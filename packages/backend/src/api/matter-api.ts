@@ -11,6 +11,13 @@ import type { BridgeService } from "../services/bridges/bridge-service.js";
 import { testMatchers } from "../services/bridges/matcher/matches-entity-filter.js";
 import type { HomeAssistantRegistry } from "../services/home-assistant/home-assistant-registry.js";
 import type { EntityIdentityStorage } from "../services/storage/entity-identity-storage.js";
+import type { EntityMappingStorage } from "../services/storage/entity-mapping-storage.js";
+import {
+  buildPresentEntityIds,
+  buildPresentIdentityKeys,
+  computeOrphanCandidates,
+  executeOrphanCleanup,
+} from "../services/storage/orphan-cleanup.js";
 import { endpointToJson } from "../utils/json/endpoint-to-json.js";
 
 const ajv = new Ajv();
@@ -19,6 +26,7 @@ export function matterApi(
   bridgeService: BridgeService,
   haRegistry?: HomeAssistantRegistry,
   identityStorage?: EntityIdentityStorage,
+  mappingStorage?: EntityMappingStorage,
 ): express.Router {
   const router = express.Router();
   router.get("/", (_, res) => {
@@ -147,6 +155,72 @@ export function matterApi(
       });
     }
   });
+
+  // Manual orphan cleanup: entities removed from HA forever leave behind their
+  // frozen identity record (and any mapping keyed to it). These two routes let
+  // the user preview and prune those, gated by the 7-day tombstone.
+  router.get("/bridges/:bridgeId/orphans", async (req, res) => {
+    const bridgeId = req.params.bridgeId;
+    const bridge = bridgeService.bridges.find((b) => b.id === bridgeId);
+    if (!bridge) {
+      res.status(404).send("Not Found");
+      return;
+    }
+    if (!haRegistry || !identityStorage) {
+      res.status(503).json({ error: "Orphan cleanup is not available" });
+      return;
+    }
+    const presentKeys = buildPresentIdentityKeys(haRegistry.entities);
+    const presentEntityIds = buildPresentEntityIds(haRegistry.entities);
+    const candidates = computeOrphanCandidates({
+      bridgeId,
+      identities: identityStorage.getBridgeIdentities(bridgeId),
+      presentKeys,
+      presentEntityIds,
+      hasMapping: (entityId) =>
+        mappingStorage?.getMapping(bridgeId, entityId) != null,
+      mappings: mappingStorage?.getMappingsForBridge(bridgeId),
+    });
+    res.status(200).json({ candidates });
+  });
+
+  router.post(
+    "/bridges/:bridgeId/actions/cleanup-orphans",
+    async (req, res) => {
+      const bridgeId = req.params.bridgeId;
+      const bridge = bridgeService.bridges.find((b) => b.id === bridgeId);
+      if (!bridge) {
+        res.status(404).send("Not Found");
+        return;
+      }
+      if (!haRegistry || !identityStorage || !mappingStorage) {
+        res.status(503).json({ error: "Orphan cleanup is not available" });
+        return;
+      }
+      const body = req.body as { identityKeys?: unknown };
+      const requestedKeys = Array.isArray(body?.identityKeys)
+        ? body.identityKeys.filter((k): k is string => typeof k === "string")
+        : [];
+      try {
+        const results = await executeOrphanCleanup({
+          bridgeId,
+          requestedKeys,
+          identities: identityStorage.getBridgeIdentities(bridgeId),
+          presentKeys: buildPresentIdentityKeys(haRegistry.entities),
+          presentEntityIds: buildPresentEntityIds(haRegistry.entities),
+          getMapping: (b, e) => mappingStorage.getMapping(b, e),
+          deleteMapping: (b, e) => mappingStorage.deleteMapping(b, e),
+          deleteIdentity: (b, k) => identityStorage.deleteIdentity(b, k),
+          mappings: mappingStorage.getMappingsForBridge(bridgeId),
+        });
+        res.status(200).json({ results });
+      } catch (e) {
+        res.status(500).json({
+          error: e instanceof Error ? e.message : "Unknown error",
+        });
+      }
+    },
+  );
 
   router.get("/bridges/:bridgeId/devices", async (req, res) => {
     const bridgeId = req.params.bridgeId;
