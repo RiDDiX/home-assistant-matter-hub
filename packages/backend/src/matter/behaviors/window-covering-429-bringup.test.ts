@@ -73,7 +73,9 @@ beforeEach(() => {
 afterEach(async () => {
   await server?.close().catch(() => {});
   server = undefined;
-  setOptimisticMovementTimeoutMsForTests(DEFAULT_OPTIMISTIC_MOVEMENT_TIMEOUT_MS);
+  setOptimisticMovementTimeoutMsForTests(
+    DEFAULT_OPTIMISTIC_MOVEMENT_TIMEOUT_MS,
+  );
   rmSync(dir, { recursive: true, force: true });
 });
 
