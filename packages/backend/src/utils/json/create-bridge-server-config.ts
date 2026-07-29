@@ -11,6 +11,7 @@ export type BridgeServerNodeConfig =
 
 export function createBridgeServerConfig(
   data: BridgeData,
+  options?: { tcp?: { incoming: boolean; outgoing: boolean } },
 ): BridgeServerNodeConfig {
   return {
     type: ServerNode.RootEndpoint,
@@ -18,6 +19,7 @@ export function createBridgeServerConfig(
     network: {
       port: data.port,
       subscriptionOptions: matterSubscriptionOptions(),
+      ...(options?.tcp ? { tcp: options.tcp } : {}),
     },
     productDescription: {
       name: data.name,

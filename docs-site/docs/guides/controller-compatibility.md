@@ -24,24 +24,26 @@ Rows flagged with a footnote number link to the vendor source that establishes t
 | `fan` | Fan | ✅ | ✅ [¹](#sources) | ✅ [²](#sources) | ✅ [⁴](#sources) | ⚠️ |
 | `sensor` | TemperatureSensor | ✅ | ✅ [¹](#sources) | ✅ [²](#sources) | ✅ [⁴](#sources) | ✅ |
 | `sensor` | HumiditySensor | ✅ | ✅ [¹](#sources) | ✅ [²](#sources) | ✅ [⁴](#sources) | ✅ |
-| `sensor` | PressureSensor | ✅ | ✅ [¹](#sources) | ❌ [²](#sources) | ✅ [⁴](#sources) | ✅ |
+| `sensor` | PressureSensor | ❌ [⁵](#sources) | ✅ [¹](#sources) | ❌ [²](#sources) | ✅ [⁴](#sources) | ✅ |
 | `sensor` | IlluminanceSensor | ✅ | ✅ [¹](#sources) | ✅ [²](#sources) | ❓ | ✅ |
-| `sensor` | FlowSensor | ❓ | ✅ [¹](#sources) | ❌ [²](#sources) | ❓ | ❓ |
+| `sensor` | FlowSensor | ❌ [⁵](#sources) | ✅ [¹](#sources) | ❌ [²](#sources) | ❓ | ❓ |
 | `sensor` | AirQualitySensor | ✅ | ✅ [¹](#sources) | ✅ [²](#sources) | ✅ [⁴](#sources) | ❓ |
-| `sensor` | ElectricalSensor | ❓ | ❓ | ❓ | ❓ | ❓ |
+| `sensor` | ElectricalMeter | ❌ | ✅ | ❌ | ❓ | ✅ |
+| `sensor` (override) | SolarPower | ❌ | ❌ | ❓ | ❓ | ✅ |
+| `sensor` (override) | BatteryStorage | ❌ | ❌ | ❌ | ✅ | ❓ |
 | `binary_sensor` | ContactSensor | ✅ | ✅ [¹](#sources) | ✅ [²](#sources) | ✅ [⁴](#sources) | ✅ |
 | `binary_sensor` | OccupancySensor | ✅ | ✅ [¹](#sources) | ✅ [²](#sources) | ✅ [⁴](#sources) | ✅ |
-| `binary_sensor` | SmokeCoAlarm | ✅ | ✅ | ✅ [²](#sources) | ✅ [⁴](#sources) | ✅ |
-| `binary_sensor` (override) | WaterLeakDetector | ✅ [³](#sources) | ❌ [¹](#sources) | ⚠️ [²](#sources) | ✅ [⁴](#sources) | ❓ |
-| `binary_sensor` (override) | WaterFreezeDetector | ❌ [³](#sources) | ❌ [¹](#sources) | ❌ [²](#sources) | ✅ [⁴](#sources) | ❓ |
-| `media_player` | Speaker | ❓ | ✅ [¹](#sources) | ❌ [²](#sources) | ✅ [⁴](#sources) | ❓ |
-| `media_player` | BasicVideoPlayer | ❓ | ❓ | ❓ | ✅ [⁴](#sources) | ❓ |
-| `valve` | WaterValve | ✅ | ❌ [¹](#sources) | ❌ [²](#sources) | ✅ [⁴](#sources) | ❓ |
-| `vacuum` | RoboticVacuumCleaner | ✅ [³](#sources) | ✅ [¹](#sources) | ✅* [²](#sources) | ✅ [⁴](#sources) | ❓ |
+| `binary_sensor` | SmokeCoAlarm | ✅ [⁵](#sources) | ✅ | ✅ [²](#sources) | ✅ [⁴](#sources) | ✅ |
+| `binary_sensor` (override) | WaterLeakDetector | ✅ [⁵](#sources) | ❌ [¹](#sources) | ⚠️ [²](#sources) | ✅ [⁴](#sources) | ❓ |
+| `binary_sensor` (override) | WaterFreezeDetector | ❌ [⁵](#sources) | ❌ [¹](#sources) | ❌ [²](#sources) | ✅ [⁴](#sources) | ❓ |
+| `media_player` | Speaker | ❌ [⁵](#sources) | ✅ [¹](#sources) | ❌ [²](#sources) | ✅ [⁴](#sources) | ❓ |
+| `media_player` | BasicVideoPlayer | ❌ [⁵](#sources) | ❓ | ❓ | ✅ [⁴](#sources) | ❓ |
+| `valve` | WaterValve | ❌ [⁵](#sources) | ❌ [¹](#sources) | ❌ [²](#sources) | ✅ [⁴](#sources) | ❓ |
+| `vacuum` | RoboticVacuumCleaner | ✅ [³](#sources)[⁵](#sources) | ✅ [¹](#sources) | ✅* [²](#sources) | ✅ [⁴](#sources) | ❓ |
 | `water_heater` | Thermostat | ✅ | ✅ | ✅ | ✅ [⁴](#sources) | ❓ |
-| `alarm_control_panel` | ModeSelect | ❓ | ❓ | ❌** | ❓ | ❓ |
-| `select` | ModeSelect | ❓ | ❌*** | ❌** | ❓ | ❓ |
-| `event` | GenericSwitch | ✅ | ❓ | ✅ [²](#sources) | ❓ | ❓ |
+| `alarm_control_panel` | ModeSelect | ❌ [⁵](#sources) | ❓ | ❌** | ❓ | ❓ |
+| `select` | ModeSelect | ❌ [⁵](#sources) | ❌*** | ❌** | ❓ | ❓ |
+| `event` | GenericSwitch | ✅ [⁵](#sources) | ❓ | ✅ [²](#sources) | ❓ | ❓ |
 | `humidifier` | Fan | ✅ | ✅ [¹](#sources) | ✅ [²](#sources) | ✅ [⁴](#sources) | ❓ |
 | `dishwasher` (override) | Dishwasher | ❌ [³](#sources) | ✅ [¹](#sources) | ✅ [²](#sources) | ❓ | ✅ |
 | `weather` | TemperatureSensor (+Humidity, +Pressure) | ⚠️**** | ⚠️**** | ⚠️**** | ❓ | ❓ |
@@ -63,9 +65,9 @@ By default a `moisture` or `cold` binary sensor is exposed as a plain ContactSen
 
 \*\*\* Google Home does not support the standalone ModeSelect device type (0x0027): it is absent from Google's published Matter device types, so Google shows a generic info screen with no options control (#356). The option labels are sent correctly on the wire, this is a controller-side device-type gap, not a bridge bug. The Home Assistant Google Assistant cloud integration does expose these entities as Google "Modes", but that is a separate non-Matter path, not the HAMH bridge. Workaround: use that cloud integration, enable the per-entity "Expose as an on/off switch" mapping (maps on/off to two chosen options, works on all controllers), or expose the entity as an HA template switch or script. See [#356](https://github.com/RiDDiX/home-assistant-matter-hub/issues/356) and [#296](https://github.com/RiDDiX/home-assistant-matter-hub/issues/296).
 
-\*\*\*\* A `weather` entity is exposed as a TemperatureSensor with Humidity and Pressure clusters stacked on one device. Temperature and Humidity should work where the standalone sensor rows do; Pressure is Google-only (see the PressureSensor row). The stacked-cluster shape on a single device is not yet community-tested, so treat these cells as expected, not confirmed.
+\*\*\*\* A `weather` entity is exposed as a TemperatureSensor with Humidity and Pressure clusters stacked on one device. Temperature and Humidity should work where the standalone sensor rows do; Pressure will not show on Apple or Alexa (see the PressureSensor row). The stacked-cluster shape on a single device is not yet community-tested, so treat these cells as expected, not confirmed.
 
-**No switch tile over Matter.** Matter has no on/off device type that controllers render as a plain "switch": every controller shows 0x010A as a plug/outlet and 0x0100 (the OnOffSwitch override) as a light. The switch tile you may know from HA's HomeKit Bridge comes from the HomeKit-native Switch service, which has no Matter equivalent. Apple's "Show as" works on Matter outlets but only offers Outlet, Light, or Fan. The Matter 1.4 Mounted On/Off Control type (experimental override) shows as a switch on SmartThings and Aqara; Apple, Google, and Alexa don't know the type and are expected to fall back to its advertised plug subset (not yet verified on real devices). For a genuine switch tile on Apple or Google, expose that entity through HA's HomeKit Bridge or Google integration in parallel ([#380](https://github.com/RiDDiX/home-assistant-matter-hub/issues/380)).
+**No switch tile over Matter.** Matter has no on/off device type that controllers render as a plain "switch": every controller shows 0x010A as a plug/outlet and 0x0100 (the OnOffSwitch override) as a light. The switch tile you may know from HA's HomeKit Bridge comes from the HomeKit-native Switch service, which has no Matter equivalent. The plist does map 0x0103 (On/Off Light Switch) to the HAP Switch service, but 0x0103 is a controller-side device type (a wall switch that binds to lights), not something a bridge can expose as a controllable endpoint, so the gap stands. Apple's "Show as" works on Matter outlets but only offers Outlet, Light, or Fan. The Matter 1.4 Mounted On/Off Control type (experimental override) shows as a switch on SmartThings and Aqara; Apple, Google, and Alexa don't know the type and are expected to fall back to its advertised plug subset (not yet verified on real devices). For a genuine switch tile on Apple or Google, expose that entity through HA's HomeKit Bridge or Google integration in parallel ([#380](https://github.com/RiDDiX/home-assistant-matter-hub/issues/380)).
 
 ### Sources
 
@@ -75,6 +77,7 @@ Footnote references for the ✅ / ❌ cells above:
 2. Amazon Alexa, [Supported Matter Device Categories and Clusters](https://developer.amazon.com/en-US/docs/alexa/smarthome/supported-matter-device-categories.html) (doc dated 2026-04-08). Rows marked ❌ for Alexa are device types absent from that page.
 3. Apple Home, [Use Matter accessories with the Home app](https://support.apple.com/en-us/102135) (doc dated 2025-12-12) plus iOS 18.4 release coverage for robot vacuum support. Apple's public doc does not list dishwashers as a supported category.
 4. Aqara Home, [Everything Matter](https://www.aqara.com/en/explore/everything-matter/) device list (fetched 2026-06) plus the [April 2025 Matter controller update](https://www.businesswire.com/news/home/20250409001178/en). Aqara surfaces one of the widest device-type ranges; ❓ for Aqara means the type is not named on that page, not that it is known to fail.
+5. Apple Home (iOS 26), the internal chipplugin-protocol-map.plist from HomeKitMatter.framework, surfaced in [discussion #410](https://github.com/RiDDiX/home-assistant-matter-hub/discussions/410). This is Apple's actual Matter to HomeKit translation table. A device type missing from it gets no HomeKit tile unless Apple handles it natively; the plist's NativeMatterDeviceTypes lists only Robot Vacuum (0x0074) and Network Infrastructure Manager (0x0090). Apple cells marked ❌ with this footnote have no entry in the plist, so they get no tile over Matter; Apple's separate media paths (AirPlay, HomeKit native) are outside this matrix.
 
 Apple, Google, Alexa, Aqara, and SmartThings each move at a different cadence. A ❌ here means the vendor has not published support on their current device-type page, not that the device is known to fail. When a vendor adds the category we flip the cell and cite the update.
 

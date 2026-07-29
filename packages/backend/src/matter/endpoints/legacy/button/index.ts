@@ -22,6 +22,11 @@ class ButtonOnOffServerBase extends Base {
   override on() {
     const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);
     homeAssistant.callAction({ action: "button.press" });
+    // disableMomentaryFlip (#423): the reset never toggles onOff (this class
+    // never sets it true), so skipping it just avoids a dead timer.
+    if (homeAssistant.state.mapping?.disableMomentaryFlip) {
+      return;
+    }
     // Auto-reset to OFF after 1 second so button doesn't stay "on"
     setTimeout(this.callback(this.resetToOff), 1000);
   }

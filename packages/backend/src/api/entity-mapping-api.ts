@@ -1,9 +1,11 @@
 import type { EntityMappingRequest } from "@home-assistant-matter-hub/common";
 import express from "express";
+import type { EntityIdentityStorage } from "../services/storage/entity-identity-storage.js";
 import type { EntityMappingStorage } from "../services/storage/entity-mapping-storage.js";
 
 export function entityMappingApi(
   mappingStorage: EntityMappingStorage,
+  identityStorage: EntityIdentityStorage,
 ): express.Router {
   const router = express.Router();
 
@@ -43,11 +45,20 @@ export function entityMappingApi(
       humidityEntity: body.humidityEntity,
       pressureEntity: body.pressureEntity,
       batteryEntity: body.batteryEntity,
+      disableBatteryMapping: body.disableBatteryMapping,
       chargingStateEntity: body.chargingStateEntity,
       roomEntities: body.roomEntities,
       disableLockPin: body.disableLockPin,
+      lockUsercodeService: body.lockUsercodeService,
+      lockUsercodeSlot: body.lockUsercodeSlot,
+      lockPinMinLength: body.lockPinMinLength,
+      lockPinMaxLength: body.lockPinMaxLength,
       powerEntity: body.powerEntity,
       energyEntity: body.energyEntity,
+      voltageEntity: body.voltageEntity,
+      currentEntity: body.currentEntity,
+      batteryPowerEntity: body.batteryPowerEntity,
+      batteryEnergyEntity: body.batteryEnergyEntity,
       suctionLevelEntity: body.suctionLevelEntity,
       mopIntensityEntity: body.mopIntensityEntity,
       customServiceAreas: body.customServiceAreas,
@@ -71,6 +82,7 @@ export function entityMappingApi(
       climateExposeFan: body.climateExposeFan,
       climateAutoMode: body.climateAutoMode,
       composedEntities: body.composedEntities,
+      disableMomentaryFlip: body.disableMomentaryFlip,
     };
 
     const config = await mappingStorage.setMapping(request);
@@ -86,6 +98,9 @@ export function entityMappingApi(
   router.delete("/:bridgeId", async (req, res) => {
     const { bridgeId } = req.params;
     await mappingStorage.deleteBridgeMappings(bridgeId);
+    // Drop the bridge's frozen identities too, so a re-created bridge with the
+    // same id starts fresh instead of inheriting stale anchors (#404).
+    await identityStorage.deleteBridgeIdentities(bridgeId);
     res.status(204).send();
   });
 

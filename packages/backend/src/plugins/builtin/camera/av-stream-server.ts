@@ -3,10 +3,18 @@ import { CameraAvStreamManagementServer } from "@matter/main/behaviors";
 import { CameraAvStreamManagement } from "@matter/main/clusters";
 import type { WebRtcBridge } from "./webrtc-bridge.js";
 
-const Base = CameraAvStreamManagementServer.with("Video", "Audio", "Snapshot");
+// ImageControl carries no commands; it is on so we can set an image-orientation
+// attribute, which matter.js requires (a "choice b" conformance group) even
+// though the bridge does not rotate or flip.
+const Base = CameraAvStreamManagementServer.with(
+  "Video",
+  "Snapshot",
+  "ImageControl",
+);
 
-// The 8 CameraAvStreamManagement commands. Allocation is just bookkeeping (the
+// The 6 CameraAvStreamManagement commands. Allocation is just bookkeeping (the
 // real media comes from HA over WebRTC); captureSnapshot pulls a JPEG from HA.
+// No Audio: the bridge never forwards audio, so we don't advertise the feature.
 export class CameraAvStreamServer extends Base {
   declare state: CameraAvStreamServer.State;
 
@@ -46,34 +54,6 @@ export class CameraAvStreamServer extends Base {
   ): MaybePromise {
     this.state.allocatedVideoStreams = this.state.allocatedVideoStreams.filter(
       (s) => s.videoStreamId !== request.videoStreamId,
-    );
-  }
-
-  override audioStreamAllocate(
-    request: CameraAvStreamManagement.AudioStreamAllocateRequest,
-  ): MaybePromise<CameraAvStreamManagement.AudioStreamAllocateResponse> {
-    const audioStreamId = this.state.nextAudioStreamId++;
-    this.state.allocatedAudioStreams = [
-      ...this.state.allocatedAudioStreams,
-      {
-        audioStreamId,
-        streamUsage: request.streamUsage,
-        audioCodec: request.audioCodec,
-        channelCount: request.channelCount,
-        sampleRate: request.sampleRate,
-        bitRate: request.bitRate,
-        bitDepth: request.bitDepth,
-        referenceCount: 1,
-      },
-    ];
-    return { audioStreamId };
-  }
-
-  override audioStreamDeallocate(
-    request: CameraAvStreamManagement.AudioStreamDeallocateRequest,
-  ): MaybePromise {
-    this.state.allocatedAudioStreams = this.state.allocatedAudioStreams.filter(
-      (s) => s.audioStreamId !== request.audioStreamId,
     );
   }
 
@@ -124,7 +104,6 @@ export namespace CameraAvStreamServer {
     bridge!: WebRtcBridge;
     entityId!: string;
     nextVideoStreamId = 1;
-    nextAudioStreamId = 1;
     nextSnapshotStreamId = 1;
   }
 }

@@ -31,6 +31,7 @@ export class ServerModeVacuumEndpoint extends EntityEndpoint {
     registry: BridgeRegistry,
     entityId: string,
     mapping?: EntityMappingConfig,
+    endpointId?: string,
   ): Promise<ServerModeVacuumEndpoint | undefined> {
     const deviceRegistry = registry.deviceOf(entityId);
     let state = registry.initialState(entityId);
@@ -42,11 +43,16 @@ export class ServerModeVacuumEndpoint extends EntityEndpoint {
 
     // Auto-assign battery entity if not manually set
     let effectiveMapping = mapping;
+    // disableBatteryMapping wins over a manual batteryEntity too, matching the
+    // legacy and user-composed paths (#427).
+    if (mapping?.disableBatteryMapping && mapping.batteryEntity) {
+      effectiveMapping = { ...mapping, batteryEntity: undefined };
+    }
     logger.info(
       `${entityId}: device_id=${entity.device_id}, manualBattery=${mapping?.batteryEntity ?? "none"}`,
     );
     if (entity.device_id) {
-      if (!mapping?.batteryEntity) {
+      if (!mapping?.batteryEntity && !mapping?.disableBatteryMapping) {
         const batteryEntityId = registry.findBatteryEntityForDevice(
           entity.device_id,
         );
@@ -257,6 +263,7 @@ export class ServerModeVacuumEndpoint extends EntityEndpoint {
       entityId,
       customName,
       mappedIds,
+      endpointId,
     );
   }
 
@@ -269,8 +276,9 @@ export class ServerModeVacuumEndpoint extends EntityEndpoint {
     entityId: string,
     customName?: string,
     mappedEntityIds?: string[],
+    endpointId?: string,
   ) {
-    super(type, entityId, customName, mappedEntityIds);
+    super(type, entityId, customName, mappedEntityIds, endpointId);
     // Debounce state updates to batch rapid changes into a single transaction.
     // HA sends vacuum state updates every 5-10s even when unchanged.
     // Without debouncing, each triggers a separate Matter.js transaction.

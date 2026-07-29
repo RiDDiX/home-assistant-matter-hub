@@ -149,6 +149,10 @@ interface HomeAssistantEntityState {
     pressureEntity?: string;
     powerEntity?: string;
     energyEntity?: string;
+    voltageEntity?: string;
+    currentEntity?: string;
+    batteryPowerEntity?: string;
+    batteryEnergyEntity?: string;
   };
 }
 
@@ -237,6 +241,24 @@ export const EndpointCard = ({
     if (mapping?.energyEntity) {
       mappings.push({ label: "Energy", entity: mapping.energyEntity });
     }
+    if (mapping?.voltageEntity) {
+      mappings.push({ label: "Voltage", entity: mapping.voltageEntity });
+    }
+    if (mapping?.currentEntity) {
+      mappings.push({ label: "Current", entity: mapping.currentEntity });
+    }
+    if (mapping?.batteryPowerEntity) {
+      mappings.push({
+        label: "Battery Power",
+        entity: mapping.batteryPowerEntity,
+      });
+    }
+    if (mapping?.batteryEnergyEntity) {
+      mappings.push({
+        label: "Battery Energy",
+        entity: mapping.batteryEnergyEntity,
+      });
+    }
     return mappings;
   }, [mapping]);
 
@@ -247,6 +269,10 @@ export const EndpointCard = ({
     if (mapping?.pressureEntity) set.add("pressureMeasurement");
     if (mapping?.powerEntity) set.add("electricalPowerMeasurement");
     if (mapping?.energyEntity) set.add("electricalEnergyMeasurement");
+    if (mapping?.voltageEntity) set.add("electricalPowerMeasurement");
+    if (mapping?.currentEntity) set.add("electricalPowerMeasurement");
+    if (mapping?.batteryPowerEntity) set.add("electricalPowerMeasurement");
+    if (mapping?.batteryEnergyEntity) set.add("electricalEnergyMeasurement");
     return set;
   }, [mapping]);
 

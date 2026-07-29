@@ -1,3 +1,4 @@
+import * as os from "node:os";
 import {
   alexaPairingPortProblem,
   BridgeStatus,
@@ -5,14 +6,22 @@ import {
   type UpdateBridgeRequest,
 } from "@home-assistant-matter-hub/common";
 import type { Logger } from "@matter/general";
+import { Network } from "@matter/main";
 import { CommissioningServer } from "@matter/main/node";
 import {
   DeviceAdvertiser,
+  type Fabric,
   FabricManager,
+  MdnsService,
   SessionManager,
 } from "@matter/main/protocol";
+import { FilteredNetwork } from "../../core/app/filtered-network.js";
 import type { LoggerService } from "../../core/app/logger.js";
 import type { ServerModeServerNode } from "../../matter/endpoints/server-mode-server-node.js";
+import {
+  collectAdvertisedAddresses,
+  runMdnsAddressWatchTick,
+} from "../../matter/mdns-address-watch.js";
 import { ensureCommissioningConfig } from "../../utils/ensure-commissioning-config.js";
 import { logMemoryUsage } from "../../utils/log-memory.js";
 import { diagnosticEventBus } from "../diagnostics/diagnostic-event-bus.js";
@@ -23,6 +32,7 @@ import type {
 import type { ServerModeEndpointManager } from "./server-mode-endpoint-manager.js";
 import {
   DEFAULT_SESSION_MAX_AGE_HOURS,
+  deadSessionTimeoutMs,
   parseSessionMaxAgeHours,
   ROTATION_CHECK_INTERVAL_MS,
   SESSION_MAX_AGE_HOURS_RANGE,
@@ -38,17 +48,16 @@ import {
 // via empty DataReports every ~sendInterval.
 const AUTO_FORCE_SYNC_INTERVAL_MS = 90_000;
 
-// When all subscriptions are lost but sessions remain active, wait this
-// long before force-closing the dead sessions. This breaks the deadlock
-// where the controller holds a stale CASE session and never re-subscribes
-// because it doesn't know the server canceled its subscriptions (#266).
-const DEAD_SESSION_TIMEOUT_MS = 60_000;
-
 // On shutdown, wait at most this long for active sessions to close cleanly.
 // A clean close tells the controller to drop its CASE session right away
 // instead of holding a stale one until its own timeout, which is what leaves
 // a controller showing the bridge as unresponsive after a restart.
 const SHUTDOWN_SESSION_CLOSE_TIMEOUT_MS = 2_500;
+
+// How often to re-check the interface addresses mDNS advertises. A dynamic ISP
+// IPv6 prefix change swaps the global address behind the cached operational
+// records, so poll and re-announce when the set moves (#415).
+const MDNS_ADDRESS_CHECK_INTERVAL_MS = 60_000;
 
 export function makeWarmStartState<T extends { last_updated?: string }>(
   state: T,
@@ -83,6 +92,15 @@ export class ServerModeBridge {
   private sessionStartedAt = new Map<number, number>();
   private rotationTimer: ReturnType<typeof setInterval> | null = null;
   private maxSessionAgeMs = 0;
+
+  // Watches the advertised interface addresses so a dynamic ISP IPv6 prefix
+  // change forces a fresh operational announcement (#415).
+  private mdnsAddressTimer: ReturnType<typeof setInterval> | null = null;
+  private advertisedAddressSnapshot: string[] = [];
+  // Skip a tick while the previous one is still awaiting refresh, so a slow
+  // refreshOperationalAdvertisement can't overlap and re-announce off a stale
+  // snapshot.
+  private mdnsCheckInFlight = false;
 
   // Tracks the last synced state JSON per entity to avoid pushing unchanged states.
   private readonly lastSyncedStates = new Map<string, string>();
@@ -280,6 +298,7 @@ export class ServerModeBridge {
       this.wireSessionDiagnostics();
       this.wireFabricWarnings();
       this.startSessionRotation();
+      this.startMdnsAddressWatch();
       this.scheduleWarmStart();
       logMemoryUsage(this.log, "server mode bridge running");
       this.log.info("Server mode bridge started");
@@ -299,6 +318,7 @@ export class ServerModeBridge {
     reason = "Manually stopped",
   ): Promise<void> {
     this.stopSessionRotation();
+    this.stopMdnsAddressWatch();
     this.unwireSessionDiagnostics();
     this.unwireFabricWarnings();
     this.cancelWarmStart();
@@ -406,17 +426,34 @@ export class ServerModeBridge {
         this.log.debug(
           `Session ${session.id} (peer ${session.peerNodeId}): subscriptions=${session.subscriptions.size} | total: sessions=${sessions.length} subscriptions=${totalSubs}`,
         );
+        diagnosticEventBus.emit(
+          "subscription_changed",
+          `Session ${session.id}: ${session.subscriptions.size} subs (total ${totalSubs})`,
+          {
+            bridgeId: this.data.id,
+            bridgeName: this.data.name,
+            details: {
+              sessionId: session.id,
+              sessionSubs: session.subscriptions.size,
+              totalSessions: sessions.length,
+              totalSubs,
+            },
+          },
+        );
         if (totalSubs === 0 && sessions.length > 0) {
           this.log.warn(
             `All subscriptions lost, ${sessions.length} session(s) still active, waiting for controller to re-subscribe`,
           );
           if (!this.deadSessionTimer) {
+            const timeoutMs = deadSessionTimeoutMs(
+              this.dataProvider.featureFlags,
+            );
             this.deadSessionTimer = setTimeout(() => {
               this.deadSessionTimer = null;
               this.closeDeadSessions();
-            }, DEAD_SESSION_TIMEOUT_MS);
+            }, timeoutMs);
             this.log.info(
-              `Scheduled dead session cleanup in ${DEAD_SESSION_TIMEOUT_MS / 1000}s`,
+              `Scheduled dead session cleanup in ${timeoutMs / 1000}s`,
             );
           }
         } else if (totalSubs > 0 && this.deadSessionTimer) {
@@ -439,7 +476,7 @@ export class ServerModeBridge {
             setTimeout(() => {
               this.staleSessionTimers.delete(session.id);
               this.closeStaleSession(session.id);
-            }, DEAD_SESSION_TIMEOUT_MS),
+            }, deadSessionTimeoutMs(this.dataProvider.featureFlags)),
           );
         } else if (
           session.subscriptions.size > 0 &&
@@ -459,6 +496,15 @@ export class ServerModeBridge {
         this.sessionStartedAt.set(newSession.id, Date.now());
         this.log.info(
           `Session opened: id=${newSession.id} peer=${newSession.peerNodeId}`,
+        );
+        diagnosticEventBus.emit(
+          "session_opened",
+          `Session ${newSession.id} opened (peer ${newSession.peerNodeId})`,
+          {
+            bridgeId: this.data.id,
+            bridgeName: this.data.name,
+            details: { sessionId: newSession.id },
+          },
         );
         // Clean up stale sessions from the same peer that have lost all
         // subscriptions. matter.js 0.16.10 CaseServer does not close
@@ -525,6 +571,18 @@ export class ServerModeBridge {
         this.log.warn(
           `Session closed: id=${session.id} peer=${session.peerNodeId} | remaining sessions=${sessions.length}`,
         );
+        diagnosticEventBus.emit(
+          "session_closed",
+          `Session ${session.id} closed (peer ${session.peerNodeId})`,
+          {
+            bridgeId: this.data.id,
+            bridgeName: this.data.name,
+            details: {
+              sessionId: session.id,
+              remainingSessions: sessions.length,
+            },
+          },
+        );
       };
       sessionManager.sessions.added.on(this.sessionAddedHandler);
       sessionManager.sessions.deleted.on(this.sessionDeletedHandler);
@@ -559,12 +617,12 @@ export class ServerModeBridge {
             setTimeout(() => {
               this.staleSessionTimers.delete(sessionId);
               this.closeStaleSession(sessionId);
-            }, DEAD_SESSION_TIMEOUT_MS),
+            }, deadSessionTimeoutMs(this.dataProvider.featureFlags)),
           );
           break;
         }
         this.log.warn(
-          `Closing stale session ${s.id} (peer ${s.peerNodeId}, no subscriptions for ${DEAD_SESSION_TIMEOUT_MS / 1000}s, no traffic for ${idleSec}s)`,
+          `Closing stale session ${s.id} (peer ${s.peerNodeId}, no subscriptions for ${deadSessionTimeoutMs(this.dataProvider.featureFlags) / 1000}s, no traffic for ${idleSec}s)`,
         );
         s.initiateClose()
           .catch(() => {
@@ -607,7 +665,7 @@ export class ServerModeBridge {
           continue;
         }
         this.log.warn(
-          `Closing dead session ${s.id} (peer ${s.peerNodeId}, no subscriptions for ${DEAD_SESSION_TIMEOUT_MS / 1000}s, no traffic for ${idleSec}s)`,
+          `Closing dead session ${s.id} (peer ${s.peerNodeId}, no subscriptions for ${deadSessionTimeoutMs(this.dataProvider.featureFlags) / 1000}s, no traffic for ${idleSec}s)`,
         );
         closes.push(
           s.initiateClose().catch(() => {
@@ -623,7 +681,7 @@ export class ServerModeBridge {
         this.deadSessionTimer = setTimeout(() => {
           this.deadSessionTimer = null;
           this.closeDeadSessions();
-        }, DEAD_SESSION_TIMEOUT_MS);
+        }, deadSessionTimeoutMs(this.dataProvider.featureFlags));
       }
       if (closes.length > 0) {
         Promise.allSettled(closes).then(() => this.triggerMdnsReAnnounce());
@@ -684,6 +742,10 @@ export class ServerModeBridge {
   private triggerMdnsReAnnounce() {
     try {
       const advertiser = this.server.env.get(DeviceAdvertiser);
+      // restartAdvertisement re-sends the cached records for live fabrics but
+      // does not rebuild them; refreshOperationalAdvertisement (used by the
+      // address watch for #415) is what re-runs the address lookup. This path
+      // only needs the controller poked to reconnect, so keep it as is.
       advertiser.restartAdvertisement();
       this.log.info("Triggered mDNS re-announcement after session cleanup");
     } catch {
@@ -779,6 +841,84 @@ export class ServerModeBridge {
       clearInterval(this.rotationTimer);
       this.rotationTimer = null;
     }
+  }
+
+  // Poll the interface addresses mDNS advertises and re-announce when they
+  // change. matter.js caches the operational records at first announcement, so
+  // a dynamic ISP IPv6 prefix change keeps advertising the dead global address
+  // until a restart (#415). refreshOperationalAdvertisement re-runs the lookup.
+  private startMdnsAddressWatch() {
+    this.stopMdnsAddressWatch();
+    const { netInterface, stripGlobalIpv6, ipv4Enabled } =
+      this.readMdnsWatchSettings();
+    this.advertisedAddressSnapshot = collectAdvertisedAddresses(
+      os.networkInterfaces(),
+      netInterface,
+      stripGlobalIpv6,
+      ipv4Enabled,
+    );
+    this.mdnsAddressTimer = setInterval(() => {
+      if (this.mdnsCheckInFlight) return;
+      this.mdnsCheckInFlight = true;
+      this.checkAdvertisedAddresses()
+        .catch((e) => {
+          this.log.warn("mDNS address check failed:", e);
+        })
+        .finally(() => {
+          this.mdnsCheckInFlight = false;
+        });
+    }, MDNS_ADDRESS_CHECK_INTERVAL_MS);
+  }
+
+  private stopMdnsAddressWatch() {
+    if (this.mdnsAddressTimer) {
+      clearInterval(this.mdnsAddressTimer);
+      this.mdnsAddressTimer = null;
+    }
+  }
+
+  // Read the mDNS settings the shared setup applied. MdnsService lives on the
+  // root env and stripGlobalIpv6 swaps in a FilteredNetwork, so both are
+  // visible from the bridge env.
+  private readMdnsWatchSettings(): {
+    netInterface?: string;
+    stripGlobalIpv6: boolean;
+    ipv4Enabled: boolean;
+  } {
+    try {
+      const mdns = this.server.env.get(MdnsService);
+      const stripGlobalIpv6 =
+        this.server.env.get(Network) instanceof FilteredNetwork;
+      return {
+        netInterface: mdns.limitedToNetInterface,
+        stripGlobalIpv6,
+        ipv4Enabled: mdns.enableIpv4,
+      };
+    } catch {
+      return { stripGlobalIpv6: false, ipv4Enabled: true };
+    }
+  }
+
+  private async checkAdvertisedAddresses() {
+    const { netInterface, stripGlobalIpv6, ipv4Enabled } =
+      this.readMdnsWatchSettings();
+    const advertiser = this.server.env.get(DeviceAdvertiser);
+    const fabrics = this.server.env.get(FabricManager);
+    this.advertisedAddressSnapshot = await runMdnsAddressWatchTick({
+      readInterfaces: () => os.networkInterfaces(),
+      netInterface,
+      stripGlobalIpv6,
+      ipv4Enabled,
+      currentSnapshot: this.advertisedAddressSnapshot,
+      fabrics: () => fabrics.fabrics,
+      refresh: (fabric) =>
+        advertiser.refreshOperationalAdvertisement(fabric as Fabric),
+      onChange: (prev, curr) => {
+        this.log.warn(
+          `Advertised address set changed (${prev.length} -> ${curr.length} addresses), re-announcing operational mDNS (#415)`,
+        );
+      },
+    });
   }
 
   // Resolve session rotation max age. Bridge config wins, then env var,

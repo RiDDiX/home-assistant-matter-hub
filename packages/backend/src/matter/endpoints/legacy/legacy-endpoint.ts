@@ -44,6 +44,8 @@ export class LegacyEndpoint extends EntityEndpoint {
     mapping?: EntityMappingConfig,
     pluginDomainMappings?: Map<string, string>,
     standalone = false,
+    endpointId?: string,
+    identityAnchor?: string,
   ): Promise<LegacyEndpoint | undefined> {
     const deviceRegistry = registry.deviceOf(entityId);
     let state = registry.initialState(entityId);
@@ -156,7 +158,8 @@ export class LegacyEndpoint extends EntityEndpoint {
       const isVacuum = entityId.startsWith("vacuum.");
       if (
         (registry.isAutoBatteryMappingEnabled() || isVacuum) &&
-        !mapping?.batteryEntity
+        !mapping?.batteryEntity &&
+        !mapping?.disableBatteryMapping
       ) {
         const batteryEntityId = registry.findBatteryEntityForDevice(
           entity.device_id,
@@ -172,6 +175,34 @@ export class LegacyEndpoint extends EntityEndpoint {
           logger.debug(
             `Auto-assigned battery ${batteryEntityId} to ${entityId}`,
           );
+        }
+      }
+
+      // 3b. Auto-assign a problem/safety sensor to smoke/CO alarms so it drives
+      // hardwareFaultAlert (#408). Gated exactly like battery mapping above.
+      const alarmDeviceClass = (state.attributes as { device_class?: string })
+        .device_class;
+      const isSmokeCoAlarm =
+        mapping?.matterDeviceType === "smoke_co_alarm" ||
+        (entityId.startsWith("binary_sensor.") &&
+          (alarmDeviceClass === "smoke" ||
+            alarmDeviceClass === "carbon_monoxide" ||
+            alarmDeviceClass === "gas"));
+      if (
+        registry.isAutoBatteryMappingEnabled() &&
+        !mapping?.faultEntity &&
+        isSmokeCoAlarm
+      ) {
+        const faultEntityId = registry.findProblemEntityForDevice(
+          entity.device_id,
+        );
+        if (faultEntityId && faultEntityId !== entityId) {
+          effectiveMapping = {
+            ...effectiveMapping,
+            entityId: effectiveMapping?.entityId ?? entityId,
+            faultEntity: faultEntityId,
+          };
+          logger.debug(`Auto-assigned fault ${faultEntityId} to ${entityId}`);
         }
       }
 
@@ -375,6 +406,8 @@ export class LegacyEndpoint extends EntityEndpoint {
         composedEntities: effectiveMapping.composedEntities,
         customName: effectiveMapping?.customName,
         areaName: composedAreaName,
+        endpointId,
+        identityAnchor,
       });
       if (composed) {
         return composed as unknown as LegacyEndpoint;
@@ -402,11 +435,15 @@ export class LegacyEndpoint extends EntityEndpoint {
           primaryEntityId: entityId,
           humidityEntityId: effectiveMapping?.humidityEntity,
           pressureEntityId: effectiveMapping?.pressureEntity,
-          batteryEntityId: effectiveMapping?.batteryEntity,
+          batteryEntityId: effectiveMapping?.disableBatteryMapping
+            ? undefined
+            : effectiveMapping?.batteryEntity,
           powerEntityId: effectiveMapping?.powerEntity,
           energyEntityId: effectiveMapping?.energyEntity,
           customName: effectiveMapping?.customName,
           areaName: composedAreaName,
+          endpointId,
+          identityAnchor,
         });
         // Return as LegacyEndpoint-compatible (duck typed: entityId + updateStates)
         return composed as unknown as LegacyEndpoint;
@@ -440,12 +477,16 @@ export class LegacyEndpoint extends EntityEndpoint {
             primaryEntityId: entityId,
             temperatureEntityId,
             humidityEntityId,
-            batteryEntityId: effectiveMapping?.batteryEntity,
+            batteryEntityId: effectiveMapping?.disableBatteryMapping
+              ? undefined
+              : effectiveMapping?.batteryEntity,
             powerEntityId: effectiveMapping?.powerEntity,
             energyEntityId: effectiveMapping?.energyEntity,
             mapping: effectiveMapping,
             customName: effectiveMapping?.customName,
             areaName: composedAreaName,
+            endpointId,
+            identityAnchor,
           });
           if (composed) {
             return composed as unknown as LegacyEndpoint;
@@ -473,6 +514,8 @@ export class LegacyEndpoint extends EntityEndpoint {
           mapping: effectiveMapping,
           customName: effectiveMapping?.customName,
           areaName: composedAreaName,
+          endpointId,
+          identityAnchor,
         });
         if (composed) {
           return composed as unknown as LegacyEndpoint;
@@ -519,11 +562,17 @@ export class LegacyEndpoint extends EntityEndpoint {
     }
 
     const areaName = registry.getAreaName(entityId);
-    let type = createLegacyEndpointType(payload, effectiveMapping, areaName, {
-      vacuumOnOff: registry.isVacuumOnOffEnabled(),
-      cleaningModeOptions,
-      pluginDomainMappings,
-    });
+    let type = createLegacyEndpointType(
+      payload,
+      effectiveMapping,
+      areaName,
+      {
+        vacuumOnOff: registry.isVacuumOnOffEnabled(),
+        cleaningModeOptions,
+        pluginDomainMappings,
+      },
+      identityAnchor,
+    );
     if (!type) {
       return;
     }
@@ -539,6 +588,7 @@ export class LegacyEndpoint extends EntityEndpoint {
       customName,
       mappedIds,
       effectiveMapping?.updateThrottleMs,
+      endpointId,
     );
   }
 
@@ -548,8 +598,9 @@ export class LegacyEndpoint extends EntityEndpoint {
     customName?: string,
     mappedEntityIds?: string[],
     throttleMs?: number,
+    endpointId?: string,
   ) {
-    super(type, entityId, customName, mappedEntityIds);
+    super(type, entityId, customName, mappedEntityIds, endpointId);
     // Batch rapid HA updates into a single Matter transaction. Home Assistant
     // often sends several attribute updates back to back (e.g. media player:
     // volume + source + play state); a 50ms debounce coalesces them and stays

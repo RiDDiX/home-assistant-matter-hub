@@ -47,6 +47,8 @@ If you only see `fe80::` addresses and no `fd` prefixes, ULA is not configured.
 
 **After changing IPv6 settings** on your router or Home Assistant host, **reboot HAOS** (not just the add-on). The mDNS service reads network addresses at startup and Docker containers may not see interface changes until the host restarts.
 
+HAMH now watches the interface addresses and re-announces with the current set when it changes, so a dynamic ISP IPv6 prefix change no longer leaves controllers stuck on a dead global address. On link-local-only LANs `mdns_strip_global_ipv6` stays the robust choice, since a stripped set never moves when the ISP prefix rotates.
+
 See [Discussion #39](https://github.com/RiDDiX/home-assistant-matter-hub/discussions/39) for a detailed explanation of IPv6 behavior with Matter.
 
 :::
@@ -120,7 +122,33 @@ HAMH flags this in two places: the **Network Diagnostics** card on the **Health 
 
 If your LAN interface also carries a global IPv6 that controllers cannot reach, drop it from what mDNS advertises with `mdns_strip_global_ipv6` (add-on, both channels; stable from the next release) or `--mdns-strip-global-ipv6` (container). This keeps only the link-local and ULA addresses. It does **not** remove a Thread `fd::` address, since that is a ULA; for Thread interfaces, bind the LAN interface instead.
 
+If the advertised IPv4 address is unroutable (for example podman without host networking behind an avahi reflector), force controllers onto IPv6 with `mdns_disable_ipv4` (add-on) or `--mdns-disable-ipv4` (container). This stops mDNS advertising IPv4 so only IPv6 is used. Only reach for it when IPv4 is the problem: an IPv6-only advertisement leaves controllers without IPv6 connectivity (some older Alexa or Google Home hubs) unable to discover the bridge.
+
 Check names and addresses with `ip addr`, or read them straight from the Network Diagnostics card. After changing the interface on an add-on, **reboot HAOS** (not just the add-on) so mDNS re-reads addresses, then re-commission the bridge in your controller.
+
+### OTBR route trap across ULA VLANs
+
+Running the Thread Border Router (OTBR) add-on next to HAMH needs a second fix beyond interface binding. The bridge works until OTBR starts, then goes offline on any controller that sits on a different ULA VLAN. Pinning `mdns_network_interface` to the LAN NIC fixes the mDNS side (the correct routable `fd::` address is advertised again), but pairing still ends in `peer-unresponsive` and the request only travels one way.
+
+The cause is a kernel route the OTBR agent injects on the host: an external route for `fc00::/7` via `wpan0` (visible in the OTBR log as it adds an external route `fc00::/7` in kernel). `fc00::/7` covers **every** `fd::` ULA network and is more specific than the `::/0` default, so return packets to a controller on another ULA VLAN (e.g. `fd30::/64`) get routed into the Thread mesh and dropped. The pairing request arrives, the reply never does, and the controller times out.
+
+Add a more specific static route on the HA host so LAN-bound ULA traffic bypasses the `/7` trap, one route per remote ULA VLAN that hosts a controller:
+
+```bash
+# Adjust connection name, interface, VLAN prefix and gateway per setup.
+# The gateway is your router's link-local address on the HA LAN interface:
+nmcli connection modify "Supervisor enp0s18" +ipv6.routes "fd30::/64 fe80::1"
+nmcli connection up "Supervisor enp0s18"
+```
+
+Verify the LAN route wins over `wpan0`:
+
+```bash
+# Must show the LAN interface, not wpan0:
+ip -6 route get fd30::30:xxxx:xxxx:xxxx:xxxx
+```
+
+See [Discussion #388](https://github.com/RiDDiX/home-assistant-matter-hub/discussions/388) for the full trace.
 
 ### Network Topology Best Practices
 

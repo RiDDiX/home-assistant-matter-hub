@@ -8,6 +8,7 @@ import { Logger } from "@matter/general";
 import type { EndpointType } from "@matter/main";
 import { FixedLabelServer } from "@matter/main/behaviors";
 import type { HomeAssistantEntityBehavior } from "../../behaviors/home-assistant-entity-behavior.js";
+import { DefaultPowerSourceServer } from "../../behaviors/power-source-server.js";
 import { validateEndpointType } from "../validate-endpoint-type.js";
 import { AirPurifierEndpoint } from "./air-purifier/index.js";
 import {
@@ -50,7 +51,9 @@ import { ScriptDevice } from "./script/index.js";
 import { InputSelectDevice, SelectDevice } from "./select/index.js";
 import { AirQualitySensorType } from "./sensor/devices/air-quality-sensor.js";
 import { BatterySensorType } from "./sensor/devices/battery-sensor.js";
+import { batteryStorageEssType } from "./sensor/devices/battery-storage-ess.js";
 import { CarbonMonoxideSensorType } from "./sensor/devices/carbon-monoxide-sensor.js";
+import { ElectricalMeterType } from "./sensor/devices/electrical-meter.js";
 import { ElectricalSensorType } from "./sensor/devices/electrical-sensor.js";
 import { FlowSensorType } from "./sensor/devices/flow-sensor.js";
 import { FormaldehydeSensorType } from "./sensor/devices/formaldehyde-sensor.js";
@@ -90,16 +93,43 @@ export function createLegacyEndpointType(
   mapping?: EntityMappingConfig,
   areaName?: string,
   options?: LegacyEndpointOptions,
+  identityAnchor?: string,
 ): EndpointType | undefined {
+  // Some integrations (e.g. Xiaomi Home) report a bogus battery sensor on
+  // mains-powered devices, which the auto battery mapper then attaches,
+  // causing a false low-battery warning. disableBatteryMapping strips both
+  // battery/battery_level attributes and a mapped batteryEntity here, the
+  // one place every domain factory below reads them from (#427). Shallow
+  // copies only, never mutate the registry's entity/mapping objects.
+  if (mapping?.disableBatteryMapping) {
+    entity = {
+      ...entity,
+      state: {
+        ...entity.state,
+        attributes: stripBatteryAttributes(entity.state.attributes),
+      },
+    };
+    mapping = { ...mapping, batteryEntity: undefined };
+  }
+
   const domain = entity.entity_id.split(".")[0] as HomeAssistantDomain;
   const customName = mapping?.customName;
+  // Build the behavior state once so identityAnchor rides along to every factory
+  // and BasicInformationServer freezes uniqueId/serial to it (#404).
+  const ha = { entity, customName, mapping, identityAnchor };
 
   let type: EndpointType | undefined;
 
   if (mapping?.matterDeviceType) {
     const overrideFactory = matterDeviceTypeFactories[mapping.matterDeviceType];
     if (overrideFactory) {
-      type = overrideFactory({ entity, customName, mapping });
+      type = overrideFactory(ha);
+      // Explicit device types skip the domain path that swaps in battery
+      // variants, so attach a power source when a battery entity is mapped
+      // and the type does not already carry one (e.g. vacuum).
+      if (type && mapping.batteryEntity && !hasPowerSource(type)) {
+        type = addPowerSource(type);
+      }
     }
   }
 
@@ -107,14 +137,14 @@ export function createLegacyEndpointType(
     // Vacuum needs special handling for the vacuumOnOff feature flag
     if (domain === "vacuum") {
       type = VacuumDevice(
-        { entity, customName, mapping },
+        ha,
         options?.vacuumOnOff,
         options?.cleaningModeOptions,
       );
     } else {
       const factory = deviceCtrs[domain];
       if (factory) {
-        type = factory({ entity, customName, mapping });
+        type = factory(ha);
       } else if (options?.pluginDomainMappings?.has(domain)) {
         const mappedType = options.pluginDomainMappings.get(domain)!;
         const mappedFactory =
@@ -123,7 +153,7 @@ export function createLegacyEndpointType(
           legacyLogger.info(
             `Using plugin domain mapping for "${domain}" → "${mappedType}"`,
           );
-          type = mappedFactory({ entity, customName, mapping });
+          type = mappedFactory(ha);
         }
       } else {
         return undefined;
@@ -175,6 +205,38 @@ function addFixedLabel(type: EndpointType, areaName: string): EndpointType {
     ...type,
     behaviors: { ...type.behaviors, fixedLabel },
   } as EndpointType;
+}
+
+function hasPowerSource(type: EndpointType): boolean {
+  return "powerSource" in type.behaviors;
+}
+
+/**
+ * Shallow copy of the entity attributes with the battery/battery_level keys
+ * removed, so domain factories that fall back to the entity's own battery
+ * attribute (rather than a mapped batteryEntity) don't pick a WithBattery
+ * variant either (#427).
+ */
+function stripBatteryAttributes(
+  attributes: HomeAssistantEntityInformation["state"]["attributes"],
+): HomeAssistantEntityInformation["state"]["attributes"] {
+  const stripped = { ...attributes } as typeof attributes & {
+    battery?: number;
+    battery_level?: number;
+  };
+  delete stripped.battery;
+  delete stripped.battery_level;
+  return stripped;
+}
+
+function addPowerSource(type: EndpointType): EndpointType {
+  const mutable = type as EndpointType & {
+    with(...behaviors: unknown[]): EndpointType;
+  };
+  if (typeof mutable.with === "function") {
+    return mutable.with(DefaultPowerSourceServer);
+  }
+  return type;
 }
 
 const deviceCtrs: Partial<
@@ -263,7 +325,13 @@ const matterDeviceTypeFactories: Partial<
   flow_sensor: (ha) => FlowSensorType.set({ homeAssistantEntity: ha }),
   air_quality_sensor: (ha) =>
     AirQualitySensorType.set({ homeAssistantEntity: ha }),
-  battery_storage: (ha) => BatterySensorType.set({ homeAssistantEntity: ha }),
+  battery_storage: (ha) => {
+    // A mapped power/energy sensor upgrades the battery to a full ESS endpoint.
+    if (ha.mapping?.batteryPowerEntity || ha.mapping?.batteryEnergyEntity) {
+      return batteryStorageEssType(ha.mapping).set({ homeAssistantEntity: ha });
+    }
+    return BatterySensorType.set({ homeAssistantEntity: ha });
+  },
   tvoc_sensor: (ha) => TvocSensorType.set({ homeAssistantEntity: ha }),
   carbon_monoxide_sensor: (ha) =>
     CarbonMonoxideSensorType.set({ homeAssistantEntity: ha }),
@@ -274,8 +342,12 @@ const matterDeviceTypeFactories: Partial<
     FormaldehydeSensorType.set({ homeAssistantEntity: ha }),
   radon_sensor: (ha) => RadonSensorType.set({ homeAssistantEntity: ha }),
   pm1_sensor: (ha) => Pm1SensorType.set({ homeAssistantEntity: ha }),
+  electrical_meter: (ha) =>
+    ElectricalMeterType.set({ homeAssistantEntity: ha }),
+  // Legacy SolarPower alias, kept for existing mappings.
   electrical_sensor: (ha) =>
     ElectricalSensorType.set({ homeAssistantEntity: ha }),
+  solar_power: (ha) => ElectricalSensorType.set({ homeAssistantEntity: ha }),
   contact_sensor: (ha) => ContactSensorType.set({ homeAssistantEntity: ha }),
   motion_sensor: (ha) => MotionSensorType.set({ homeAssistantEntity: ha }),
   occupancy_sensor: (ha) =>

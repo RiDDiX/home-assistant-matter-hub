@@ -4,7 +4,12 @@ import type {
   PluginConfigSchema,
   PluginContext,
 } from "../../types.js";
-import { createCameraEndpointType } from "./camera-endpoint.js";
+import {
+  type CameraSensorParams,
+  createCameraEndpointType,
+  defaultSensorParams,
+} from "./camera-endpoint.js";
+import { parseCameraList } from "./camera-tcp-requirement.js";
 import { WebRtcBridge } from "./webrtc-bridge.js";
 
 interface CameraConfig {
@@ -12,6 +17,9 @@ interface CameraConfig {
   haToken?: string;
   // Comma-separated HA camera entity ids, e.g. "camera.front,camera.garage".
   cameras?: string;
+  sensorWidth?: number;
+  sensorHeight?: number;
+  maxFps?: number;
 }
 
 const CONFIG_KEY = "config";
@@ -75,6 +83,27 @@ export class CameraPlugin implements MatterHubPlugin {
           description: "e.g. camera.front,camera.garage",
           required: true,
         },
+        sensorWidth: {
+          type: "number",
+          title: "Sensor width (px)",
+          description: "Video sensor width reported to controllers.",
+          default: defaultSensorParams.sensorWidth,
+          required: false,
+        },
+        sensorHeight: {
+          type: "number",
+          title: "Sensor height (px)",
+          description: "Video sensor height reported to controllers.",
+          default: defaultSensorParams.sensorHeight,
+          required: false,
+        },
+        maxFps: {
+          type: "number",
+          title: "Max frame rate (fps)",
+          description: "Maximum frame rate the sensor supports.",
+          default: defaultSensorParams.maxFps,
+          required: false,
+        },
       },
     };
   }
@@ -93,27 +122,49 @@ export class CameraPlugin implements MatterHubPlugin {
       this.log.info("no Home Assistant connection, no cameras exposed");
       return;
     }
-    const entityIds = (cameras ?? "")
-      .split(",")
-      .map((s) => s.trim())
-      .filter(Boolean);
+    const entityIds = parseCameraList(cameras);
     if (entityIds.length === 0) {
       this.log.info("no camera entity ids configured");
       return;
     }
 
+    const sensor = this.sensorParams();
     this.bridge = new WebRtcBridge({ haUrl, haToken });
     for (const entityId of entityIds) {
       const id = entityId.replace(/\./g, "_");
       await context.registerDevice({
         id,
         name: entityId,
-        endpointType: createCameraEndpointType(this.bridge, entityId),
+        endpointType: createCameraEndpointType(this.bridge, entityId, sensor),
         clusters: [],
       });
       this.deviceIds.push(id);
     }
     this.log.info(`Exposed ${this.deviceIds.length} camera(s)`);
+  }
+
+  // Clamp the configured sensor to values the cluster accepts; a bad or missing
+  // entry falls back to the default for that field.
+  private sensorParams(): CameraSensorParams {
+    const dim = (n: unknown, fallback: number): number =>
+      typeof n === "number" && Number.isFinite(n)
+        ? Math.min(65535, Math.max(64, Math.floor(n)))
+        : fallback;
+    const fps = (n: unknown, fallback: number): number =>
+      typeof n === "number" && Number.isFinite(n)
+        ? Math.min(65535, Math.max(1, Math.floor(n)))
+        : fallback;
+    return {
+      sensorWidth: dim(
+        this.config.sensorWidth,
+        defaultSensorParams.sensorWidth,
+      ),
+      sensorHeight: dim(
+        this.config.sensorHeight,
+        defaultSensorParams.sensorHeight,
+      ),
+      maxFps: fps(this.config.maxFps, defaultSensorParams.maxFps),
+    };
   }
 
   private async teardown(): Promise<void> {

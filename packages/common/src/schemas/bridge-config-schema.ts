@@ -326,6 +326,18 @@ const featureFlagSchema: JSONSchema7 = {
       type: "boolean",
       default: false,
     },
+
+    stableIdentity: {
+      title: "Stable Device Identity",
+      description:
+        "Anchor each device to its Home Assistant entity registry id instead " +
+        "of the entity id, so renaming an entity no longer re-adds it in your " +
+        "controller (Alexa, Google Home, Apple Home) and keeps groups and " +
+        "automations. Records are seeded from the start, so enabling this later " +
+        "is safe and never re-adds existing devices. Default off.",
+      type: "boolean",
+      default: false,
+    },
   },
 };
 

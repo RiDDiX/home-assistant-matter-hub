@@ -38,6 +38,21 @@ Locking is always allowed without a PIN. Only the unlock action requires PIN ent
 
 After commissioning a lock with PIN support, Apple Home may show a one-time "Set Up an Access Code" prompt the first time you open the lock's details. Enter the same PIN you configured for this entity in HAMH so Apple Home and the bridge agree on the credential. If you do not want PIN prompts at all, set `disableLockPin` on the entity mapping; HAMH then advertises the lock without the PinCredential feature and Apple Home will skip the access code setup.
 
+### Programming the physical lock (opt-in)
+
+By default the PIN lives only in HAMH. It gates remote unlock at the bridge and is never written to the lock hardware.
+
+If you want a code that a controller sets or clears to also land on the physical lock, set both `lockUsercodeService` and `lockUsercodeSlot` on the entity mapping. When they are set, a controller's `SetCredential` also programs that slot on the lock, and `ClearCredential` clears it.
+
+| Service | PIN parameter | Slot parameter |
+|---------|---------------|----------------|
+| `zwave_js.set_lock_usercode` | `usercode` | `code_slot` |
+| `zha.set_lock_user_code` | `user_code` | `code_slot` |
+
+The clear call is derived from the set service (`zwave_js.clear_lock_usercode`, `zha.clear_lock_user_code`). The slot number is passed verbatim; it defaults to `1` when only the service is set. The service targets the lock entity, so no separate target is needed.
+
+The passthrough is fire and forget: a failed physical program still reports success to the controller, so the credential stays usable for remote unlock. This is independent of `disableLockPin`.
+
 ## Unlatch (Unbolting)
 
 Since v2.0.25, the Unbolting feature is automatically enabled when your HA lock entity supports the `OPEN` feature (reported in `supported_features`).

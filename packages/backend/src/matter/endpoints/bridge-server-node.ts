@@ -4,8 +4,13 @@ import { type Endpoint, ServerNode } from "@matter/main/node";
 import { createBridgeServerConfig } from "../../utils/json/create-bridge-server-config.js";
 
 export class BridgeServerNode extends ServerNode {
-  constructor(env: Environment, bridgeData: BridgeData, aggregator: Endpoint) {
-    const config = createBridgeServerConfig(bridgeData);
+  constructor(
+    env: Environment,
+    bridgeData: BridgeData,
+    aggregator: Endpoint,
+    options?: { tcp?: { incoming: boolean; outgoing: boolean } },
+  ) {
+    const config = createBridgeServerConfig(bridgeData, options);
     super({
       ...config,
       environment: env,

@@ -42,6 +42,8 @@ Group arbitrary Home Assistant entities under a single Matter device. Set `compo
 
 Unlike auto-mapping, which only pulls in humidity/pressure/battery/power sensors on the same HA device, this lets you pick any entities you want, and they do **not** need to match the bridge filter. You choose them from the full HA registry in the UI.
 
+The device battery sensor (auto-mapped via `autoBatteryMapping` or an explicit `batteryEntity`) is attached to the composed device so controllers show its battery level. If an integration (e.g. Xiaomi Home) reports a bogus battery sensor on a mains-powered device, set `disableBatteryMapping` on that entity to stop the false low-battery warning.
+
 **Requirements:** Enable the `autoComposedDevices` feature flag on the bridge. Each sub-entity may set a `matterDeviceType` to control how it is exposed.
 
 Example, a Hue Motion sensor exposed as one device with occupancy, illuminance, and temperature sub-devices:
@@ -90,6 +92,20 @@ A switch with real-time power and cumulative energy measurement.
 }
 ```
 
+### With Voltage and Current
+
+`voltageEntity` and `currentEntity` group a voltage and current sensor into the same ElectricalPowerMeasurement cluster as the power reading. Use plain Home Assistant sensors: volts (V) for `voltageEntity`, amps (A) for `currentEntity`.
+
+```json
+{
+  "entityId": "switch.smart_plug",
+  "powerEntity": "sensor.smart_plug_power",
+  "energyEntity": "sensor.smart_plug_energy",
+  "voltageEntity": "sensor.smart_plug_voltage",
+  "currentEntity": "sensor.smart_plug_current"
+}
+```
+
 ---
 
 ## Dimmable Light with Energy Monitoring
@@ -99,6 +115,23 @@ A switch with real-time power and cumulative energy measurement.
   "entityId": "light.kitchen_ceiling",
   "powerEntity": "sensor.kitchen_ceiling_power",
   "energyEntity": "sensor.kitchen_ceiling_energy"
+}
+```
+
+---
+
+## Home Battery Storage
+
+A battery `sensor` (`device_class: battery`) is exposed as a Matter Battery Storage device once you add `batteryPowerEntity` and/or `batteryEnergyEntity`. A plain percent battery without these stays an ordinary battery sensor.
+
+- `batteryPowerEntity`: a power sensor in watts (W). The value is signed: positive while the battery discharges, negative while it charges.
+- `batteryEnergyEntity`: an energy sensor in kilowatt-hours (kWh) reporting lifetime throughput.
+
+```json
+{
+  "entityId": "sensor.home_battery_level",
+  "batteryPowerEntity": "sensor.home_battery_power",
+  "batteryEnergyEntity": "sensor.home_battery_energy"
 }
 ```
 

@@ -187,7 +187,7 @@ function runDiagnostics(
       status: "warn",
       message: "IPv4 mDNS disabled (IPv6-only mode)",
       detail:
-        "Some controllers (older Alexa, Google Home) may need IPv4 mDNS for discovery. Enable with --mdns-ipv4.",
+        "Some controllers (older Alexa, Google Home) may need IPv4 mDNS for discovery. Remove --mdns-disable-ipv4 (or the mdns_disable_ipv4 add-on option) to re-enable it.",
     });
   }
 

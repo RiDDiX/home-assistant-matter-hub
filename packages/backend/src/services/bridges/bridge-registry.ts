@@ -45,6 +45,8 @@ export class BridgeRegistry {
   private _usedBatteryEntities: Set<string> = new Set();
   // Cache for battery entity lookups (deviceId -> entityId or null)
   private _batteryEntityCache: Map<string, string | null> = new Map();
+  // Cache for problem entity lookups (deviceId -> entityId or null) (#408)
+  private _problemEntityCache: Map<string, string | null> = new Map();
   // Track humidity entities that have been auto-assigned to temperature sensors
   private _usedHumidityEntities: Set<string> = new Set();
   // Track pressure entities that have been auto-assigned to temperature sensors
@@ -183,6 +185,43 @@ export class BridgeRegistry {
    */
   isBatteryEntityUsed(entityId: string): boolean {
     return this._usedBatteryEntities.has(entityId);
+  }
+
+  /**
+   * Find a problem/safety binary sensor on the same HA device, so a smoke/CO
+   * alarm can drive hardwareFaultAlert from it. Prefers device_class=problem
+   * over safety. Returns the entity_id, or undefined if none found (#408).
+   */
+  findProblemEntityForDevice(deviceId: string): string | undefined {
+    if (this._problemEntityCache.has(deviceId)) {
+      const cached = this._problemEntityCache.get(deviceId);
+      return cached === null ? undefined : cached;
+    }
+
+    // Search the FULL HA registry, not the filtered bridge entities, the
+    // problem sensor may not match the bridge filter (same as battery).
+    const entities = values(this.registry.entities);
+    const sameDevice = entities.filter((e) => e.device_id === deviceId);
+
+    let safety: string | undefined;
+    for (const entity of sameDevice) {
+      if (!entity.entity_id.startsWith("binary_sensor.")) continue;
+
+      const state = this.registry.states[entity.entity_id];
+      if (!state) continue;
+
+      const attrs = state.attributes as { device_class?: string };
+      if (attrs.device_class === "problem") {
+        this._problemEntityCache.set(deviceId, entity.entity_id);
+        return entity.entity_id;
+      }
+      if (attrs.device_class === "safety" && !safety) {
+        safety = entity.entity_id;
+      }
+    }
+
+    this._problemEntityCache.set(deviceId, safety ?? null);
+    return safety;
   }
 
   /**
@@ -332,6 +371,12 @@ export class BridgeRegistry {
    */
   isVacuumOnOffEnabled(): boolean {
     return this.dataProvider.featureFlags?.vacuumOnOff === true;
+  }
+
+  // Consume frozen device identities (#404). Seeding always runs; only
+  // consumption of the stored endpoint id/anchor is gated on this flag.
+  isStableIdentityEnabled(): boolean {
+    return this.dataProvider.featureFlags?.stableIdentity === true;
   }
 
   /**
@@ -801,8 +846,9 @@ export class BridgeRegistry {
     this._usedPowerEntities.clear();
     this._usedEnergyEntities.clear();
     this._usedComposedSubEntities.clear();
-    // Clear battery lookup cache
+    // Clear lookup caches
     this._batteryEntityCache.clear();
+    this._problemEntityCache.clear();
 
     this._entities = pickBy(this.registry.entities, (entity) => {
       const device = this.registry.devices[entity.device_id];

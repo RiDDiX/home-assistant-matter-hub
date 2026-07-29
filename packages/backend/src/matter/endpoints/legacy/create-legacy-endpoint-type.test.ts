@@ -260,6 +260,19 @@ describe("createLegacyEndpointType", () => {
   it("should not use any unknown clusterId", () => {
     const entities = Object.values(testEntities).flat();
     const devices = entities.map((entity) => createLegacyEndpointType(entity));
+    // A mapped battery upgrades to the BatteryStorage ESS type, which keeps
+    // powerTopology covered now that the meter default dropped it.
+    devices.push(
+      createLegacyEndpointType(
+        createEntity<SensorDeviceAttributes>("sensor.batt_ess", "80", {
+          device_class: SensorDeviceClass.battery,
+        }),
+        {
+          entityId: "sensor.batt_ess",
+          batteryPowerEntity: "sensor.batt_power",
+        },
+      ),
+    );
     const endpoints = devices
       .filter((d): d is EndpointType => d != null)
       .map((endpointType) => new Endpoint(endpointType));
@@ -270,6 +283,33 @@ describe("createLegacyEndpointType", () => {
     // loading ClusterId-suffixed contexts, and the speed memory must persist.
     const expected = [...Object.keys(ClusterId), "fanSpeedMemory"].sort();
     expect(actual).toEqual(expected);
+  });
+});
+
+describe("explicit matterDeviceType battery (#408)", () => {
+  const entity = createEntity<BinarySensorDeviceAttributes>(
+    "binary_sensor.occ",
+    "on",
+    { device_class: BinarySensorDeviceClass.Occupancy },
+  );
+
+  it("adds a power source when a battery entity is mapped", () => {
+    const type = createLegacyEndpointType(entity, {
+      entityId: "binary_sensor.occ",
+      matterDeviceType: "occupancy_sensor",
+      batteryEntity: "sensor.battery",
+    });
+    expect(type).toBeDefined();
+    expect(type!.behaviors).toHaveProperty("powerSource");
+  });
+
+  it("has no power source without a battery entity", () => {
+    const type = createLegacyEndpointType(entity, {
+      entityId: "binary_sensor.occ",
+      matterDeviceType: "occupancy_sensor",
+    });
+    expect(type).toBeDefined();
+    expect(type!.behaviors).not.toHaveProperty("powerSource");
   });
 });
 

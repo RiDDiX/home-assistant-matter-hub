@@ -168,6 +168,8 @@ Some device types need a live matter.js `EndpointType` (custom clusters and comm
 
 Plugin config is stored per bridge, so set the cameras on each bridge that should expose them. Upgrading from a build before this split resets the config once, so re-enter the cameras after updating.
 
+SmartThings live view needs Matter over TCP: the WebRTC offer the camera sends is far larger than Matter's UDP message size, so the stream stalls over UDP alone. A bridge with cameras configured turns on a Matter TCP listener on the bridge's operational port automatically, both on start and after you save the camera list. Host networking already covers this; a strict firewall must allow TCP on the bridge port. The TCP capability is advertised to every controller on that bridge, so if another controller misbehaves with it, keep the cameras on a dedicated bridge.
+
 Experimental: the WebRTC media path is not verified end to end, and as of 2026 only SmartThings renders Matter cameras.
 
 ### Cluster IDs

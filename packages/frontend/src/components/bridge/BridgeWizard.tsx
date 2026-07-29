@@ -36,12 +36,21 @@ import StepLabel from "@mui/material/StepLabel";
 import Stepper from "@mui/material/Stepper";
 import Switch from "@mui/material/Switch";
 import TextField from "@mui/material/TextField";
+import ToggleButton from "@mui/material/ToggleButton";
+import ToggleButtonGroup from "@mui/material/ToggleButtonGroup";
 import Tooltip from "@mui/material/Tooltip";
 import Typography from "@mui/material/Typography";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { createBridge as apiCreateBridge } from "../../api/bridges.js";
+import { fetchLabels, type HomeAssistantLabel } from "../../api/labels.js";
 import { BridgeTemplateSelector } from "./BridgeTemplateSelector.js";
+import { LabelFilterField } from "./LabelFilterField.js";
+import { PreflightPanel } from "./PreflightPanel.js";
+import {
+  buildIncludeMatchers,
+  type WizardFilterType,
+} from "./wizard-filter.js";
 
 interface BridgeWizardProps {
   open: boolean;
@@ -132,6 +141,38 @@ export function BridgeWizard({ open, onClose, onComplete }: BridgeWizardProps) {
   const [selectedController, setSelectedController] = useState<
     ControllerProfile | undefined
   >();
+  const [filterType, setFilterType] = useState<WizardFilterType>("pattern");
+  const [labelValues, setLabelValues] = useState<string[]>([]);
+  const [labels, setLabels] = useState<HomeAssistantLabel[]>([]);
+  const [labelsLoading, setLabelsLoading] = useState(false);
+  const [labelsLoaded, setLabelsLoaded] = useState(false);
+
+  const loadLabels = useCallback(async () => {
+    setLabelsLoading(true);
+    try {
+      setLabels(await fetchLabels());
+    } catch {
+      setLabels([]);
+    } finally {
+      setLabelsLoading(false);
+      setLabelsLoaded(true);
+    }
+  }, []);
+
+  const handleFilterTypeChange = (next: WizardFilterType) => {
+    setFilterType(next);
+    if (next === "pattern") {
+      setUseWildcard(true);
+      if (!entityPattern) setEntityPattern("*");
+    } else {
+      setUseWildcard(false);
+      // leftover pattern text would leak into the domain/area matcher
+      setEntityPattern("");
+    }
+    if (next === "label" && !labelsLoaded && !labelsLoading) {
+      loadLabels();
+    }
+  };
 
   const fetchNextPort = useCallback(async () => {
     try {
@@ -163,6 +204,11 @@ export function BridgeWizard({ open, onClose, onComplete }: BridgeWizardProps) {
       setExcludePattern("");
       setError(null);
       setSelectedController(undefined);
+      setFilterType("pattern");
+      setLabelValues([]);
+      setLabels([]);
+      setLabelsLoaded(false);
+      setLabelsLoading(false);
     }
   }, [open, fetchNextPort, nextPort]);
 
@@ -247,25 +293,31 @@ export function BridgeWizard({ open, onClose, onComplete }: BridgeWizardProps) {
         includeMatchers = [...selectedTemplate.filter.include];
         excludeMatchers = [...selectedTemplate.filter.exclude];
       } else {
-        const includePatterns = useWildcard
-          ? [entityPattern || "*"]
-          : entityPattern
-              .split(",")
-              .map((s) => s.trim())
-              .filter(Boolean);
+        // Server mode always filters by entity id, so it stays on pattern.
+        includeMatchers = buildIncludeMatchers({
+          filterType: currentBridge.serverMode ? "pattern" : filterType,
+          useWildcard,
+          entityPattern,
+          labelValues,
+        });
         const excludePatterns = excludePattern
           .split(",")
           .map((s) => s.trim())
           .filter(Boolean);
-
-        includeMatchers = includePatterns.map((pattern) => ({
-          type: HomeAssistantMatcherType.Pattern,
-          value: pattern,
-        }));
         excludeMatchers = excludePatterns.map((pattern) => ({
           type: HomeAssistantMatcherType.Pattern,
           value: pattern,
         }));
+        // an empty include list means include everything on the backend,
+        // never let that happen by accident
+        if (includeMatchers.length === 0) {
+          setError(
+            filterType === "label"
+              ? "Select at least one label, or switch the filter type."
+              : "Enter at least one value for the filter.",
+          );
+          return;
+        }
       }
 
       setCurrentBridge((prev) => ({
@@ -300,6 +352,8 @@ export function BridgeWizard({ open, onClose, onComplete }: BridgeWizardProps) {
     setUseWildcard(true);
     setEntityPattern("*");
     setExcludePattern("");
+    setFilterType("pattern");
+    setLabelValues([]);
   };
 
   const createBridgeAsync = async () => {
@@ -467,12 +521,6 @@ export function BridgeWizard({ open, onClose, onComplete }: BridgeWizardProps) {
         margin="normal"
         helperText={t("bridgeWizard.portAutoAssign")}
       />
-      {currentBridge.port !== 5540 && (
-        <Alert severity="warning" sx={{ mt: 1 }}>
-          Alexa can only pair on port <strong>5540</strong>. If you plan to use
-          Alexa with this bridge, keep the port at 5540.
-        </Alert>
-      )}
       <Tooltip
         title="Exposes the entity as a standalone Matter device, e.g. so robot vacuums work with Apple Home (Siri) and Alexa. The first entity is the primary; more than one device per node is experimental."
         placement="right"
@@ -538,51 +586,91 @@ export function BridgeWizard({ open, onClose, onComplete }: BridgeWizardProps) {
           ).
         </Alert>
       )}
-      {!selectedTemplate && (
-        <FormControlLabel
-          control={
-            <Switch
-              checked={useWildcard}
-              onChange={(e) => setUseWildcard(e.target.checked)}
-            />
+      {!selectedTemplate && !currentBridge.serverMode && (
+        <ToggleButtonGroup
+          exclusive
+          size="small"
+          color="primary"
+          value={filterType}
+          onChange={(_, next) => next && handleFilterTypeChange(next)}
+          sx={{ mt: 1, mb: 0.5, flexWrap: "wrap" }}
+        >
+          <ToggleButton value="pattern">Pattern</ToggleButton>
+          <ToggleButton value="domain">Domain</ToggleButton>
+          <ToggleButton value="area">Area</ToggleButton>
+          <ToggleButton value="label">Label</ToggleButton>
+        </ToggleButtonGroup>
+      )}
+      {!selectedTemplate &&
+        (currentBridge.serverMode || filterType === "pattern") && (
+          <FormControlLabel
+            control={
+              <Switch
+                checked={useWildcard}
+                onChange={(e) => setUseWildcard(e.target.checked)}
+              />
+            }
+            label={t("bridgeWizard.includeAll")}
+          />
+        )}
+      {!selectedTemplate &&
+      !currentBridge.serverMode &&
+      filterType === "label" ? (
+        <LabelFilterField
+          labels={labels}
+          loading={labelsLoading}
+          value={labelValues}
+          onChange={setLabelValues}
+          onSwitchType={handleFilterTypeChange}
+        />
+      ) : (
+        <TextField
+          fullWidth
+          label={
+            currentBridge.serverMode
+              ? "Entity ID"
+              : filterType === "domain"
+                ? "Domains"
+                : filterType === "area"
+                  ? "Areas"
+                  : useWildcard && !selectedTemplate
+                    ? "Include Pattern"
+                    : "Entity Filters"
           }
-          label={t("bridgeWizard.includeAll")}
+          value={
+            selectedTemplate && !currentBridge.serverMode
+              ? selectedTemplate.filter.include
+                  .map((m) => `${m.type}:${m.value}`)
+                  .join(", ")
+              : entityPattern
+          }
+          onChange={(e) => setEntityPattern(e.target.value)}
+          margin="normal"
+          placeholder={
+            filterType === "domain"
+              ? "light, switch, sensor"
+              : filterType === "area"
+                ? "living_room, kitchen"
+                : useWildcard
+                  ? "* or light.*, switch.*"
+                  : "light.living_room, switch.kitchen"
+          }
+          helperText={
+            currentBridge.serverMode
+              ? "Enter exact entity IDs (e.g., vacuum.my_vacuum). The first one is the primary device of the node."
+              : selectedTemplate
+                ? "Pre-configured by template. Edit in the full editor after creation."
+                : filterType === "domain"
+                  ? "Comma separated Home Assistant domains, e.g. light, switch, sensor."
+                  : filterType === "area"
+                    ? "Comma separated Home Assistant area IDs. Find them under Settings > Areas."
+                    : useWildcard
+                      ? "Use * for all, or patterns like light.*, switch.*"
+                      : "Enter specific entity IDs separated by commas"
+          }
+          disabled={!!selectedTemplate && !currentBridge.serverMode}
         />
       )}
-      <TextField
-        fullWidth
-        label={
-          currentBridge.serverMode
-            ? "Entity ID"
-            : useWildcard && !selectedTemplate
-              ? "Include Pattern"
-              : "Entity Filters"
-        }
-        value={
-          selectedTemplate && !currentBridge.serverMode
-            ? selectedTemplate.filter.include
-                .map((m) => `${m.type}:${m.value}`)
-                .join(", ")
-            : entityPattern
-        }
-        onChange={(e) => setEntityPattern(e.target.value)}
-        margin="normal"
-        placeholder={
-          useWildcard
-            ? "* or light.*, switch.*"
-            : "light.living_room, switch.kitchen"
-        }
-        helperText={
-          currentBridge.serverMode
-            ? "Enter exact entity IDs (e.g., vacuum.my_vacuum). The first one is the primary device of the node."
-            : selectedTemplate
-              ? "Pre-configured by template. Edit in the full editor after creation."
-              : useWildcard
-                ? "Use * for all, or patterns like light.*, switch.*"
-                : "Enter specific entity IDs separated by commas"
-        }
-        disabled={!!selectedTemplate && !currentBridge.serverMode}
-      />
       {!selectedTemplate && (
         <TextField
           fullWidth
@@ -711,6 +799,7 @@ export function BridgeWizard({ open, onClose, onComplete }: BridgeWizardProps) {
             )}
           </CardContent>
         </Card>
+        <PreflightPanel port={currentBridge.port} />
         {bridges.length > 0 && (
           <Box sx={{ mt: 2 }}>
             <Typography variant="subtitle2">

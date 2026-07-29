@@ -23,9 +23,15 @@ import { diagnosticEventBus } from "../diagnostics/diagnostic-event-bus.js";
 import { subscribeEntities } from "../home-assistant/api/subscribe-entities.js";
 import type { HomeAssistantClient } from "../home-assistant/home-assistant-client.js";
 import type { HomeAssistantStates } from "../home-assistant/home-assistant-registry.js";
+import type { EntityIdentityStorage } from "../storage/entity-identity-storage.js";
 import type { EntityMappingStorage } from "../storage/entity-mapping-storage.js";
 import type { BridgeRegistry } from "./bridge-registry.js";
 import { EntityIsolationService } from "./entity-isolation-service.js";
+import {
+  IdentityResolver,
+  identityKey,
+  type ResolvedIdentity,
+} from "./identity-resolver.js";
 
 const MAX_ENTITY_ID_LENGTH = 150;
 
@@ -68,10 +74,13 @@ export class BridgeEndpointManager extends Service {
     });
   }
 
+  private readonly identityResolver: IdentityResolver;
+
   constructor(
     private readonly client: HomeAssistantClient,
     private readonly registry: BridgeRegistry,
     private readonly mappingStorage: EntityMappingStorage,
+    identityStorage: EntityIdentityStorage,
     private readonly bridgeId: string,
     private readonly log: Logger,
     private readonly pluginManager?: PluginManager,
@@ -80,6 +89,10 @@ export class BridgeEndpointManager extends Service {
   ) {
     super("BridgeEndpointManager");
     this.root = new AggregatorEndpoint("aggregator");
+    this.identityResolver = new IdentityResolver(
+      identityStorage,
+      mappingStorage,
+    );
 
     // Register callback to isolate problematic entities at runtime
     EntityIsolationService.registerIsolationCallback(
@@ -536,10 +549,74 @@ export class BridgeEndpointManager extends Service {
       }
     }
 
+    // Phase 0: resolve stable identities for every current entity before any
+    // add or remove. A rename (entity_id changed, identity key unchanged) then
+    // maps to the same endpoint id, so the endpoint is rebuilt under its
+    // preserved number instead of being torn down and re-added (#404).
+    const stableIdentity = this.registry.isStableIdentityEnabled();
+    const resolvedByEntity = new Map<string, ResolvedIdentity>();
+    const endpointIdToEntity = new Map<string, string>();
+    const claimedEndpointIds = new Map<string, string>();
+    for (const entityId of this.entityIds) {
+      const entityInfo = {
+        entity_id: entityId,
+        registry: this.registry.entity(entityId),
+      };
+      const resolved = await this.identityResolver.resolveIdentity(
+        this.bridgeId,
+        entityInfo,
+        this.getEntityMapping(entityId),
+        {
+          stableIdentity,
+          isEndpointIdTaken: (id, key) =>
+            claimedEndpointIds.has(id) && claimedEndpointIds.get(id) !== key,
+        },
+      );
+      resolvedByEntity.set(entityId, resolved);
+      claimedEndpointIds.set(
+        resolved.endpointId,
+        identityKey(entityInfo) ?? `\u0000e:${entityId}`,
+      );
+      endpointIdToEntity.set(resolved.endpointId, entityId);
+      // Carry the in-memory fingerprint to the new entity id so the create loop
+      // does not read a spurious mapping change after a rename re-key.
+      if (
+        resolved.renamedFrom &&
+        this.mappingFingerprints.has(resolved.renamedFrom)
+      ) {
+        const fp = this.mappingFingerprints.get(resolved.renamedFrom)!;
+        this.mappingFingerprints.delete(resolved.renamedFrom);
+        this.mappingFingerprints.set(entityId, fp);
+      }
+    }
+
     const existingEndpoints: EntityEndpoint[] = [];
     const now = Date.now();
     for (const endpoint of endpoints) {
       const present = this.entityIds.includes(endpoint.entityId);
+
+      // Rename: a different current entity now owns this endpoint's id while
+      // this endpoint's own entity is gone. close() keeps the persisted number
+      // pre-allocated so the create loop rebuilds it under the same id with the
+      // renamed entity. Never delete() here, that would erase the number (#404).
+      const claimant = endpointIdToEntity.get(endpoint.id);
+      if (!present && claimant != null && claimant !== endpoint.entityId) {
+        this.log.info(
+          `Entity renamed ${endpoint.entityId} -> ${claimant}, keeping endpoint ${endpoint.id}`,
+        );
+        try {
+          await endpoint.close();
+        } catch (e) {
+          this.log.warn(
+            `Failed to close renamed endpoint ${endpoint.entityId}:`,
+            e,
+          );
+        }
+        this.pendingRemovals.delete(endpoint.entityId);
+        this.mappingFingerprints.delete(endpoint.entityId);
+        continue;
+      }
+
       if (present) {
         this.pendingRemovals.delete(endpoint.entityId);
       }
@@ -598,10 +675,13 @@ export class BridgeEndpointManager extends Service {
           // delete()) so matter.js keeps the persisted number and Alexa keeps
           // the device with its groups. delete() would erase it and the recreate
           // would get a fresh number. When the id itself changes (customName
-          // edit) the number can't be kept anyway, so delete() to free it.
-          const sameId =
-            createEndpointId(endpoint.entityId, currentMapping?.customName) ===
-            endpoint.id;
+          // edit on an unprotected entity) the number can't be kept anyway, so
+          // delete() to free it. For a protected entity the resolved id is
+          // frozen, so a customName change stays on the close() branch.
+          const resolvedId =
+            resolvedByEntity.get(endpoint.entityId)?.endpointId ??
+            createEndpointId(endpoint.entityId, currentMapping?.customName);
+          const sameId = resolvedId === endpoint.id;
           try {
             if (sameId) {
               await endpoint.close();
@@ -676,11 +756,15 @@ export class BridgeEndpointManager extends Service {
       if (!endpoint) {
         try {
           const domainMappings = this.getPluginDomainMappings();
+          const resolved = resolvedByEntity.get(entityId);
           endpoint = await LegacyEndpoint.create(
             this.registry,
             entityId,
             mapping,
             domainMappings,
+            false,
+            resolved?.endpointId,
+            resolved?.anchorEntityId,
           );
         } catch (e) {
           // Handle all endpoint creation errors gracefully to prevent boot crashes

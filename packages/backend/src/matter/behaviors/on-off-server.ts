@@ -40,6 +40,24 @@ type OnOffCallback = (
   agent: Agent,
 ) => HomeAssistantAction | undefined;
 
+// Override device types (on_off_plugin_unit, on_off_switch) route through this
+// behavior instead of the valve/cover domain factory, so their native
+// open/close wiring is skipped. homeassistant.turn_on/off is a no-op for those
+// domains, so map them to the right service here (#65).
+export function defaultOnOffAction(
+  entityId: string,
+  on: boolean,
+): HomeAssistantAction {
+  const domain = entityId.split(".")[0];
+  if (domain === "valve") {
+    return { action: on ? "valve.open_valve" : "valve.close_valve" };
+  }
+  if (domain === "cover") {
+    return { action: on ? "cover.open_cover" : "cover.close_cover" };
+  }
+  return { action: on ? "homeassistant.turn_on" : "homeassistant.turn_off" };
+}
+
 export interface OnOffConfig {
   isOn?: ValueGetter<boolean>;
   turnOn?: OnOffCallback | null;
@@ -95,11 +113,20 @@ class OnOffServerBase extends Base {
     const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);
     const action = turnOn
       ? turnOn(void 0, this.agent)
-      : { action: "homeassistant.turn_on" as const };
-    // Set onOff immediately so the controller gets instant feedback in the
-    // command response. Without this, Apple Home shows "Turning on..." until
-    // the async HA WebSocket state update arrives.
-    applyPatchState(this.state, { onOff: true });
+      : defaultOnOffAction(homeAssistant.entityId, true);
+    // Momentary entities (script/scene/automation/input_button) normally get
+    // an optimistic onOff true plus a ~1s auto-reset to false, producing an
+    // unsolicited on->off report pair per activation. Some Echo devices wedge
+    // on that pair until restarted (#423). disableMomentaryFlip skips both:
+    // the HA action still fires, but the state stays off and nothing reports.
+    const skipMomentaryFlip =
+      turnOff === null && homeAssistant.state.mapping?.disableMomentaryFlip;
+    if (!skipMomentaryFlip) {
+      // Set onOff immediately so the controller gets instant feedback in the
+      // command response. Without this, Apple Home shows "Turning on..." until
+      // the async HA WebSocket state update arrives.
+      applyPatchState(this.state, { onOff: true });
+    }
     if (!action) {
       // Callback explicitly returned undefined = skip HA action
       // (e.g., climate already on, no need to send turn_on)
@@ -108,16 +135,18 @@ class OnOffServerBase extends Base {
     logger.info(`[${homeAssistant.entityId}] Turning ON -> ${action.action}`);
     // Notify LevelControlServer about turn-on for Alexa brightness workaround
     notifyLightTurnedOn(homeAssistant.entityId);
-    const now = Date.now();
-    sweepOptimisticOnOff(now);
-    optimisticOnOffState.set(homeAssistant.entityId, {
-      expectedOnOff: true,
-      timestamp: now,
-    });
+    if (!skipMomentaryFlip) {
+      const now = Date.now();
+      sweepOptimisticOnOff(now);
+      optimisticOnOffState.set(homeAssistant.entityId, {
+        expectedOnOff: true,
+        timestamp: now,
+      });
+    }
     homeAssistant.callAction(action);
     // Auto-reset for momentary actions (scenes, automations) so controllers
     // don't show a permanently "on" state after activation.
-    if (turnOff === null) {
+    if (turnOff === null && !skipMomentaryFlip) {
       setTimeout(this.callback(this.autoReset), 1000);
     }
   }
@@ -131,7 +160,7 @@ class OnOffServerBase extends Base {
     const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);
     const action = turnOff
       ? turnOff(void 0, this.agent)
-      : { action: "homeassistant.turn_off" as const };
+      : defaultOnOffAction(homeAssistant.entityId, false);
     // Set onOff immediately so the controller gets instant feedback in the
     // command response. Without this, Apple Home shows "Turning off..." until
     // the async HA WebSocket state update arrives (#219).

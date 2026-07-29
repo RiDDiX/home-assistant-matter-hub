@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { deadSessionTimeoutMs } from "./bridge.js";
+import { deadSessionTimeoutMs } from "./session-rotation.js";
 
 // fastSessionRecovery (#386): the flag picks a 5s dead-session timeout, off
 // keeps the 60s default so working setups are unchanged.

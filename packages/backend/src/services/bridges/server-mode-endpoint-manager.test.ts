@@ -19,6 +19,7 @@ import { LegacyEndpoint } from "../../matter/endpoints/legacy/legacy-endpoint.js
 import type { ServerModeServerNode } from "../../matter/endpoints/server-mode-server-node.js";
 import { ServerModeVacuumEndpoint } from "../../matter/endpoints/server-mode-vacuum-endpoint.js";
 import type { HomeAssistantClient } from "../home-assistant/home-assistant-client.js";
+import type { EntityIdentityStorage } from "../storage/entity-identity-storage.js";
 import type { EntityMappingStorage } from "../storage/entity-mapping-storage.js";
 import type { BridgeDataProvider } from "./bridge-data-provider.js";
 import type { BridgeRegistry } from "./bridge-registry.js";
@@ -65,13 +66,25 @@ interface Harness {
     entityIds: string[];
     firstEntityMatching: ReturnType<typeof vi.fn>;
     deviceOf: ReturnType<typeof vi.fn>;
+    entity: ReturnType<typeof vi.fn>;
     initialState: ReturnType<typeof vi.fn>;
     mergeExternalStates: ReturnType<typeof vi.fn>;
   };
   mappingStorage: { getMapping: ReturnType<typeof vi.fn> };
+  // biome-ignore lint/suspicious/noExplicitAny: harness data provider stub
+  dataProvider: any;
 }
 
-function makeHarness(entityIds: string[], primary?: string): Harness {
+interface HarnessOptions {
+  flags?: Record<string, unknown>;
+  entities?: Record<string, { unique_id?: string; platform?: string }>;
+}
+
+function makeHarness(
+  entityIds: string[],
+  primary?: string,
+  opts?: HarnessOptions,
+): Harness {
   const serverNode = {
     addDevice: vi.fn().mockResolvedValue(undefined),
     forgetDevice: vi.fn(),
@@ -84,12 +97,36 @@ function makeHarness(entityIds: string[], primary?: string): Harness {
     entityIds,
     firstEntityMatching: vi.fn(() => primary ?? entityIds[0]),
     deviceOf: vi.fn(() => undefined),
+    // biome-ignore lint/suspicious/noExplicitAny: registry stub
+    entity: vi.fn((id: string) => (opts?.entities as any)?.[id]),
     initialState: vi.fn(() => undefined),
     mergeExternalStates: vi.fn(),
   };
-  const mappingStorage = { getMapping: vi.fn(() => undefined) };
+  const mappingStorage = {
+    getMapping: vi.fn(() => undefined),
+    setMapping: vi.fn(),
+    deleteMapping: vi.fn(),
+  };
+  // Map-backed so a seeded identity survives across refreshes (rename tests).
+  // biome-ignore lint/suspicious/noExplicitAny: identity record shape
+  const identityStore = new Map<string, Map<string, any>>();
+  const identityStorage = {
+    getIdentity: (b: string, k: string) => identityStore.get(b)?.get(k),
+    getBridgeIdentities: (b: string) => identityStore.get(b) ?? new Map(),
+    // biome-ignore lint/suspicious/noExplicitAny: identity record shape
+    setIdentity: (b: string, k: string, r: any) => {
+      let m = identityStore.get(b);
+      if (!m) {
+        m = new Map();
+        identityStore.set(b, m);
+      }
+      m.set(k, r);
+    },
+    deleteBridgeIdentities: vi.fn(),
+  };
   const dataProvider = {
     id: "bridge1",
+    featureFlags: opts?.flags,
     filter: {
       include: entityIds.map((value) => ({
         type: "pattern",
@@ -103,10 +140,11 @@ function makeHarness(entityIds: string[], primary?: string): Harness {
     { connection: {} } as unknown as HomeAssistantClient,
     registry as unknown as BridgeRegistry,
     mappingStorage as unknown as EntityMappingStorage,
+    identityStorage as unknown as EntityIdentityStorage,
     dataProvider as unknown as BridgeDataProvider,
     fakeLogger(),
   );
-  return { manager, serverNode, registry, mappingStorage };
+  return { manager, serverNode, registry, mappingStorage, dataProvider };
 }
 
 const legacyCreate = vi.mocked(LegacyEndpoint.create);
@@ -140,6 +178,8 @@ describe("ServerModeEndpointManager (#301)", () => {
       undefined,
       undefined,
       true,
+      "light_one",
+      "light.one",
     );
     expect(h.serverNode.addDevice).toHaveBeenCalledTimes(1);
     expect(h.serverNode.updateDeviceIdentity).toHaveBeenCalledTimes(1);
@@ -319,6 +359,33 @@ describe("ServerModeEndpointManager (#301)", () => {
       expect(endpoint.delete).not.toHaveBeenCalled();
     }
     expect(h.manager.devices).toEqual([]);
+  });
+
+  it("renames via close() to keep the device number, root identity untouched (#404)", async () => {
+    const reg = { unique_id: "U", platform: "hue" };
+    const h = makeHarness(["light.old"], "light.old", {
+      flags: { stableIdentity: true },
+      entities: { "light.old": reg, "light.new": reg },
+    });
+    await h.manager.refreshDevices();
+    const oldEndpoint = h.serverNode.addDevice.mock
+      .calls[0][0] as EntityEndpoint;
+
+    // rename: same unique_id + platform, new entity id
+    h.registry.entityIds = ["light.new"];
+    h.registry.firstEntityMatching = vi.fn(() => "light.new");
+    h.serverNode.addDevice.mockClear();
+    h.serverNode.updateDeviceIdentity.mockClear();
+
+    await h.manager.refreshDevices();
+
+    // old endpoint kept (close, not delete) so its number stays pre-allocated
+    expect(oldEndpoint.close).toHaveBeenCalledTimes(1);
+    expect(oldEndpoint.delete).not.toHaveBeenCalled();
+    expect(h.serverNode.forgetDevice).toHaveBeenCalledWith(oldEndpoint);
+    // rebuilt under the same frozen id for the renamed entity
+    expect(h.serverNode.addDevice).toHaveBeenCalledTimes(1);
+    expect(h.manager.devices.map((d) => d.entityId)).toEqual(["light.new"]);
   });
 
   it("keeps the disabled and empty-filter failed-entity semantics", async () => {

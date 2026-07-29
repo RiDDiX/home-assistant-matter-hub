@@ -19,10 +19,19 @@ export interface MappingProfileEntry {
   readonly humidityEntity?: string;
   readonly pressureEntity?: string;
   readonly batteryEntity?: string;
+  readonly disableBatteryMapping?: boolean;
   readonly roomEntities?: string[];
   readonly disableLockPin?: boolean;
+  readonly lockUsercodeService?: string;
+  readonly lockUsercodeSlot?: number;
+  readonly lockPinMinLength?: number;
+  readonly lockPinMaxLength?: number;
   readonly powerEntity?: string;
   readonly energyEntity?: string;
+  readonly voltageEntity?: string;
+  readonly currentEntity?: string;
+  readonly batteryPowerEntity?: string;
+  readonly batteryEnergyEntity?: string;
   readonly suctionLevelEntity?: string;
   readonly mopIntensityEntity?: string;
   readonly customServiceAreas?: CustomServiceArea[];
@@ -39,6 +48,7 @@ export interface MappingProfileEntry {
   readonly climateKeepModeOnIdle?: boolean;
   readonly climateExposeFan?: boolean;
   readonly climateAutoMode?: ClimateAutoMode;
+  readonly disableMomentaryFlip?: boolean;
 }
 
 export interface MappingProfile {

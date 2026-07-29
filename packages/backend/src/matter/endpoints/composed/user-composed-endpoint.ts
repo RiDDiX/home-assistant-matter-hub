@@ -18,6 +18,7 @@ import type { HomeAssistantStates } from "../../../services/home-assistant/home-
 import { BasicInformationServer } from "../../behaviors/basic-information-server.js";
 import { HomeAssistantEntityBehavior } from "../../behaviors/home-assistant-entity-behavior.js";
 import { IdentifyServer } from "../../behaviors/identify-server.js";
+import { DefaultPowerSourceServer } from "../../behaviors/power-source-server.js";
 import { createLegacyEndpointType } from "../legacy/create-legacy-endpoint-type.js";
 
 const logger = Logger.get("UserComposedEndpoint");
@@ -61,6 +62,12 @@ export interface UserComposedConfig {
   composedEntities: ComposedSubEntity[];
   customName?: string;
   areaName?: string;
+  // Resolved stable endpoint id (keyed on the primary entity). Falls back to the
+  // entity_id derivation when unset (#404).
+  endpointId?: string;
+  // Identity anchor (the primary's seed entity_id) so the parent freezes
+  // uniqueId/serialNumber across a rename of the primary (#404).
+  identityAnchor?: string;
 }
 
 /**
@@ -78,6 +85,7 @@ export class UserComposedEndpoint extends Endpoint {
   readonly mappedEntityIds: string[];
   private subEndpoints = new Map<string, Endpoint>();
   private lastStates = new Map<string, string>();
+  private lastMappedStates = new Map<string, string>();
   private debouncedUpdates = new Map<
     string,
     ReturnType<
@@ -112,16 +120,48 @@ export class UserComposedEndpoint extends Endpoint {
       );
     }
 
-    const endpointId = createEndpointId(primaryEntityId, config.customName);
+    // Auto-mapped or explicit battery lives on the parent so controllers show
+    // the device battery, not on a random sub-endpoint. Skipped when
+    // disableBatteryMapping is set (#427), even if a batteryEntity is also
+    // (contradictorily) configured.
+    const hasParentBattery =
+      !!config.mapping?.batteryEntity && !config.mapping?.disableBatteryMapping;
+    if (hasParentBattery) {
+      parentType = parentType.with(DefaultPowerSourceServer);
+    }
+
+    const endpointId =
+      config.endpointId ?? createEndpointId(primaryEntityId, config.customName);
     const parts: Endpoint[] = [];
     const subEndpointMap = new Map<string, Endpoint>();
     const mappedIds: string[] = [];
 
-    // Primary entity sub-endpoint
+    // Keep the battery entity subscribed even when it is out of the bridge filter.
+    if (hasParentBattery && config.mapping?.batteryEntity) {
+      mappedIds.push(config.mapping.batteryEntity);
+    }
+
+    // Primary entity sub-endpoint. The parent owns the device battery, so drop
+    // batteryEntity from the mapping and the battery/battery_level attributes
+    // from the payload. Domain factories pick a WithBattery variant from either
+    // one, and a sub PowerSource would duplicate the parent. Shallow copies
+    // only, the payload, state and attributes belong to the BridgeRegistry.
+    let primaryMapping = config.mapping;
+    let primarySubPayload = primaryPayload;
+    if (config.mapping?.batteryEntity) {
+      primaryMapping = { ...config.mapping, batteryEntity: undefined };
+      const attributes = { ...primaryPayload.state.attributes };
+      delete (attributes as Record<string, unknown>).battery;
+      delete (attributes as Record<string, unknown>).battery_level;
+      primarySubPayload = {
+        ...primaryPayload,
+        state: { ...primaryPayload.state, attributes },
+      };
+    }
     const primaryType = createLegacyEndpointType(
-      primaryPayload,
-      config.mapping,
-      undefined,
+      primarySubPayload,
+      primaryMapping,
+      config.areaName,
       { vacuumOnOff: registry.isVacuumOnOffEnabled() },
     );
     if (!primaryType) {
@@ -156,7 +196,11 @@ export class UserComposedEndpoint extends Endpoint {
         matterDeviceType: sub.matterDeviceType,
       };
 
-      const subType = createLegacyEndpointType(subPayload, subMapping);
+      const subType = createLegacyEndpointType(
+        subPayload,
+        subMapping,
+        config.areaName,
+      );
       if (!subType) {
         logger.warn(
           `Cannot create endpoint type for composed sub-entity ${sub.entityId}`,
@@ -186,6 +230,7 @@ export class UserComposedEndpoint extends Endpoint {
         entity: primaryPayload,
         customName: config.customName,
         mapping: config.mapping,
+        identityAnchor: config.identityAnchor,
       },
     });
 
@@ -227,8 +272,15 @@ export class UserComposedEndpoint extends Endpoint {
   }
 
   async updateStates(states: HomeAssistantStates): Promise<void> {
+    // A mapped entity with no sub-endpoint (the battery) never touches the
+    // primary state, so the parent dedup would swallow it and the PowerSource
+    // cluster would stay stale. Mirror the standalone path: force the parent
+    // update so HomeAssistantEntityBehavior fires entity$Changed and PowerSource
+    // re-reads the battery.
+    const mappedChanged = this.hasMappedNonSubEntityChanged(states);
+
     // Update parent (BasicInformationServer reachable state)
-    this.scheduleUpdate(this, this.entityId, states);
+    this.scheduleUpdate(this, this.entityId, states, mappedChanged);
 
     // Update sub-endpoints with their own entity states
     for (const [entityId, sub] of this.subEndpoints) {
@@ -236,10 +288,28 @@ export class UserComposedEndpoint extends Endpoint {
     }
   }
 
+  // A mapped entity without its own sub-endpoint (the battery) drives the parent
+  // PowerSource, so track its state and report when it moves. Subs flush
+  // themselves, so skip them here.
+  private hasMappedNonSubEntityChanged(states: HomeAssistantStates): boolean {
+    let changed = false;
+    for (const mappedId of this.mappedEntityIds) {
+      if (this.subEndpoints.has(mappedId)) continue;
+      const mappedState = states[mappedId];
+      if (!mappedState) continue;
+      if (mappedState.state !== this.lastMappedStates.get(mappedId)) {
+        this.lastMappedStates.set(mappedId, mappedState.state);
+        changed = true;
+      }
+    }
+    return changed;
+  }
+
   private scheduleUpdate(
     endpoint: Endpoint,
     entityId: string,
     states: HomeAssistantStates,
+    force = false,
   ) {
     const state = states[entityId];
     if (!state) return;
@@ -250,8 +320,15 @@ export class UserComposedEndpoint extends Endpoint {
       s: state.state,
       a: state.attributes,
     });
-    if (this.lastStates.get(key) === stateJson) return;
+    if (!force && this.lastStates.get(key) === stateJson) return;
     this.lastStates.set(key, stateJson);
+
+    // When only a mapped entity (e.g. battery) changed the primary state is
+    // structurally identical, so matter.js would skip the setStateOf. Bump
+    // last_updated to force the entity$Changed the PowerSource reacts to.
+    const effectiveState = force
+      ? { ...state, last_updated: new Date().toISOString() }
+      : state;
 
     let debouncedFn = this.debouncedUpdates.get(key);
     if (!debouncedFn) {
@@ -261,7 +338,7 @@ export class UserComposedEndpoint extends Endpoint {
       );
       this.debouncedUpdates.set(key, debouncedFn);
     }
-    debouncedFn(endpoint, state);
+    debouncedFn(endpoint, effectiveState);
   }
 
   private async flushUpdate(

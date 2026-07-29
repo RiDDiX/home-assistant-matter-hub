@@ -36,6 +36,7 @@ import {
 } from "../../api/entity-mappings";
 import { navigation } from "../../routes.tsx";
 import { EntityMappingDialog } from "../entity-mapping/EntityMappingDialog.tsx";
+import { collectLeafEndpoints } from "./collect-leaf-endpoints.ts";
 import { EndpointCard } from "./EndpointCard.tsx";
 import { getEndpointName } from "./EndpointName.tsx";
 import { EndpointState } from "./EndpointState.tsx";
@@ -46,14 +47,6 @@ export interface EndpointListProps {
   bridgeId?: string;
   onMappingSaved?: () => void;
 }
-
-const collectLeafEndpoints = (endpoint: EndpointData): EndpointData[] => {
-  const parts = endpoint.parts ?? [];
-  if (parts.length === 0) {
-    return [endpoint];
-  }
-  return parts.flatMap((part) => collectLeafEndpoints(part));
-};
 
 export const EndpointList = (props: EndpointListProps) => {
   const { t } = useTranslation();

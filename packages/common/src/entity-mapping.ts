@@ -12,6 +12,7 @@ export type MatterDeviceType =
   | "dimmable_light"
   | "dimmable_plugin_unit"
   | "door_lock"
+  | "electrical_meter"
   | "electrical_sensor"
   | "extended_color_light"
   | "fan"
@@ -38,6 +39,7 @@ export type MatterDeviceType =
   | "robot_vacuum_cleaner"
   | "robotic_lawn_mower"
   | "smoke_co_alarm"
+  | "solar_power"
   | "speaker"
   | "temperature_sensor"
   | "thermostat"
@@ -137,6 +139,21 @@ export interface EntityMappingConfig {
    */
   readonly batteryEntity?: string;
   /**
+   * Optional: Skip attaching a battery source to this entity, whether from a
+   * same-device auto-mapped sensor or the entity's own battery/battery_level
+   * attribute. Some integrations (e.g. Xiaomi Home) report a bogus battery
+   * sensor on mains-powered devices, causing a false low-battery warning in
+   * Matter controllers.
+   * Default: false (battery mapping applies normally)
+   */
+  readonly disableBatteryMapping?: boolean;
+  /**
+   * Optional: Entity ID of a problem/safety binary sensor on the same device.
+   * Drives hardwareFaultAlert on a smoke/CO alarm (#408).
+   * Example: "binary_sensor.smoke_problem"
+   */
+  readonly faultEntity?: string;
+  /**
    * Optional: Entity ID of a charging-state sensor for a vacuum, so the Matter
    * batChargeState comes from a dedicated sensor (e.g. Xiaomi charging_state)
    * instead of being inferred from docked + battery level (#377).
@@ -158,6 +175,24 @@ export interface EntityMappingConfig {
    */
   readonly disableLockPin?: boolean;
   /**
+   * Optional: HA service that programs a usercode on the physical lock when a
+   * controller sets or clears the PIN credential, e.g.
+   * zwave_js.set_lock_usercode or zha.set_lock_user_code. Opt-in, leave unset
+   * to keep the PIN only in HAMH.
+   */
+  readonly lockUsercodeService?: string;
+  /** Optional: physical code slot to program, default 1. */
+  readonly lockUsercodeSlot?: number;
+  /**
+   * Optional: Override the advertised minimum PIN length (uint8, 1..20).
+   * Some physical locks accept only an exact length; controllers enforce the
+   * advertised bounds in their PIN UI. Default 4. Set min == max for a fixed
+   * length (#418). Fixed attributes, controllers cache them until re-pair.
+   */
+  readonly lockPinMinLength?: number;
+  /** Optional: Override the advertised maximum PIN length (uint8, 1..20). Default 8. */
+  readonly lockPinMaxLength?: number;
+  /**
    * Optional: Entity ID of a power sensor (device_class: power, unit: W).
    * Adds ElectricalPowerMeasurement cluster to show real-time power consumption.
    * Example: "sensor.smart_plug_power"
@@ -169,6 +204,33 @@ export interface EntityMappingConfig {
    * Example: "sensor.smart_plug_energy"
    */
   readonly energyEntity?: string;
+  /**
+   * Optional: Entity ID of a voltage sensor (device_class: voltage, unit: V).
+   * Folds voltage into the ElectricalPowerMeasurement cluster of this device.
+   * Example: "sensor.smart_plug_voltage"
+   */
+  readonly voltageEntity?: string;
+  /**
+   * Optional: Entity ID of a current sensor (device_class: current, unit: A).
+   * Folds current into the ElectricalPowerMeasurement cluster of this device.
+   * Example: "sensor.smart_plug_current"
+   */
+  readonly currentEntity?: string;
+  /**
+   * Optional: Entity ID of a power sensor (device_class: power, unit: W) for a
+   * home battery, positive on discharge and negative on charge. Adds an
+   * ElectricalPowerMeasurement to a BatteryStorage device; on the Matter side
+   * charging shows as imported (positive) and discharging as exported (negative).
+   * Example: "sensor.home_battery_power"
+   */
+  readonly batteryPowerEntity?: string;
+  /**
+   * Optional: Entity ID of an energy sensor (device_class: energy, unit: kWh)
+   * for a home battery. Adds ElectricalEnergyMeasurement to a BatteryStorage
+   * device to show lifetime throughput.
+   * Example: "sensor.home_battery_energy"
+   */
+  readonly batteryEnergyEntity?: string;
   /**
    * Optional: Entity ID of a select entity that controls the vacuum suction level.
    * Used for Dreame/Roborock vacuums where suction level is a separate select entity.
@@ -314,6 +376,16 @@ export interface EntityMappingConfig {
    * vendor-specific room cleaning commands.
    */
   readonly cleanAreaRooms?: import("./domains/vacuum.js").CleanAreaRoom[];
+  /**
+   * Optional: Skip the optimistic on/off flip for momentary entities (script,
+   * scene, automation, input_button, button). These normally report on, then
+   * auto-reset to off about a second later, so controllers don't show a
+   * stuck "on" state. Some Echo devices wedge on that unsolicited on->off
+   * report pair until restarted (#423). When set, the state stays off and no
+   * report is sent; the underlying HA action still fires.
+   * Default: false (report the on/off flip normally)
+   */
+  readonly disableMomentaryFlip?: boolean;
 }
 
 export interface CustomServiceArea {
@@ -357,11 +429,20 @@ export interface EntityMappingRequest {
   readonly humidityEntity?: string;
   readonly pressureEntity?: string;
   readonly batteryEntity?: string;
+  readonly disableBatteryMapping?: boolean;
   readonly chargingStateEntity?: string;
   readonly roomEntities?: string[];
   readonly disableLockPin?: boolean;
+  readonly lockUsercodeService?: string;
+  readonly lockUsercodeSlot?: number;
+  readonly lockPinMinLength?: number;
+  readonly lockPinMaxLength?: number;
   readonly powerEntity?: string;
   readonly energyEntity?: string;
+  readonly voltageEntity?: string;
+  readonly currentEntity?: string;
+  readonly batteryPowerEntity?: string;
+  readonly batteryEnergyEntity?: string;
   readonly suctionLevelEntity?: string;
   readonly mopIntensityEntity?: string;
   readonly customServiceAreas?: CustomServiceArea[];
@@ -387,6 +468,7 @@ export interface EntityMappingRequest {
   readonly climateExposeFan?: boolean;
   readonly climateAutoMode?: ClimateAutoMode;
   readonly composedEntities?: ComposedSubEntity[];
+  readonly disableMomentaryFlip?: boolean;
 }
 
 export interface EntityMappingResponse {
@@ -406,7 +488,8 @@ export const matterDeviceTypeLabels: Record<MatterDeviceType, string> = {
   dimmable_light: "Dimmable Light",
   dimmable_plugin_unit: "Dimmable Plug-in Unit",
   door_lock: "Door Lock",
-  electrical_sensor: "Electrical Sensor (Power/Energy/Voltage/Current)",
+  electrical_meter: "Electrical Meter (Power/Energy/Voltage/Current)",
+  electrical_sensor: "Electrical Sensor (Solar Power, legacy)",
   extended_color_light: "Extended Color Light",
   fan: "Fan",
   flow_sensor: "Flow Sensor",
@@ -432,6 +515,7 @@ export const matterDeviceTypeLabels: Record<MatterDeviceType, string> = {
   robot_vacuum_cleaner: "Robot Vacuum Cleaner",
   robotic_lawn_mower: "Robotic Lawn Mower",
   smoke_co_alarm: "Smoke/CO Alarm",
+  solar_power: "Solar Power (Generation)",
   speaker: "Speaker",
   temperature_sensor: "Temperature Sensor",
   thermostat: "Thermostat",
@@ -613,12 +697,26 @@ export const matterDeviceTypeControllerSupport: Record<
   },
   radon_sensor: { apple: "no", google: "no", alexa: "partial", aqara: "yes" },
   pm1_sensor: { apple: "no", google: "no", alexa: "partial", aqara: "yes" },
+  electrical_meter: {
+    apple: "no",
+    google: "yes",
+    alexa: "no",
+    aqara: "unknown",
+    note: "Google Home and SmartThings show an ElectricalMeter (0x0514); Apple and Alexa do not surface standalone power/energy.",
+  },
   electrical_sensor: {
     apple: "no",
     google: "no",
     alexa: "unknown",
     aqara: "unknown",
-    note: "Power/energy is rarely shown unless it is on a smart plug.",
+    note: "Legacy SolarPower (0x0017) alias. Google does not list it; pick Electrical Meter for consumption.",
+  },
+  solar_power: {
+    apple: "no",
+    google: "no",
+    alexa: "unknown",
+    aqara: "unknown",
+    note: "SolarPower (0x0017) for generation. Only SmartThings renders it standalone today.",
   },
   battery_storage: {
     apple: "no",
@@ -752,6 +850,7 @@ export const domainToDefaultMatterTypes: Partial<
     "air_quality_sensor",
     "battery_storage",
     "carbon_monoxide_sensor",
+    "electrical_meter",
     "electrical_sensor",
     "formaldehyde_sensor",
     "humidity_sensor",
@@ -761,6 +860,7 @@ export const domainToDefaultMatterTypes: Partial<
     "pm1_sensor",
     "pressure_sensor",
     "radon_sensor",
+    "solar_power",
     "temperature_sensor",
     "tvoc_sensor",
   ],

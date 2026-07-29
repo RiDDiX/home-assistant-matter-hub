@@ -6,6 +6,7 @@ export interface StartOptions {
   "disable-log-colors": boolean;
   "json-logs": boolean;
   "storage-location": string | undefined;
+  "mdns-disable-ipv4": boolean;
   "mdns-network-interface": string | undefined;
   "mdns-strip-global-ipv6": boolean;
   "home-assistant-url": string;

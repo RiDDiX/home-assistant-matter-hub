@@ -121,6 +121,15 @@ interface AllBridgeFeatureFlags {
    * Default: false (disabled)
    */
   readonly fastSessionRecovery: boolean;
+  /**
+   * Stable Device Identity: anchor each device's Matter endpoint id, uniqueId
+   * and serialNumber to the Home Assistant entity registry unique_id instead of
+   * the entity_id. Renaming an entity in HA then no longer re-mints the device,
+   * so controllers keep their groups, names and automations. Identity records
+   * are always seeded, so turning this on later never re-adds existing devices.
+   * Default: false (disabled)
+   */
+  readonly stableIdentity: boolean;
 }
 
 export type BridgeFeatureFlags = Partial<AllBridgeFeatureFlags>;
@@ -169,9 +178,10 @@ export interface BridgeConfig {
    */
   readonly uniqueIdSuffix?: string;
   /**
-   * Server Mode only. Rotate matter sessions older than this many hours so
-   * iPhone clients re-establish CASE and re-subscribe, which unsticks
-   * Apple Home "Updating" tiles (#287). 0 disables. Range 0..168.
+   * Opt-in age-based session rotation (standard and Server Mode). Rotate
+   * matter sessions older than this many hours so iPhone clients
+   * re-establish CASE and re-subscribe, which unsticks Apple Home
+   * "Updating" tiles (#287). 0 disables. Range 0..168.
    * Falls back to HAMH_MATTER_SESSION_MAX_AGE_HOURS, then 4.
    */
   readonly sessionMaxAgeHours?: number;

@@ -1,0 +1,117 @@
+{
+  "common": {
+    "loading": "Carregando",
+    "notFound": "Não encontrado",
+    "save": "Salvar",
+    "cancel": "Cancelar",
+    "delete": "Excluir",
+    "edit": "Editar",
+    "close": "Fechar",
+    "refresh": "Atualizar",
+    "search": "Procurar",
+    "enabled": "Ativado",
+    "disabled": "Desativado",
+    "online": "Online",
+    "offline": "Offline",
+    "running": "Em execução",
+    "stopped": "Parado",
+    "failed": "Falhou",
+    "starting": "Iniciando",
+    "devices": "Dispositivos",
+    "fabrics": "Fabrics",
+    "port": "Porta",
+    "unknown": "Desconhecido",
+    "confirm": "Confirmar",
+    "create": "Criar",
+    "back": "Voltar",
+    "next": "Próximo",
+    "actions": "Ações",
+    "name": "Nome",
+    "type": "Tipo",
+    "error": "Erro",
+    "version": "Versão",
+    "copy": "Copiar",
+    "copied": "Copiado",
+    "copyId": "Copiar ID",
+    "later": "Mais tarde",
+    "skip": "Pular",
+    "reset": "Redefinir",
+    "update": "Atualizar",
+    "all": "Todos",
+    "ascending": "Crescente",
+    "descending": "Decrescente",
+    "moveUp": "Mover para cima",
+    "moveDown": "Mover para baixo",
+    "selectAll": "Selecionar tudo",
+    "selectNone": "Desmarcar tudo",
+    "live": "Ao vivo",
+    "new": "Novo",
+    "overwrite": "Substituir",
+    "active": "Ativo",
+    "property": "Propriedade",
+    "value": "Valor",
+    "custom": "Personalizado",
+    "startAll": "Iniciar tudo",
+    "stopAll": "Parar tudo",
+    "restartAll": "Reiniciar tudo",
+    "import": "Importar",
+    "export": "Exportar",
+    "exportAll": "Exportar tudo",
+    "wizard": "Assistente"
+  },
+  "nav": {
+    "bridges": "Bridges",
+    "devices": "Todos os dispositivos",
+    "standaloneDevices": "Dispositivos autônomos",
+    "health": "Saúde e Diagnóstico",
+    "diagnostics": "Eventos ao vivo",
+    "settings": "Configurações",
+    "networkMap": "Mapa da rede",
+    "logs": "Logs",
+    "lightMode": "Modo claro",
+    "darkMode": "Modo escuro"
+  },
+  "standaloneDevices": {
+    "create": "Criar",
+    "name": "Nome"
+  },
+  "status": {
+    "error": "Erro",
+    "unknown": "Desconhecido"
+  },
+  "settings": {
+    "language": "Idioma"
+  },
+  "dashboard": {
+    "startAll": "Iniciar tudo",
+    "stopAll": "Parar tudo",
+    "restartAll": "Reiniciar tudo"
+  },
+  "bridge": {
+    "name": "Nome",
+    "port": "Porta",
+    "status": "Status"
+  },
+  "health": {
+    "version": "Versão",
+    "offline": "Offline",
+    "ascending": "Crescente",
+    "descending": "Decrescente",
+    "fabrics": "Fabrics"
+  },
+  "mapping": {
+    "status": "Status"
+  },
+  "logs": {
+    "error": "Erro"
+  },
+  "backup": {
+    "settings": "Configurações"
+  },
+  "networkMap": {
+    "failed": "Falhou"
+  },
+  "translationEditor": {
+    "copied": "Copiado"
+  }
+}

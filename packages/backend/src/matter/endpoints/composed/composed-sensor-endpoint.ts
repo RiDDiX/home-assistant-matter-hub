@@ -123,14 +123,16 @@ function createEndpointId(entityId: string, customName?: string): string {
   return baseName.replace(/\./g, "_").replace(/\s+/g, "_");
 }
 
+// sub-entities may sit outside the bridge filter (#426, like #408); all three
+// accessors must be unfiltered together, the strict deviceOf throws otherwise.
 function buildEntityPayload(
   registry: BridgeRegistry,
   entityId: string,
 ): HomeAssistantEntityInformation | undefined {
-  const state = registry.initialState(entityId);
+  const state = registry.initialStateIncludingUnfiltered(entityId);
   if (!state) return undefined;
-  const entity = registry.entity(entityId);
-  const deviceRegistry = registry.deviceOf(entityId);
+  const entity = registry.entityIncludingUnfiltered(entityId);
+  const deviceRegistry = registry.deviceOfIncludingUnfiltered(entityId);
   return {
     entity_id: entityId,
     state,
@@ -151,6 +153,12 @@ export interface ComposedSensorConfig {
   energyEntityId?: string;
   customName?: string;
   areaName?: string;
+  // Resolved stable endpoint id (keyed on the primary entity). Falls back to the
+  // entity_id derivation when unset (#404).
+  endpointId?: string;
+  // Identity anchor (the primary's seed entity_id) so the parent freezes
+  // uniqueId/serialNumber across a rename of the primary (#404).
+  identityAnchor?: string;
 }
 
 // --- Main class ---
@@ -230,7 +238,8 @@ export class ComposedSensorEndpoint extends Endpoint {
     }
 
     // Build sub-endpoints
-    const endpointId = createEndpointId(primaryEntityId, config.customName);
+    const endpointId =
+      config.endpointId ?? createEndpointId(primaryEntityId, config.customName);
     const parts: Endpoint[] = [];
 
     // Temperature sub-endpoint (always present)
@@ -281,6 +290,7 @@ export class ComposedSensorEndpoint extends Endpoint {
         entity: primaryPayload,
         customName: config.customName,
         mapping: mapping as EntityMappingConfig,
+        identityAnchor: config.identityAnchor,
       },
     });
 

@@ -89,6 +89,23 @@ function parseThrottleMs(value: string): number | undefined {
   return Math.min(60000, Math.round(n));
 }
 
+function parseUsercodeSlot(value: string): number | undefined {
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+  const n = Number(trimmed);
+  if (!Number.isInteger(n) || n < 1) return undefined;
+  return n;
+}
+
+// PIN length attributes are uint8, the Matter spec keeps them 1..20.
+function parsePinLength(value: string): number | undefined {
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+  const n = Number(trimmed);
+  if (!Number.isInteger(n) || n < 1 || n > 20) return undefined;
+  return n;
+}
+
 interface EntityMappingDialogProps {
   open: boolean;
   entityId: string;
@@ -123,10 +140,19 @@ export function EntityMappingDialog({
   const [humidityEntity, setHumidityEntity] = useState("");
   const [pressureEntity, setPressureEntity] = useState("");
   const [batteryEntity, setBatteryEntity] = useState("");
+  const [disableBatteryMapping, setDisableBatteryMapping] = useState(false);
   const [roomEntities, setRoomEntities] = useState<string[]>([]);
   const [disableLockPin, setDisableLockPin] = useState(false);
+  const [lockUsercodeService, setLockUsercodeService] = useState("");
+  const [lockUsercodeSlot, setLockUsercodeSlot] = useState("");
+  const [lockPinMinLength, setLockPinMinLength] = useState("");
+  const [lockPinMaxLength, setLockPinMaxLength] = useState("");
   const [powerEntity, setPowerEntity] = useState("");
   const [energyEntity, setEnergyEntity] = useState("");
+  const [voltageEntity, setVoltageEntity] = useState("");
+  const [currentEntity, setCurrentEntity] = useState("");
+  const [batteryPowerEntity, setBatteryPowerEntity] = useState("");
+  const [batteryEnergyEntity, setBatteryEnergyEntity] = useState("");
   const [suctionLevelEntity, setSuctionLevelEntity] = useState("");
   const [mopIntensityEntity, setMopIntensityEntity] = useState("");
   const [currentRoomEntity, setCurrentRoomEntity] = useState("");
@@ -157,6 +183,7 @@ export function EntityMappingDialog({
   const [climateAutoMode, setClimateAutoMode] = useState<ClimateAutoMode | "">(
     "",
   );
+  const [disableMomentaryFlip, setDisableMomentaryFlip] = useState(false);
   const composedKeyRef = useRef(0);
   const [composedEntities, setComposedEntities] = useState<
     (ComposedSubEntity & { _key: number })[]
@@ -204,10 +231,31 @@ export function EntityMappingDialog({
       setHumidityEntity(currentMapping?.humidityEntity || "");
       setPressureEntity(currentMapping?.pressureEntity || "");
       setBatteryEntity(currentMapping?.batteryEntity || "");
+      setDisableBatteryMapping(currentMapping?.disableBatteryMapping || false);
       setRoomEntities(currentMapping?.roomEntities || []);
       setDisableLockPin(currentMapping?.disableLockPin || false);
+      setLockUsercodeService(currentMapping?.lockUsercodeService || "");
+      setLockUsercodeSlot(
+        currentMapping?.lockUsercodeSlot != null
+          ? String(currentMapping.lockUsercodeSlot)
+          : "",
+      );
+      setLockPinMinLength(
+        currentMapping?.lockPinMinLength != null
+          ? String(currentMapping.lockPinMinLength)
+          : "",
+      );
+      setLockPinMaxLength(
+        currentMapping?.lockPinMaxLength != null
+          ? String(currentMapping.lockPinMaxLength)
+          : "",
+      );
       setPowerEntity(currentMapping?.powerEntity || "");
       setEnergyEntity(currentMapping?.energyEntity || "");
+      setVoltageEntity(currentMapping?.voltageEntity || "");
+      setCurrentEntity(currentMapping?.currentEntity || "");
+      setBatteryPowerEntity(currentMapping?.batteryPowerEntity || "");
+      setBatteryEnergyEntity(currentMapping?.batteryEnergyEntity || "");
       setSuctionLevelEntity(currentMapping?.suctionLevelEntity || "");
       setMopIntensityEntity(currentMapping?.mopIntensityEntity || "");
       setCurrentRoomEntity(currentMapping?.currentRoomEntity || "");
@@ -250,6 +298,7 @@ export function EntityMappingDialog({
         currentMapping?.fanRestoreSpeedOnPowerOn || false,
       );
       setClimateAutoMode(currentMapping?.climateAutoMode || "");
+      setDisableMomentaryFlip(currentMapping?.disableMomentaryFlip || false);
       composedKeyRef.current = 0;
       setComposedEntities(
         (currentMapping?.composedEntities || []).map((e) => ({
@@ -340,12 +389,21 @@ export function EntityMappingDialog({
       humidityEntity: humidityEntity.trim() || undefined,
       pressureEntity: pressureEntity.trim() || undefined,
       batteryEntity: batteryEntity.trim() || undefined,
+      disableBatteryMapping: disableBatteryMapping || undefined,
       roomEntities: roomEntities.length > 0 ? roomEntities : undefined,
       customServiceAreas:
         customServiceAreas.length > 0 ? customServiceAreas : undefined,
       disableLockPin: disableLockPin || undefined,
+      lockUsercodeService: lockUsercodeService.trim() || undefined,
+      lockUsercodeSlot: parseUsercodeSlot(lockUsercodeSlot),
+      lockPinMinLength: parsePinLength(lockPinMinLength),
+      lockPinMaxLength: parsePinLength(lockPinMaxLength),
       powerEntity: powerEntity.trim() || undefined,
       energyEntity: energyEntity.trim() || undefined,
+      voltageEntity: voltageEntity.trim() || undefined,
+      currentEntity: currentEntity.trim() || undefined,
+      batteryPowerEntity: batteryPowerEntity.trim() || undefined,
+      batteryEnergyEntity: batteryEnergyEntity.trim() || undefined,
       suctionLevelEntity: suctionLevelEntity.trim() || undefined,
       mopIntensityEntity: mopIntensityEntity.trim() || undefined,
       currentRoomEntity: currentRoomEntity.trim() || undefined,
@@ -375,6 +433,7 @@ export function EntityMappingDialog({
       climateExposeFan: climateExposeFan || undefined,
       fanRestoreSpeedOnPowerOn: fanRestoreSpeedOnPowerOn || undefined,
       climateAutoMode: climateAutoMode || undefined,
+      disableMomentaryFlip: disableMomentaryFlip || undefined,
       composedEntities:
         composedEntities.filter((e) => e.entityId?.trim()).length > 0
           ? composedEntities
@@ -397,10 +456,19 @@ export function EntityMappingDialog({
     humidityEntity,
     pressureEntity,
     batteryEntity,
+    disableBatteryMapping,
     roomEntities,
     disableLockPin,
+    lockUsercodeService,
+    lockUsercodeSlot,
+    lockPinMinLength,
+    lockPinMaxLength,
     powerEntity,
     energyEntity,
+    voltageEntity,
+    currentEntity,
+    batteryPowerEntity,
+    batteryEnergyEntity,
     suctionLevelEntity,
     mopIntensityEntity,
     currentRoomEntity,
@@ -425,6 +493,7 @@ export function EntityMappingDialog({
     climateExposeFan,
     fanRestoreSpeedOnPowerOn,
     climateAutoMode,
+    disableMomentaryFlip,
     composedEntities,
     onSave,
   ]);
@@ -476,10 +545,35 @@ export function EntityMappingDialog({
     // on_off_switch is exposed as a plain On/Off Light, which carries no
     // power/energy clusters, so don't offer those fields for it (#380).
     matterDeviceType !== "on_off_switch" &&
+    // The electrical-meter types render their own companion group below, so
+    // don't double up when one of those is picked for a switch/light.
+    matterDeviceType !== "electrical_meter" &&
+    matterDeviceType !== "solar_power" &&
+    matterDeviceType !== "electrical_sensor" &&
     (currentDomain === "switch" ||
       currentDomain === "light" ||
       matterDeviceType === "on_off_plugin_unit" ||
       matterDeviceType === "dimmable_plugin_unit");
+
+  // Show the full power/energy/voltage/current group for electrical meters, so
+  // one device folds separate sensors into a single ElectricalMeter endpoint.
+  const showElectricalMeterFields =
+    matterDeviceType === "electrical_meter" ||
+    matterDeviceType === "solar_power" ||
+    matterDeviceType === "electrical_sensor";
+
+  // Show battery power/energy fields to expose a home battery as an ESS.
+  const showBatteryEnergyFields = matterDeviceType === "battery_storage";
+
+  // Show momentary-flip disable option for entities that only pulse on then
+  // auto-reset off (no real "on" state to hold), the source of the Echo
+  // wedge in #423.
+  const showMomentaryFlipField =
+    currentDomain === "script" ||
+    currentDomain === "scene" ||
+    currentDomain === "automation" ||
+    currentDomain === "input_button" ||
+    currentDomain === "button";
 
   const availableTypes = Object.entries(matterDeviceTypeLabels) as [
     MatterDeviceType,
@@ -988,6 +1082,80 @@ export function EntityMappingDialog({
               helperText="Sensor with device_class: energy (kWh), adds cumulative energy measurement to this device"
               domain="sensor"
             />
+            <EntityAutocomplete
+              value={voltageEntity}
+              onChange={setVoltageEntity}
+              label="Voltage Sensor (optional)"
+              placeholder="sensor.smart_plug_voltage"
+              helperText="Sensor with device_class: voltage (V), folds voltage into the power measurement"
+              domain="sensor"
+            />
+            <EntityAutocomplete
+              value={currentEntity}
+              onChange={setCurrentEntity}
+              label="Current Sensor (optional)"
+              placeholder="sensor.smart_plug_current"
+              helperText="Sensor with device_class: current (A), folds current into the power measurement"
+              domain="sensor"
+            />
+          </>
+        )}
+
+        {showElectricalMeterFields && (
+          <>
+            <EntityAutocomplete
+              value={powerEntity}
+              onChange={setPowerEntity}
+              label="Power Sensor (optional)"
+              placeholder="sensor.grid_power"
+              helperText="Sensor with device_class: power (W). Leave empty to use this entity's own value."
+              domain="sensor"
+            />
+            <EntityAutocomplete
+              value={energyEntity}
+              onChange={setEnergyEntity}
+              label="Energy Sensor (optional)"
+              placeholder="sensor.grid_energy"
+              helperText="Sensor with device_class: energy (kWh), adds cumulative energy to this meter"
+              domain="sensor"
+            />
+            <EntityAutocomplete
+              value={voltageEntity}
+              onChange={setVoltageEntity}
+              label="Voltage Sensor (optional)"
+              placeholder="sensor.grid_voltage"
+              helperText="Sensor with device_class: voltage (V), folded into this meter"
+              domain="sensor"
+            />
+            <EntityAutocomplete
+              value={currentEntity}
+              onChange={setCurrentEntity}
+              label="Current Sensor (optional)"
+              placeholder="sensor.grid_current"
+              helperText="Sensor with device_class: current (A), folded into this meter"
+              domain="sensor"
+            />
+          </>
+        )}
+
+        {showBatteryEnergyFields && (
+          <>
+            <EntityAutocomplete
+              value={batteryPowerEntity}
+              onChange={setBatteryPowerEntity}
+              label="Battery Power Sensor (optional)"
+              placeholder="sensor.home_battery_power"
+              helperText="Sensor with device_class: power (W). Positive on discharge, negative on charge. Exposes the battery as an ESS."
+              domain="sensor"
+            />
+            <EntityAutocomplete
+              value={batteryEnergyEntity}
+              onChange={setBatteryEnergyEntity}
+              label="Battery Energy Sensor (optional)"
+              placeholder="sensor.home_battery_energy"
+              helperText="Sensor with device_class: energy (kWh), adds lifetime throughput to the battery"
+              domain="sensor"
+            />
           </>
         )}
 
@@ -1194,16 +1362,57 @@ export function EntityMappingDialog({
         )}
 
         {showLockPinField && (
-          <FormControlLabel
-            control={
-              <Switch
-                checked={disableLockPin}
-                onChange={(e) => setDisableLockPin(e.target.checked)}
-              />
-            }
-            label="Disable PIN requirement for this lock"
-            sx={{ mt: 1, display: "block" }}
-          />
+          <>
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={disableLockPin}
+                  onChange={(e) => setDisableLockPin(e.target.checked)}
+                />
+              }
+              label="Disable PIN requirement for this lock"
+              sx={{ mt: 1, display: "block" }}
+            />
+            <TextField
+              label="Physical lock usercode service"
+              size="small"
+              fullWidth
+              value={lockUsercodeService}
+              onChange={(e) => setLockUsercodeService(e.target.value)}
+              helperText="Opt-in: also program the physical lock when a controller sets/clears the PIN, e.g. zwave_js.set_lock_usercode or zha.set_lock_user_code. Leave empty to keep the PIN only in HAMH."
+              sx={{ mt: 1, display: "block" }}
+            />
+            <TextField
+              label="Code slot"
+              type="number"
+              size="small"
+              value={lockUsercodeSlot}
+              onChange={(e) => setLockUsercodeSlot(e.target.value)}
+              helperText="Code slot on the physical lock, default 1"
+              slotProps={{ htmlInput: { min: 1, step: 1 } }}
+              sx={{ mt: 1, display: "block" }}
+            />
+            <TextField
+              label="Min PIN length"
+              type="number"
+              size="small"
+              value={lockPinMinLength}
+              onChange={(e) => setLockPinMinLength(e.target.value)}
+              helperText="Override advertised minimum PIN length (1-20). Default 4. Set min = max for locks that require an exact length."
+              slotProps={{ htmlInput: { min: 1, max: 20, step: 1 } }}
+              sx={{ mt: 1, display: "block" }}
+            />
+            <TextField
+              label="Max PIN length"
+              type="number"
+              size="small"
+              value={lockPinMaxLength}
+              onChange={(e) => setLockPinMaxLength(e.target.value)}
+              helperText="Override advertised maximum PIN length (1-20). Default 8. Controllers cache both lengths at pairing, re-pair the bridge after changing them."
+              slotProps={{ htmlInput: { min: 1, max: 20, step: 1 } }}
+              sx={{ mt: 1, display: "block" }}
+            />
+          </>
         )}
 
         {showClimateOnOffField && (
@@ -1374,6 +1583,30 @@ export function EntityMappingDialog({
           }
           label="Disable this entity (exclude from bridge)"
         />
+
+        <FormControlLabel
+          control={
+            <Switch
+              checked={disableBatteryMapping}
+              onChange={(e) => setDisableBatteryMapping(e.target.checked)}
+            />
+          }
+          label="Disable battery mapping (skip an auto-detected or manually mapped battery sensor for this entity; use when an integration like Xiaomi Home reports a bogus battery sensor on a mains-powered device, causing a false low-battery warning in Matter controllers)"
+          sx={{ mt: 1, display: "block" }}
+        />
+
+        {showMomentaryFlipField && (
+          <FormControlLabel
+            control={
+              <Switch
+                checked={disableMomentaryFlip}
+                onChange={(e) => setDisableMomentaryFlip(e.target.checked)}
+              />
+            }
+            label="Do not report the on/off flip after a run. Try this when Alexa devices on script bridges stop responding."
+            sx={{ mt: 1, display: "block" }}
+          />
+        )}
 
         <TextField
           fullWidth

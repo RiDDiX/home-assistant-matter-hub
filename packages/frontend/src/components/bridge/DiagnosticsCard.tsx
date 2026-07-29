@@ -18,6 +18,7 @@ import Stack from "@mui/material/Stack";
 import Tooltip from "@mui/material/Tooltip";
 import Typography from "@mui/material/Typography";
 import { useMemo, useState } from "react";
+import { collectLeafEndpoints } from "../endpoints/collect-leaf-endpoints";
 import { getEndpointName } from "../endpoints/EndpointName";
 
 interface HaEntityState {
@@ -51,14 +52,6 @@ interface EntityDiagnostic {
   clusters: string[];
   autoMappings: { label: string; entity: string }[];
 }
-
-const collectLeafEndpoints = (endpoint: EndpointData): EndpointData[] => {
-  const parts = endpoint.parts ?? [];
-  if (parts.length === 0) {
-    return [endpoint];
-  }
-  return parts.flatMap((part) => collectLeafEndpoints(part));
-};
 
 const extractDiagnostics = (
   endpoint: EndpointData,

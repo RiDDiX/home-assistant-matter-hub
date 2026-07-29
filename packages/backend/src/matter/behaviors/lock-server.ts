@@ -8,6 +8,7 @@ import {
   StatusCode,
   StatusResponseError,
 } from "@matter/main/types";
+import type { HomeAssistantAction } from "../../services/home-assistant/home-assistant-actions.js";
 import { LockCredentialStorage } from "../../services/storage/lock-credential-storage.js";
 import { applyPatchState } from "../../utils/apply-patch-state.js";
 import { HomeAssistantEntityBehavior } from "./home-assistant-entity-behavior.js";
@@ -36,6 +37,88 @@ export function normalizeSupportedIndex(
     return SUPPORTED_SLOT;
   }
   return null;
+}
+
+/**
+ * Opt-in passthrough that also programs the physical lock slot via an
+ * integration-specific HA service when the PIN credential changes (#418).
+ */
+export interface UsercodePassthrough {
+  service: string;
+  slot: number;
+  callAction: (action: HomeAssistantAction) => void;
+}
+
+// zha names the PIN field user_code, z-wave calls it usercode.
+export function buildUsercodeSetAction(
+  service: string,
+  slot: number,
+  pin: string,
+): HomeAssistantAction {
+  const pinKey = service.split(".")[0] === "zha" ? "user_code" : "usercode";
+  return { action: service, data: { code_slot: slot, [pinKey]: pin } };
+}
+
+export function buildUsercodeClearAction(
+  service: string,
+  slot: number,
+): HomeAssistantAction {
+  return {
+    action: service.replace(".set_", ".clear_"),
+    data: { code_slot: slot },
+  };
+}
+
+// Reads the passthrough config off the entity mapping. Undefined = feature off.
+function usercodePassthroughFrom(
+  homeAssistant: HomeAssistantEntityBehavior,
+): UsercodePassthrough | undefined {
+  const service = homeAssistant.state.mapping?.lockUsercodeService?.trim();
+  if (!service) {
+    return undefined;
+  }
+  return {
+    service,
+    slot: homeAssistant.state.mapping?.lockUsercodeSlot ?? 1,
+    callAction: (action) => homeAssistant.callAction(action),
+  };
+}
+
+// min/maxPinCodeLength are uint8, Matter spec keeps them 1..20.
+const DEFAULT_MIN_PIN_LENGTH = 4;
+const DEFAULT_MAX_PIN_LENGTH = 8;
+const PIN_LENGTH_SPEC_MIN = 1;
+const PIN_LENGTH_SPEC_MAX = 20;
+
+function clampPinLength(value: number | undefined): number | undefined {
+  if (
+    value === undefined ||
+    !Number.isInteger(value) ||
+    value < PIN_LENGTH_SPEC_MIN ||
+    value > PIN_LENGTH_SPEC_MAX
+  ) {
+    return undefined;
+  }
+  return value;
+}
+
+// Per-entity PIN length override (#418). A lock that wants an exact length sets
+// min == max so controllers advertise the right bounds. Falls back to 4/8 when
+// unset or inconsistent (min > max).
+function effectivePinCodeLengths(homeAssistant: HomeAssistantEntityBehavior): {
+  min: number;
+  max: number;
+} {
+  const min =
+    clampPinLength(homeAssistant.state.mapping?.lockPinMinLength) ??
+    DEFAULT_MIN_PIN_LENGTH;
+  const max =
+    clampPinLength(homeAssistant.state.mapping?.lockPinMaxLength) ??
+    DEFAULT_MAX_PIN_LENGTH;
+  if (min > max) {
+    return { min: DEFAULT_MIN_PIN_LENGTH, max: DEFAULT_MAX_PIN_LENGTH };
+  }
+  return { min, max };
 }
 
 type EnvLike = {
@@ -172,6 +255,7 @@ export async function applySetCredential(
   entityId: string,
   request: DoorLock.SetCredentialRequest,
   fabricIndex: number | undefined,
+  passthrough?: UsercodePassthrough,
 ): Promise<DoorLock.SetCredentialResponse> {
   if (
     request.credential.credentialType !== DoorLock.CredentialType.Pin ||
@@ -201,6 +285,10 @@ export async function applySetCredential(
       lastModifiedFabricIndex: fabricIndex,
       creatorFabricIndex: fabricIndex,
     });
+    // Fire and forget: a failed physical program still reports success.
+    passthrough?.callAction(
+      buildUsercodeSetAction(passthrough.service, passthrough.slot, pinCode),
+    );
   }
   return {
     status: Status.Success,
@@ -236,10 +324,14 @@ export async function applyClearCredential(
   env: EnvLike,
   entityId: string,
   request: DoorLock.ClearCredentialRequest,
+  passthrough?: UsercodePassthrough,
 ): Promise<void> {
   if (request.credential === null) {
     const storage = env.get(LockCredentialStorage);
     await storage.deleteCredential(entityId);
+    passthrough?.callAction(
+      buildUsercodeClearAction(passthrough.service, passthrough.slot),
+    );
     return;
   }
   if (
@@ -248,6 +340,34 @@ export async function applyClearCredential(
   ) {
     const storage = env.get(LockCredentialStorage);
     await storage.deleteCredential(entityId);
+    passthrough?.callAction(
+      buildUsercodeClearAction(passthrough.service, passthrough.slot),
+    );
+  }
+}
+
+/**
+ * Apply Matter ClearUser to storage. Handles the single supported slot and the
+ * 0xFFFE clear-all index. When a PIN credential was actually stored we also
+ * clear the physical slot, so ClearUser can't leave a working code on the lock.
+ */
+export async function applyClearUser(
+  env: EnvLike,
+  entityId: string,
+  request: DoorLock.ClearUserRequest,
+  passthrough?: UsercodePassthrough,
+): Promise<void> {
+  const slot = normalizeSupportedIndex(request.userIndex);
+  if (slot === null && request.userIndex !== 0xfffe) {
+    return;
+  }
+  const storage = env.get(LockCredentialStorage);
+  const hadCredential = storage.hasCredential(entityId);
+  await storage.deleteCredential(entityId);
+  if (hadCredential) {
+    passthrough?.callAction(
+      buildUsercodeClearAction(passthrough.service, passthrough.slot),
+    );
   }
 }
 
@@ -370,6 +490,7 @@ class LockServerWithPinBase extends PinCredentialBase {
     const hasPinConfigured =
       !isPinDisabledByMapping &&
       hasStoredCredentialHelper(this.env, homeAssistant.entityId);
+    const pinLengths = effectivePinCodeLengths(homeAssistant);
 
     applyPatchState(this.state, {
       lockState: this.state.config.getLockState(entity.state, this.agent),
@@ -390,8 +511,8 @@ class LockServerWithPinBase extends PinCredentialBase {
       numberOfPinUsersSupported: 1,
       numberOfTotalUsersSupported: 1,
       numberOfCredentialsSupportedPerUser: 1,
-      maxPinCodeLength: 8,
-      minPinCodeLength: 4,
+      maxPinCodeLength: pinLengths.max,
+      minPinCodeLength: pinLengths.min,
       requirePinForRemoteOperation: hasPinConfigured,
     });
   }
@@ -473,12 +594,13 @@ class LockServerWithPinBase extends PinCredentialBase {
   }
 
   override async clearUser(request: DoorLock.ClearUserRequest): Promise<void> {
-    const slot = normalizeSupportedIndex(request.userIndex);
-    if (slot !== null || request.userIndex === 0xfffe) {
-      const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);
-      const storage = this.env.get(LockCredentialStorage);
-      await storage.deleteCredential(homeAssistant.entityId);
-    }
+    const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);
+    await applyClearUser(
+      this.env,
+      homeAssistant.entityId,
+      request,
+      usercodePassthroughFrom(homeAssistant),
+    );
   }
 
   override async setCredential(
@@ -490,6 +612,7 @@ class LockServerWithPinBase extends PinCredentialBase {
       homeAssistant.entityId,
       request,
       this.context.fabric,
+      usercodePassthroughFrom(homeAssistant),
     );
   }
 
@@ -508,7 +631,12 @@ class LockServerWithPinBase extends PinCredentialBase {
     request: DoorLock.ClearCredentialRequest,
   ): Promise<void> {
     const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);
-    await applyClearCredential(this.env, homeAssistant.entityId, request);
+    await applyClearCredential(
+      this.env,
+      homeAssistant.entityId,
+      request,
+      usercodePassthroughFrom(homeAssistant),
+    );
   }
 }
 
@@ -593,6 +721,7 @@ class LockServerWithPinAndUnboltBase extends PinCredentialUnboltBase {
     const hasPinConfigured =
       !isPinDisabledByMapping &&
       hasStoredCredentialHelper(this.env, homeAssistant.entityId);
+    const pinLengths = effectivePinCodeLengths(homeAssistant);
 
     applyPatchState(this.state, {
       lockState: this.state.config.getLockState(entity.state, this.agent),
@@ -613,8 +742,8 @@ class LockServerWithPinAndUnboltBase extends PinCredentialUnboltBase {
       numberOfPinUsersSupported: 1,
       numberOfTotalUsersSupported: 1,
       numberOfCredentialsSupportedPerUser: 1,
-      maxPinCodeLength: 8,
-      minPinCodeLength: 4,
+      maxPinCodeLength: pinLengths.max,
+      minPinCodeLength: pinLengths.min,
       requirePinForRemoteOperation: hasPinConfigured,
     });
   }
@@ -723,12 +852,13 @@ class LockServerWithPinAndUnboltBase extends PinCredentialUnboltBase {
   }
 
   override async clearUser(request: DoorLock.ClearUserRequest): Promise<void> {
-    const slot = normalizeSupportedIndex(request.userIndex);
-    if (slot !== null || request.userIndex === 0xfffe) {
-      const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);
-      const storage = this.env.get(LockCredentialStorage);
-      await storage.deleteCredential(homeAssistant.entityId);
-    }
+    const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);
+    await applyClearUser(
+      this.env,
+      homeAssistant.entityId,
+      request,
+      usercodePassthroughFrom(homeAssistant),
+    );
   }
 
   override async setCredential(
@@ -740,6 +870,7 @@ class LockServerWithPinAndUnboltBase extends PinCredentialUnboltBase {
       homeAssistant.entityId,
       request,
       this.context.fabric,
+      usercodePassthroughFrom(homeAssistant),
     );
   }
 
@@ -758,7 +889,12 @@ class LockServerWithPinAndUnboltBase extends PinCredentialUnboltBase {
     request: DoorLock.ClearCredentialRequest,
   ): Promise<void> {
     const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);
-    await applyClearCredential(this.env, homeAssistant.entityId, request);
+    await applyClearCredential(
+      this.env,
+      homeAssistant.entityId,
+      request,
+      usercodePassthroughFrom(homeAssistant),
+    );
   }
 }
 

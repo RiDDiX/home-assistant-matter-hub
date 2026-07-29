@@ -12,8 +12,9 @@ export abstract class EntityEndpoint extends Endpoint {
     readonly entityId: string,
     customName?: string,
     mappedEntityIds?: string[],
+    endpointId?: string,
   ) {
-    super(type, { id: createEndpointId(entityId, customName) });
+    super(type, { id: endpointId ?? createEndpointId(entityId, customName) });
     this.mappedEntityIds = mappedEntityIds ?? [];
   }
 
@@ -45,7 +46,10 @@ export function createEndpointId(
 export function getMappedEntityIds(mapping?: EntityMappingConfig): string[] {
   if (!mapping) return [];
   const ids: string[] = [];
-  if (mapping.batteryEntity) ids.push(mapping.batteryEntity);
+  if (mapping.batteryEntity && !mapping.disableBatteryMapping) {
+    ids.push(mapping.batteryEntity);
+  }
+  if (mapping.faultEntity) ids.push(mapping.faultEntity);
   if (mapping.chargingStateEntity) ids.push(mapping.chargingStateEntity);
   if (mapping.temperatureEntity) ids.push(mapping.temperatureEntity);
   if (mapping.humidityEntity) ids.push(mapping.humidityEntity);
@@ -56,6 +60,10 @@ export function getMappedEntityIds(mapping?: EntityMappingConfig): string[] {
   if (mapping.filterLifeEntity) ids.push(mapping.filterLifeEntity);
   if (mapping.powerEntity) ids.push(mapping.powerEntity);
   if (mapping.energyEntity) ids.push(mapping.energyEntity);
+  if (mapping.voltageEntity) ids.push(mapping.voltageEntity);
+  if (mapping.currentEntity) ids.push(mapping.currentEntity);
+  if (mapping.batteryPowerEntity) ids.push(mapping.batteryPowerEntity);
+  if (mapping.batteryEnergyEntity) ids.push(mapping.batteryEnergyEntity);
   if (mapping.currentRoomEntity) ids.push(mapping.currentRoomEntity);
   if (mapping.cleanedAreaEntity) ids.push(mapping.cleanedAreaEntity);
   if (mapping.composedEntities) {

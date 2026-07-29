@@ -34,6 +34,7 @@ import { UserComposedEndpoint } from "./user-composed-endpoint.js";
 const PRIMARY = "binary_sensor.occupancy";
 const ILLUMINANCE = "sensor.illuminance";
 const TEMPERATURE = "sensor.temperature";
+const BATTERY = "sensor.battery";
 
 function state(
   entityId: string,
@@ -115,6 +116,77 @@ function create(registry: BridgeRegistry) {
     primaryEntityId: PRIMARY,
     mapping: { entityId: PRIMARY },
     composedEntities,
+  });
+}
+
+// primary + two out-of-filter sensors + a mapped battery on the same device
+function haRegistryWithBattery(): HomeAssistantRegistry {
+  const entities = {
+    [PRIMARY]: { entity_id: PRIMARY, device_id: "dev1" },
+    [ILLUMINANCE]: { entity_id: ILLUMINANCE, device_id: "dev1" },
+    [TEMPERATURE]: { entity_id: TEMPERATURE, device_id: "dev1" },
+    [BATTERY]: { entity_id: BATTERY, device_id: "dev1" },
+  };
+  const states: HomeAssistantStates = {
+    [PRIMARY]: state(PRIMARY, "on", "occupancy"),
+    [ILLUMINANCE]: state(ILLUMINANCE, "42", "illuminance", "lx"),
+    [TEMPERATURE]: state(TEMPERATURE, "21.5", "temperature", "°C"),
+    [BATTERY]: state(BATTERY, "80", "battery", "%"),
+  };
+  return {
+    entities,
+    states,
+    devices: { dev1: { id: "dev1", name: "Hue Motion" } },
+    labels: [],
+    areas: new Map(),
+    // biome-ignore lint/suspicious/noExplicitAny: minimal registry stub
+  } as any;
+}
+
+// same as above, but the primary state also carries a battery_level attribute.
+// The domain factory picks a WithBattery variant from that attribute alone, so
+// without the strip the primary sub would get a second PowerSource.
+function haRegistryWithPrimaryBatteryAttr(): HomeAssistantRegistry {
+  const primary = state(PRIMARY, "on", "occupancy");
+  (primary.attributes as Record<string, unknown>).battery_level = 80;
+  const entities = {
+    [PRIMARY]: { entity_id: PRIMARY, device_id: "dev1" },
+    [ILLUMINANCE]: { entity_id: ILLUMINANCE, device_id: "dev1" },
+    [TEMPERATURE]: { entity_id: TEMPERATURE, device_id: "dev1" },
+    [BATTERY]: { entity_id: BATTERY, device_id: "dev1" },
+  };
+  const states: HomeAssistantStates = {
+    [PRIMARY]: primary,
+    [ILLUMINANCE]: state(ILLUMINANCE, "42", "illuminance", "lx"),
+    [TEMPERATURE]: state(TEMPERATURE, "21.5", "temperature", "°C"),
+    [BATTERY]: state(BATTERY, "80", "battery", "%"),
+  };
+  return {
+    entities,
+    states,
+    devices: { dev1: { id: "dev1", name: "Hue Motion" } },
+    labels: [],
+    areas: new Map(),
+    // biome-ignore lint/suspicious/noExplicitAny: minimal registry stub
+  } as any;
+}
+
+function createWithBattery(registry: BridgeRegistry) {
+  return UserComposedEndpoint.create({
+    registry,
+    primaryEntityId: PRIMARY,
+    mapping: { entityId: PRIMARY, batteryEntity: BATTERY },
+    composedEntities,
+  });
+}
+
+function createWithArea(registry: BridgeRegistry) {
+  return UserComposedEndpoint.create({
+    registry,
+    primaryEntityId: PRIMARY,
+    mapping: { entityId: PRIMARY },
+    composedEntities,
+    areaName: "Living Room",
   });
 }
 
@@ -207,5 +279,129 @@ describe("user composed device with out-of-filter sub-entities (#408)", () => {
     expect(endpoint).toBeDefined();
     expect(endpoint!.mappedEntityIds).toEqual([ILLUMINANCE, TEMPERATURE]);
     expect([...endpoint!.parts].length).toBe(3);
+  });
+});
+
+describe("user composed device battery and room label (#408)", () => {
+  it("attaches the mapped battery to the parent and subscribes it", async () => {
+    env.set(EntityStateProvider, {
+      getState: () => undefined,
+      getNumericState: () => undefined,
+      getBatteryPercent: (id: string) => (id === BATTERY ? 80 : null),
+      // biome-ignore lint/suspicious/noExplicitAny: test stub
+    } as any);
+
+    const registry = new BridgeRegistry(
+      haRegistryWithBattery(),
+      dataProvider(true),
+    );
+    const endpoint = await createWithBattery(registry);
+    expect(endpoint).toBeDefined();
+    expect(endpoint!.mappedEntityIds).toContain(BATTERY);
+
+    await mount(endpoint!);
+    await delay(50);
+
+    // batPercentRemaining is half-percent units, so 80% becomes 160
+    // biome-ignore lint/suspicious/noExplicitAny: read cluster state off parent
+    const power = (endpoint!.state as any).powerSource;
+    expect(power.batPercentRemaining).toBe(160);
+  });
+
+  it("pushes a battery-only change to the parent PowerSource", async () => {
+    // PowerSource reads the percent via EntityStateProvider, not the states
+    // map, so drive the percent from a mutable stub value.
+    let batteryPercent = 80;
+    env.set(EntityStateProvider, {
+      getState: () => undefined,
+      getNumericState: () => undefined,
+      getBatteryPercent: (id: string) =>
+        id === BATTERY ? batteryPercent : null,
+      // biome-ignore lint/suspicious/noExplicitAny: test stub
+    } as any);
+
+    const registry = new BridgeRegistry(
+      haRegistryWithBattery(),
+      dataProvider(true),
+    );
+    const endpoint = await createWithBattery(registry);
+    expect(endpoint).toBeDefined();
+
+    await mount(endpoint!);
+    await delay(50);
+
+    // 80% becomes 160 half-percent units at mount
+    // biome-ignore lint/suspicious/noExplicitAny: read cluster state off parent
+    expect((endpoint!.state as any).powerSource.batPercentRemaining).toBe(160);
+
+    // Only the battery changed, the primary occupancy stays "on".
+    batteryPercent = 55;
+    const states: HomeAssistantStates = {
+      [PRIMARY]: state(PRIMARY, "on", "occupancy"),
+      [ILLUMINANCE]: state(ILLUMINANCE, "42", "illuminance", "lx"),
+      [TEMPERATURE]: state(TEMPERATURE, "21.5", "temperature", "°C"),
+      [BATTERY]: state(BATTERY, "55", "battery", "%"),
+    };
+    await endpoint!.updateStates(states);
+    await delay(200);
+
+    // 55% becomes 110 half-percent units, must reach the parent PowerSource
+    // biome-ignore lint/suspicious/noExplicitAny: read cluster state off parent
+    expect((endpoint!.state as any).powerSource.batPercentRemaining).toBe(110);
+  });
+
+  it("keeps PowerSource only on the parent when the primary has a battery attribute", async () => {
+    env.set(EntityStateProvider, {
+      getState: () => undefined,
+      getNumericState: () => undefined,
+      getBatteryPercent: (id: string) => (id === BATTERY ? 80 : null),
+      // biome-ignore lint/suspicious/noExplicitAny: test stub
+    } as any);
+
+    const registry = new BridgeRegistry(
+      haRegistryWithPrimaryBatteryAttr(),
+      dataProvider(true),
+    );
+    const endpoint = await createWithBattery(registry);
+    expect(endpoint).toBeDefined();
+
+    await mount(endpoint!);
+    await delay(50);
+
+    // the parent owns the device battery
+    expect(endpoint!.behaviors.has("powerSource")).toBe(true);
+
+    // the primary sub must not carry a duplicate PowerSource from the attribute
+    const primary = [...endpoint!.parts].find(
+      (p) =>
+        p.stateOf(HomeAssistantEntityBehavior).entity.entity_id === PRIMARY,
+    );
+    expect(primary).toBeDefined();
+    expect(primary!.behaviors.has("powerSource")).toBe(false);
+  });
+
+  it("puts the room label on the parent and the primary sub", async () => {
+    const endpoint = await createWithArea(bridgeRegistry(true));
+    expect(endpoint).toBeDefined();
+    await mount(endpoint!);
+
+    // biome-ignore lint/suspicious/noExplicitAny: read cluster state off parent
+    const parentLabels = (endpoint!.state as any).fixedLabel.labelList;
+    expect(parentLabels).toContainEqual({
+      label: "room",
+      value: "Living Room",
+    });
+
+    const primary = [...endpoint!.parts].find(
+      (p) =>
+        p.stateOf(HomeAssistantEntityBehavior).entity.entity_id === PRIMARY,
+    );
+    expect(primary).toBeDefined();
+    // biome-ignore lint/suspicious/noExplicitAny: read cluster state off sub
+    const primaryLabels = (primary!.state as any).fixedLabel.labelList;
+    expect(primaryLabels).toContainEqual({
+      label: "room",
+      value: "Living Room",
+    });
   });
 });

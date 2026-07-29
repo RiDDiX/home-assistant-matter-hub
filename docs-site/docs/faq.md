@@ -109,6 +109,14 @@ This is typically caused by stale sessions, Alexa goes offline but the bridge ke
 
 See [#105](https://github.com/RiDDiX/home-assistant-matter-hub/issues/105) for details.
 
+## Alexa stops responding to any device after running a script/scene
+
+Script, scene, automation, and input_button entities are momentary, they report "on" then automatically reset to "off" about a second later, since there is no Matter scene device type to represent them properly. Some Echo devices get stuck on that on/off report pair: after running one of these, Alexa stops forwarding commands to the whole bridge until it is restarted.
+
+If this happens on a bridge with script/scene/automation/input_button/button entities, open **Entity Mapping** for the affected entity and enable **"Do not report the on/off flip after a run"** (`disableMomentaryFlip`). The Home Assistant action still runs, but the entity no longer reports the flip, so Alexa has nothing to choke on.
+
+See [#423](https://github.com/RiDDiX/home-assistant-matter-hub/issues/423).
+
 ## My cover / blinds open and close commands are inverted
 
 Matter and Home Assistant use different conventions for cover position percentages. Use the bridge feature flags to fix this:
@@ -166,6 +174,8 @@ If you're on an older version, update to get the correct mapping. See [#154](htt
 HAMH sends your Home Assistant area names to Matter controllers using the FixedLabel cluster (`label: "room", value: "<area name>"`). However, **no major controller** (Google Home, Apple Home, Alexa) currently reads this label for automatic room assignment. You need to assign rooms manually in each controller app during or after pairing.
 
 The FixedLabel data is kept in the bridge for future controller support. The room name is limited to 16 characters per the Matter spec, longer HA area names are truncated automatically.
+
+If the old Google Assistant cloud integration used to sort your devices into rooms, that worked through Google's own cloud API and its `roomHint` field. Matter has no equivalent a bridge could send, which is why the behavior changed ([#413](https://github.com/RiDDiX/home-assistant-matter-hub/issues/413)).
 
 ## How do I control Media Player playback?
 
@@ -225,6 +235,17 @@ Since Matter has no concept of aliases, `nodeLabel` is a single string (max 32 c
 HA's automatic migration adds old names as Assist voice aliases, but those only work for HA's built-in voice assistant, not for external controllers like Alexa, Google Home, or Apple Home. Each controller has its own device renaming UI that you can use as an alternative.
 
 See [#276](https://github.com/RiDDiX/home-assistant-matter-hub/issues/276) for discussion.
+
+## How do I move a device to another integration without losing it in my voice assistant?
+
+HAMH identifies a device by its `entity_id`: the Matter unique id is a hash of it and the endpoint number is stored under it. As long as the new entity ends up with the exact same `entity_id`, controllers keep the device with its rooms, groups and automations.
+
+1. Stop the HAMH add-on (a stopped bridge keeps its endpoint numbers, a device that just disappears while the bridge runs loses its number after a grace period).
+2. Migrate the device (e.g. unpair from the old hub, pair to the new stick).
+3. Rename the new entity to the exact old `entity_id` in Home Assistant.
+4. Start HAMH again. The device re-attaches under the same Matter identity.
+
+Keep the custom names and entity mappings too: they are keyed by `entity_id`, and a `customName` also feeds the stored endpoint identity, so changing it counts as a new device.
 
 ## What's the difference between Stable and Alpha?
 

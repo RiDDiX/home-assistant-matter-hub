@@ -58,6 +58,11 @@ export function startOptionsBuilder(yargs: Argv): Argv<StartOptions> {
       description:
         "Only allow the specified IPv4, IPv6 or CIDR. You can specify this option multiple times. When configured via ENV variables, you can only specify ONE value. Defaults to allow every IP address.",
     })
+    .option("mdns-disable-ipv4", {
+      type: "boolean",
+      default: false,
+      description: "Disable IPv4 for mDNS, so only IPv6 will be used",
+    })
     .option("mdns-network-interface", {
       type: "string",
       description: "Limit mDNS to this network interface",

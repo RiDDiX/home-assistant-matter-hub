@@ -12,6 +12,7 @@ import {
   useUsedPorts,
 } from "../../hooks/data/bridges.ts";
 import { navigation } from "../../routes.tsx";
+import { bridgeToConfig } from "./bridge-to-config.ts";
 
 export const EditBridgePage = () => {
   const { t } = useTranslation();
@@ -27,21 +28,7 @@ export const EditBridgePage = () => {
     if (isLoading || !bridge) {
       return undefined;
     }
-    return {
-      name: bridge.name,
-      port: bridge.port,
-      filter: bridge.filter,
-      ...(bridge.countryCode != null && { countryCode: bridge.countryCode }),
-      ...(bridge.featureFlags != null && { featureFlags: bridge.featureFlags }),
-      ...(bridge.icon != null && { icon: bridge.icon }),
-      ...(bridge.priority != null && { priority: bridge.priority }),
-      ...(bridge.serialNumberSuffix != null && {
-        serialNumberSuffix: bridge.serialNumberSuffix,
-      }),
-      ...(bridge.uniqueIdSuffix != null && {
-        uniqueIdSuffix: bridge.uniqueIdSuffix,
-      }),
-    };
+    return bridgeToConfig(bridge);
   }, [isLoading, bridge]);
 
   const cancelAction = () => {
