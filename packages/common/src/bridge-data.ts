@@ -130,6 +130,15 @@ interface AllBridgeFeatureFlags {
    * Default: false (disabled)
    */
   readonly stableIdentity: boolean;
+  /**
+   * Wedge Watchdog: rotate the one session that looks wedged (subscriptions
+   * alive but no inbound Interaction Model request for ~45min) earlier than the
+   * blind session rotation would. Targets the Apple "Updating" wedge where the
+   * controller keeps acking pushed reports but stops consuming data. A false
+   * positive costs only a transparent re-CASE, the same as blind rotation.
+   * Default: false (disabled)
+   */
+  readonly wedgeWatchdog: boolean;
 }
 
 export type BridgeFeatureFlags = Partial<AllBridgeFeatureFlags>;

@@ -7,7 +7,7 @@ import {
 } from "@home-assistant-matter-hub/common";
 import type { Environment } from "@matter/general";
 import { type Endpoint, Network } from "@matter/main";
-import { CommissioningServer } from "@matter/main/node";
+import { CommissioningServer, InteractionServer } from "@matter/main/node";
 import {
   DeviceAdvertiser,
   type Fabric,
@@ -44,6 +44,12 @@ import {
   staleSessionQuietWindowMs,
   staleSessionShouldClose,
 } from "./session-rotation.js";
+import { decideWedgeRotation } from "./wedge-watchdog.js";
+
+// Marks an InteractionServer whose onNewExchange we already wrapped so re-wiring
+// never stacks wrappers. A restart mints a fresh InteractionServer without the
+// marker, so it gets wrapped again.
+const imWrapMarker = Symbol("hamh.wedgeImWrap");
 
 // Auto Force Sync interval in milliseconds (90 seconds).
 // When autoForceSync is enabled, this pushes changed entity states to
@@ -85,6 +91,13 @@ export class Bridge {
   private sessionStartedAt = new Map<number, number>();
   private rotationTimer: ReturnType<typeof setInterval> | null = null;
   private maxSessionAgeMs = 0;
+
+  // Wedge watchdog: last inbound Interaction Model request time per session and
+  // last time the watchdog rotated it, both keyed by the long-lived session
+  // object so they clear when the session goes away.
+  private lastImRequestAt = new WeakMap<object, number>();
+  private wedgeLastRotatedAt = new WeakMap<object, number>();
+  private wedgeWatchdogTimer: ReturnType<typeof setInterval> | null = null;
 
   // Watches the advertised interface addresses so a dynamic ISP IPv6 prefix
   // change forces a fresh operational announcement (#415).
@@ -138,6 +151,7 @@ export class Bridge {
       subscriptionCount: number;
       lastActiveMsAgo: number | null;
       lastAnyActivityMsAgo: number | null;
+      lastImRequestMsAgo: number | null;
       isPeerActive: boolean;
       ageMsFromOpen: number | null;
     }>;
@@ -183,6 +197,8 @@ export class Bridge {
             : null;
         const lastAnyActivityMsAgo =
           typeof s.timestamp === "number" ? nowMs - s.timestamp : null;
+        const lastImAt = this.lastImRequestAt.get(s);
+        const lastImRequestMsAgo = lastImAt != null ? nowMs - lastImAt : null;
         const startedAt = this.sessionStartedAt.get(s.id);
         return {
           id: s.id,
@@ -191,6 +207,7 @@ export class Bridge {
           subscriptionCount: subCount,
           lastActiveMsAgo,
           lastAnyActivityMsAgo,
+          lastImRequestMsAgo,
           isPeerActive: Boolean(s.isPeerActive),
           ageMsFromOpen: startedAt != null ? nowMs - startedAt : null,
         };
@@ -413,6 +430,7 @@ export class Bridge {
       this.wireSessionDiagnostics();
       this.wireFabricWarnings();
       this.startSessionRotation();
+      this.startWedgeWatchdog();
       this.startMdnsAddressWatch();
       logMemoryUsage(this.log, "bridge running");
       diagnosticEventBus.emit("bridge_started", `Bridge started`, {
@@ -667,8 +685,33 @@ export class Bridge {
       };
       sessionManager.sessions.added.on(this.sessionAddedHandler);
       sessionManager.sessions.deleted.on(this.sessionDeletedHandler);
+      this.wireImRequestTracking();
     } catch {
       // SessionManager not yet available
+    }
+  }
+
+  // Stamp the time of every inbound Interaction Model request per session by
+  // wrapping InteractionServer.onNewExchange. The wedge watchdog reads these to
+  // tell a live-but-consuming controller from one that only keeps acking.
+  private wireImRequestTracking() {
+    try {
+      const is = this.server.env.get(InteractionServer);
+      const marked = is as unknown as Record<symbol, unknown>;
+      if (marked[imWrapMarker]) {
+        return;
+      }
+      const original = is.onNewExchange.bind(is);
+      is.onNewExchange = (exchange, message) => {
+        const session = exchange.session;
+        if (session) {
+          this.lastImRequestAt.set(session, Date.now());
+        }
+        return original(exchange, message);
+      };
+      marked[imWrapMarker] = true;
+    } catch {
+      // InteractionServer not yet available
     }
   }
 
@@ -860,6 +903,7 @@ export class Bridge {
     }
     this.staleSessionTimers.clear();
     this.stopSessionRotation();
+    this.stopWedgeWatchdog();
     this.stopMdnsAddressWatch();
     this.sessionStartedAt.clear();
   }
@@ -931,6 +975,79 @@ export class Bridge {
     if (this.rotationTimer) {
       clearInterval(this.rotationTimer);
       this.rotationTimer = null;
+    }
+  }
+
+  // Opt-in wedge watchdog: reuse the rotation check cadence (5min) to look for
+  // the one session wedged on "Updating" and rotate just that one.
+  private startWedgeWatchdog() {
+    this.stopWedgeWatchdog();
+    if (!this.dataProvider.featureFlags?.wedgeWatchdog) {
+      return;
+    }
+    this.wedgeWatchdogTimer = setInterval(
+      () => this.runWedgeWatchdogCheck(),
+      ROTATION_CHECK_INTERVAL_MS,
+    );
+    this.log.info(
+      `Wedge watchdog: checking every ${ROTATION_CHECK_INTERVAL_MS / 60_000}min`,
+    );
+  }
+
+  private stopWedgeWatchdog() {
+    if (this.wedgeWatchdogTimer) {
+      clearInterval(this.wedgeWatchdogTimer);
+      this.wedgeWatchdogTimer = null;
+    }
+  }
+
+  // Rotate exactly the sessions the pure rule flags as wedged. Closing is the
+  // same graceful-then-force path age rotation uses, so a false positive just
+  // re-CASEs the controller.
+  private runWedgeWatchdogCheck() {
+    try {
+      const sessionManager = this.server.env.get(SessionManager);
+      const now = Date.now();
+      const closes: Promise<void>[] = [];
+      for (const s of [...sessionManager.sessions]) {
+        if (s.isClosing) continue;
+        const startedAt = this.sessionStartedAt.get(s.id);
+        const sessionAgeMs = startedAt != null ? now - startedAt : 0;
+        const lastImAt = this.lastImRequestAt.get(s);
+        const lastImRequestMsAgo = lastImAt != null ? now - lastImAt : null;
+        const lastRotatedAt = this.wedgeLastRotatedAt.get(s);
+        const lastRotatedMsAgo =
+          lastRotatedAt != null ? now - lastRotatedAt : null;
+        if (
+          !decideWedgeRotation({
+            subscriptionCount: s.subscriptions.size,
+            sessionAgeMs,
+            lastImRequestMsAgo,
+            lastRotatedMsAgo,
+          })
+        ) {
+          continue;
+        }
+        const silenceMin = Math.round(
+          (lastImRequestMsAgo ?? sessionAgeMs) / 60_000,
+        );
+        this.log.info(
+          `Wedge watchdog: rotating session ${s.id}, no inbound interaction for ${silenceMin}min`,
+        );
+        this.wedgeLastRotatedAt.set(s, now);
+        closes.push(
+          s.initiateClose().catch(() => {
+            return s.initiateForceClose({
+              cause: new Error("wedge watchdog, forcing"),
+            });
+          }),
+        );
+      }
+      if (closes.length > 0) {
+        Promise.allSettled(closes).then(() => this.triggerMdnsReAnnounce());
+      }
+    } catch {
+      // SessionManager may be disposed
     }
   }
 
@@ -1087,6 +1204,7 @@ export class Bridge {
       if (this.status.code === BridgeStatus.Running) {
         this.startAutoForceSyncIfEnabled();
         this.startSessionRotation();
+        this.startWedgeWatchdog();
       }
     } catch (e) {
       const reason = "Failed to update bridge due to error:";

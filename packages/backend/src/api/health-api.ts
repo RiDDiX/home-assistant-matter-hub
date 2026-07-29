@@ -20,6 +20,10 @@ export interface SessionInfo {
   // ack); lastAnyActivityMsAgo is ms since any traffic in either direction.
   lastActiveMsAgo: number | null;
   lastAnyActivityMsAgo: number | null;
+  // ms since the last inbound Interaction Model request on this session, or null
+  // if none was seen. Unlike lastActiveMsAgo this does not advance on MRP acks,
+  // so it tells a healthy session from one wedged on "Updating".
+  lastImRequestMsAgo: number | null;
   isPeerActive: boolean;
   ageMsFromOpen: number | null;
 }
