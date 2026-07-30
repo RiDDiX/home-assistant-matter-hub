@@ -1,12 +1,34 @@
 import { Logger, type MaybePromise } from "@matter/general";
-import { EndpointNumber, FabricIndex, NodeId } from "@matter/main";
+import { EndpointNumber, type FabricIndex, NodeId } from "@matter/main";
 import { WebRtcTransportProviderServer } from "@matter/main/behaviors";
 import type { WebRtcTransportProvider } from "@matter/main/clusters";
 import { StatusCode, StatusResponseError } from "@matter/main/types";
+import type { SecureSession } from "@matter/protocol";
 import { StreamUsage } from "@matter/types";
+import {
+  deliverAnswerDeferred,
+  hasRequestor,
+  registerRequestor,
+  unregisterRequestor,
+} from "./requestor-client.js";
 import type { WebRtcBridge } from "./webrtc-bridge.js";
 
 const logger = Logger.get("CameraWebRtc");
+
+// Session ids mint globally: the requestor registry and the bridge session map
+// are process wide, per-endpoint counters would collide across cameras.
+// Per spec the counter wraps past 65534 to 0 and must probe past live ids.
+let nextGlobalSessionId = 0;
+function mintSessionId(): number {
+  for (let i = 0; i <= 0xfffe; i++) {
+    const id = nextGlobalSessionId;
+    nextGlobalSessionId =
+      nextGlobalSessionId >= 0xfffe ? 0 : nextGlobalSessionId + 1;
+    if (!hasRequestor(id)) return id;
+  }
+  // 65535 live sessions cannot happen, but never loop forever.
+  return nextGlobalSessionId;
+}
 
 // The 5 WebRtcTransportProvider commands, media delegated to WebRtcBridge.
 // provideOffer is wired; solicitOffer's deferred-offer push is unverified.
@@ -16,7 +38,7 @@ export class CameraWebRtcProviderServer extends WebRtcTransportProviderServer {
   override solicitOffer(
     request: WebRtcTransportProvider.SolicitOfferRequest,
   ): MaybePromise<WebRtcTransportProvider.SolicitOfferResponse> {
-    const id = this.state.nextSessionId++;
+    const id = mintSessionId();
     this.trackSession(id, request.streamUsage, request.originatingEndpointId);
     logger.info(
       `solicitOffer session=${id} (${this.state.entityId}), deferred offer`,
@@ -39,7 +61,7 @@ export class CameraWebRtcProviderServer extends WebRtcTransportProviderServer {
   override async provideOffer(
     request: WebRtcTransportProvider.ProvideOfferRequest,
   ): Promise<WebRtcTransportProvider.ProvideOfferResponse> {
-    const id = request.webRtcSessionId ?? this.state.nextSessionId++;
+    const id = request.webRtcSessionId ?? mintSessionId();
     logger.info(
       `provideOffer entry: entityId=${this.state.entityId} session=${id} (sdp ${request.sdp.length} chars)`,
     );
@@ -49,6 +71,19 @@ export class CameraWebRtcProviderServer extends WebRtcTransportProviderServer {
         request.streamUsage ?? StreamUsage.LiveView,
         request.originatingEndpointId ?? EndpointNumber(0),
       );
+    }
+    // Register the live session so we can invoke the answer back on the
+    // controller's WebRtcTransportRequestor cluster once the bridge answers.
+    const requestorEndpoint =
+      request.originatingEndpointId ?? EndpointNumber(0);
+    const session = (this.context as unknown as { session?: SecureSession })
+      .session;
+    if (session) {
+      registerRequestor(id, {
+        session,
+        requestorEndpoint,
+        env: this.env,
+      });
     }
     let answerSdp: string;
     try {
@@ -67,6 +102,7 @@ export class CameraWebRtcProviderServer extends WebRtcTransportProviderServer {
         `provideOffer failed for ${this.state.entityId} session=${id}: ${message}`,
       );
       // Drop the half-open session we optimistically tracked.
+      unregisterRequestor(id);
       this.state.currentSessions = this.state.currentSessions.filter(
         (s) => s.id !== id,
       );
@@ -76,11 +112,25 @@ export class CameraWebRtcProviderServer extends WebRtcTransportProviderServer {
       );
     }
     logger.info(
-      `provideOffer answer computed for ${this.state.entityId} session=${id} (${answerSdp.length} chars); awaiting requestor delivery path`,
+      `provideOffer answer computed for ${this.state.entityId} session=${id} (${answerSdp.length} chars); delivering via requestor`,
     );
-    // Spec returns the answer via the Requestor side, which matter.js does not
-    // model here. The bridge holds it; this delivery path is unverified.
-    void answerSdp;
+    // Deliver AFTER this handler returns. The answer SDP already embeds our
+    // gathered host candidates (werift blocks on ICE gathering in
+    // setLocalDescription), no ICE trickle needed. No agent context survives
+    // the timer, so capture plain values.
+    const bridge = this.state.bridge;
+    const state = this.state;
+    deliverAnswerDeferred(id, answerSdp, async () => {
+      await bridge.endSession(id).catch(() => {});
+      unregisterRequestor(id);
+      try {
+        state.currentSessions = state.currentSessions.filter(
+          (s) => s.id !== id,
+        );
+      } catch {
+        // endpoint already disposed, nothing left to prune
+      }
+    });
     return { webRtcSessionId: id };
   }
 
@@ -119,6 +169,7 @@ export class CameraWebRtcProviderServer extends WebRtcTransportProviderServer {
       `endSession session=${request.webRtcSessionId} (${this.state.entityId})`,
     );
     await this.state.bridge.endSession(request.webRtcSessionId);
+    unregisterRequestor(request.webRtcSessionId);
     this.state.currentSessions = this.state.currentSessions.filter(
       (s) => s.id !== request.webRtcSessionId,
     );
@@ -139,6 +190,11 @@ export class CameraWebRtcProviderServer extends WebRtcTransportProviderServer {
         };
       }
     ).session;
+    const fabricIndex = session?.associatedFabric?.fabricIndex;
+    if (fabricIndex == null) {
+      // No fabric (offline act in tests): a 0 sentinel fails validation.
+      return;
+    }
     this.state.currentSessions = [
       ...this.state.currentSessions,
       {
@@ -147,7 +203,7 @@ export class CameraWebRtcProviderServer extends WebRtcTransportProviderServer {
         peerEndpointId,
         streamUsage,
         metadataEnabled: false,
-        fabricIndex: session?.associatedFabric?.fabricIndex ?? FabricIndex(0),
+        fabricIndex,
       },
     ];
   }
@@ -161,6 +217,5 @@ export namespace CameraWebRtcProviderServer {
   export class State extends WebRtcTransportProviderServer.State {
     bridge!: WebRtcBridge;
     entityId!: string;
-    nextSessionId = 1;
   }
 }

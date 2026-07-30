@@ -116,6 +116,9 @@ export class WebRtcBridge {
     );
     this.forwardHaTracks(haPeer, senders, entityId);
 
+    // Re-offer on an existing id: tear down the prior peers before replacing so
+    // we do not leak werift connections.
+    await this.closeExistingPeers(matterSessionId);
     this.sessions.set(matterSessionId, { entityId, haPeer, controllerPeer });
 
     try {
@@ -187,6 +190,9 @@ export class WebRtcBridge {
     }
     this.forwardHaTracks(haPeer, senders, entityId);
 
+    // Re-offer on an existing id: tear down the prior peers before replacing so
+    // we do not leak werift connections.
+    await this.closeExistingPeers(matterSessionId);
     this.sessions.set(matterSessionId, { entityId, haPeer, controllerPeer });
 
     try {
@@ -260,6 +266,25 @@ export class WebRtcBridge {
     });
   }
 
+  // Close the peers of a session we are about to overwrite. Leaves no map
+  // entry; the caller replaces it with fresh peers under the same id.
+  private async closeExistingPeers(matterSessionId: number): Promise<void> {
+    const prior = this.sessions.get(matterSessionId);
+    if (!prior) return;
+    logger.info(
+      `replacing session ${matterSessionId} (${prior.entityId}), closing prior peers`,
+    );
+    if (prior.haUnsubscribe) {
+      await Promise.resolve(prior.haUnsubscribe()).catch((err) =>
+        logger.debug(`HA unsubscribe failed: ${errText(err)}`),
+      );
+    }
+    await prior.haPeer.close().catch(() => {});
+    await prior.controllerPeer.close().catch(() => {});
+    // The old HA stream would keep running server-side, stop it too.
+    await this.stopHaStream(prior).catch(() => {});
+  }
+
   async endSession(matterSessionId: number): Promise<void> {
     const session = this.sessions.get(matterSessionId);
     if (!session) return;
@@ -272,20 +297,22 @@ export class WebRtcBridge {
     }
     await session.haPeer.close().catch(() => {});
     await session.controllerPeer.close().catch(() => {});
-    // Tell HA to stop the stream if we tracked an HA session id.
-    if (session.haSessionId) {
-      try {
-        const conn = await this.ha();
-        await conn.sendMessagePromise({
-          type: "camera/webrtc/candidate",
-          entity_id: session.entityId,
-          session_id: session.haSessionId,
-          candidate: { candidate: "" },
-        });
-      } catch {
-        // best effort
-      }
-    }
+    await this.stopHaStream(session).catch(() => {});
+  }
+
+  // Tell HA to stop the stream if we tracked an HA session id. Best effort.
+  private async stopHaStream(session: {
+    entityId: string;
+    haSessionId?: string;
+  }): Promise<void> {
+    if (!session.haSessionId) return;
+    const conn = await this.ha();
+    await conn.sendMessagePromise({
+      type: "camera/webrtc/candidate",
+      entity_id: session.entityId,
+      session_id: session.haSessionId,
+      candidate: { candidate: "" },
+    });
   }
 
   // Grab a still JPEG via HA's camera proxy (for CaptureSnapshot).

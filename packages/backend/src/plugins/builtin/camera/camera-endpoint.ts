@@ -34,7 +34,6 @@ export function createCameraEndpointType(
       bridge,
       entityId,
       currentSessions: [],
-      nextSessionId: 1,
     },
     cameraAvStreamManagement: {
       bridge,
