@@ -140,6 +140,17 @@ const adjustPositionForWriting = (position: number, agent: Agent) => {
 };
 
 /**
+ * Where the position attributes land once HA parks the cover at an end. Runs the
+ * HA end value (open = 100, closed = 0) through the same read conversion the
+ * getters below use, so no inversion rule is duplicated: default flags turn HA
+ * open into Matter 0, while coverUseHomeAssistantPercentage /
+ * coverDoNotInvertPercentage keep it at 100. Axis-independent because lift and
+ * tilt share adjustPositionForReading (#429).
+ */
+const expectedRestPosition = (end: "open" | "close", agent: Agent) =>
+  adjustPositionForReading(end === "open" ? 100 : 0, agent);
+
+/**
  * Checks if open/close commands should be swapped.
  * Per-entity mapping overrides the bridge-level feature flag.
  */
@@ -290,11 +301,15 @@ const config: WindowCoveringConfig = {
     }
     return position == null ? null : adjustPositionForReading(position, agent);
   },
+  getExpectedRestPosition: expectedRestPosition,
   getCoverType: (entity) => deviceClassMapping(entity)?.type,
   getEndProductType: (entity) => deviceClassMapping(entity)?.endProductType,
   getMovementStatus: (entity, agent) => {
-    const { featureFlags } = agent.env.get(BridgeDataProvider);
-    const swapped = featureFlags?.coverSwapOpenClose === true;
+    // Same resolution the dispatch side uses, per-entity mapping first. Reading
+    // only the bridge flag made a per-entity swap report HA "opening" as Matter
+    // Opening while the command had written Closing, so the controller watched
+    // the direction flip mid-move (#429).
+    const swapped = shouldSwapOpenClose(agent);
     const coverState = entity.state as CoverDeviceState;
     if (coverState === CoverDeviceState.opening) {
       return swapped

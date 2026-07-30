@@ -3,6 +3,7 @@ import type {
   HomeAssistantEntityState,
 } from "@home-assistant-matter-hub/common";
 import { Logger } from "@matter/general";
+import type { Agent } from "@matter/main";
 import {
   WindowCoveringServer as Base,
   MovementDirection,
@@ -33,6 +34,18 @@ export interface WindowCoveringConfig {
   getCurrentLiftPosition: ValueGetter<number | null>;
   getCurrentTiltPosition: ValueGetter<number | null>;
   getMovementStatus: ValueGetter<MovementStatus>;
+
+  /**
+   * Where getCurrentLiftPosition / getCurrentTiltPosition will land once HA
+   * parks the cover at an end, as a percent in that same stored space.
+   * "open" / "close" are HA ends, not Matter intents: the caller resolves which
+   * HA action really fires (swap included) and asks for that end. Optional; the
+   * completion check falls back to the Matter target without it (#429).
+   */
+  getExpectedRestPosition?: (
+    end: "open" | "close",
+    agent: Agent,
+  ) => number | null;
 
   // Override the feature-derived Type / EndProductType. Used to tell
   // controllers the covering is a curtain/shutter/awning instead of the
@@ -151,6 +164,11 @@ interface CoverOptimisticAxis {
   startedAt: number;
   // Active safety-net timer that writes Stopped if HA never confirms (#429).
   timer: ReturnType<typeof setTimeout> | null;
+  // The HA end the dispatched action parks at, or null when the Matter target
+  // is the right thing to compare against. Kept as the END, not a number, so
+  // the check resolves through the CURRENT flag conversion on every tick and a
+  // mid-move bridge flag edit cannot split the comparison across spaces.
+  expectedRestEnd: "open" | "close" | null;
 }
 
 interface CoverOptimisticState {
@@ -159,6 +177,21 @@ interface CoverOptimisticState {
 }
 
 const coverOptimistic = new WeakMap<object, CoverOptimisticState>();
+
+// Which HA end the dispatched action drives the cover to. Only the discrete
+// open/close services park at an end; the position services land on the target
+// itself, so those get no expectation and keep the target comparison. Reading
+// the resolved action instead of the Matter intent is what makes a per-entity
+// coverSwapOpenClose land in the right place (#429).
+function haRestEnd(action: HomeAssistantAction): "open" | "close" | null {
+  if (action.action.includes("open_cover")) {
+    return "open";
+  }
+  if (action.action.includes("close_cover")) {
+    return "close";
+  }
+  return null;
+}
 
 function getCoverOptimistic(endpoint: object): CoverOptimisticState {
   let st = coverOptimistic.get(endpoint);
@@ -324,17 +357,27 @@ export class WindowCoveringServerBase extends FeaturedBase {
       if (!entry) {
         return MovementStatus.Stopped;
       }
-      // Position-aware axes complete when current meets the commanded target.
-      // Same 1% tolerance the command-skip guards use (handleGoToLiftPosition /
-      // handleGoToTiltPosition), so a landing a fraction of a percent shy of the
-      // target still counts as reached instead of sticking on "moving" forever.
-      // Non-position-aware axes have no target to compare, so they clear only via
+      // Position-aware axes complete when current meets the position the command
+      // is really heading for. The Matter target only works when the stored
+      // position space matches Matter's; a non-inverting space or a per-entity
+      // swap parks the cover somewhere else, so the command records its own
+      // expectation and that wins here (#429). Same 1% tolerance the
+      // command-skip guards use (handleGoToLiftPosition / handleGoToTiltPosition)
+      // so a landing a fraction of a percent shy still counts as reached.
+      // Non-position-aware axes have nothing to compare, so they clear only via
       // HA transitional states, StopMotion, or the timeout.
+      const getExpected = config.getExpectedRestPosition;
+      const expectedPercent =
+        entry.expectedRestEnd != null && getExpected != null
+          ? getExpected(entry.expectedRestEnd, this.agent)
+          : null;
+      const goal =
+        expectedPercent != null ? expectedPercent * 100 : existingTarget;
       const reachedTarget =
         positionAware &&
         current100ths != null &&
-        existingTarget != null &&
-        Math.abs(current100ths - existingTarget) < 100;
+        goal != null &&
+        Math.abs(current100ths - goal) < 100;
       const expired =
         Date.now() - entry.startedAt >= optimisticMovementTimeoutMs;
       if (reachedTarget || expired) {
@@ -525,6 +568,7 @@ export class WindowCoveringServerBase extends FeaturedBase {
   private startOptimisticMovement(
     axis: "lift" | "tilt",
     status: MovementStatus,
+    expectedRestEnd: "open" | "close" | null,
   ) {
     const optimistic = getCoverOptimistic(this.endpoint);
     // A fresh movement on this axis supersedes any pending safety timer.
@@ -607,7 +651,7 @@ export class WindowCoveringServerBase extends FeaturedBase {
     // A safety net must not keep the event loop alive by itself.
     (timer as { unref?: () => void }).unref?.();
 
-    optimistic[axis] = { status, startedAt, timer };
+    optimistic[axis] = { status, startedAt, timer, expectedRestEnd };
     this.writeOperationalStatus({ [axis]: status });
   }
 
@@ -701,13 +745,19 @@ export class WindowCoveringServerBase extends FeaturedBase {
   private handleLiftOpen() {
     clearPendingLift(getCoverDebounce(this.endpoint));
 
-    // Matter open intent = moving towards 0 = Opening, independent of the HA
-    // swap flag (swap only picks which HA service fires, not the Matter-side
-    // direction the controller sees).
-    this.startOptimisticMovement("lift", MovementStatus.Opening);
-
     const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);
     const action = this.state.config.openCoverLift(void 0, this.agent);
+
+    // Matter open intent = moving towards 0 = Opening, independent of the HA
+    // swap flag (swap only picks which HA service fires, not the Matter-side
+    // direction the controller sees). Completion is judged against where that
+    // service parks the cover, which is not the Matter target in every space.
+    this.startOptimisticMovement(
+      "lift",
+      MovementStatus.Opening,
+      haRestEnd(action),
+    );
+
     logger.info(`handleLiftOpen: calling action=${action.action}`);
     homeAssistant.callAction(action);
   }
@@ -715,11 +765,16 @@ export class WindowCoveringServerBase extends FeaturedBase {
   private handleLiftClose() {
     clearPendingLift(getCoverDebounce(this.endpoint));
 
-    // Matter close intent = moving towards 10000 = Closing (swap-independent).
-    this.startOptimisticMovement("lift", MovementStatus.Closing);
-
     const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);
     const action = this.state.config.closeCoverLift(void 0, this.agent);
+
+    // Matter close intent = moving towards 10000 = Closing (swap-independent).
+    this.startOptimisticMovement(
+      "lift",
+      MovementStatus.Closing,
+      haRestEnd(action),
+    );
+
     logger.info(`handleLiftClose: calling action=${action.action}`);
     homeAssistant.callAction(action);
   }
@@ -737,18 +792,6 @@ export class WindowCoveringServerBase extends FeaturedBase {
     }
     // Update target immediately for UI feedback
     this.state.targetPositionLiftPercent100ths = targetPercent100ths;
-    // Direction in the controller's own numeric space: it compares the target it
-    // sent against the current position it sees. Higher 100ths = more closed, so
-    // target above current = Closing. This stays self-consistent even under
-    // coverUseHomeAssistantPercentage because both numbers live in the same stored
-    // attribute space the controller reads, which is what clears its label (#429).
-    this.startOptimisticMovement(
-      "lift",
-      currentPositionMatter != null &&
-        targetPercent100ths < currentPositionMatter
-        ? MovementStatus.Opening
-        : MovementStatus.Closing,
-    );
     // Capture EVERYTHING needed for the debounced callback NOW while context is valid
     // The agent context expires after the command handler returns, so we must not
     // access any behavior properties (including entityId) inside setTimeout
@@ -756,6 +799,21 @@ export class WindowCoveringServerBase extends FeaturedBase {
     const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);
     const action = config.setLiftPosition(targetPosition, this.agent);
     const entityId = homeAssistant.entityId;
+    // Direction in the controller's own numeric space: it compares the target it
+    // sent against the current position it sees. Higher 100ths = more closed, so
+    // target above current = Closing. This stays self-consistent even under
+    // coverUseHomeAssistantPercentage because both numbers live in the same stored
+    // attribute space the controller reads, which is what clears its label (#429).
+    // set_cover_position lands on the target, so the expectation stays null there
+    // and only a binary cover (open/close instead of a position) records one.
+    this.startOptimisticMovement(
+      "lift",
+      currentPositionMatter != null &&
+        targetPercent100ths < currentPositionMatter
+        ? MovementStatus.Opening
+        : MovementStatus.Closing,
+      haRestEnd(action),
+    );
     const actions = this.env.get(HomeAssistantActions);
     const st = getCoverDebounce(this.endpoint);
     st.pendingLift = { action, entityId, actions };
@@ -806,12 +864,15 @@ export class WindowCoveringServerBase extends FeaturedBase {
     // tilt-only covers park tilt actions in the lift slot, #350
     if (st.pendingLift?.action.action.includes("tilt")) clearPendingLift(st);
 
-    this.startOptimisticMovement("tilt", MovementStatus.Opening);
+    const action = this.state.config.openCoverTilt(void 0, this.agent);
+    this.startOptimisticMovement(
+      "tilt",
+      MovementStatus.Opening,
+      haRestEnd(action),
+    );
 
     const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);
-    homeAssistant.callAction(
-      this.state.config.openCoverTilt(void 0, this.agent),
-    );
+    homeAssistant.callAction(action);
   }
 
   private handleTiltClose() {
@@ -820,12 +881,15 @@ export class WindowCoveringServerBase extends FeaturedBase {
     // tilt-only covers park tilt actions in the lift slot, #350
     if (st.pendingLift?.action.action.includes("tilt")) clearPendingLift(st);
 
-    this.startOptimisticMovement("tilt", MovementStatus.Closing);
+    const action = this.state.config.closeCoverTilt(void 0, this.agent);
+    this.startOptimisticMovement(
+      "tilt",
+      MovementStatus.Closing,
+      haRestEnd(action),
+    );
 
     const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);
-    homeAssistant.callAction(
-      this.state.config.closeCoverTilt(void 0, this.agent),
-    );
+    homeAssistant.callAction(action);
   }
 
   private handleGoToTiltPosition(targetPercent100ths: number) {
@@ -841,14 +905,6 @@ export class WindowCoveringServerBase extends FeaturedBase {
     }
     // Update target immediately for UI feedback
     this.state.targetPositionTiltPercent100ths = targetPercent100ths;
-    // Same controller-space direction derivation as lift (#429).
-    this.startOptimisticMovement(
-      "tilt",
-      currentPositionMatter != null &&
-        targetPercent100ths < currentPositionMatter
-        ? MovementStatus.Opening
-        : MovementStatus.Closing,
-    );
     // Capture EVERYTHING needed for the debounced callback NOW while context is valid
     // The agent context expires after the command handler returns, so we must not
     // access any behavior properties (including entityId) inside setTimeout
@@ -856,6 +912,15 @@ export class WindowCoveringServerBase extends FeaturedBase {
     const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);
     const action = config.setTiltPosition(targetPosition, this.agent);
     const entityId = homeAssistant.entityId;
+    // Same controller-space direction derivation and rest expectation as lift (#429).
+    this.startOptimisticMovement(
+      "tilt",
+      currentPositionMatter != null &&
+        targetPercent100ths < currentPositionMatter
+        ? MovementStatus.Opening
+        : MovementStatus.Closing,
+      haRestEnd(action),
+    );
     const actions = this.env.get(HomeAssistantActions);
     const st = getCoverDebounce(this.endpoint);
     st.pendingTilt = { action, entityId, actions };
