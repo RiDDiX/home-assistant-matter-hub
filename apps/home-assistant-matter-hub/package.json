@@ -46,6 +46,7 @@
   "dependencies": {
     "@matter/main": "0.17.7",
     "@matter/nodejs": "0.17.7",
+    "@matter/protocol": "0.17.7",
     "@matter/general": "0.17.7",
     "@matter/types": "0.17.7",
     "ajv": "8.18.0",
