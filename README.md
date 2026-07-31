@@ -37,7 +37,7 @@ of port forwarding etc.
 
 | Channel | Branch | Current Version | Description |
 |---------|--------|-----------------|-------------|
-| **Stable** | `main` | v2.0.50 | Production-ready, recommended for most users |
+| **Stable** | `main` | v2.0.51 | Production-ready, recommended for most users |
 | **Alpha** | `alpha` | v2.1.0-alpha.x (next) | Currently level with Stable; next pre-release lands here first |
 | **Testing** | `testing` | v4.1.0-testing.x | ⚠️ **Highly unstable!** Experimental features, may break |
 
@@ -61,9 +61,20 @@ Re-assign the affected devices to their rooms after they reconnect. See the [doc
 ## 🎉 What's New
 
 <details>
-<summary><strong>📦 Stable Features (v2.0.50)</strong> - Click to expand</summary>
+<summary><strong>📦 Stable Features (v2.0.51)</strong> - Click to expand</summary>
 
-**New in v2.0.50:**
+**New in v2.0.51:**
+
+- 🐕 **Opt-in wedge watchdog**: rotates a controller session that keeps acking but stops talking at the interaction layer, the automated "Play Sound" fix for stuck Apple devices ([#287](https://github.com/RiDDiX/home-assistant-matter-hub/issues/287), [#428](https://github.com/RiDDiX/home-assistant-matter-hub/issues/428))
+- 🧹 **Clean up orphaned records**: bridge menu action with a dry-run preview that removes identity and mapping leftovers of entities deleted from HA (7 day tombstone guards against false positives)
+- 🚗 **EV charger support**: new EVSE device-type override with charging switch and current limit mapping, EnableCharging/Disable from the controller; Aqara and Home Assistant render it, keep it off Alexa bridges
+- 🩺 **Subscription scope on the health card**: see whether each controller holds a whole-node wildcard or watches specific endpoints
+- 📷 **Camera live view signaling completed**: the WebRTC answer now reaches the controller over the requestor cluster, plus full media path logging, HA signaling timeouts, trickle ICE and ICE server support (still experimental until verified on real hardware)
+- 🪟 **Cover stop detection in every position space**: the v2.0.50 cover fix now also works with the Alexa percentage flag and the per-cover swap toggle, and swapped covers report the right direction ([#429](https://github.com/RiDDiX/home-assistant-matter-hub/issues/429))
+- 🤖 **Vacuum on/off crash fixed**: state updates no longer throw on vacuums with the on/off toggle ([#428](https://github.com/RiDDiX/home-assistant-matter-hub/issues/428))
+- 🌍 **Brazilian Portuguese completed**: 602 of 615 strings ([#420](https://github.com/RiDDiX/home-assistant-matter-hub/issues/420))
+
+**Previously in v2.0.50:**
 
 - 🆔 **Stable device identity (opt-in)**: endpoints keep their identity when an entity is renamed or re-registered, keyed on the HA registry unique id; enable the `stableIdentity` feature flag per bridge ([#404](https://github.com/RiDDiX/home-assistant-matter-hub/issues/404), [#407](https://github.com/RiDDiX/home-assistant-matter-hub/issues/407))
 - ⚡ **Energy suite stage 1**: consumption sensors expose an **Electrical Meter** that Google Home and SmartThings render, home batteries become a **Battery Storage** device with signed charge/discharge power and lifetime energy, and voltage/current/energy sensors group onto one endpoint via new mapping fields
@@ -255,7 +266,7 @@ Re-assign the affected devices to their rooms after they reconnect. See the [doc
 <details>
 <summary><strong>🧪 Alpha Features (v2.1.0-alpha.x)</strong> - Click to expand</summary>
 
-**Alpha is currently level with Stable (v2.0.50).** All alpha work up to the latest pre-release has been promoted into v2.0.50. New alpha work continues from the next pre-release tag onward and will appear here as development progresses.
+**Alpha is currently level with Stable (v2.0.51).** All alpha work up to the latest pre-release has been promoted into v2.0.51. New alpha work continues from the next pre-release tag onward and will appear here as development progresses.
 
 </details>
 
