@@ -9,9 +9,14 @@ interface MockState {
   currentArea: number | null;
 }
 
-function selectAreas(state: MockState, newAreas: number[]) {
+function selectAreas(
+  state: MockState,
+  newAreas: number[],
+  mapping?: { vacuumAscendingRoomOrder?: boolean },
+) {
+  const agent = mapping ? { get: () => ({ state: { mapping } }) } : undefined;
   return ServiceAreaServerBase.prototype.selectAreas.call(
-    { state } as unknown as ServiceAreaServerBase,
+    { state, agent } as unknown as ServiceAreaServerBase,
     { newAreas },
   );
 }
@@ -64,5 +69,33 @@ describe("ServiceAreaServerBase.selectAreas", () => {
     selectAreas(state, [1, 1, 2, 2]);
 
     expect(state.selectedAreas).toEqual([1, 2]);
+  });
+
+  it("keeps the tap order by default (#368)", () => {
+    const state: MockState = {
+      supportedAreas: [{ areaId: 3 }, { areaId: 4 }],
+      selectedAreas: [],
+      progress: [],
+      currentArea: null,
+    };
+
+    selectAreas(state, [4, 3]);
+
+    expect(state.selectedAreas).toEqual([4, 3]);
+    expect(state.progress.map((p) => p.areaId)).toEqual([4, 3]);
+  });
+
+  it("sorts ascending when vacuumAscendingRoomOrder is set (#368)", () => {
+    const state: MockState = {
+      supportedAreas: [{ areaId: 3 }, { areaId: 4 }, { areaId: 7 }],
+      selectedAreas: [],
+      progress: [],
+      currentArea: null,
+    };
+
+    selectAreas(state, [7, 4, 3], { vacuumAscendingRoomOrder: true });
+
+    expect(state.selectedAreas).toEqual([3, 4, 7]);
+    expect(state.progress.map((p) => p.areaId)).toEqual([3, 4, 7]);
   });
 });

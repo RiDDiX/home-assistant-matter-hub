@@ -1,8 +1,26 @@
 import { Logger } from "@matter/general";
+import type { Agent } from "@matter/main";
 import { ServiceAreaBehavior } from "@matter/main/behaviors";
 import { ServiceArea } from "@matter/main/clusters";
+import { HomeAssistantEntityBehavior } from "./home-assistant-entity-behavior.js";
 
 const logger = Logger.get("ServiceAreaServer");
+
+/**
+ * Apple Home sends the areas in tap order. Vacuums that clean a batch of
+ * segments in ascending id order (Roborock) need the stored selection in
+ * that same order, so display, dispatch and progress agree (#368).
+ */
+function orderSelection(areas: number[], agent: Agent | undefined): number[] {
+  try {
+    const ascending =
+      agent?.get(HomeAssistantEntityBehavior).state.mapping
+        ?.vacuumAscendingRoomOrder === true;
+    return ascending ? [...areas].sort((a, b) => a - b) : areas;
+  } catch {
+    return areas;
+  }
+}
 
 const ServiceAreaWithProgress = ServiceAreaBehavior.with(
   ServiceArea.Feature.ProgressReporting,
@@ -27,8 +45,8 @@ export class ServiceAreaServerBase extends ServiceAreaWithProgress {
       `ServiceArea selectAreas called with: ${JSON.stringify(newAreas)}`,
     );
 
-    // Remove duplicates
-    const uniqueAreas = [...new Set(newAreas)];
+    // Remove duplicates, then apply the configured cleaning order
+    const uniqueAreas = orderSelection([...new Set(newAreas)], this.agent);
 
     // Validate that all requested areas exist in supportedAreas
     const supportedAreaIds = this.state.supportedAreas.map((a) => a.areaId);
@@ -134,7 +152,7 @@ class ServiceAreaServerWithMapsBase extends ServiceAreaWithMapsAndProgress {
       `ServiceArea selectAreas called with: ${JSON.stringify(newAreas)}`,
     );
 
-    const uniqueAreas = [...new Set(newAreas)];
+    const uniqueAreas = orderSelection([...new Set(newAreas)], this.agent);
 
     const supportedAreaIds = this.state.supportedAreas.map((a) => a.areaId);
     const invalidAreas = uniqueAreas.filter(

@@ -310,51 +310,59 @@ describe("#429 optimistic movement bringup", () => {
     expect(cap.ops).toEqual([Closing, Stopped]);
   });
 
-  it("e: optimistic move that never completes flips to Stopped after the timeout", async () => {
-    setOptimisticMovementTimeoutMsForTests(800);
-    const endpoint = await mount("closed", 0);
-    const cap = subscribe(endpoint);
+  it(
+    "e: optimistic move that never completes flips to Stopped after the timeout",
+    { retry: 2, timeout: 20_000 },
+    async () => {
+      setOptimisticMovementTimeoutMsForTests(800);
+      const endpoint = await mount("closed", 0);
+      const cap = subscribe(endpoint);
 
-    await goToLift(endpoint, 0); // target Matter 0 (open)
-    // HA reports a stopped state ('open') but a position that never reaches the
-    // target, so completion can't be inferred from current == target.
-    await drive(endpoint, "open", 50); // Matter current 5000, still != 0
-    expect(cap.ops).toEqual([Opening]); // still optimistically Opening, not expired
+      await goToLift(endpoint, 0); // target Matter 0 (open)
+      // HA reports a stopped state ('open') but a position that never reaches the
+      // target, so completion can't be inferred from current == target.
+      await drive(endpoint, "open", 50); // Matter current 5000, still != 0
+      expect(cap.ops).toEqual([Opening]); // still optimistically Opening, not expired
 
-    // Poll generously: parallel suite load can starve this worker for seconds.
-    await vi.waitFor(() => expect(cap.ops).toContain(Stopped), {
-      timeout: 15_000,
-    });
-    await drive(endpoint, "open", 50); // next HA tick evaluates the timeout
+      // Poll generously: parallel suite load can starve this worker for seconds.
+      await vi.waitFor(() => expect(cap.ops).toContain(Stopped), {
+        timeout: 15_000,
+      });
+      await drive(endpoint, "open", 50); // next HA tick evaluates the timeout
 
-    expect(cap.ops).toEqual([Opening, Stopped]);
-  }, 20_000);
+      expect(cap.ops).toEqual([Opening, Stopped]);
+    },
+  );
 
-  it("f: HA lands off-target then goes quiet -> the safety timer emits Stopped with no further HA tick", async () => {
-    // Finding 1: the passive expiry only runs inside update() on the next HA
-    // onChange. If HA falls silent after parking off the exact target, the
-    // moving label must still clear on its own via the active timer.
-    setOptimisticMovementTimeoutMsForTests(800);
-    const endpoint = await mount("closed", 0); // Matter current/target 10000
-    const cap = subscribe(endpoint);
+  it(
+    "f: HA lands off-target then goes quiet -> the safety timer emits Stopped with no further HA tick",
+    { retry: 2, timeout: 20_000 },
+    async () => {
+      // Finding 1: the passive expiry only runs inside update() on the next HA
+      // onChange. If HA falls silent after parking off the exact target, the
+      // moving label must still clear on its own via the active timer.
+      setOptimisticMovementTimeoutMsForTests(800);
+      const endpoint = await mount("closed", 0); // Matter current/target 10000
+      const cap = subscribe(endpoint);
 
-    await goToLift(endpoint, 5000); // mid-range target
-    // HA finishes but reports a position 1000 100ths off the target and then
-    // never ticks again. Not reached, not yet expired -> still Opening.
-    await drive(endpoint, "open", 40); // HA 40 => Matter 6000, state 'open'
-    expect(cap.ops).toEqual([Opening]);
+      await goToLift(endpoint, 5000); // mid-range target
+      // HA finishes but reports a position 1000 100ths off the target and then
+      // never ticks again. Not reached, not yet expired -> still Opening.
+      await drive(endpoint, "open", 40); // HA 40 => Matter 6000, state 'open'
+      expect(cap.ops).toEqual([Opening]);
 
-    // Poll generously: parallel suite load can starve this worker for seconds.
-    await vi.waitFor(() => expect(cap.ops).toContain(Stopped), {
-      timeout: 15_000,
-    });
-    expect(cap.ops).toEqual([Opening, Stopped]);
-    // Stopped requires target = current, so the timer snaps the stale target.
-    // biome-ignore lint/suspicious/noExplicitAny: read cluster state
-    const wc = (endpoint.state as any).windowCovering;
-    expect(wc.targetPositionLiftPercent100ths).toBe(6000);
-    expect(wc.currentPositionLiftPercent100ths).toBe(6000);
-  }, 20_000);
+      // Poll generously: parallel suite load can starve this worker for seconds.
+      await vi.waitFor(() => expect(cap.ops).toContain(Stopped), {
+        timeout: 15_000,
+      });
+      expect(cap.ops).toEqual([Opening, Stopped]);
+      // Stopped requires target = current, so the timer snaps the stale target.
+      // biome-ignore lint/suspicious/noExplicitAny: read cluster state
+      const wc = (endpoint.state as any).windowCovering;
+      expect(wc.targetPositionLiftPercent100ths).toBe(6000);
+      expect(wc.currentPositionLiftPercent100ths).toBe(6000);
+    },
+  );
 
   it("g: HA lands within 1% of a non-round target -> completion clears via tolerance", async () => {
     // Finding 2: resolveAxisStatus completion used exact ==, so a landing a

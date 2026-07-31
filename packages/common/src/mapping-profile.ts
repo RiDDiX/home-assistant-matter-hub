@@ -51,6 +51,7 @@ export interface MappingProfileEntry {
   readonly climateExposeFan?: boolean;
   readonly climateAutoMode?: ClimateAutoMode;
   readonly disableMomentaryFlip?: boolean;
+  readonly vacuumAscendingRoomOrder?: boolean;
 }
 
 export interface MappingProfile {

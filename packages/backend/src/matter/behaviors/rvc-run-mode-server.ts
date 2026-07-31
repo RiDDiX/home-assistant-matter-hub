@@ -371,6 +371,25 @@ class RvcRunModeServerBase extends Base {
     }
   }
 
+  /**
+   * Snapshot the controller selection in the order the vacuum will actually
+   * clean it. Roborock-class devices clean a batch of segments in ascending
+   * id order and ignore the order they were dispatched in, so tracking has
+   * to follow that instead of the tap order (#368).
+   */
+  private orderSelectedAreas(selectedAreas: number[]): number[] {
+    const areas = [...selectedAreas];
+    try {
+      const mapping = this.agent.get(HomeAssistantEntityBehavior).state.mapping;
+      if (mapping?.vacuumAscendingRoomOrder) {
+        areas.sort((a, b) => a - b);
+      }
+    } catch {
+      // HomeAssistant behavior not available
+    }
+    return areas;
+  }
+
   /** Read the cumulative cleaned-area sensor (m2), or null if not configured. */
   private readCleanedAreaSqm(): number | null {
     try {
@@ -419,6 +438,9 @@ class RvcRunModeServerBase extends Base {
       // otherwise leave the first-area fallback in place.
       const customAreas = mapping?.customServiceAreas;
       const ordered: { areaId: number; sizeSqm: number }[] = [];
+      // Attribution always walks ascending: with vacuumAscendingRoomOrder set
+      // activeAreas already is, and without it this preserves the long-standing
+      // assumption that batch vacuums clean rooms in ascending id order (#368).
       for (const areaId of [...s.activeAreas].sort((a, b) => a - b)) {
         const size = customAreas?.[areaId - 1]?.sizeSqm;
         if (typeof size !== "number" || !Number.isFinite(size) || size <= 0) {
@@ -624,7 +646,12 @@ class RvcRunModeServerBase extends Base {
         const serviceArea = this.agent.get(ServiceAreaBehavior);
         if (serviceArea.state.selectedAreas?.length > 0) {
           // Snapshot selected areas before the start handler clears them
-          s.activeAreas = [...serviceArea.state.selectedAreas];
+          s.activeAreas = this.orderSelectedAreas(
+            serviceArea.state.selectedAreas,
+          );
+          // Dispatch reads selectedAreas, so write the order back in case the
+          // selection was stored before the flag changed (#368).
+          serviceArea.state.selectedAreas = [...s.activeAreas];
           s.completedAreas.clear();
           s.lastCurrentArea = null;
           s.loggedShortCircuits.clear();
@@ -667,7 +694,11 @@ class RvcRunModeServerBase extends Base {
         try {
           const serviceArea = this.agent.get(ServiceAreaBehavior);
           if (serviceArea.state.selectedAreas?.length > 0) {
-            s.activeAreas = [...serviceArea.state.selectedAreas];
+            s.activeAreas = this.orderSelectedAreas(
+              serviceArea.state.selectedAreas,
+            );
+            // Same write-back as the area-based branch above (#368).
+            serviceArea.state.selectedAreas = [...s.activeAreas];
             s.completedAreas.clear();
             s.lastCurrentArea = null;
             s.loggedShortCircuits.clear();

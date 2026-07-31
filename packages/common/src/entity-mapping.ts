@@ -295,6 +295,14 @@ export interface EntityMappingConfig {
    */
   readonly cleanedAreaEntity?: string;
   /**
+   * Optional: The vacuum cleans rooms in ascending area ID order regardless of
+   * the order they were picked in (Roborock batch segment cleaning does this).
+   * Affects the dispatch order, the progress attribution and the room reported
+   * as current when cleaning starts.
+   * Default: false (follow the selection order sent by the controller)
+   */
+  readonly vacuumAscendingRoomOrder?: boolean;
+  /**
    * Optional: Don't expose custom service areas as per-room RvcRunMode modes,
    * so Apple Home uses the ServiceArea multi-room picker instead of cleaning a
    * single room. Keep off for Google Home / Alexa, which use the modes (#367).
@@ -469,6 +477,7 @@ export interface EntityMappingRequest {
   readonly fanRestoreSpeedOnPowerOn?: boolean;
   readonly currentRoomEntity?: string;
   readonly cleanedAreaEntity?: string;
+  readonly vacuumAscendingRoomOrder?: boolean;
   readonly disableCustomAreaRoomModes?: boolean;
   readonly valetudoIdentifier?: string;
   readonly coverSwapOpenClose?: boolean;

@@ -252,6 +252,7 @@ export function backupApi(
                     fanRestoreSpeedOnPowerOn: config.fanRestoreSpeedOnPowerOn,
                     composedEntities: config.composedEntities,
                     disableMomentaryFlip: config.disableMomentaryFlip,
+                    vacuumAscendingRoomOrder: config.vacuumAscendingRoomOrder,
                   });
                   mappingsRestored++;
                 }
@@ -450,6 +451,7 @@ export function backupApi(
                   fanWindPresets: config.fanWindPresets,
                   composedEntities: config.composedEntities,
                   disableMomentaryFlip: config.disableMomentaryFlip,
+                  vacuumAscendingRoomOrder: config.vacuumAscendingRoomOrder,
                 });
                 mappingsRestored++;
               }

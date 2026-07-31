@@ -56,6 +56,7 @@ function configToProfileEntry(
     climateExposeFan: config.climateExposeFan,
     climateAutoMode: config.climateAutoMode,
     disableMomentaryFlip: config.disableMomentaryFlip,
+    vacuumAscendingRoomOrder: config.vacuumAscendingRoomOrder,
   };
 }
 
@@ -233,6 +234,7 @@ export function mappingProfileApi(
           climateExposeFan: entry.climateExposeFan,
           climateAutoMode: entry.climateAutoMode,
           disableMomentaryFlip: entry.disableMomentaryFlip,
+          vacuumAscendingRoomOrder: entry.vacuumAscendingRoomOrder,
         });
         applied++;
       } catch (e) {

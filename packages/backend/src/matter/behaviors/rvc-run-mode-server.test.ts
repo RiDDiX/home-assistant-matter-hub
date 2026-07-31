@@ -5,6 +5,7 @@ import {
   getSession,
   RvcRunModeServer,
   type RvcRunModeServerConfig,
+  RvcSupportedRunMode,
 } from "./rvc-run-mode-server.js";
 
 // finalizeProgressOnStop is private; reach it through the prototype for a
@@ -117,5 +118,83 @@ describe("updateCurrentRoomFromCleanedArea ordering (#368)", () => {
     // (15 >= 10), room 2 operating (15 < 30) => currentArea 2. Click order
     // [3,1,2] would land on room 3 (the bug).
     expect(serviceArea.state.currentArea).toBe(2);
+  });
+});
+
+describe("changeToMode(Cleaning) room order (#368)", () => {
+  function startCleaning(
+    selectedAreas: number[],
+    mapping: Record<string, unknown>,
+  ) {
+    const endpoint = {};
+    const session = getSession(endpoint);
+    session.activeAreas = [];
+    session.completedAreas = new Set();
+    session.pendingDispatches = [];
+    session.lastCurrentArea = null;
+    const serviceArea = {
+      state: {
+        selectedAreas,
+        currentArea: null as number | null,
+        progress: [] as ServiceArea.Progress[],
+      },
+    };
+    const calls: unknown[] = [];
+    const homeAssistant = {
+      state: { mapping },
+      callAction: (a: unknown) => calls.push(a),
+    };
+    const ctx = {
+      endpoint,
+      state: {
+        currentMode: RvcSupportedRunMode.Idle,
+        supportedModes: [
+          { mode: RvcSupportedRunMode.Idle },
+          { mode: RvcSupportedRunMode.Cleaning },
+        ],
+        config: { start: () => ({ action: "vacuum.start" }) },
+      },
+      agent: {
+        // biome-ignore lint/suspicious/noExplicitAny: stub
+        get: (beh: any) =>
+          beh === HomeAssistantEntityBehavior ? homeAssistant : serviceArea,
+      },
+      readCleanedAreaSqm: proto.readCleanedAreaSqm,
+      orderSelectedAreas: proto.orderSelectedAreas,
+      trySetCurrentArea: proto.trySetCurrentArea,
+      updateProgress: proto.updateProgress,
+    };
+
+    proto.changeToMode.call(ctx, { newMode: RvcSupportedRunMode.Cleaning });
+
+    return { session, serviceArea, calls };
+  }
+
+  it("writes the ordered list back so dispatch and progress agree", () => {
+    // Selection stored before the flag was enabled: the Cleaning start must
+    // re-order the stored attribute too, since dispatch reads selectedAreas.
+    const { session, serviceArea } = startCleaning([4, 3], {
+      vacuumAscendingRoomOrder: true,
+    });
+    expect(session.activeAreas).toEqual([3, 4]);
+    expect(serviceArea.state.selectedAreas).toEqual([3, 4]);
+  });
+
+  it("keeps the tap order by default", () => {
+    const { session, serviceArea } = startCleaning([4, 3], {});
+
+    expect(session.activeAreas).toEqual([4, 3]);
+    expect(serviceArea.state.currentArea).toBe(4);
+  });
+
+  it("cleans ascending when vacuumAscendingRoomOrder is set", () => {
+    const { session, serviceArea } = startCleaning([4, 3], {
+      vacuumAscendingRoomOrder: true,
+    });
+
+    // Roborock-class vacuums clean batched segments in ascending id order,
+    // so tracking has to follow that instead of the tap order.
+    expect(session.activeAreas).toEqual([3, 4]);
+    expect(serviceArea.state.currentArea).toBe(3);
   });
 });

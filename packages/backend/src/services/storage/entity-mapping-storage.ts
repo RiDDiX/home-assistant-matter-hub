@@ -200,6 +200,7 @@ export class EntityMappingStorage extends Service {
       fanRestoreSpeedOnPowerOn: request.fanRestoreSpeedOnPowerOn || undefined,
       currentRoomEntity: request.currentRoomEntity?.trim() || undefined,
       cleanedAreaEntity: request.cleanedAreaEntity?.trim() || undefined,
+      vacuumAscendingRoomOrder: request.vacuumAscendingRoomOrder || undefined,
       disableCustomAreaRoomModes:
         request.disableCustomAreaRoomModes || undefined,
       valetudoIdentifier: request.valetudoIdentifier?.trim() || undefined,
@@ -263,6 +264,7 @@ export class EntityMappingStorage extends Service {
       !config.fanRestoreSpeedOnPowerOn &&
       !config.currentRoomEntity &&
       !config.cleanedAreaEntity &&
+      !config.vacuumAscendingRoomOrder &&
       !config.disableCustomAreaRoomModes &&
       !config.valetudoIdentifier &&
       !config.coverSwapOpenClose &&

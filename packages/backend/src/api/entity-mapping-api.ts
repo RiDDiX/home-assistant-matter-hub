@@ -69,6 +69,7 @@ export function entityMappingApi(
       fanRestoreSpeedOnPowerOn: body.fanRestoreSpeedOnPowerOn,
       currentRoomEntity: body.currentRoomEntity,
       cleanedAreaEntity: body.cleanedAreaEntity,
+      vacuumAscendingRoomOrder: body.vacuumAscendingRoomOrder,
       disableCustomAreaRoomModes: body.disableCustomAreaRoomModes,
       valetudoIdentifier: body.valetudoIdentifier,
       coverSwapOpenClose: body.coverSwapOpenClose,

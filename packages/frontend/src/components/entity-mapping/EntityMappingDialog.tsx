@@ -160,6 +160,8 @@ export function EntityMappingDialog({
   const [currentRoomEntity, setCurrentRoomEntity] = useState("");
   const [chargingStateEntity, setChargingStateEntity] = useState("");
   const [cleanedAreaEntity, setCleanedAreaEntity] = useState("");
+  const [vacuumAscendingRoomOrder, setVacuumAscendingRoomOrder] =
+    useState(false);
   const [disableCustomAreaRoomModes, setDisableCustomAreaRoomModes] =
     useState(false);
   const [customServiceAreas, setCustomServiceAreas] = useState<
@@ -265,6 +267,9 @@ export function EntityMappingDialog({
       setCurrentRoomEntity(currentMapping?.currentRoomEntity || "");
       setChargingStateEntity(currentMapping?.chargingStateEntity || "");
       setCleanedAreaEntity(currentMapping?.cleanedAreaEntity || "");
+      setVacuumAscendingRoomOrder(
+        currentMapping?.vacuumAscendingRoomOrder || false,
+      );
       setDisableCustomAreaRoomModes(
         currentMapping?.disableCustomAreaRoomModes || false,
       );
@@ -415,6 +420,7 @@ export function EntityMappingDialog({
       currentRoomEntity: currentRoomEntity.trim() || undefined,
       chargingStateEntity: chargingStateEntity.trim() || undefined,
       cleanedAreaEntity: cleanedAreaEntity.trim() || undefined,
+      vacuumAscendingRoomOrder: vacuumAscendingRoomOrder || undefined,
       disableCustomAreaRoomModes: disableCustomAreaRoomModes || undefined,
       customFanSpeedTags:
         Object.keys(customFanSpeedTags).length > 0
@@ -482,6 +488,7 @@ export function EntityMappingDialog({
     currentRoomEntity,
     chargingStateEntity,
     cleanedAreaEntity,
+    vacuumAscendingRoomOrder,
     disableCustomAreaRoomModes,
     customServiceAreas,
     customFanSpeedTagsList,
@@ -854,6 +861,18 @@ export function EntityMappingDialog({
               placeholder="sensor.vacuum_cleaned_area"
               helperText="Sensor reporting cumulative cleaned area in m². With a Size (m²) set on each area, advances room progress for batch vacuums that report area but not the current room."
               domain="sensor"
+            />
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={vacuumAscendingRoomOrder}
+                  onChange={(e) =>
+                    setVacuumAscendingRoomOrder(e.target.checked)
+                  }
+                />
+              }
+              label="Vacuum cleans rooms in ascending area ID order, not in the order they were picked (Roborock batch cleaning). Fixes the room shown as current and the room progress when the picking order differs."
+              sx={{ mt: 1, display: "block" }}
             />
             <FormControlLabel
               control={
