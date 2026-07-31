@@ -55,7 +55,9 @@ export function pluginApi(
     }> = [];
 
     for (const bridge of bridgeService.bridges) {
+      // Server mode bridges host no plugins and have no pluginInfo (#430).
       const info = bridge.pluginInfo;
+      if (!info) continue;
       const plugins = info.metadata.map((meta) => ({
         name: meta.name,
         version: meta.version,
@@ -86,12 +88,24 @@ export function pluginApi(
   /**
    * POST /api/plugins/:bridgeId/:pluginName/enable
    */
-  router.post("/:bridgeId/:pluginName/enable", (req, res) => {
-    const bridge = bridgeService.get(req.params.bridgeId);
+  // Resolve a plugin-capable bridge or answer the request with an error.
+  // Server mode bridges have none of the plugin methods (#430).
+  function pluginBridge(bridgeId: string, res: express.Response) {
+    const bridge = bridgeService.get(bridgeId);
     if (!bridge) {
       res.status(404).json({ error: "Bridge not found" });
-      return;
+      return undefined;
     }
+    if (typeof bridge.enablePlugin !== "function") {
+      res.status(400).json({ error: "Bridge does not support plugins" });
+      return undefined;
+    }
+    return bridge;
+  }
+
+  router.post("/:bridgeId/:pluginName/enable", (req, res) => {
+    const bridge = pluginBridge(req.params.bridgeId, res);
+    if (!bridge) return;
     const { pluginName } = req.params;
     bridge.enablePlugin(pluginName);
     res.json({ success: true, pluginName, enabled: true });
@@ -101,11 +115,8 @@ export function pluginApi(
    * POST /api/plugins/:bridgeId/:pluginName/disable
    */
   router.post("/:bridgeId/:pluginName/disable", (req, res) => {
-    const bridge = bridgeService.get(req.params.bridgeId);
-    if (!bridge) {
-      res.status(404).json({ error: "Bridge not found" });
-      return;
-    }
+    const bridge = pluginBridge(req.params.bridgeId, res);
+    if (!bridge) return;
     const { pluginName } = req.params;
     bridge.disablePlugin(pluginName);
     res.json({ success: true, pluginName, enabled: false });
@@ -116,11 +127,8 @@ export function pluginApi(
    * Get the config schema for a plugin.
    */
   router.get("/:bridgeId/:pluginName/config-schema", (req, res) => {
-    const bridge = bridgeService.get(req.params.bridgeId);
-    if (!bridge) {
-      res.status(404).json({ error: "Bridge not found" });
-      return;
-    }
+    const bridge = pluginBridge(req.params.bridgeId, res);
+    if (!bridge) return;
     const schema = bridge.getPluginConfigSchema(req.params.pluginName);
     res.json({ pluginName: req.params.pluginName, schema: schema ?? null });
   });
@@ -131,11 +139,8 @@ export function pluginApi(
    * Body: { config: object }
    */
   router.post("/:bridgeId/:pluginName/config", async (req, res) => {
-    const bridge = bridgeService.get(req.params.bridgeId);
-    if (!bridge) {
-      res.status(404).json({ error: "Bridge not found" });
-      return;
-    }
+    const bridge = pluginBridge(req.params.bridgeId, res);
+    if (!bridge) return;
     const { config } = req.body as { config?: Record<string, unknown> };
     if (!config || typeof config !== "object") {
       res.status(400).json({ error: "config object is required" });
@@ -154,11 +159,8 @@ export function pluginApi(
    * Reset the circuit breaker for a plugin.
    */
   router.post("/:bridgeId/:pluginName/reset", (req, res) => {
-    const bridge = bridgeService.get(req.params.bridgeId);
-    if (!bridge) {
-      res.status(404).json({ error: "Bridge not found" });
-      return;
-    }
+    const bridge = pluginBridge(req.params.bridgeId, res);
+    if (!bridge) return;
     const { pluginName } = req.params;
     bridge.resetPlugin(pluginName);
     res.json({ success: true, pluginName, reset: true });
