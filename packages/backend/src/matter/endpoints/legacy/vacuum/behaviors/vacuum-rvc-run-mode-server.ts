@@ -302,23 +302,27 @@ function resolveCleanAreaIds(
   return haAreaIds;
 }
 
+// All cleaning-related states map to Cleaning mode. "paused" is included
+// because in HA it means paused mid-clean; the Matter spec requires Cleaning
+// mode when OpState is Paused. Shared with VacuumOnOffServer.isOn (#428).
+const cleaningStates: string[] = [
+  VacuumState.cleaning,
+  VacuumState.segment_cleaning,
+  VacuumState.zone_cleaning,
+  VacuumState.spot_cleaning,
+  VacuumState.mop_cleaning,
+  VacuumState.paused,
+];
+
+export function vacuumIsCleaning(state: string | undefined): boolean {
+  return state != null && cleaningStates.includes(state);
+}
+
 const vacuumRvcRunModeConfig = {
   getCurrentMode: (entity: { state: string }) => {
-    const state = entity.state as VacuumState;
-    // All cleaning-related states should map to Cleaning mode.
-    // "paused" is included because in HA it means paused mid-clean;
-    // the Matter spec requires Cleaning mode when OpState is Paused.
-    const cleaningStates: string[] = [
-      VacuumState.cleaning,
-      VacuumState.segment_cleaning,
-      VacuumState.zone_cleaning,
-      VacuumState.spot_cleaning,
-      VacuumState.mop_cleaning,
-      VacuumState.paused,
-    ];
-    const isCleaning = cleaningStates.includes(state);
+    const isCleaning = vacuumIsCleaning(entity.state);
     logger.debug(
-      `Vacuum state: "${state}", isCleaning: ${isCleaning}, currentMode: ${isCleaning ? "Cleaning" : "Idle"}`,
+      `Vacuum state: "${entity.state}", isCleaning: ${isCleaning}, currentMode: ${isCleaning ? "Cleaning" : "Idle"}`,
     );
     return isCleaning ? RvcSupportedRunMode.Cleaning : RvcSupportedRunMode.Idle;
   },
@@ -771,6 +775,3 @@ export function createCleanAreaRvcRunModeServer(
     currentMode: RvcSupportedRunMode.Idle,
   });
 }
-
-/** @deprecated Use createVacuumRvcRunModeServer instead */
-export const VacuumRvcRunModeServer = RvcRunModeServer(vacuumRvcRunModeConfig);

@@ -137,6 +137,41 @@ A battery `sensor` (`device_class: battery`) is exposed as a Matter Battery Stor
 
 ---
 
+## EV Charger (EVSE)
+
+Home Assistant has no charger convention, so an EVSE is mapped by hand. Set the Matter device type to **EV Charger (EVSE)** on the charger's **status** entity (a `sensor` or `switch` whose state reads like `charging`, `connected`, `not connected`, `error`, ...). The status keyword drives the Matter EnergyEvse state:
+
+- `charging` -> plugged in and charging
+- `connected` / `ready` / `awaiting` / `completed` / `paused` / `sleeping` -> plugged in, idle
+- `not connected` / `disconnected` / `no vehicle` -> unplugged
+- `error` / `fault` -> fault
+- anything else (incl. `unknown` / `unavailable`) -> reported unknown, charging left disabled
+
+Optional companion entities:
+
+- `chargingSwitchEntity`: a `switch` that starts and stops charging. A controller's EnableCharging turns it on, Disable turns it off. If EnableCharging carries a "charging enabled until" time, that window is honored: an already-elapsed time is treated as Disable, and a future time arms a timer that turns the switch off when it expires.
+- `currentLimitEntity`: a `number` entity in amperes for the charge current limit. EnableCharging writes the requested maximum here (clamped to the 6 to 32 A circuit capacity), and its live value feeds MaximumChargeCurrent (clamped the same way).
+- `powerEntity` / `energyEntity`: the same power (W) and energy (kWh) sensors used elsewhere, folded onto the charger endpoint as real-time power and cumulative energy.
+
+The endpoint also advertises the ElectricalSensor device type and a mains PowerSource. The Matter spec additionally lists a DeviceEnergyManagement device type, but Home Assistant exposes no charging forecast to feed it honestly, and the controllers tested so far render the EVSE without it, so it is left off.
+
+```json
+{
+  "entityId": "sensor.wallbox_status",
+  "matterDeviceType": "evse",
+  "chargingSwitchEntity": "switch.wallbox_charging",
+  "currentLimitEntity": "number.wallbox_current_limit",
+  "powerEntity": "sensor.wallbox_power",
+  "energyEntity": "sensor.wallbox_energy"
+}
+```
+
+:::warning Keep EVSE off Alexa bridges
+A bridged EVSE has been reported to break Alexa device recognition for the whole bridge. Home Assistant and Aqara Home render EnergyEvse; SmartThings announced support but it is unconfirmed. Only add an EVSE to a bridge that Alexa is not paired with.
+:::
+
+---
+
 ## Roborock Vacuum with Room Cleaning
 
 Maps a vacuum with room-specific cleaning buttons and a cleaning mode selector.

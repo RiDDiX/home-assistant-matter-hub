@@ -92,6 +92,13 @@ function makeHarness(
     updateDeviceIdentity: vi.fn().mockResolvedValue(undefined),
     updateAdvertisedDeviceType: vi.fn().mockResolvedValue(undefined),
   };
+  // Full registry keyed by entity_id, carrying entity_id so orphan tombstone
+  // stamping can compute identity keys from it.
+  // biome-ignore lint/suspicious/noExplicitAny: registry stub
+  const fullEntities: Record<string, any> = {};
+  for (const [id, value] of Object.entries(opts?.entities ?? {})) {
+    fullEntities[id] = { entity_id: id, ...value };
+  }
   const registry = {
     refresh: vi.fn(),
     entityIds,
@@ -101,9 +108,13 @@ function makeHarness(
     entity: vi.fn((id: string) => (opts?.entities as any)?.[id]),
     initialState: vi.fn(() => undefined),
     mergeExternalStates: vi.fn(),
+    fullEntities,
   };
   const mappingStorage = {
     getMapping: vi.fn(() => undefined),
+    getMappingsForBridge: vi.fn(() => []),
+    markMappingMissing: vi.fn(),
+    clearMappingMissing: vi.fn(),
     setMapping: vi.fn(),
     deleteMapping: vi.fn(),
   };
@@ -122,6 +133,17 @@ function makeHarness(
       }
       m.set(k, r);
     },
+    markIdentityMissing: (b: string, k: string, nowIso: string) => {
+      const r = identityStore.get(b)?.get(k);
+      if (!r || r.missingSince != null) return;
+      r.missingSince = nowIso;
+    },
+    clearIdentityMissing: (b: string, k: string) => {
+      const r = identityStore.get(b)?.get(k);
+      if (!r || r.missingSince == null) return;
+      r.missingSince = undefined;
+    },
+    deleteIdentity: vi.fn(),
     deleteBridgeIdentities: vi.fn(),
   };
   const dataProvider = {

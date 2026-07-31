@@ -153,6 +153,8 @@ export function EntityMappingDialog({
   const [currentEntity, setCurrentEntity] = useState("");
   const [batteryPowerEntity, setBatteryPowerEntity] = useState("");
   const [batteryEnergyEntity, setBatteryEnergyEntity] = useState("");
+  const [chargingSwitchEntity, setChargingSwitchEntity] = useState("");
+  const [currentLimitEntity, setCurrentLimitEntity] = useState("");
   const [suctionLevelEntity, setSuctionLevelEntity] = useState("");
   const [mopIntensityEntity, setMopIntensityEntity] = useState("");
   const [currentRoomEntity, setCurrentRoomEntity] = useState("");
@@ -256,6 +258,8 @@ export function EntityMappingDialog({
       setCurrentEntity(currentMapping?.currentEntity || "");
       setBatteryPowerEntity(currentMapping?.batteryPowerEntity || "");
       setBatteryEnergyEntity(currentMapping?.batteryEnergyEntity || "");
+      setChargingSwitchEntity(currentMapping?.chargingSwitchEntity || "");
+      setCurrentLimitEntity(currentMapping?.currentLimitEntity || "");
       setSuctionLevelEntity(currentMapping?.suctionLevelEntity || "");
       setMopIntensityEntity(currentMapping?.mopIntensityEntity || "");
       setCurrentRoomEntity(currentMapping?.currentRoomEntity || "");
@@ -404,6 +408,8 @@ export function EntityMappingDialog({
       currentEntity: currentEntity.trim() || undefined,
       batteryPowerEntity: batteryPowerEntity.trim() || undefined,
       batteryEnergyEntity: batteryEnergyEntity.trim() || undefined,
+      chargingSwitchEntity: chargingSwitchEntity.trim() || undefined,
+      currentLimitEntity: currentLimitEntity.trim() || undefined,
       suctionLevelEntity: suctionLevelEntity.trim() || undefined,
       mopIntensityEntity: mopIntensityEntity.trim() || undefined,
       currentRoomEntity: currentRoomEntity.trim() || undefined,
@@ -469,6 +475,8 @@ export function EntityMappingDialog({
     currentEntity,
     batteryPowerEntity,
     batteryEnergyEntity,
+    chargingSwitchEntity,
+    currentLimitEntity,
     suctionLevelEntity,
     mopIntensityEntity,
     currentRoomEntity,
@@ -550,6 +558,9 @@ export function EntityMappingDialog({
     matterDeviceType !== "electrical_meter" &&
     matterDeviceType !== "solar_power" &&
     matterDeviceType !== "electrical_sensor" &&
+    // EVSE renders its own charging switch / current limit / power / energy
+    // group below, so don't double up the power/energy fields for it (#419).
+    matterDeviceType !== "evse" &&
     (currentDomain === "switch" ||
       currentDomain === "light" ||
       matterDeviceType === "on_off_plugin_unit" ||
@@ -564,6 +575,10 @@ export function EntityMappingDialog({
 
   // Show battery power/energy fields to expose a home battery as an ESS.
   const showBatteryEnergyFields = matterDeviceType === "battery_storage";
+
+  // Show the EVSE charging switch, current limit and optional power/energy
+  // sensors when the entity is mapped as an EV charger.
+  const showEvseFields = matterDeviceType === "evse";
 
   // Show momentary-flip disable option for entities that only pulse on then
   // auto-reset off (no real "on" state to hold), the source of the Echo
@@ -1133,6 +1148,43 @@ export function EntityMappingDialog({
               label="Current Sensor (optional)"
               placeholder="sensor.grid_current"
               helperText="Sensor with device_class: current (A), folded into this meter"
+              domain="sensor"
+            />
+          </>
+        )}
+
+        {showEvseFields && (
+          <>
+            <EntityAutocomplete
+              value={chargingSwitchEntity}
+              onChange={setChargingSwitchEntity}
+              label="Charging Switch (optional)"
+              placeholder="switch.wallbox_charging"
+              helperText="Switch that starts and stops charging. EnableCharging turns it on, Disable turns it off."
+              domain="switch"
+            />
+            <EntityAutocomplete
+              value={currentLimitEntity}
+              onChange={setCurrentLimitEntity}
+              label="Current Limit (optional)"
+              placeholder="number.wallbox_current_limit"
+              helperText="Number entity (amperes) for the charge current limit. Feeds MaximumChargeCurrent."
+              domain="number"
+            />
+            <EntityAutocomplete
+              value={powerEntity}
+              onChange={setPowerEntity}
+              label="Power Sensor (optional)"
+              placeholder="sensor.wallbox_power"
+              helperText="Sensor with device_class: power (W), adds real-time power to this charger"
+              domain="sensor"
+            />
+            <EntityAutocomplete
+              value={energyEntity}
+              onChange={setEnergyEntity}
+              label="Energy Sensor (optional)"
+              placeholder="sensor.wallbox_energy"
+              helperText="Sensor with device_class: energy (kWh), adds cumulative energy to this charger"
               domain="sensor"
             />
           </>

@@ -64,6 +64,8 @@ export function getMappedEntityIds(mapping?: EntityMappingConfig): string[] {
   if (mapping.currentEntity) ids.push(mapping.currentEntity);
   if (mapping.batteryPowerEntity) ids.push(mapping.batteryPowerEntity);
   if (mapping.batteryEnergyEntity) ids.push(mapping.batteryEnergyEntity);
+  if (mapping.chargingSwitchEntity) ids.push(mapping.chargingSwitchEntity);
+  if (mapping.currentLimitEntity) ids.push(mapping.currentLimitEntity);
   if (mapping.currentRoomEntity) ids.push(mapping.currentRoomEntity);
   if (mapping.cleanedAreaEntity) ids.push(mapping.cleanedAreaEntity);
   if (mapping.composedEntities) {

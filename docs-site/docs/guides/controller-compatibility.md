@@ -31,6 +31,7 @@ Rows flagged with a footnote number link to the vendor source that establishes t
 | `sensor` | ElectricalMeter | ❌ | ✅ | ❌ | ❓ | ✅ |
 | `sensor` (override) | SolarPower | ❌ | ❌ | ❓ | ❓ | ✅ |
 | `sensor` (override) | BatteryStorage | ❌ | ❌ | ❌ | ✅ | ❓ |
+| `sensor` (override) | EnergyEvse | ❌ | ❌ | ❌ | ✅ | ❓ |
 | `binary_sensor` | ContactSensor | ✅ | ✅ [¹](#sources) | ✅ [²](#sources) | ✅ [⁴](#sources) | ✅ |
 | `binary_sensor` | OccupancySensor | ✅ | ✅ [¹](#sources) | ✅ [²](#sources) | ✅ [⁴](#sources) | ✅ |
 | `binary_sensor` | SmokeCoAlarm | ✅ [⁵](#sources) | ✅ | ✅ [²](#sources) | ✅ [⁴](#sources) | ✅ |
@@ -47,6 +48,10 @@ Rows flagged with a footnote number link to the vendor source that establishes t
 | `humidifier` | Fan | ✅ | ✅ [¹](#sources) | ✅ [²](#sources) | ✅ [⁴](#sources) | ❓ |
 | `dishwasher` (override) | Dishwasher | ❌ [³](#sources) | ✅ [¹](#sources) | ✅ [²](#sources) | ❓ | ✅ |
 | `weather` | TemperatureSensor (+Humidity, +Pressure) | ⚠️**** | ⚠️**** | ⚠️**** | ❓ | ❓ |
+
+:::note EnergyEvse is opt-in and bridge-sensitive
+EnergyEvse (0x050C) is only used when you set the Matter device type to "EV Charger (EVSE)" by hand. Home Assistant and Aqara Home render it; SmartThings announced support but it is unconfirmed here. A bridged EVSE has been reported to break Alexa device recognition, so keep it off any bridge that Alexa pairs with. See [mapping blueprints](./mapping-blueprints.md#ev-charger-evse).
+:::
 
 :::note Leak and freeze detectors are opt-in
 By default a `moisture` or `cold` binary sensor is exposed as a plain ContactSensor (Matter 1.3), which every controller handles. The WaterLeakDetector and WaterFreezeDetector rows above are Matter 1.4 types that are only used if you set the entity's Matter device type by hand in the Entity Mapping dialog. Setting WaterLeakDetector gives Apple Home (iOS 18.4+) a real leak/alarm tile, but Google does not list these types, Alexa maps water leak to no capability, and exposing a 1.4 detector type can knock out an Alexa bridge so every device on it goes unresponsive ([#365](https://github.com/RiDDiX/home-assistant-matter-hub/issues/365)). Stay on the default unless you are Apple-only.

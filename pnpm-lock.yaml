@@ -113,6 +113,9 @@ importers:
       '@matter/nodejs':
         specifier: 0.17.7
         version: 0.17.7
+      '@matter/protocol':
+        specifier: 0.17.7
+        version: 0.17.7
       '@matter/types':
         specifier: 0.17.7
         version: 0.17.7
@@ -187,6 +190,9 @@ importers:
         specifier: 0.17.7
         version: 0.17.7
       '@matter/nodejs':
+        specifier: 0.17.7
+        version: 0.17.7
+      '@matter/protocol':
         specifier: 0.17.7
         version: 0.17.7
       '@matter/types':

@@ -90,6 +90,16 @@ const extractHaDiagnostics = (
         label: "Battery Energy",
         entity: mapping.batteryEnergyEntity,
       });
+    if (typeof mapping.chargingSwitchEntity === "string")
+      mappings.push({
+        label: "Charging Switch",
+        entity: mapping.chargingSwitchEntity,
+      });
+    if (typeof mapping.currentLimitEntity === "string")
+      mappings.push({
+        label: "Current Limit",
+        entity: mapping.currentLimitEntity,
+      });
     if (typeof mapping.filterLifeEntity === "string")
       mappings.push({
         label: "Filter Life",

@@ -8,6 +8,7 @@ import type {
   BridgeService,
   RecoveryAttempt,
 } from "../services/bridges/bridge-service.js";
+import type { SubscriptionSummary } from "../services/bridges/subscription-summary.js";
 import type { HomeAssistantClient } from "../services/home-assistant/home-assistant-client.js";
 
 export interface SessionInfo {
@@ -15,11 +16,18 @@ export interface SessionInfo {
   peerNodeId: string;
   fabricIndex: number | null;
   subscriptionCount: number;
+  // Scope of each active subscription on the session (whole-node wildcard vs
+  // endpoint-specific), so the health view can show what the controller watches.
+  subscriptions: SubscriptionSummary[];
   // #365 diagnostics: tell a healthy session from a wedged one. lastActiveMsAgo
   // is ms since the controller last sent us anything (resets on each keepalive
   // ack); lastAnyActivityMsAgo is ms since any traffic in either direction.
   lastActiveMsAgo: number | null;
   lastAnyActivityMsAgo: number | null;
+  // ms since the last inbound Interaction Model request on this session, or null
+  // if none was seen. Unlike lastActiveMsAgo this does not advance on MRP acks,
+  // so it tells a healthy session from one wedged on "Updating".
+  lastImRequestMsAgo: number | null;
   isPeerActive: boolean;
   ageMsFromOpen: number | null;
 }

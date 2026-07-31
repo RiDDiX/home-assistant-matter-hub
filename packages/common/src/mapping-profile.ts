@@ -32,6 +32,8 @@ export interface MappingProfileEntry {
   readonly currentEntity?: string;
   readonly batteryPowerEntity?: string;
   readonly batteryEnergyEntity?: string;
+  readonly chargingSwitchEntity?: string;
+  readonly currentLimitEntity?: string;
   readonly suctionLevelEntity?: string;
   readonly mopIntensityEntity?: string;
   readonly customServiceAreas?: CustomServiceArea[];

@@ -10,6 +10,7 @@ import {
   defaultSensorParams,
 } from "./camera-endpoint.js";
 import { parseCameraList } from "./camera-tcp-requirement.js";
+import { unregisterAllRequestors } from "./requestor-client.js";
 import { WebRtcBridge } from "./webrtc-bridge.js";
 
 interface CameraConfig {
@@ -174,5 +175,7 @@ export class CameraPlugin implements MatterHubPlugin {
     this.deviceIds = [];
     await this.bridge?.close().catch(() => {});
     this.bridge = undefined;
+    // Cancel pending answer deliveries so no timer outlives the endpoints.
+    unregisterAllRequestors();
   }
 }

@@ -170,7 +170,9 @@ Plugin config is stored per bridge, so set the cameras on each bridge that shoul
 
 SmartThings live view needs Matter over TCP: the WebRTC offer the camera sends is far larger than Matter's UDP message size, so the stream stalls over UDP alone. A bridge with cameras configured turns on a Matter TCP listener on the bridge's operational port automatically, both on start and after you save the camera list. Host networking already covers this; a strict firewall must allow TCP on the bridge port. The TCP capability is advertised to every controller on that bridge, so if another controller misbehaves with it, keep the cameras on a dedicated bridge.
 
-Experimental: the WebRTC media path is not verified end to end, and as of 2026 only SmartThings renders Matter cameras.
+Live view answers now travel back to the controller: after the camera computes its SDP answer, the bridge invokes the `answer` command on the controller's `WebRtcTransportRequestor` cluster over the same session, so the handshake completes instead of stalling with the answer discarded. The answer SDP already carries the camera's gathered ICE candidates, so no separate candidate trickle is sent from our side.
+
+Experimental: the media path is delivered but not yet verified end to end on real hardware, and as of 2026 only SmartThings renders Matter cameras.
 
 ### Cluster IDs
 

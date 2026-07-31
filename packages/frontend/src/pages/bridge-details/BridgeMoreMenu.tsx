@@ -1,3 +1,4 @@
+import CleaningServicesIcon from "@mui/icons-material/CleaningServices";
 import DeleteIcon from "@mui/icons-material/Delete";
 import EditIcon from "@mui/icons-material/Edit";
 import MoreVert from "@mui/icons-material/MoreVert";
@@ -20,6 +21,7 @@ import {
   useResetBridge,
 } from "../../hooks/data/bridges.ts";
 import { navigation } from "../../routes.tsx";
+import { OrphanCleanupDialog } from "./OrphanCleanupDialog.tsx";
 
 export interface BridgeMoreMenuProps {
   bridge: string;
@@ -40,6 +42,7 @@ export const BridgeMoreMenu = ({ bridge }: BridgeMoreMenuProps) => {
   const [confirmAction, setConfirmAction] = React.useState<
     "delete" | "reset" | null
   >(null);
+  const [orphanDialogOpen, setOrphanDialogOpen] = React.useState(false);
 
   const handleOpen = (event: React.MouseEvent<HTMLElement>) =>
     setAnchorEl(event.currentTarget);
@@ -129,6 +132,17 @@ export const BridgeMoreMenu = ({ bridge }: BridgeMoreMenuProps) => {
         <MenuItem
           onClick={() => {
             handleClose();
+            setOrphanDialogOpen(true);
+          }}
+        >
+          <ListItemIcon>
+            <CleaningServicesIcon fontSize="small" />
+          </ListItemIcon>
+          <ListItemText>{t("bridge.orphanMenu")}</ListItemText>
+        </MenuItem>
+        <MenuItem
+          onClick={() => {
+            handleClose();
             setConfirmAction("delete");
           }}
         >
@@ -156,6 +170,11 @@ export const BridgeMoreMenu = ({ bridge }: BridgeMoreMenuProps) => {
         confirmColor="error"
         onConfirm={handleDelete}
         onCancel={() => setConfirmAction(null)}
+      />
+      <OrphanCleanupDialog
+        open={orphanDialogOpen}
+        bridgeId={bridge}
+        onClose={() => setOrphanDialogOpen(false)}
       />
     </>
   );

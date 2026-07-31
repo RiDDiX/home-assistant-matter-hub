@@ -7,12 +7,16 @@ type StorageObjectType = { [key: string]: SupportedStorageTypes };
 // One record per stable identity key (see identity-resolver). endpointId is the
 // frozen matter.js endpoint id that preserves the persisted number, anchorEntityId
 // is the entity_id the uniqueId/serialNumber hash to, lastEntityId is the entity_id
-// last seen so a rename can be detected.
+// last seen so a rename can be detected. missingSince is the ISO time the keyed
+// entity first went absent from the FULL HA registry; it is the tombstone the
+// manual orphan cleanup ages out (see orphan-cleanup.ts), cleared when the entity
+// returns.
 export interface IdentityRecord {
   endpointId: string;
   anchorEntityId: string;
   lastEntityId?: string;
   createdAt?: string;
+  missingSince?: string;
 }
 
 interface StoredIdentities {
@@ -20,6 +24,10 @@ interface StoredIdentities {
   identities: Record<string, Record<string, IdentityRecord>>;
 }
 
+// missingSince is an additive optional field: records are stored as opaque
+// objects, so an old record without it loads with it undefined and a new record
+// serialises it inline. That round-trips both ways, so no version bump / migrate
+// is required and CURRENT_VERSION stays 1.
 const CURRENT_VERSION = 1;
 
 // Records are written on every seeding pass, so persist is debounced to coalesce
@@ -137,5 +145,33 @@ export class EntityIdentityStorage extends Service {
   async deleteBridgeIdentities(bridgeId: string): Promise<void> {
     this.identities.delete(bridgeId);
     await this.flush();
+  }
+
+  // Drop a single identity record. Used by the manual orphan cleanup after the
+  // 7-day tombstone; flush immediately since it is a user-initiated deletion.
+  async deleteIdentity(bridgeId: string, key: string): Promise<void> {
+    const bridgeMap = this.identities.get(bridgeId);
+    if (bridgeMap?.delete(key)) {
+      await this.flush();
+    }
+  }
+
+  // Stamp the tombstone the first time a record's entity is absent from HA. Keeps
+  // the first-seen time on later passes and no-ops once stamped, so a steady
+  // absence does not churn the debounced persist.
+  markIdentityMissing(bridgeId: string, key: string, nowIso: string): void {
+    const record = this.identities.get(bridgeId)?.get(key);
+    if (!record || record.missingSince != null) return;
+    record.missingSince = nowIso;
+    this.schedulePersist();
+  }
+
+  // Clear the tombstone when the entity is present again. No-ops when there is
+  // nothing to clear, so an all-present bridge writes nothing on refresh.
+  clearIdentityMissing(bridgeId: string, key: string): void {
+    const record = this.identities.get(bridgeId)?.get(key);
+    if (!record || record.missingSince == null) return;
+    delete record.missingSince;
+    this.schedulePersist();
   }
 }

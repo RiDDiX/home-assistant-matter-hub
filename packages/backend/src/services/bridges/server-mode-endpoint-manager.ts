@@ -18,6 +18,12 @@ import type { HomeAssistantClient } from "../home-assistant/home-assistant-clien
 import type { HomeAssistantStates } from "../home-assistant/home-assistant-registry.js";
 import type { EntityIdentityStorage } from "../storage/entity-identity-storage.js";
 import type { EntityMappingStorage } from "../storage/entity-mapping-storage.js";
+import {
+  buildPresentEntityIds,
+  buildPresentIdentityKeys,
+  stampIdentityPresence,
+  stampMappingPresence,
+} from "../storage/orphan-cleanup.js";
 import type { BridgeDataProvider } from "./bridge-data-provider.js";
 import type { BridgeRegistry } from "./bridge-registry.js";
 import {
@@ -63,7 +69,7 @@ export class ServerModeEndpointManager extends Service {
     private readonly client: HomeAssistantClient,
     private readonly registry: BridgeRegistry,
     private readonly mappingStorage: EntityMappingStorage,
-    identityStorage: EntityIdentityStorage,
+    private readonly identityStorage: EntityIdentityStorage,
     private readonly dataProvider: BridgeDataProvider,
     private readonly log: Logger,
   ) {
@@ -179,6 +185,25 @@ export class ServerModeEndpointManager extends Service {
     this._failedEntities = [];
 
     this.entityIds = this.registry.entityIds;
+
+    // Reconcile orphan tombstones against the FULL HA registry before any early
+    // return below, so a node whose only entity was removed still tombstones its
+    // stored identity record. Keyed by the rename-stable identity key, so a
+    // rename or a filter change never reads as a removal. Stamp/clear only.
+    const fullEntities = this.registry.fullEntities;
+    stampIdentityPresence(
+      this.identityStorage,
+      this.dataProvider.id,
+      buildPresentIdentityKeys(fullEntities),
+    );
+    // Same reconcile for stray custom mappings, keyed by entity_id: it catches a
+    // flag-off rename that left the mapping at the old id and keyless entities
+    // that have no identity record.
+    stampMappingPresence(
+      this.mappingStorage,
+      this.dataProvider.id,
+      buildPresentEntityIds(fullEntities),
+    );
 
     try {
       if (this.entityIds.length === 0) {

@@ -98,7 +98,12 @@ export class WebApi extends Service {
       .use(nocache())
       .use(
         "/matter",
-        matterApi(this.bridgeService, this.haRegistry, this.identityStorage),
+        matterApi(
+          this.bridgeService,
+          this.haRegistry,
+          this.identityStorage,
+          this.mappingStorage,
+        ),
       )
       .use(
         "/health",

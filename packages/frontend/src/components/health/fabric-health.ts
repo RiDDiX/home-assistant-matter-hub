@@ -14,12 +14,26 @@ export interface FabricInput {
   label: string;
 }
 
+// Mirror of the backend SubscriptionSummary, only the fields the scope line
+// needs. Kept local like the other health API shapes the frontend re-declares.
+export interface SubscriptionScopeInput {
+  scope: "wildcard" | "endpoint-specific" | "unknown";
+  endpointIds: number[];
+}
+
 export interface SessionInput {
   fabricIndex: number | null;
   subscriptionCount: number;
+  subscriptions?: SubscriptionScopeInput[];
   lastActiveMsAgo?: number | null;
   isPeerActive?: boolean;
 }
+
+// What the fabric's subscriptions watch, rolled up across its sessions.
+export type SubscriptionScope =
+  | { kind: "wildcard" }
+  | { kind: "endpoint-specific"; endpointIds: number[] }
+  | { kind: "unknown" };
 
 export interface FabricHealth {
   fabricIndex: number;
@@ -31,6 +45,31 @@ export interface FabricHealth {
   subscriptions: number;
   sessions: number;
   lastActiveMsAgo: number | null;
+  subscriptionScope: SubscriptionScope | null;
+}
+
+// Roll a fabric's subscription summaries into a single scope. A wildcard on
+// any subscription covers the whole node, so it wins; an unknown next; only
+// then the union of concrete endpoints. Returns null when nothing to describe.
+export function describeSubscriptionScope(
+  summaries: SubscriptionScopeInput[],
+): SubscriptionScope | null {
+  if (summaries.length === 0) {
+    return null;
+  }
+  if (summaries.some((s) => s.scope === "wildcard")) {
+    return { kind: "wildcard" };
+  }
+  if (summaries.some((s) => s.scope === "unknown")) {
+    return { kind: "unknown" };
+  }
+  const endpointIds = [
+    ...new Set(summaries.flatMap((s) => s.endpointIds)),
+  ].sort((a, b) => a - b);
+  if (endpointIds.length === 0) {
+    return null;
+  }
+  return { kind: "endpoint-specific", endpointIds };
 }
 
 // One health row per fabric, tagged with the controller ecosystem.
@@ -49,6 +88,9 @@ export function summarizeFabricHealth(
       subscriptions > 0 &&
       lastActiveMsAgo != null &&
       lastActiveMsAgo > FABRIC_STALE_MS;
+    const subscriptionScope = describeSubscriptionScope(
+      own.flatMap((s) => s.subscriptions ?? []),
+    );
     return {
       fabricIndex: fabric.fabricIndex,
       rootVendorId: fabric.rootVendorId,
@@ -59,6 +101,7 @@ export function summarizeFabricHealth(
       subscriptions,
       sessions: own.length,
       lastActiveMsAgo,
+      subscriptionScope,
     };
   });
 }

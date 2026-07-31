@@ -53,6 +53,49 @@ export async function resetBridge(bridgeId: string) {
   return parseJsonResponse<BridgeDataWithMetadata>(res);
 }
 
+export interface OrphanCandidate {
+  // Identity key for an "identity" row, mapping entityId for a "mapping" row.
+  identityKey: string;
+  lastEntityId: string;
+  missingSince: string;
+  hasMapping: boolean;
+  kind: "identity" | "mapping";
+}
+
+export interface OrphanCleanupResult {
+  identityKey: string;
+  deleted: boolean;
+  reason?: string;
+}
+
+export async function getOrphans(
+  bridgeId: string,
+): Promise<{ candidates: OrphanCandidate[] }> {
+  const res = await fetch(
+    `api/matter/bridges/${bridgeId}/orphans?_s=${Date.now()}`,
+  );
+  await assertOk(res, "Failed to load orphaned records");
+  return parseJsonResponse(res);
+}
+
+export async function cleanupOrphans(
+  bridgeId: string,
+  identityKeys: string[],
+): Promise<{ results: OrphanCleanupResult[] }> {
+  const res = await fetch(
+    `api/matter/bridges/${bridgeId}/actions/cleanup-orphans`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ identityKeys }),
+    },
+  );
+  await assertOk(res, "Cleanup failed");
+  return parseJsonResponse(res);
+}
+
 export async function forceSyncBridge(
   bridgeId: string,
 ): Promise<{ syncedCount: number; bridge: BridgeDataWithMetadata }> {
