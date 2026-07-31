@@ -37,7 +37,7 @@ of port forwarding etc.
 
 | Channel | Branch | Current Version | Description |
 |---------|--------|-----------------|-------------|
-| **Stable** | `main` | v2.0.51 | Production-ready, recommended for most users |
+| **Stable** | `main` | v2.0.52 | Production-ready, recommended for most users |
 | **Alpha** | `alpha` | v2.1.0-alpha.x (next) | Currently level with Stable; next pre-release lands here first |
 | **Testing** | `testing` | v4.1.0-testing.x | ⚠️ **Highly unstable!** Experimental features, may break |
 
@@ -61,9 +61,13 @@ Re-assign the affected devices to their rooms after they reconnect. See the [doc
 ## 🎉 What's New
 
 <details>
-<summary><strong>📦 Stable Features (v2.0.51)</strong> - Click to expand</summary>
+<summary><strong>📦 Stable Features (v2.0.52)</strong> - Click to expand</summary>
 
-**New in v2.0.51:**
+**New in v2.0.52 (hotfix release):**
+
+- 🔌 The plugins page no longer fails with a 500 when a server mode bridge exists ([#430](https://github.com/RiDDiX/home-assistant-matter-hub/issues/430))
+
+**Previously in v2.0.51:**
 
 - 🐕 **Opt-in wedge watchdog**: rotates a controller session that keeps acking but stops talking at the interaction layer, the automated "Play Sound" fix for stuck Apple devices ([#287](https://github.com/RiDDiX/home-assistant-matter-hub/issues/287), [#428](https://github.com/RiDDiX/home-assistant-matter-hub/issues/428))
 - 🧹 **Clean up orphaned records**: bridge menu action with a dry-run preview that removes identity and mapping leftovers of entities deleted from HA (7 day tombstone guards against false positives)
@@ -266,7 +270,7 @@ Re-assign the affected devices to their rooms after they reconnect. See the [doc
 <details>
 <summary><strong>🧪 Alpha Features (v2.1.0-alpha.x)</strong> - Click to expand</summary>
 
-**Alpha is currently level with Stable (v2.0.51).** All alpha work up to the latest pre-release has been promoted into v2.0.51. New alpha work continues from the next pre-release tag onward and will appear here as development progresses.
+**Alpha is currently level with Stable (v2.0.52).** All alpha work up to the latest pre-release has been promoted into v2.0.52. New alpha work continues from the next pre-release tag onward and will appear here as development progresses.
 
 </details>
 

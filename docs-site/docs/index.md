@@ -53,9 +53,13 @@ Home, ...) are not placed in the same network segment. Please make sure to revie
 ## What's New
 
 <details>
-<summary><strong>📦 Stable (v2.0.51) - Current</strong></summary>
+<summary><strong>📦 Stable (v2.0.52) - Current</strong></summary>
 
-**New in v2.0.51:**
+**New in v2.0.52 (hotfix release):**
+
+- 🔌 The plugins page no longer fails with a 500 when a server mode bridge exists ([#430](https://github.com/RiDDiX/home-assistant-matter-hub/issues/430))
+
+**Previously in v2.0.51:**
 
 - 🐕 **Opt-in wedge watchdog**: rotates a controller session that keeps acking but stops talking at the interaction layer, the automated "Play Sound" fix for stuck Apple devices ([#287](https://github.com/RiDDiX/home-assistant-matter-hub/issues/287), [#428](https://github.com/RiDDiX/home-assistant-matter-hub/issues/428))
 - 🧹 **Clean up orphaned records**: bridge menu action with a dry-run preview that removes identity and mapping leftovers of entities deleted from HA (7 day tombstone guards against false positives)
@@ -255,7 +259,7 @@ Home, ...) are not placed in the same network segment. Please make sure to revie
 <details>
 <summary><strong>🧪 Alpha (v2.1.0-alpha.x)</strong></summary>
 
-**Alpha is currently level with Stable (v2.0.51).** All alpha work up to the latest pre-release has been promoted into v2.0.51. New alpha work continues from the next pre-release tag onward and will appear here as development progresses. See the [Alpha Features Guide](./guides/alpha-features.md) for installation instructions.
+**Alpha is currently level with Stable (v2.0.52).** All alpha work up to the latest pre-release has been promoted into v2.0.52. New alpha work continues from the next pre-release tag onward and will appear here as development progresses. See the [Alpha Features Guide](./guides/alpha-features.md) for installation instructions.
 
 </details>
 
