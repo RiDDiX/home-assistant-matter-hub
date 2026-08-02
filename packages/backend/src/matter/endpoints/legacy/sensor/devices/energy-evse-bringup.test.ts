@@ -23,6 +23,8 @@ import { createLegacyEndpointType } from "../../create-legacy-endpoint-type.js";
 
 const ENERGY_EVSE = 0x050c; // 1292
 const ELECTRICAL_SENSOR = 0x0510; // 1296
+const POWER_SOURCE = 0x0011; // 17
+const BRIDGED_NODE = 0x0013; // 19
 
 let dir: string;
 let env: Environment;
@@ -101,6 +103,11 @@ interface Snapshot {
   powerSourceStatus: number | null;
   hasPowerMeasurement: boolean;
   hasEnergyMeasurement: boolean;
+  hasPowerTopology: boolean;
+  treeTopology: boolean;
+  nodeTopology: boolean;
+  setTopology: boolean;
+  dynamicPowerFlow: boolean;
 }
 
 async function bringUp(
@@ -139,6 +146,11 @@ async function bringUp(
     powerSourceStatus: null,
     hasPowerMeasurement: false,
     hasEnergyMeasurement: false,
+    hasPowerTopology: false,
+    treeTopology: false,
+    nodeTopology: false,
+    setTopology: false,
+    dynamicPowerFlow: false,
   };
   await endpoint.act((agent) => {
     // biome-ignore lint/suspicious/noExplicitAny: read cluster state
@@ -166,6 +178,12 @@ async function bringUp(
       a.electricalPowerMeasurement?.state.activePower != null;
     snapshot.hasEnergyMeasurement =
       a.electricalEnergyMeasurement?.state.cumulativeEnergyImported != null;
+    const topology = a.powerTopology?.state.featureMap;
+    snapshot.hasPowerTopology = topology != null;
+    snapshot.treeTopology = topology?.treeTopology === true;
+    snapshot.nodeTopology = topology?.nodeTopology === true;
+    snapshot.setTopology = topology?.setTopology === true;
+    snapshot.dynamicPowerFlow = topology?.dynamicPowerFlow === true;
   });
   return snapshot;
 }
@@ -212,9 +230,14 @@ describe("energy evse bring-up (#419 seeding)", () => {
       statusEntity("sensor.wallbox_status", "idle"),
     );
 
-    // Both device types are advertised so controllers render the measurements.
-    expect(snapshot.deviceTypes).toContain(ENERGY_EVSE);
-    expect(snapshot.deviceTypes).toContain(ELECTRICAL_SENSOR);
+    // Exact: the descriptor is what a controller reads, so an extra or missing
+    // device type must not slip through unnoticed.
+    expect(snapshot.deviceTypes).toEqual([
+      ENERGY_EVSE,
+      ELECTRICAL_SENSOR,
+      POWER_SOURCE,
+      BRIDGED_NODE,
+    ]);
 
     // Wired PowerSource seeded Active so the mandatory attrs don't brick.
     expect(snapshot.powerSourceStatus).toBe(1); // Active
@@ -222,5 +245,21 @@ describe("energy evse bring-up (#419 seeding)", () => {
     // Measurement clusters are mounted unconditionally with safe defaults.
     expect(snapshot.hasPowerMeasurement).toBe(true);
     expect(snapshot.hasEnergyMeasurement).toBe(true);
+  });
+
+  // The ElectricalSensor device type mandates PowerTopology, and tree scope
+  // keeps the wallbox reading on this endpoint instead of the bridge (#431).
+  it("carries PowerTopology scoped to the endpoint", async () => {
+    const snapshot = await bringUp(
+      statusEntity("sensor.wallbox_status", "idle"),
+    );
+
+    expect(snapshot.hasPowerTopology).toBe(true);
+    expect(snapshot.treeTopology).toBe(true);
+    expect(snapshot.nodeTopology).toBe(false);
+    // NODE/TREE/SET are a choice, and DYNPW pulls in attributes nothing seeds,
+    // so the whole map is pinned instead of just the tree bit.
+    expect(snapshot.setTopology).toBe(false);
+    expect(snapshot.dynamicPowerFlow).toBe(false);
   });
 });

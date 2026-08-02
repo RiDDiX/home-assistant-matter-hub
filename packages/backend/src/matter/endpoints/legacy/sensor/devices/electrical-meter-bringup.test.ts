@@ -21,6 +21,8 @@ import { createLegacyEndpointType } from "../../create-legacy-endpoint-type.js";
 // online through createLegacyEndpointType and checks the wire values.
 
 const ELECTRICAL_METER = 0x0514; // 1300
+const ELECTRICAL_SENSOR = 0x0510; // 1296
+const BRIDGED_NODE = 0x0013; // 19
 const SOLAR_POWER = 0x0017; // 23
 
 let dir: string;
@@ -99,6 +101,11 @@ interface Snapshot {
   deviceTypes: number[];
   activePower: number;
   cumulativeEnergy: number;
+  hasPowerTopology: boolean;
+  treeTopology: boolean;
+  nodeTopology: boolean;
+  setTopology: boolean;
+  dynamicPowerFlow: boolean;
 }
 
 // Mount the endpoint under a real ServerNode (no AggregateError proves the
@@ -128,6 +135,11 @@ async function bringUp(
     deviceTypes: [],
     activePower: Number.NaN,
     cumulativeEnergy: Number.NaN,
+    hasPowerTopology: false,
+    treeTopology: false,
+    nodeTopology: false,
+    setTopology: false,
+    dynamicPowerFlow: false,
   };
   await endpoint.act((agent) => {
     // biome-ignore lint/suspicious/noExplicitAny: read cluster state
@@ -143,6 +155,12 @@ async function bringUp(
     snapshot.cumulativeEnergy = Number(
       a.electricalEnergyMeasurement?.state.cumulativeEnergyImported?.energy,
     );
+    const topology = a.powerTopology?.state.featureMap;
+    snapshot.hasPowerTopology = topology != null;
+    snapshot.treeTopology = topology?.treeTopology === true;
+    snapshot.nodeTopology = topology?.nodeTopology === true;
+    snapshot.setTopology = topology?.setTopology === true;
+    snapshot.dynamicPowerFlow = topology?.dynamicPowerFlow === true;
   });
   return snapshot;
 }
@@ -153,7 +171,13 @@ describe("electrical meter bring-up (#419 seeding)", () => {
       sensorEntity("sensor.grid_power", "1500", "power", "W"),
     );
 
-    expect(snapshot.deviceTypes).toContain(ELECTRICAL_METER);
+    // Exact: mounting PowerTopology makes matter.js add ElectricalSensor to the
+    // descriptor, and a controller sees that change.
+    expect(snapshot.deviceTypes).toEqual([
+      ELECTRICAL_METER,
+      ELECTRICAL_SENSOR,
+      BRIDGED_NODE,
+    ]);
     // 1500 W -> 1_500_000 mW
     expect(snapshot.activePower).toBe(1_500_000);
     // energy cluster seeded even though this is a power-only sensor
@@ -168,6 +192,22 @@ describe("electrical meter bring-up (#419 seeding)", () => {
     expect(snapshot.deviceTypes).toContain(ELECTRICAL_METER);
     // 12.5 kWh -> 12_500_000 mWh
     expect(snapshot.cumulativeEnergy).toBe(12_500_000);
+  });
+
+  // ElectricalMeter requires the ElectricalSensor device type, which mandates
+  // PowerTopology. Tree scope keeps the reading on this endpoint (#431).
+  it("carries PowerTopology scoped to the endpoint", async () => {
+    const snapshot = await bringUp(
+      sensorEntity("sensor.grid_power", "1500", "power", "W"),
+    );
+
+    expect(snapshot.hasPowerTopology).toBe(true);
+    expect(snapshot.treeTopology).toBe(true);
+    expect(snapshot.nodeTopology).toBe(false);
+    // NODE/TREE/SET are a choice, and DYNPW pulls in attributes nothing seeds,
+    // so the whole map is pinned instead of just the tree bit.
+    expect(snapshot.setTopology).toBe(false);
+    expect(snapshot.dynamicPowerFlow).toBe(false);
   });
 
   it("keeps SolarPower for the solar_power override", async () => {

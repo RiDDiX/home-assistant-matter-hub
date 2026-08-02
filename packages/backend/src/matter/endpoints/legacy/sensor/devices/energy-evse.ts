@@ -14,6 +14,7 @@ import { applyPatchState } from "../../../../../utils/apply-patch-state.js";
 import { BasicInformationServer } from "../../../../behaviors/basic-information-server.js";
 import { HomeAssistantEntityBehavior } from "../../../../behaviors/home-assistant-entity-behavior.js";
 import { IdentifyServer } from "../../../../behaviors/identify-server.js";
+import { HaPowerTopologyServer } from "../../../../behaviors/power-topology-server.js";
 import { EnergyServer, PowerServer } from "./electrical-sensor.js";
 
 const logger = Logger.get("EnergyEvse");
@@ -312,6 +313,8 @@ const EnergyEvseBase = EnergyEvseDevice.with(
   // ElectricalSensor device type.
   PowerServer,
   EnergyServer,
+  // ElectricalSensor requires PowerTopology; matter.js does not enforce it.
+  HaPowerTopologyServer,
   DescriptorServer,
 ).set({
   descriptor: {
