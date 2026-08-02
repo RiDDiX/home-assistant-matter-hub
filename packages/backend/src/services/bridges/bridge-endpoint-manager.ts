@@ -12,7 +12,7 @@ import {
 } from "../../matter/endpoints/entity-endpoint.js";
 import { LegacyEndpoint } from "../../matter/endpoints/legacy/legacy-endpoint.js";
 import { validateEndpointType } from "../../matter/endpoints/validate-endpoint-type.js";
-import { CameraPlugin } from "../../plugins/builtin/camera/camera-plugin.js";
+import { BUILTIN_PLUGINS } from "../../plugins/builtin/index.js";
 import { createPluginEndpointType } from "../../plugins/plugin-device-factory.js";
 import type { PluginInstaller } from "../../plugins/plugin-installer.js";
 import type { PluginManager } from "../../plugins/plugin-manager.js";
@@ -286,10 +286,16 @@ export class BridgeEndpointManager extends Service {
   // matter.js instance and can hand over live EndpointTypes.
   private async registerBuiltInPlugins(): Promise<void> {
     if (!this.pluginManager) return;
-    try {
-      await this.pluginManager.registerBuiltIn(new CameraPlugin());
-    } catch (e) {
-      this.log.warn("Failed to register built-in camera plugin:", e);
+    for (const Plugin of BUILTIN_PLUGINS) {
+      const plugin = new Plugin();
+      try {
+        await this.pluginManager.registerBuiltIn(plugin);
+      } catch (e) {
+        this.log.warn(
+          `Failed to register built-in plugin "${plugin.name}":`,
+          e,
+        );
+      }
     }
   }
 

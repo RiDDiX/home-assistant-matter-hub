@@ -1,5 +1,6 @@
 import * as nodePath from "node:path";
 import express from "express";
+import { BUILTIN_PLUGIN_NAMES } from "../plugins/builtin/names.js";
 import { PluginInstaller } from "../plugins/plugin-installer.js";
 import { PluginRegistry } from "../plugins/plugin-registry.js";
 import type { BridgeService } from "../services/bridges/bridge-service.js";
@@ -17,6 +18,24 @@ const BLOCKED_PREFIXES = [
   "/boot",
   "/root",
 ];
+
+// Drop an npm version spec: "camera@1.0.0" -> "camera", "@a/b@2" -> "@a/b".
+// A scoped name starts with "@", so only the last "@" can be the version there.
+function packageBaseName(spec: string): string {
+  const name = spec.trim();
+  const at = name.startsWith("@") ? name.lastIndexOf("@") : name.indexOf("@");
+  return at > 0 ? name.slice(0, at) : name;
+}
+
+// Built-in plugins ship with the bridge. Their names are not npm packages, so
+// installing one pulls an unrelated stranger off the registry (#432). The list
+// is static: a bridge that never started its plugins must not open the gate.
+function builtinPluginName(requested: string): string | undefined {
+  const wanted = requested.trim().toLowerCase();
+  return BUILTIN_PLUGIN_NAMES.find(
+    (name) => name.trim().toLowerCase() === wanted,
+  );
+}
 
 export function pluginApi(
   bridgeService: BridgeService,
@@ -205,6 +224,20 @@ export function pluginApi(
       return;
     }
 
+    // The version spec stays on the install call, everything else works with
+    // the bare name.
+    const baseName = packageBaseName(packageName);
+
+    const builtin = builtinPluginName(baseName);
+    if (builtin) {
+      res.status(400).json({
+        error:
+          `"${builtin}" is built in and needs no installation. ` +
+          "Enable and configure it on the plugins page.",
+      });
+      return;
+    }
+
     try {
       const result = await installer.install(packageName);
       if (!result.success) {
@@ -215,11 +248,13 @@ export function pluginApi(
         return;
       }
 
-      registry.add(packageName, config ?? {});
+      // npm puts the package under its bare name, so the registry has to store
+      // that name or the entry points at a path that does not exist.
+      registry.add(baseName, config ?? {});
 
       res.json({
         success: true,
-        packageName,
+        packageName: baseName,
         version: result.version,
         message: "Plugin installed. Restart the bridge to load it.",
       });
@@ -303,6 +338,14 @@ export function pluginApi(
         return;
       }
 
+      const reservedUpload = builtinPluginName(result.packageName);
+      if (reservedUpload) {
+        res.status(400).json({
+          error: `"${reservedUpload}" is built in and needs no installation. Enable and configure it on the plugins page.`,
+        });
+        return;
+      }
+
       registry.add(result.packageName, {});
 
       res.json({
@@ -346,6 +389,14 @@ export function pluginApi(
         res.status(500).json({
           error: `Local install failed: ${result.error}`,
           details: result,
+        });
+        return;
+      }
+
+      const reservedLocal = builtinPluginName(result.packageName);
+      if (reservedLocal) {
+        res.status(400).json({
+          error: `"${reservedLocal}" is built in and needs no installation. Enable and configure it on the plugins page.`,
         });
         return;
       }

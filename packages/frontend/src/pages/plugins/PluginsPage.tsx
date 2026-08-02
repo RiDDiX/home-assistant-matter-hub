@@ -19,6 +19,7 @@ import DialogActions from "@mui/material/DialogActions";
 import DialogContent from "@mui/material/DialogContent";
 import DialogTitle from "@mui/material/DialogTitle";
 import Divider from "@mui/material/Divider";
+import FormHelperText from "@mui/material/FormHelperText";
 import IconButton from "@mui/material/IconButton";
 import List from "@mui/material/List";
 import ListItem from "@mui/material/ListItem";
@@ -72,7 +73,12 @@ interface InstalledPlugin {
 
 async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, init);
-  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+  if (!res.ok) {
+    // The backend explains rejections in the body, e.g. a built-in plugin name
+    // typed into the npm field (#432). "400 Bad Request" alone helps nobody.
+    const data = (await res.json().catch(() => ({}))) as { error?: string };
+    throw new Error(data.error ?? `${res.status} ${res.statusText}`);
+  }
   return res.json();
 }
 
@@ -87,6 +93,9 @@ export const PluginsPage = () => {
   const [localPath, setLocalPath] = useState("");
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [installing, setInstalling] = useState(false);
+  // Install failures stay inside the dialog: it stays open on error, so the
+  // page-level alert would sit behind it.
+  const [installError, setInstallError] = useState<string>();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const refresh = useCallback(async () => {
@@ -113,6 +122,7 @@ export const PluginsPage = () => {
   const handleInstall = async () => {
     if (!packageName.trim()) return;
     setInstalling(true);
+    setInstallError(undefined);
     try {
       await fetchJson("api/plugins/install", {
         method: "POST",
@@ -123,7 +133,7 @@ export const PluginsPage = () => {
       setInstallOpen(false);
       await refresh();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setInstallError(e instanceof Error ? e.message : String(e));
     } finally {
       setInstalling(false);
     }
@@ -132,6 +142,7 @@ export const PluginsPage = () => {
   const handleUpload = async () => {
     if (!selectedFile) return;
     setInstalling(true);
+    setInstallError(undefined);
     try {
       const buf = await selectedFile.arrayBuffer();
       const res = await fetch("api/plugins/upload", {
@@ -151,7 +162,7 @@ export const PluginsPage = () => {
       setInstallOpen(false);
       await refresh();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setInstallError(e instanceof Error ? e.message : String(e));
     } finally {
       setInstalling(false);
     }
@@ -160,6 +171,7 @@ export const PluginsPage = () => {
   const handleLocalInstall = async () => {
     if (!localPath.trim()) return;
     setInstalling(true);
+    setInstallError(undefined);
     try {
       await fetchJson("api/plugins/install-local", {
         method: "POST",
@@ -170,7 +182,7 @@ export const PluginsPage = () => {
       setInstallOpen(false);
       await refresh();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setInstallError(e instanceof Error ? e.message : String(e));
     } finally {
       setInstalling(false);
     }
@@ -241,7 +253,10 @@ export const PluginsPage = () => {
           <Button
             variant="contained"
             startIcon={<AddIcon />}
-            onClick={() => setInstallOpen(true)}
+            onClick={() => {
+              setInstallError(undefined);
+              setInstallOpen(true);
+            }}
             size="small"
           >
             Install Plugin
@@ -439,7 +454,10 @@ export const PluginsPage = () => {
         <DialogContent>
           <Tabs
             value={installTab}
-            onChange={(_e, v: number) => setInstallTab(v)}
+            onChange={(_e, v: number) => {
+              setInstallTab(v);
+              setInstallError(undefined);
+            }}
             sx={{ mb: 2 }}
           >
             <Tab label="npm" />
@@ -456,8 +474,13 @@ export const PluginsPage = () => {
                 placeholder="e.g. hamh-plugin-example"
                 fullWidth
                 value={packageName}
-                onChange={(e) => setPackageName(e.target.value)}
+                onChange={(e) => {
+                  setPackageName(e.target.value);
+                  setInstallError(undefined);
+                }}
                 disabled={installing}
+                error={!!installError}
+                helperText={installError}
                 onKeyDown={(e) => {
                   if (e.key === "Enter") handleInstall();
                 }}
@@ -485,9 +508,17 @@ export const PluginsPage = () => {
                   type="file"
                   accept=".tgz,application/gzip"
                   hidden
-                  onChange={(e) => setSelectedFile(e.target.files?.[0] ?? null)}
+                  onChange={(e) => {
+                    setSelectedFile(e.target.files?.[0] ?? null);
+                    setInstallError(undefined);
+                  }}
                 />
               </Button>
+              {installError && (
+                <FormHelperText error sx={{ mt: 1 }}>
+                  {installError}
+                </FormHelperText>
+              )}
               <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
                 Upload a packaged plugin (.tgz). Restart the bridge after
                 installation.
@@ -504,8 +535,13 @@ export const PluginsPage = () => {
                 placeholder="/path/to/your/plugin"
                 fullWidth
                 value={localPath}
-                onChange={(e) => setLocalPath(e.target.value)}
+                onChange={(e) => {
+                  setLocalPath(e.target.value);
+                  setInstallError(undefined);
+                }}
                 disabled={installing}
+                error={!!installError}
+                helperText={installError}
                 InputProps={{
                   startAdornment: <FolderOpenIcon sx={{ mr: 1 }} />,
                 }}
