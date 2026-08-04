@@ -8,7 +8,10 @@ import { OnOffServer as Base } from "@matter/main/behaviors";
 import type { HomeAssistantAction } from "../../services/home-assistant/home-assistant-actions.js";
 import { applyPatchState } from "../../utils/apply-patch-state.js";
 import { HomeAssistantEntityBehavior } from "./home-assistant-entity-behavior.js";
-import { notifyLightTurnedOn } from "./level-control-server.js";
+import {
+  notifyLightTurnedOff,
+  notifyLightTurnedOn,
+} from "./level-control-server.js";
 import type { ValueGetter } from "./utils/cluster-config.js";
 
 const logger = Logger.get("OnOffServer");
@@ -165,6 +168,12 @@ class OnOffServerBase extends Base {
     // command response. Without this, Apple Home shows "Turning off..." until
     // the async HA WebSocket state update arrives (#219).
     applyPatchState(this.state, { onOff: false });
+    // Tell LevelControlServer a Matter off just happened, so the level command
+    // Google sends right after a room-off does not relight the room (#434).
+    notifyLightTurnedOff(
+      homeAssistant.entityId,
+      homeAssistant.entity.state?.last_changed,
+    );
     if (!action) {
       return;
     }

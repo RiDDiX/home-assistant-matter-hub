@@ -1,6 +1,11 @@
 import type { HomeAssistantEntityInformation } from "@home-assistant-matter-hub/common";
 import { Logger } from "@matter/general";
-import { LevelControlServer as Base } from "@matter/main/behaviors";
+// OnOffServer comes from matter.js, not from ./on-off-server.js, because that
+// module already imports this one and the cycle would break at load time.
+import {
+  LevelControlServer as Base,
+  OnOffServer,
+} from "@matter/main/behaviors";
 import { LevelControl } from "@matter/main/clusters/level-control";
 import { BridgeDataProvider } from "../../services/bridges/bridge-data-provider.js";
 import { applyPatchState } from "../../utils/apply-patch-state.js";
@@ -11,6 +16,22 @@ import type { ValueGetter, ValueSetter } from "./utils/cluster-config.js";
 // Track when lights were turned on to detect Alexa's brightness reset pattern
 const lastTurnOnTimestamps = new Map<string, number>();
 const LAST_TURN_ON_TTL_MS = 60_000;
+
+// Track when lights were turned off via Matter, to detect Google's
+// off-then-store-level sequence (#434).
+const lastTurnOffTimestamps = new Map<
+  string,
+  { ts: number; haLastChanged: string | undefined }
+>();
+const DEFAULT_OFF_SUPPRESSION_WINDOW_MS = 1000;
+let offSuppressionWindowMs = DEFAULT_OFF_SUPPRESSION_WINDOW_MS;
+
+// Test seam: shrink the window so the "window expired" path is reachable
+// without a 1s wait. Production code never calls this.
+export function setOffSuppressionWindowMsForTests(ms: number): void {
+  offSuppressionWindowMs = ms;
+}
+export { DEFAULT_OFF_SUPPRESSION_WINDOW_MS };
 
 // Track optimistic level writes to prevent stale HA state from overwriting them.
 // After a controller command, the HA state update with the OLD brightness can
@@ -42,6 +63,13 @@ function sweepLastTurnOn(now: number) {
     }
   }
 }
+function sweepLastTurnOff(now: number) {
+  for (const [key, entry] of lastTurnOffTimestamps) {
+    if (now - entry.ts > LAST_TURN_ON_TTL_MS) {
+      lastTurnOffTimestamps.delete(key);
+    }
+  }
+}
 
 /**
  * Called by OnOffServer when a light is turned on via Matter command.
@@ -51,6 +79,19 @@ export function notifyLightTurnedOn(entityId: string): void {
   const now = Date.now();
   sweepLastTurnOn(now);
   lastTurnOnTimestamps.set(entityId, now);
+}
+
+/**
+ * Called by OnOffServer when a light is turned off via Matter command.
+ * Used to detect Google's off-then-store-level sequence (#434).
+ */
+export function notifyLightTurnedOff(
+  entityId: string,
+  haLastChanged: string | undefined,
+) {
+  const now = Date.now();
+  sweepLastTurnOff(now);
+  lastTurnOffTimestamps.set(entityId, { ts: now, haLastChanged });
 }
 
 const logger = Logger.get("LevelControlServer");
@@ -230,6 +271,57 @@ export class LevelControlServerBase extends FeaturedBase {
     const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);
     const config = this.state.config;
     const entityId = homeAssistant.entity.entity_id;
+
+    // Google's "turn off the room" sends onOff.off and roughly 10ms later a
+    // moveToLevelWithOnOff carrying the level it wants remembered, with an
+    // all-zero optionsMask. Options cannot tell the two cases apart: per spec
+    // ExecuteIfOff only gates the non-WithOnOff commands, and we pin
+    // executeIfOff true on purpose for Alexa (see LevelControlServer below).
+    // So this is a deliberate deviation from the reference implementation:
+    // while a Matter off for this entity is fresh and the OnOff attribute
+    // still reads false, keep the level on the Matter attribute so the
+    // controller UI stays consistent, and send nothing to HA (#434).
+    const lastTurnOff = lastTurnOffTimestamps.get(entityId);
+    const sinceTurnOff =
+      lastTurnOff != null ? Date.now() - lastTurnOff.ts : null;
+    // Tiebreaker: right after the off HA still reports the stale "on", so
+    // plain state cannot discriminate. A wall switch relighting the lamp
+    // inside the window shows as an "on" whose last_changed DIFFERS from the
+    // one captured at off time; identity beats clock comparison, HA and hub
+    // clocks need not agree. Known residual: the stamp is not fabric scoped,
+    // so two controllers fighting over one lamp inside the window resolve to
+    // the off; that ambiguity is inherent and bounded by the window.
+    const haState = homeAssistant.entity.state;
+    const freshHaOn =
+      haState?.state === "on" &&
+      lastTurnOff != null &&
+      haState.last_changed !== lastTurnOff.haLastChanged;
+    if (
+      sinceTurnOff != null &&
+      sinceTurnOff < offSuppressionWindowMs &&
+      !freshHaOn &&
+      this.agent.has(OnOffServer) &&
+      this.agent.get(OnOffServer).state.onOff === false
+    ) {
+      const remembered = Math.min(
+        Math.max(this.minLevel, level),
+        this.maxLevel,
+      );
+      this.state.currentLevel = remembered;
+      // Shield the remembered level from a stale HA update, same window the
+      // dispatch path uses.
+      const now = Date.now();
+      sweepOptimisticLevel(now);
+      optimisticLevelState.set(entityId, {
+        expectedLevel: remembered,
+        timestamp: now,
+      });
+      logger.debug(
+        `[${entityId}] Storing level ${level} without calling HA - moveToLevel arrived ` +
+          `${sinceTurnOff}ms after a Matter off while still off (#434)`,
+      );
+      return;
+    }
 
     // Level 1..254 maps to a full-scale 0..1 fraction (level / 254). Combined
     // with the config's *255 this makes Google's level 30 arrive as brightness
