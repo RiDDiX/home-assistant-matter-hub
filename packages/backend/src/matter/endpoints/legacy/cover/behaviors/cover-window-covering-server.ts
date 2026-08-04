@@ -163,6 +163,27 @@ const shouldSwapOpenClose = (agent: Agent): boolean => {
 };
 
 /**
+ * One line for the command log naming everything that decides which HA service
+ * fires and which space the stored positions live in. Resolved here, through
+ * the very same helpers the real paths use, so it can never desync from them:
+ * swapDispatch comes from shouldSwapOpenClose (per-entity mapping first), while
+ * spaceInverted follows adjustPosition, which reads the BRIDGE flags only. A
+ * per-entity swap therefore moves the dispatch without moving the space, and
+ * printing one number for both misled three diagnosis rounds (#429).
+ */
+const diagnosticFlags = (agent: Agent): string => {
+  const { featureFlags } = agent.env.get(BridgeDataProvider);
+  const useHaPercentage =
+    featureFlags?.coverUseHomeAssistantPercentage === true;
+  const doNotInvert = featureFlags?.coverDoNotInvertPercentage === true;
+  const skipInversion =
+    useHaPercentage || doNotInvert || usesMatterSemantics(agent);
+  const spaceInverted =
+    !skipInversion && featureFlags?.coverSwapOpenClose !== true;
+  return `useHaPercentage=${useHaPercentage} doNotInvert=${doNotInvert} swapDispatch=${shouldSwapOpenClose(agent)} spaceInverted=${spaceInverted}`;
+};
+
+/**
  * Checks if the cover supports position control (support_set_position feature).
  */
 const supportsPositionControl = (agent: Agent): boolean => {
@@ -302,6 +323,7 @@ const config: WindowCoveringConfig = {
     return position == null ? null : adjustPositionForReading(position, agent);
   },
   getExpectedRestPosition: expectedRestPosition,
+  getDiagnosticFlags: diagnosticFlags,
   getCoverType: (entity) => deviceClassMapping(entity)?.type,
   getEndProductType: (entity) => deviceClassMapping(entity)?.endProductType,
   getMovementStatus: (entity, agent) => {

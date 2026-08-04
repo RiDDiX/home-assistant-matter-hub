@@ -47,6 +47,14 @@ export interface WindowCoveringConfig {
     agent: Agent,
   ) => number | null;
 
+  /**
+   * One line naming the flags that decide which HA service fires and which
+   * space the stored positions live in, for the command log. Resolved by the
+   * config itself so the diagnostic reads exactly what the dispatch and the
+   * position conversion read, and cannot drift from them (#429).
+   */
+  getDiagnosticFlags?: (agent: Agent) => string;
+
   // Override the feature-derived Type / EndProductType. Used to tell
   // controllers the covering is a curtain/shutter/awning instead of the
   // default Rollershade (#304).
@@ -191,6 +199,25 @@ function haRestEnd(action: HomeAssistantAction): "open" | "close" | null {
     return "close";
   }
   return null;
+}
+
+// One HA percent, in Matter 100ths. HA reports whole percents, so every stored
+// position is a multiple of this and a difference of exactly one unit is the
+// smallest real move a cover can make, not rounding noise.
+const POSITION_TOLERANCE_100THS = 100;
+
+// Strict, so effectively "same position": a one percent command must never be
+// mistaken for a no-op, or the smallest slider step is dropped before it
+// reaches HA. Used by the command-skip guards and the at-rest guard.
+function isExactPosition(a: number, b: number): boolean {
+  return Math.abs(a - b) < POSITION_TOLERANCE_100THS;
+}
+
+// Inclusive, and only for judging a finished move: a cover parking exactly one
+// percent short of where it was sent has arrived, and holding the moving label
+// on that single unit stranded it until the safety timeout (#429).
+function withinRestTolerance(a: number, b: number): boolean {
+  return Math.abs(a - b) <= POSITION_TOLERANCE_100THS;
 }
 
 function getCoverOptimistic(endpoint: object): CoverOptimisticState {
@@ -361,9 +388,9 @@ export class WindowCoveringServerBase extends FeaturedBase {
       // is really heading for. The Matter target only works when the stored
       // position space matches Matter's; a non-inverting space or a per-entity
       // swap parks the cover somewhere else, so the command records its own
-      // expectation and that wins here (#429). Same 1% tolerance the
-      // command-skip guards use (handleGoToLiftPosition / handleGoToTiltPosition)
-      // so a landing a fraction of a percent shy still counts as reached.
+      // expectation and that wins here (#429). This is the ONE inclusive check:
+      // a landing up to one percent shy still counts as reached, while the
+      // command-skip guards stay strict so a one percent move still dispatches.
       // Non-position-aware axes have nothing to compare, so they clear only via
       // HA transitional states, StopMotion, or the timeout.
       const getExpected = config.getExpectedRestPosition;
@@ -377,7 +404,7 @@ export class WindowCoveringServerBase extends FeaturedBase {
         positionAware &&
         current100ths != null &&
         goal != null &&
-        Math.abs(current100ths - goal) < 100;
+        withinRestTolerance(current100ths, goal);
       const expired =
         Date.now() - entry.startedAt >= optimisticMovementTimeoutMs;
       if (reachedTarget || expired) {
@@ -563,6 +590,68 @@ export class WindowCoveringServerBase extends FeaturedBase {
     };
   }
 
+  // At rest target MUST equal current. matter.js pre-writes target 0/10000 for
+  // the command it is about to run and its own snap is skipped while operational
+  // mode handling is disabled (WindowCoveringServer.js:322-335, #328), so any
+  // path that ends a move without an HA tick has to do it here.
+  private snapTargetToCurrent(axis: "lift" | "tilt") {
+    if (axis === "lift") {
+      if (!this.features.positionAwareLift) return;
+      const current = this.state.currentPositionLiftPercent100ths;
+      if (current != null) {
+        this.state.targetPositionLiftPercent100ths = current;
+      }
+      return;
+    }
+    if (!this.features.positionAwareTilt) return;
+    const current = this.state.currentPositionTiltPercent100ths;
+    if (current != null) {
+      this.state.targetPositionTiltPercent100ths = current;
+    }
+  }
+
+  // Is the axis already parked where the dispatched action would drive it? Uses
+  // the live rest-position hook so the answer is resolved in the stored space,
+  // flags and swap included, instead of re-deriving them here (#429). Strict:
+  // a cover one percent off the end really does move, so it must report the
+  // move; the inclusive completion check clears it again on landing.
+  private isAtExpectedRest(
+    axis: "lift" | "tilt",
+    end: "open" | "close" | null,
+  ): boolean {
+    const positionAware =
+      axis === "lift"
+        ? this.features.positionAwareLift
+        : this.features.positionAwareTilt;
+    if (!positionAware || end == null) {
+      return false;
+    }
+    const expected = this.state.config.getExpectedRestPosition?.(
+      end,
+      this.agent,
+    );
+    const current =
+      axis === "lift"
+        ? this.state.currentPositionLiftPercent100ths
+        : this.state.currentPositionTiltPercent100ths;
+    if (expected == null || current == null) {
+      return false;
+    }
+    return isExactPosition(current, expected * 100);
+  }
+
+  // The action moves nothing, so HA reports no state change and an optimistic
+  // Opening/Closing would sit there until the safety timeout. Just line the
+  // attributes up with the rest the axis is provably already at.
+  private settleAtRest(axis: "lift" | "tilt") {
+    this.snapTargetToCurrent(axis);
+    const optimistic = getCoverOptimistic(this.endpoint);
+    if (optimistic[axis]) {
+      clearOptimisticAxis(optimistic, axis);
+      this.writeOperationalStatus({ [axis]: MovementStatus.Stopped });
+    }
+  }
+
   // Record the optimistic direction and emit it now so a controller gets the
   // moving->stopped edge even when HA never reports a transitional state (#429).
   private startOptimisticMovement(
@@ -663,9 +752,12 @@ export class WindowCoveringServerBase extends FeaturedBase {
   ) {
     const currentLift = this.state.currentPositionLiftPercent100ths ?? 0;
     const currentTilt = this.state.currentPositionTiltPercent100ths ?? 0;
+    const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);
+    // Logged verbatim: the config owns the resolution, this only prints it.
+    const flags = this.state.config.getDiagnosticFlags?.(this.agent);
 
     logger.info(
-      `handleMovement: type=${MovementType[type]}, direction=${MovementDirection[direction]}, target=${targetPercent100ths}, currentLift=${currentLift}, currentTilt=${currentTilt}`,
+      `handleMovement ${homeAssistant.entityId}: type=${MovementType[type]}, direction=${MovementDirection[direction]}, target=${targetPercent100ths}, currentLift=${currentLift}, currentTilt=${currentTilt}${flags ? `, ${flags}` : ""}`,
     );
 
     // Boundary targets (0=open, 10000=closed per Matter spec) are routed
@@ -733,6 +825,10 @@ export class WindowCoveringServerBase extends FeaturedBase {
     const optimistic = getCoverOptimistic(this.endpoint);
     clearOptimisticAxis(optimistic, "lift");
     clearOptimisticAxis(optimistic, "tilt");
+    // The interrupted command left target at the position it aimed for. Snap it
+    // back before the status write, so the wire order stays target then status.
+    this.snapTargetToCurrent("lift");
+    this.snapTargetToCurrent("tilt");
     this.writeOperationalStatus({
       ...(this.features.lift ? { lift: MovementStatus.Stopped } : {}),
       ...(this.features.tilt ? { tilt: MovementStatus.Stopped } : {}),
@@ -747,18 +843,23 @@ export class WindowCoveringServerBase extends FeaturedBase {
 
     const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);
     const action = this.state.config.openCoverLift(void 0, this.agent);
+    const end = haRestEnd(action);
+    const atRest = this.isAtExpectedRest("lift", end);
 
     // Matter open intent = moving towards 0 = Opening, independent of the HA
     // swap flag (swap only picks which HA service fires, not the Matter-side
     // direction the controller sees). Completion is judged against where that
     // service parks the cover, which is not the Matter target in every space.
-    this.startOptimisticMovement(
-      "lift",
-      MovementStatus.Opening,
-      haRestEnd(action),
-    );
+    // Already there = nothing to report, but HA still gets the command.
+    if (atRest) {
+      this.settleAtRest("lift");
+    } else {
+      this.startOptimisticMovement("lift", MovementStatus.Opening, end);
+    }
 
-    logger.info(`handleLiftOpen: calling action=${action.action}`);
+    logger.info(
+      `handleLiftOpen ${homeAssistant.entityId}: calling action=${action.action}, atRest=${atRest}, ${this.state.config.getDiagnosticFlags?.(this.agent) ?? ""}`,
+    );
     homeAssistant.callAction(action);
   }
 
@@ -767,15 +868,19 @@ export class WindowCoveringServerBase extends FeaturedBase {
 
     const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);
     const action = this.state.config.closeCoverLift(void 0, this.agent);
+    const end = haRestEnd(action);
+    const atRest = this.isAtExpectedRest("lift", end);
 
     // Matter close intent = moving towards 10000 = Closing (swap-independent).
-    this.startOptimisticMovement(
-      "lift",
-      MovementStatus.Closing,
-      haRestEnd(action),
-    );
+    if (atRest) {
+      this.settleAtRest("lift");
+    } else {
+      this.startOptimisticMovement("lift", MovementStatus.Closing, end);
+    }
 
-    logger.info(`handleLiftClose: calling action=${action.action}`);
+    logger.info(
+      `handleLiftClose ${homeAssistant.entityId}: calling action=${action.action}, atRest=${atRest}, ${this.state.config.getDiagnosticFlags?.(this.agent) ?? ""}`,
+    );
     homeAssistant.callAction(action);
   }
 
@@ -783,10 +888,12 @@ export class WindowCoveringServerBase extends FeaturedBase {
     const config = this.state.config;
     // Compare in Matter space (both values should be in same coordinate system)
     const currentPositionMatter = this.state.currentPositionLiftPercent100ths;
-    // Skip if already at target (with small tolerance for rounding)
+    // Skip only a target the axis is already at. Strict on purpose: the
+    // completion check tolerates one percent, this must not, or a one percent
+    // slider step is dropped instead of dispatched (#429).
     if (
       currentPositionMatter != null &&
-      Math.abs(targetPercent100ths - currentPositionMatter) < 100
+      isExactPosition(targetPercent100ths, currentPositionMatter)
     ) {
       return;
     }
@@ -865,13 +972,18 @@ export class WindowCoveringServerBase extends FeaturedBase {
     if (st.pendingLift?.action.action.includes("tilt")) clearPendingLift(st);
 
     const action = this.state.config.openCoverTilt(void 0, this.agent);
-    this.startOptimisticMovement(
-      "tilt",
-      MovementStatus.Opening,
-      haRestEnd(action),
-    );
+    const end = haRestEnd(action);
+    const atRest = this.isAtExpectedRest("tilt", end);
+    if (atRest) {
+      this.settleAtRest("tilt");
+    } else {
+      this.startOptimisticMovement("tilt", MovementStatus.Opening, end);
+    }
 
     const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);
+    logger.info(
+      `handleTiltOpen ${homeAssistant.entityId}: calling action=${action.action}, atRest=${atRest}, ${this.state.config.getDiagnosticFlags?.(this.agent) ?? ""}`,
+    );
     homeAssistant.callAction(action);
   }
 
@@ -882,13 +994,18 @@ export class WindowCoveringServerBase extends FeaturedBase {
     if (st.pendingLift?.action.action.includes("tilt")) clearPendingLift(st);
 
     const action = this.state.config.closeCoverTilt(void 0, this.agent);
-    this.startOptimisticMovement(
-      "tilt",
-      MovementStatus.Closing,
-      haRestEnd(action),
-    );
+    const end = haRestEnd(action);
+    const atRest = this.isAtExpectedRest("tilt", end);
+    if (atRest) {
+      this.settleAtRest("tilt");
+    } else {
+      this.startOptimisticMovement("tilt", MovementStatus.Closing, end);
+    }
 
     const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);
+    logger.info(
+      `handleTiltClose ${homeAssistant.entityId}: calling action=${action.action}, atRest=${atRest}, ${this.state.config.getDiagnosticFlags?.(this.agent) ?? ""}`,
+    );
     homeAssistant.callAction(action);
   }
 
@@ -896,10 +1013,10 @@ export class WindowCoveringServerBase extends FeaturedBase {
     const config = this.state.config;
     // Compare in Matter space (both values should be in same coordinate system)
     const currentPositionMatter = this.state.currentPositionTiltPercent100ths;
-    // Skip if already at target (with small tolerance for rounding)
+    // Strict, same reason as lift: one percent is a real move (#429).
     if (
       currentPositionMatter != null &&
-      Math.abs(targetPercent100ths - currentPositionMatter) < 100
+      isExactPosition(targetPercent100ths, currentPositionMatter)
     ) {
       return;
     }

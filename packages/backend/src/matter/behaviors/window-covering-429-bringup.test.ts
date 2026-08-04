@@ -13,7 +13,7 @@ import type {
   EntityMappingConfig,
   HomeAssistantEntityInformation,
 } from "@home-assistant-matter-hub/common";
-import { Environment, VariableService } from "@matter/general";
+import { Environment, Logger, VariableService } from "@matter/general";
 import { Endpoint, VendorId } from "@matter/main";
 import { WindowCovering } from "@matter/main/clusters";
 import { ServerNode } from "@matter/main/node";
@@ -83,7 +83,11 @@ function setFeatureFlags(
   );
 }
 
+let restoreLog: (() => void) | undefined;
+
 afterEach(async () => {
+  restoreLog?.();
+  restoreLog = undefined;
   await server?.close().catch(() => {});
   server = undefined;
   setOptimisticMovementTimeoutMsForTests(
@@ -91,6 +95,22 @@ afterEach(async () => {
   );
   rmSync(dir, { recursive: true, force: true });
 });
+
+// Tap the default destination the same way the vacuum #428 harness does. Only
+// the tests that assert on log content install it; afterEach restores.
+function captureLogs(): string[] {
+  const captured: string[] = [];
+  const dest = Logger.destinations.default;
+  const orig = dest.write;
+  dest.write = (text: string, message: unknown) => {
+    captured.push(text);
+    orig?.(text, message as never);
+  };
+  restoreLog = () => {
+    dest.write = orig;
+  };
+  return captured;
+}
 
 // open + close + set_position => Lift + PositionAwareLift, no tilt (SONOFF MINI-RBS).
 const LIFT_WITH_POSITION = 1 + 2 + 4; // 7
@@ -567,5 +587,219 @@ describe("#429 binary cover percentage moves", () => {
     // At rest the axis snaps to where HA actually parked, target following.
     expect(state(endpoint).currentPositionLiftPercent100ths).toBe(0);
     expect(state(endpoint).targetPositionLiftPercent100ths).toBe(0);
+  });
+});
+
+// A discrete open/close aimed at the end the cover already sits at moves
+// nothing, so HA reports no state change and nothing could clear an optimistic
+// status before the 120s safety timer. The command must still reach HA (a
+// harmless refresh) but must not claim movement.
+describe("#429 discrete command on a cover already at that end", () => {
+  it("q: UpOrOpen on a fully open cover dispatches without reporting movement", async () => {
+    const endpoint = await mount("open", 100); // default inversion: stored 0 = open
+    const cap = subscribe(endpoint);
+    calls.length = 0;
+
+    await upOrOpen(endpoint);
+
+    expect(calls.map((c) => c.action)).toEqual(["cover.open_cover"]);
+    expect(cap.ops).toEqual([]);
+    expect(state(endpoint).targetPositionLiftPercent100ths).toBe(
+      state(endpoint).currentPositionLiftPercent100ths,
+    );
+  });
+
+  it("r: DownOrClose on a fully closed cover dispatches without reporting movement", async () => {
+    const endpoint = await mount("closed", 0); // stored 10000 = closed
+    const cap = subscribe(endpoint);
+    calls.length = 0;
+
+    await downOrClose(endpoint);
+
+    expect(calls.map((c) => c.action)).toEqual(["cover.close_cover"]);
+    expect(cap.ops).toEqual([]);
+    expect(state(endpoint).targetPositionLiftPercent100ths).toBe(
+      state(endpoint).currentPositionLiftPercent100ths,
+    );
+  });
+
+  it("q2: UpOrOpen one percent short of open still reports the move", async () => {
+    // The guard is a tolerance, not "is the state string open": a cover parked
+    // just off the end must keep the optimistic edge.
+    const endpoint = await mount("open", 98); // stored 2 => 200 100ths
+    const cap = subscribe(endpoint);
+
+    await upOrOpen(endpoint);
+
+    expect(cap.ops).toEqual([Opening]);
+  });
+
+  it("q3: UpOrOpen exactly one percent short of open still reports the move", async () => {
+    // HA percents are integers, so one percent IS the completion tolerance
+    // value. The at-rest guard has to be strict or the smallest real move a
+    // cover can make emits nothing at all.
+    const endpoint = await mount("open", 99); // stored 1 => 100 100ths
+    const cap = subscribe(endpoint);
+
+    await upOrOpen(endpoint);
+    expect(cap.ops).toEqual([Opening]);
+
+    await drive(endpoint, "open", 100); // lands on the open end
+    expect(cap.ops).toEqual([Opening, Stopped]);
+  });
+});
+
+// HA percents are integers, so every stored position is a multiple of 100 in
+// Matter 100ths and a one percent slider step sits exactly on the completion
+// tolerance. The command-skip guards must stay strict, otherwise the smallest
+// move a controller can send is dropped before it ever reaches HA.
+describe("#429 one percent steps still reach HA", () => {
+  it("v: a one percent lift step dispatches set_cover_position and writes the target", async () => {
+    const endpoint = await mount("open", 50); // default inversion: stored 5000
+    calls.length = 0;
+
+    await goToLift(endpoint, 5100); // exactly one HA percent away
+    await delay(500); // past the slider debounce
+
+    expect(calls.map((c) => c.action)).toEqual(["cover.set_cover_position"]);
+    expect(calls[0]?.data).toEqual({ position: 49 });
+    expect(state(endpoint).targetPositionLiftPercent100ths).toBe(5100);
+  });
+
+  it("w: a one percent tilt step dispatches set_cover_tilt_position and writes the target", async () => {
+    const endpoint = await mount("open", 50, undefined, {
+      supportedFeatures: LIFT_AND_TILT_WITH_POSITION,
+      haTiltPosition: 50, // default inversion: stored 5000
+    });
+    calls.length = 0;
+
+    await goToTilt(endpoint, 5100);
+    await delay(500);
+
+    expect(calls.map((c) => c.action)).toEqual([
+      "cover.set_cover_tilt_position",
+    ]);
+    expect(calls[0]?.data).toEqual({ tilt_position: 49 });
+    expect(state(endpoint).targetPositionTiltPercent100ths).toBe(5100);
+  });
+});
+
+// The completion check and the command-skip guards share one tolerance, and it
+// has to include the boundary: a cover parking exactly one HA percent short
+// missed by a single unit and held the moving label for the full 120s.
+describe("#429 completion tolerance at the boundary", () => {
+  it("s: close landing exactly one percent short still completes", async () => {
+    const endpoint = await mount("open", 100); // stored 0
+    const cap = subscribe(endpoint);
+
+    await downOrClose(endpoint); // close end expects stored 100 => 10000
+    await drive(endpoint, "closed", 1); // stored 99 => 9900, exactly 100 off
+
+    expect(cap.ops).toEqual([Closing, Stopped]);
+  });
+});
+
+// matter.js pre-writes target 0/10000 for the command it is about to run and
+// its own stop snap is disabled (#328), so a StopMotion left target far from
+// current: controllers deriving direction from target-vs-current see Stopped
+// pointing somewhere else until the next HA tick.
+describe("#429 StopMotion leaves a consistent target", () => {
+  it("t: StopMotion mid-move snaps target back to current", async () => {
+    const endpoint = await mount("closed", 0); // stored current 10000
+    const cap = subscribe(endpoint);
+    calls.length = 0;
+
+    await goToLift(endpoint, 5000); // target 5000, nothing confirmed by HA yet
+    await stopMotion(endpoint);
+
+    expect(cap.ops).toEqual([Opening, Stopped]);
+    expect(state(endpoint).targetPositionLiftPercent100ths).toBe(
+      state(endpoint).currentPositionLiftPercent100ths,
+    );
+    expect(state(endpoint).targetPositionLiftPercent100ths).toBe(10000);
+
+    // The stop also drops the debounced position, so nothing moves afterwards.
+    await delay(500);
+    expect(calls.map((c) => c.action)).toEqual(["cover.stop_cover"]);
+  });
+});
+
+// Three diagnosis rounds on #429 were guesswork because the command logs named
+// neither the entity nor the flags that decide which HA service fires and which
+// space positions are stored in.
+describe("#429 command logs identify the entity and the resolved flags", () => {
+  it("u: handleMovement and the discrete handler name the entity and flags", async () => {
+    setFeatureFlags({ coverUseHomeAssistantPercentage: true });
+    const endpoint = await mount("closed", 0, {
+      entityId: "cover.blind",
+      coverSwapOpenClose: true,
+    });
+    const captured = captureLogs();
+
+    await downOrClose(endpoint); // swapped: dispatches cover.open_cover
+
+    const movement = captured.find((t) => t.includes("handleMovement"));
+    expect(movement).toBeDefined();
+    expect(movement).toContain("cover.blind");
+    expect(movement).toContain("useHaPercentage=true");
+    expect(movement).toContain("doNotInvert=false");
+    expect(movement).toContain("swapDispatch=true");
+    // The HA-percentage flag skips inversion, so the stored space is NOT
+    // inverted even though the dispatch is swapped. Two separate facts, two
+    // separate fields.
+    expect(movement).toContain("spaceInverted=false");
+
+    const close = captured.find((t) => t.includes("handleLiftClose"));
+    expect(close).toBeDefined();
+    expect(close).toContain("cover.blind");
+    expect(close).toContain("cover.open_cover");
+  });
+
+  it("u2: a per-entity swap moves the dispatch but not the position space", async () => {
+    // Only the bridge-level swap flag turns inversion off
+    // (cover-position-utils.ts:22), so a per-entity swap has to log
+    // swapDispatch=true together with spaceInverted=true.
+    const endpoint = await mount("closed", 0, {
+      entityId: "cover.blind",
+      coverSwapOpenClose: true,
+    });
+    const captured = captureLogs();
+
+    await downOrClose(endpoint);
+
+    const movement = captured.find((t) => t.includes("handleMovement"));
+    expect(movement).toBeDefined();
+    expect(movement).toContain("cover.blind");
+    expect(movement).toContain("swapDispatch=true");
+    expect(movement).toContain("spaceInverted=true");
+  });
+
+  it("u3: the tilt handlers name the entity and the dispatched action", async () => {
+    const endpoint = await mount("closed", 0, undefined, {
+      supportedFeatures: LIFT_AND_TILT_WITH_POSITION,
+      haTiltPosition: 0, // default inversion: stored 10000 = closed
+    });
+    const captured = captureLogs();
+
+    await goToTilt(endpoint, 0); // boundary open
+
+    const open = captured.find((t) => t.includes("handleTiltOpen"));
+    expect(open).toBeDefined();
+    expect(open).toContain("cover.blind");
+    expect(open).toContain("cover.open_cover_tilt");
+    // The discrete lines carry the same hook-backed flags as handleMovement.
+    expect(open).toContain("spaceInverted=");
+  });
+
+  it("u4: the lift discrete handlers carry the diagnostic flags too", async () => {
+    const endpoint = await mount("closed", 0);
+    const captured = captureLogs();
+
+    await upOrOpen(endpoint);
+
+    const open = captured.find((t) => t.includes("handleLiftOpen"));
+    expect(open).toBeDefined();
+    expect(open).toContain("swapDispatch=");
+    expect(open).toContain("spaceInverted=");
   });
 });
