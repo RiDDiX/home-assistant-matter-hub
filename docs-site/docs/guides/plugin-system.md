@@ -158,6 +158,8 @@ A live `EndpointType` only works if it comes from the exact same matter.js insta
 
 Some device types need a live matter.js `EndpointType` (custom clusters and command handlers), which only works from inside the backend bundle. These ship as built-in plugins. They show up in the Plugins page like any other plugin and are configured there; nothing to install.
 
+Plugins run on standard bridges only. A bridge with Server Mode enabled hosts no plugins at all, including the built-in camera; the Plugins page lists it with a note saying so. If every bridge you have is in Server Mode, create a standard bridge and put the camera there. Apple Home does not render Matter cameras; as of 2026 SmartThings is the only controller that does.
+
 **Camera** exposes a Home Assistant camera as a Matter Camera (0x0142). It implements the Matter `WebRtcTransportProvider` flow and bridges HA's WebRTC. Configure it on the Plugins page:
 
 | Setting | Description |

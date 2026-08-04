@@ -1,3 +1,7 @@
+import {
+  type BridgeDataWithMetadata,
+  BridgeStatus,
+} from "@home-assistant-matter-hub/common";
 import AddIcon from "@mui/icons-material/Add";
 import DeleteIcon from "@mui/icons-material/Delete";
 import ExtensionIcon from "@mui/icons-material/Extension";
@@ -32,6 +36,7 @@ import TextField from "@mui/material/TextField";
 import Tooltip from "@mui/material/Tooltip";
 import Typography from "@mui/material/Typography";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useBridges } from "../../hooks/data/bridges.ts";
 
 interface PluginDevice {
   id: string;
@@ -71,6 +76,48 @@ interface InstalledPlugin {
   path: string;
 }
 
+/**
+ * Which empty state the page is actually in. GET /api/plugins skips server mode
+ * bridges because they host no plugins (#430), so an empty response used to
+ * read as "No plugins installed" and sent reporters typing built-in plugin
+ * names into the npm box (#432).
+ */
+export type PluginsEmptyState =
+  | "no-bridges"
+  | "all-server-mode"
+  | "bridge-not-running"
+  | "none-installed";
+
+export function pluginsEmptyState(input: {
+  bridges: BridgeDataWithMetadata[] | undefined;
+  bridgePlugins: BridgePlugins[];
+  installed: InstalledPlugin[];
+}): PluginsEmptyState | undefined {
+  const { bridges, bridgePlugins, installed } = input;
+  const totalPlugins = bridgePlugins.reduce(
+    (sum, b) => sum + b.plugins.length,
+    0,
+  );
+  if (totalPlugins > 0 || installed.length > 0) {
+    return undefined;
+  }
+  if (bridges == null) {
+    // Loading or load failure: keep the generic hint, never a blank page.
+    return "none-installed";
+  }
+  if (bridges.length === 0) {
+    return "no-bridges";
+  }
+  const pluginCapable = bridges.filter((b) => !b.featureFlags?.serverMode);
+  if (pluginCapable.length === 0) {
+    return "all-server-mode";
+  }
+  if (!pluginCapable.some((b) => b.status === BridgeStatus.Running)) {
+    return "bridge-not-running";
+  }
+  return "none-installed";
+}
+
 async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, init);
   if (!res.ok) {
@@ -83,6 +130,7 @@ async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
 }
 
 export const PluginsPage = () => {
+  const { content: bridges } = useBridges();
   const [bridgePlugins, setBridgePlugins] = useState<BridgePlugins[]>([]);
   const [installed, setInstalled] = useState<InstalledPlugin[]>([]);
   const [loading, setLoading] = useState(true);
@@ -224,10 +272,9 @@ export const PluginsPage = () => {
     );
   }
 
-  const totalPlugins = bridgePlugins.reduce(
-    (sum, b) => sum + b.plugins.length,
-    0,
-  );
+  const emptyState = pluginsEmptyState({ bridges, bridgePlugins, installed });
+  const serverModeBridges =
+    bridges?.filter((b) => b.featureFlags?.serverMode) ?? [];
 
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 3, p: 2 }}>
@@ -270,7 +317,29 @@ export const PluginsPage = () => {
         </Alert>
       )}
 
-      {totalPlugins === 0 && installed.length === 0 && (
+      {emptyState === "no-bridges" && (
+        <Alert severity="info">
+          No bridges configured. Create a bridge first, then plugins registered
+          on it appear here.
+        </Alert>
+      )}
+
+      {emptyState === "all-server-mode" && (
+        <Alert severity="info">
+          Plugins run on standard bridges. Server mode bridges host none,
+          including the built-in camera. Create a standard bridge to use
+          plugins.
+        </Alert>
+      )}
+
+      {emptyState === "bridge-not-running" && (
+        <Alert severity="info">
+          No plugins reported yet. Plugins load when the bridge starts, so start
+          the bridge and refresh this page.
+        </Alert>
+      )}
+
+      {emptyState === "none-installed" && (
         <Alert severity="info">
           No plugins installed. Click &quot;Install Plugin&quot; to add an npm
           plugin package, or plugins will appear here when registered by the
@@ -440,6 +509,21 @@ export const PluginsPage = () => {
                 ))}
               </List>
             )}
+          </CardContent>
+        </Card>
+      ))}
+
+      {/* Account for every bridge, so a server mode bridge missing from
+          /api/plugins does not read as a bug (#432). */}
+      {serverModeBridges.map((bridge) => (
+        <Card key={bridge.id} variant="outlined">
+          <CardContent>
+            <Typography variant="h6" gutterBottom>
+              {bridge.name}
+            </Typography>
+            <Typography variant="body2" color="text.secondary">
+              Server mode bridge, hosts no plugins.
+            </Typography>
           </CardContent>
         </Card>
       ))}
