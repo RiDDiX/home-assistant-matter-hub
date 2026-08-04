@@ -26,6 +26,9 @@ export const MATTER_TRAFFIC_FACILITIES = new Set([
   "ServerSubscription",
   "IncomingInteractionServerMessenger",
   "ExchangeManager",
+  // Rejected invokes (UnsupportedEndpoint and friends) log here at INFO; a
+  // controller aiming at a stale endpoint number is invisible without it (#423).
+  "CommandInvokeResponse",
 ]);
 
 export function categoryFor(facility: string): string | undefined {

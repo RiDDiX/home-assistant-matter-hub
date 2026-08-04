@@ -33,4 +33,10 @@ describe("MATTER_TRAFFIC_FACILITIES", () => {
     expect(MATTER_TRAFFIC_FACILITIES.has("MessageChannel")).toBe(true);
     expect(MATTER_TRAFFIC_FACILITIES.has("ServerSubscription")).toBe(true);
   });
+
+  it("surfaces rejected invokes in the traffic category (#423)", () => {
+    // UnsupportedEndpoint rejections log under this facility; dropping it
+    // hides a controller aiming at a stale endpoint number.
+    expect(categoryFor("CommandInvokeResponse")).toBe("matter-traffic");
+  });
 });

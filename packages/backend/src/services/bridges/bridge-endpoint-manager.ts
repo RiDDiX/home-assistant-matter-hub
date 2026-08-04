@@ -666,6 +666,11 @@ export class BridgeEndpointManager extends Service {
           continue;
         }
         try {
+          // The only number-erasing path with no trace: say it out loud, a
+          // controller holding the old number sees a dead endpoint (#423).
+          this.log.info(
+            `Removing endpoint ${endpoint.entityId} (ep ${endpoint.number}) after the grace window, controllers will see a new number if it returns`,
+          );
           await endpoint.delete();
         } catch (e) {
           this.log.warn(`Failed to delete endpoint ${endpoint.entityId}:`, e);
