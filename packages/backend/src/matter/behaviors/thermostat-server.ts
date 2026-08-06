@@ -282,7 +282,13 @@ export function thermostatPreInitialize(self: any): void {
   // former AutoMode config can persist them onto a now non-AutoMode base, which
   // fails conformance on init like the setpoints do (code 135, #384).
   if (self.features.autoMode) {
-    self.state.minSetpointDeadBand = self.state.minSetpointDeadBand ?? 0;
+    // Keep this inside the autoMode branch, writing the attribute on a base
+    // without AutoMode crashes the endpoint ("Behaviors have errors"). The
+    // assignment must stay "= 0", never "?? 0": the attribute is quality N
+    // with a 2°C model default (20) that survives "??", and pre-super
+    // initialize is the only window where the write sticks. HA has no such
+    // gap between the heat and cool setpoints.
+    self.state.minSetpointDeadBand = 0;
   } else {
     if (self.state.minSetpointDeadBand !== undefined)
       self.state.minSetpointDeadBand = undefined;
