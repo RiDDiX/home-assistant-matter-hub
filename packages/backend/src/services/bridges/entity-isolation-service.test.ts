@@ -31,6 +31,49 @@ describe("EntityIsolationService", () => {
         EntityIsolationService.parseEndpointPath("some random error"),
       ).toBeNull();
     });
+
+    // #435: a part that fails during construction is named without a trailing
+    // cluster segment, so the path ends at the entity id.
+    it("should parse a path that ends at the endpoint id", () => {
+      expect(
+        EntityIsolationService.parseEndpointPath(
+          `Error initializing part ${BRIDGE_ID}.aggregator.${ENTITY_NAME}`,
+        ),
+      ).toEqual({ bridgeId: BRIDGE_ID, entityName: ENTITY_NAME });
+    });
+
+    it("should parse a path closed by a reactor bracket", () => {
+      expect(
+        EntityIsolationService.parseEndpointPath(
+          `Error in reactor<${BRIDGE_ID}.aggregator.${ENTITY_NAME}>`,
+        ),
+      ).toEqual({ bridgeId: BRIDGE_ID, entityName: ENTITY_NAME });
+    });
+  });
+
+  // #435 headline: the aggregator endpoint itself fails, the path ends at
+  // ".aggregator" and there is no entity to blame.
+  describe("path ending at the aggregator itself", () => {
+    const message = `Error initializing part ${BRIDGE_ID}.aggregator`;
+
+    it("yields no entity", () => {
+      expect(EntityIsolationService.parseEndpointPath(message)).toBeNull();
+    });
+
+    it("classifies as a construction failure", () => {
+      const service = EntityIsolationService as unknown as {
+        classifyError(msg: string): string | null;
+      };
+      expect(service.classifyError(message)).toBe(
+        "Endpoint construction failure",
+      );
+    });
+
+    it("declines isolation without throwing", async () => {
+      await expect(
+        EntityIsolationService.isolateFromError(new Error(message)),
+      ).resolves.toBe(false);
+    });
   });
 
   describe("isolateFromError", () => {
@@ -130,6 +173,25 @@ describe("EntityIsolationService", () => {
 
       const isolated = EntityIsolationService.getIsolatedEntities(BRIDGE_ID);
       expect(isolated[0].reason).toContain("Endpoint storage inaccessible");
+
+      EntityIsolationService.unregisterIsolationCallback(BRIDGE_ID);
+    });
+
+    it("should isolate on Error initializing part", async () => {
+      const callback = vi.fn().mockResolvedValue(undefined);
+      EntityIsolationService.registerIsolationCallback(BRIDGE_ID, callback);
+
+      const result = await EntityIsolationService.isolateFromError(
+        new Error(
+          `Error initializing part ${BRIDGE_ID}.aggregator.${ENTITY_NAME}`,
+        ),
+      );
+
+      expect(result).toBe(true);
+      expect(callback).toHaveBeenCalledWith(ENTITY_NAME);
+
+      const isolated = EntityIsolationService.getIsolatedEntities(BRIDGE_ID);
+      expect(isolated[0].reason).toContain("Endpoint construction failure");
 
       EntityIsolationService.unregisterIsolationCallback(BRIDGE_ID);
     });

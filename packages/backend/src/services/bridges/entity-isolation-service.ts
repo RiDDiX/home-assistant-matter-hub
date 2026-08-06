@@ -38,8 +38,10 @@ class EntityIsolationServiceImpl {
     bridgeId: string;
     entityName: string;
   } | null {
-    // Match pattern: bridgeId.aggregator.entityName.cluster.attribute/command
-    const match = errorMessage.match(/([a-f0-9]{32})\.aggregator\.([^.]+)\./i);
+    // Match pattern: bridgeId.aggregator.entityName[.cluster.attribute]
+    // The trailing segments are optional, a part that fails during construction
+    // is named without them.
+    const match = errorMessage.match(/([a-f0-9]{32})\.aggregator\.([^.\s>]+)/i);
     if (match) {
       return {
         bridgeId: match[1],
@@ -67,6 +69,9 @@ class EntityIsolationServiceImpl {
     }
     if (msg.includes("Endpoint storage inaccessible")) {
       return "Endpoint storage inaccessible";
+    }
+    if (msg.includes("Error initializing part")) {
+      return "Endpoint construction failure";
     }
     if (msg.includes("aggregator.")) {
       return "Runtime error in endpoint";

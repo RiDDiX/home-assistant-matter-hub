@@ -13,53 +13,11 @@ import { HomeAssistantClient } from "../../services/home-assistant/home-assistan
 import { HomeAssistantRegistry } from "../../services/home-assistant/home-assistant-registry.js";
 import { AppSettingsStorage } from "../../services/storage/app-settings-storage.js";
 import { logStartupMemoryGuard } from "../../utils/log-memory.js";
+import {
+  isIsolatableError,
+  shouldSuppressError,
+} from "./start-error-matchers.js";
 import type { StartOptions } from "./start-options.js";
-
-function extractErrorMessage(error: unknown): string {
-  if (error instanceof Error) return error.message;
-  if (typeof error === "object" && error !== null) {
-    const obj = error as Record<string, unknown>;
-    // HA WebSocket error: { type: 'result', success: false, error: { code: N, message: '...' } }
-    if (typeof obj.error === "object" && obj.error !== null) {
-      const inner = obj.error as Record<string, unknown>;
-      if (typeof inner.message === "string") return inner.message;
-    }
-    if (typeof obj.message === "string") return obj.message;
-  }
-  return String(error);
-}
-
-// Check if an error should be suppressed (not crash the process)
-function shouldSuppressError(error: unknown): boolean {
-  const msg = extractErrorMessage(error);
-  return (
-    msg.includes("Connection lost") ||
-    msg.includes("Endpoint storage inaccessible") ||
-    msg.includes("Invalid intervalMs") ||
-    msg.includes("generalDiagnostics") ||
-    msg.includes("Behaviors have errors") ||
-    msg.includes("TransactionDestroyedError") ||
-    msg.includes("DestroyedDependencyError") ||
-    msg.includes("UninitializedDependencyError") ||
-    msg.includes("mutex-closed") ||
-    msg.includes("not a node and is not owned") ||
-    msg.includes("aggregator.")
-  );
-}
-
-// Check if an error is isolatable (can isolate the entity causing it)
-function isIsolatableError(error: unknown): boolean {
-  const msg = error instanceof Error ? error.message : String(error);
-  return (
-    msg.includes("Invalid intervalMs") ||
-    msg.includes("Behaviors have errors") ||
-    msg.includes("TransactionDestroyedError") ||
-    msg.includes("DestroyedDependencyError") ||
-    msg.includes("UninitializedDependencyError") ||
-    msg.includes("Endpoint storage inaccessible") ||
-    msg.includes("aggregator.")
-  );
-}
 
 // Register early error handlers to catch errors before Matter.js initializes
 process.on("uncaughtException", (error) => {
