@@ -10,6 +10,7 @@ import PowerIcon from "@mui/icons-material/Power";
 import PowerOffIcon from "@mui/icons-material/PowerOff";
 import RefreshIcon from "@mui/icons-material/Refresh";
 import RestartAltIcon from "@mui/icons-material/RestartAlt";
+import SettingsIcon from "@mui/icons-material/Settings";
 import UploadFileIcon from "@mui/icons-material/UploadFile";
 import Alert from "@mui/material/Alert";
 import Box from "@mui/material/Box";
@@ -23,13 +24,17 @@ import DialogActions from "@mui/material/DialogActions";
 import DialogContent from "@mui/material/DialogContent";
 import DialogTitle from "@mui/material/DialogTitle";
 import Divider from "@mui/material/Divider";
+import FormControlLabel from "@mui/material/FormControlLabel";
 import FormHelperText from "@mui/material/FormHelperText";
 import IconButton from "@mui/material/IconButton";
 import List from "@mui/material/List";
 import ListItem from "@mui/material/ListItem";
+import ListItemButton from "@mui/material/ListItemButton";
 import ListItemIcon from "@mui/material/ListItemIcon";
 import ListItemText from "@mui/material/ListItemText";
+import MenuItem from "@mui/material/MenuItem";
 import Stack from "@mui/material/Stack";
+import Switch from "@mui/material/Switch";
 import Tab from "@mui/material/Tab";
 import Tabs from "@mui/material/Tabs";
 import TextField from "@mui/material/TextField";
@@ -74,6 +79,36 @@ interface InstalledPlugin {
   autoLoad: boolean;
   installedAt: number;
   path: string;
+}
+
+// Mirrors PluginConfigSchema from the backend plugin types.
+interface ConfigSchemaProperty {
+  type: "string" | "number" | "boolean" | "select";
+  title: string;
+  description?: string;
+  default?: unknown;
+  required?: boolean;
+  options?: Array<{ label: string; value: string }>;
+}
+
+interface ConfigSchema {
+  title: string;
+  description?: string;
+  properties: Record<string, ConfigSchemaProperty>;
+}
+
+interface ConfigDialogTarget {
+  bridgeId: string;
+  pluginName: string;
+}
+
+function invalidNumber(text: string): boolean {
+  return text.trim() !== "" && Number.isNaN(Number(text));
+}
+
+// The schema has no secret flag, so mask by field name (haToken etc).
+function isSecretField(key: string): boolean {
+  return /token|password|secret/i.test(key);
 }
 
 /**
@@ -145,6 +180,21 @@ export const PluginsPage = () => {
   // page-level alert would sit behind it.
   const [installError, setInstallError] = useState<string>();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [configTarget, setConfigTarget] = useState<ConfigDialogTarget>();
+  // undefined while the schema loads, null when the plugin has no settings
+  const [configSchema, setConfigSchema] = useState<ConfigSchema | null>();
+  // Config the plugin already has, so keys outside the schema survive a save.
+  const [configExisting, setConfigExisting] = useState<Record<string, unknown>>(
+    {},
+  );
+  // Bumped on every dialog open; a schema response from an earlier open
+  // must not touch the state of a newer one.
+  const configEpoch = useRef(0);
+  const [configValues, setConfigValues] = useState<
+    Record<string, string | boolean>
+  >({});
+  const [configError, setConfigError] = useState<string>();
+  const [savingConfig, setSavingConfig] = useState(false);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -255,12 +305,108 @@ export const PluginsPage = () => {
     action: "enable" | "disable" | "reset",
   ) => {
     try {
-      await fetchJson(`api/plugins/${bridgeId}/${pluginName}/${action}`, {
-        method: "POST",
-      });
+      await fetchJson(
+        `api/plugins/${encodeURIComponent(bridgeId)}/${encodeURIComponent(pluginName)}/${action}`,
+        { method: "POST" },
+      );
       await refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  const closeConfigDialog = () => {
+    // A response still in flight for this dialog must land in the void.
+    configEpoch.current++;
+    setConfigTarget(undefined);
+  };
+
+  const openPluginConfig = async (bridgeId: string, plugin: PluginInfo) => {
+    const epoch = ++configEpoch.current;
+    setConfigTarget({ bridgeId, pluginName: plugin.name });
+    setConfigSchema(undefined);
+    setConfigError(undefined);
+    setConfigValues({});
+    setConfigExisting(plugin.config ?? {});
+    try {
+      const res = await fetchJson<{ schema: ConfigSchema | null }>(
+        `api/plugins/${encodeURIComponent(bridgeId)}/${encodeURIComponent(plugin.name)}/config-schema`,
+      );
+      if (epoch !== configEpoch.current) return;
+      const schema = res.schema ?? null;
+      if (schema) {
+        const values: Record<string, string | boolean> = {};
+        for (const [key, prop] of Object.entries(schema.properties)) {
+          const current = plugin.config[key] ?? prop.default;
+          values[key] =
+            prop.type === "boolean"
+              ? Boolean(current ?? false)
+              : current == null
+                ? ""
+                : String(current);
+        }
+        setConfigValues(values);
+      }
+      setConfigSchema(schema);
+    } catch (e) {
+      // The schema route answers 200 with schema null when there is nothing
+      // to configure, so landing here is a real failure, not "no settings".
+      if (epoch !== configEpoch.current) return;
+      setConfigSchema(null);
+      setConfigError(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  // Required fields must be filled and number fields numeric before save.
+  const configBlocked =
+    configSchema == null ||
+    Object.entries(configSchema.properties).some(([key, prop]) => {
+      if (prop.type === "boolean") return false;
+      const value = configValues[key];
+      const text = typeof value === "string" ? value.trim() : "";
+      if (prop.required && text === "") return true;
+      return prop.type === "number" && invalidNumber(text);
+    });
+
+  const handleSaveConfig = async () => {
+    if (!configTarget || !configSchema) return;
+    // Start from what the plugin already has: the backend replaces the whole
+    // config, and a plugin may keep keys the schema does not list.
+    const config: Record<string, unknown> = { ...configExisting };
+    for (const [key, prop] of Object.entries(configSchema.properties)) {
+      const value = configValues[key];
+      if (prop.type === "boolean") {
+        config[key] = value === true;
+        continue;
+      }
+      const text = typeof value === "string" ? value.trim() : "";
+      if (text === "") {
+        delete config[key]; // a blanked field clears the stored value
+        continue;
+      }
+      config[key] = prop.type === "number" ? Number(text) : text;
+    }
+    const epoch = configEpoch.current;
+    setSavingConfig(true);
+    setConfigError(undefined);
+    try {
+      await fetchJson(
+        `api/plugins/${encodeURIComponent(configTarget.bridgeId)}/${encodeURIComponent(configTarget.pluginName)}/config`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ config }),
+        },
+      );
+      if (epoch === configEpoch.current) setConfigTarget(undefined);
+      await refresh();
+    } catch (e) {
+      // A save whose dialog is gone must not close or scribble on a newer one.
+      if (epoch === configEpoch.current) {
+        setConfigError(e instanceof Error ? e.message : String(e));
+      }
+    } finally {
+      setSavingConfig(false);
     }
   };
 
@@ -399,6 +545,7 @@ export const PluginsPage = () => {
                 {bridge.plugins.map((plugin) => (
                   <Box key={plugin.name}>
                     <ListItem
+                      disablePadding
                       secondaryAction={
                         <Stack direction="row" spacing={0.5}>
                           {plugin.circuitBreaker?.disabled && (
@@ -417,6 +564,16 @@ export const PluginsPage = () => {
                               </IconButton>
                             </Tooltip>
                           )}
+                          <Tooltip title="Settings">
+                            <IconButton
+                              size="small"
+                              onClick={() =>
+                                openPluginConfig(bridge.bridgeId, plugin)
+                              }
+                            >
+                              <SettingsIcon />
+                            </IconButton>
+                          </Tooltip>
                           <Tooltip
                             title={plugin.enabled ? "Disable" : "Enable"}
                           >
@@ -440,51 +597,59 @@ export const PluginsPage = () => {
                         </Stack>
                       }
                     >
-                      <ListItemIcon>
-                        <ExtensionIcon
-                          color={plugin.enabled ? "primary" : "disabled"}
+                      {/* The whole row opens the settings: that is where
+                          reporters clicked expecting them (#432). */}
+                      <ListItemButton
+                        onClick={() =>
+                          openPluginConfig(bridge.bridgeId, plugin)
+                        }
+                      >
+                        <ListItemIcon>
+                          <ExtensionIcon
+                            color={plugin.enabled ? "primary" : "disabled"}
+                          />
+                        </ListItemIcon>
+                        <ListItemText
+                          primary={
+                            <Box
+                              sx={{
+                                display: "flex",
+                                alignItems: "center",
+                                gap: 1,
+                              }}
+                            >
+                              {plugin.name}
+                              <Chip
+                                label={`v${plugin.version}`}
+                                size="small"
+                                variant="outlined"
+                              />
+                              {plugin.source === "builtin" && (
+                                <Chip label="built-in" size="small" />
+                              )}
+                              {!plugin.enabled && (
+                                <Chip
+                                  label="disabled"
+                                  size="small"
+                                  color="warning"
+                                />
+                              )}
+                              {plugin.circuitBreaker?.disabled && (
+                                <Chip
+                                  label="circuit breaker open"
+                                  size="small"
+                                  color="error"
+                                />
+                              )}
+                            </Box>
+                          }
+                          secondary={
+                            plugin.devices.length > 0
+                              ? `${plugin.devices.length} device(s)`
+                              : "No devices registered"
+                          }
                         />
-                      </ListItemIcon>
-                      <ListItemText
-                        primary={
-                          <Box
-                            sx={{
-                              display: "flex",
-                              alignItems: "center",
-                              gap: 1,
-                            }}
-                          >
-                            {plugin.name}
-                            <Chip
-                              label={`v${plugin.version}`}
-                              size="small"
-                              variant="outlined"
-                            />
-                            {plugin.source === "builtin" && (
-                              <Chip label="built-in" size="small" />
-                            )}
-                            {!plugin.enabled && (
-                              <Chip
-                                label="disabled"
-                                size="small"
-                                color="warning"
-                              />
-                            )}
-                            {plugin.circuitBreaker?.disabled && (
-                              <Chip
-                                label="circuit breaker open"
-                                size="small"
-                                color="error"
-                              />
-                            )}
-                          </Box>
-                        }
-                        secondary={
-                          plugin.devices.length > 0
-                            ? `${plugin.devices.length} device(s)`
-                            : "No devices registered"
-                        }
-                      />
+                      </ListItemButton>
                     </ListItem>
                     {plugin.circuitBreaker?.disabled &&
                       plugin.circuitBreaker.lastError && (
@@ -671,6 +836,122 @@ export const PluginsPage = () => {
               {installing ? <CircularProgress size={20} /> : "Link"}
             </Button>
           )}
+        </DialogActions>
+      </Dialog>
+
+      <Dialog
+        open={!!configTarget}
+        onClose={() => {
+          if (!savingConfig) closeConfigDialog();
+        }}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>
+          {configSchema?.title ?? configTarget?.pluginName} Settings
+        </DialogTitle>
+        <DialogContent>
+          {configSchema === undefined && (
+            <Box sx={{ display: "flex", justifyContent: "center", py: 2 }}>
+              <CircularProgress size={24} />
+            </Box>
+          )}
+          {configSchema === null && !configError && (
+            <Typography variant="body2" color="text.secondary">
+              This plugin has no settings.
+            </Typography>
+          )}
+          {configSchema && (
+            <Stack spacing={2} sx={{ mt: 1 }}>
+              {configSchema.description && (
+                <Typography variant="body2" color="text.secondary">
+                  {configSchema.description}
+                </Typography>
+              )}
+              {Object.entries(configSchema.properties).map(([key, prop]) => {
+                if (prop.type === "boolean") {
+                  return (
+                    <Box key={key}>
+                      <FormControlLabel
+                        control={
+                          <Switch
+                            checked={configValues[key] === true}
+                            onChange={(e) =>
+                              setConfigValues((v) => ({
+                                ...v,
+                                [key]: e.target.checked,
+                              }))
+                            }
+                          />
+                        }
+                        label={prop.title}
+                      />
+                      {prop.description && (
+                        <FormHelperText>{prop.description}</FormHelperText>
+                      )}
+                    </Box>
+                  );
+                }
+                const text =
+                  typeof configValues[key] === "string"
+                    ? (configValues[key] as string)
+                    : "";
+                const badNumber = prop.type === "number" && invalidNumber(text);
+                return (
+                  <TextField
+                    key={key}
+                    label={prop.title}
+                    fullWidth
+                    select={prop.type === "select"}
+                    type={
+                      prop.type === "number"
+                        ? "number"
+                        : isSecretField(key)
+                          ? "password"
+                          : "text"
+                    }
+                    required={prop.required}
+                    value={text}
+                    onChange={(e) =>
+                      setConfigValues((v) => ({
+                        ...v,
+                        [key]: e.target.value,
+                      }))
+                    }
+                    error={badNumber}
+                    helperText={
+                      badNumber ? "Must be a number" : prop.description
+                    }
+                    disabled={savingConfig}
+                  >
+                    {prop.type === "select" &&
+                      (prop.options ?? []).map((option) => (
+                        <MenuItem key={option.value} value={option.value}>
+                          {option.label}
+                        </MenuItem>
+                      ))}
+                  </TextField>
+                );
+              })}
+            </Stack>
+          )}
+          {configError && (
+            <Alert severity="error" sx={{ mt: 2 }}>
+              {configError}
+            </Alert>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={closeConfigDialog} disabled={savingConfig}>
+            Cancel
+          </Button>
+          <Button
+            onClick={handleSaveConfig}
+            variant="contained"
+            disabled={savingConfig || configBlocked}
+          >
+            {savingConfig ? <CircularProgress size={20} /> : "Save"}
+          </Button>
         </DialogActions>
       </Dialog>
     </Box>
