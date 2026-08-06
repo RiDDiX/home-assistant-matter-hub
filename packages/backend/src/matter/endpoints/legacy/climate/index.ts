@@ -21,7 +21,10 @@ import {
 } from "./behaviors/climate-fan-control-server.js";
 import { ClimateHumidityMeasurementServer } from "./behaviors/climate-humidity-measurement-server.js";
 import { ClimateOnOffServer } from "./behaviors/climate-on-off-server.js";
-import { ClimateThermostatServer } from "./behaviors/climate-thermostat-server.js";
+import {
+  ClimateThermostatServer,
+  isTemperatureRangeActive,
+} from "./behaviors/climate-thermostat-server.js";
 
 /**
  * Initial thermostat state extracted from Home Assistant entity.
@@ -226,6 +229,14 @@ export function ClimateDevice(
   const minLimit = Math.min(rawMinLimit, rawMaxLimit);
   const maxLimit = Math.max(rawMinLimit, rawMaxLimit);
 
+  // Same gate as the runtime getters: outside heat_cool/auto the range
+  // attributes can hold a parked stale value (#435). An entity that starts
+  // unavailable keeps this registration state until its first available
+  // update, so the ordering matters here too.
+  const rangeActive = isTemperatureRangeActive(
+    homeAssistantEntity.entity.state,
+  );
+
   // Extract initial thermostat state from HA entity attributes.
   // These values are passed to Matter.js during registration to prevent
   // NaN validation errors (Matter.js validates BEFORE our initialize() runs).
@@ -234,14 +245,20 @@ export function ClimateDevice(
     // If unavailable (null/undefined), update() will fall back to the
     // target setpoint so controllers don't display 0°C.
     localTemperature: toMatterTemp(attributes.current_temperature),
-    occupiedHeatingSetpoint:
-      toMatterTemp(attributes.target_temp_low) ??
-      toMatterTemp(attributes.temperature) ??
-      2000,
-    occupiedCoolingSetpoint:
-      toMatterTemp(attributes.target_temp_high) ??
-      toMatterTemp(attributes.temperature) ??
-      2400,
+    occupiedHeatingSetpoint: rangeActive
+      ? (toMatterTemp(attributes.target_temp_low) ??
+        toMatterTemp(attributes.temperature) ??
+        2000)
+      : (toMatterTemp(attributes.temperature) ??
+        toMatterTemp(attributes.target_temp_low) ??
+        2000),
+    occupiedCoolingSetpoint: rangeActive
+      ? (toMatterTemp(attributes.target_temp_high) ??
+        toMatterTemp(attributes.temperature) ??
+        2400)
+      : (toMatterTemp(attributes.temperature) ??
+        toMatterTemp(attributes.target_temp_high) ??
+        2400),
     // Use HA's actual min/max limits, fall back to wide range (0-50°C) if not
     // provided. Ordered above so min <= max always holds.
     minHeatSetpointLimit: minLimit,

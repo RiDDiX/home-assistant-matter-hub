@@ -318,33 +318,48 @@ export function applyClimateFreezeForKeepModeOnIdle(
   return computed;
 }
 
+// Temperature range (target_temp_low/high) only works in heat_cool mode.
+// In heat or cool mode, HA expects a single "temperature" value.
+// We must check BOTH the feature flag AND the current HVAC mode.
+export function isTemperatureRangeActive(
+  entity: HomeAssistantEntityState,
+): boolean {
+  const hasFeature = testBit(
+    entity.attributes.supported_features ?? 0,
+    ClimateDeviceFeature.TARGET_TEMPERATURE_RANGE,
+  );
+  const currentMode = entity.state as ClimateHvacMode;
+  const isRangeMode =
+    currentMode === ClimateHvacMode.heat_cool ||
+    currentMode === ClimateHvacMode.auto;
+  return hasFeature && isRangeMode;
+}
+
 const config: ThermostatServerConfig = {
-  // Temperature range (target_temp_low/high) only works in heat_cool mode.
-  // In heat or cool mode, HA expects a single "temperature" value.
-  // We must check BOTH the feature flag AND the current HVAC mode.
-  supportsTemperatureRange: (entity) => {
-    const hasFeature = testBit(
-      entity.attributes.supported_features ?? 0,
-      ClimateDeviceFeature.TARGET_TEMPERATURE_RANGE,
-    );
-    const currentMode = entity.state as ClimateHvacMode;
-    const isRangeMode =
-      currentMode === ClimateHvacMode.heat_cool ||
-      currentMode === ClimateHvacMode.auto;
-    return hasFeature && isRangeMode;
-  },
+  supportsTemperatureRange: isTemperatureRangeActive,
   getMinTemperature: (entity, agent) => getTemp(agent, entity, "min_temp"),
   getMaxTemperature: (entity, agent) => getTemp(agent, entity, "max_temp"),
   getCurrentTemperature: (entity, agent) =>
     getTemp(agent, entity, "current_temperature"),
+  // Outside range mode the range attributes are stale: an integration can park
+  // target_temp_low/high while the mode it actually runs on is "temperature".
+  // Reading them then reports the parked value as the setpoint (#435).
   getTargetHeatingTemperature: (entity, agent) =>
-    getTemp(agent, entity, "target_temp_low") ??
-    getTemp(agent, entity, "target_temperature") ??
-    getTemp(agent, entity, "temperature"),
+    isTemperatureRangeActive(entity)
+      ? (getTemp(agent, entity, "target_temp_low") ??
+        getTemp(agent, entity, "target_temperature") ??
+        getTemp(agent, entity, "temperature"))
+      : (getTemp(agent, entity, "temperature") ??
+        getTemp(agent, entity, "target_temperature") ??
+        getTemp(agent, entity, "target_temp_low")),
   getTargetCoolingTemperature: (entity, agent) =>
-    getTemp(agent, entity, "target_temp_high") ??
-    getTemp(agent, entity, "target_temperature") ??
-    getTemp(agent, entity, "temperature"),
+    isTemperatureRangeActive(entity)
+      ? (getTemp(agent, entity, "target_temp_high") ??
+        getTemp(agent, entity, "target_temperature") ??
+        getTemp(agent, entity, "temperature"))
+      : (getTemp(agent, entity, "temperature") ??
+        getTemp(agent, entity, "target_temperature") ??
+        getTemp(agent, entity, "target_temp_high")),
   getSystemMode: (entity, agent) => {
     const homeAssistant = agent.get(HomeAssistantEntityBehavior);
     const computed = computeSystemMode(entity, agent);
