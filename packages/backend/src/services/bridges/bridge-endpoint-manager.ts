@@ -17,7 +17,11 @@ import { createPluginEndpointType } from "../../plugins/plugin-device-factory.js
 import type { PluginInstaller } from "../../plugins/plugin-installer.js";
 import type { PluginManager } from "../../plugins/plugin-manager.js";
 import type { PluginRegistry } from "../../plugins/plugin-registry.js";
-import type { PluginDevice, PluginMetadata } from "../../plugins/types.js";
+import type {
+  PluginConfigSchema,
+  PluginDevice,
+  PluginMetadata,
+} from "../../plugins/types.js";
 import { isHeapUnderPressure } from "../../utils/log-memory.js";
 import { diagnosticEventBus } from "../diagnostics/diagnostic-event-bus.js";
 import { subscribeEntities } from "../home-assistant/api/subscribe-entities.js";
@@ -381,11 +385,8 @@ export class BridgeEndpointManager extends Service {
     this.pluginManager?.resetPlugin(pluginName);
   }
 
-  getPluginConfigSchema(
-    pluginName: string,
-  ): Record<string, unknown> | undefined {
-    // biome-ignore lint/suspicious/noExplicitAny: PluginConfigSchema is structurally compatible
-    return this.pluginManager?.getConfigSchema(pluginName) as any;
+  getPluginConfigSchema(pluginName: string): PluginConfigSchema | undefined {
+    return this.pluginManager?.getConfigSchema(pluginName);
   }
 
   async updatePluginConfig(

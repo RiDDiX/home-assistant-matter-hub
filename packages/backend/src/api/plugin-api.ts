@@ -3,7 +3,24 @@ import express from "express";
 import { BUILTIN_PLUGIN_NAMES } from "../plugins/builtin/names.js";
 import { PluginInstaller } from "../plugins/plugin-installer.js";
 import { PluginRegistry } from "../plugins/plugin-registry.js";
+import { type PluginConfigSchema, SECRET_UNCHANGED } from "../plugins/types.js";
 import type { BridgeService } from "../services/bridges/bridge-service.js";
+
+// Secret fields never leave the backend; the dialog round-trips the
+// placeholder and updateConfig swaps the stored value back in.
+function redactSecrets(
+  config: Record<string, unknown>,
+  schema: PluginConfigSchema | undefined,
+): Record<string, unknown> {
+  if (!schema) return config;
+  const out = { ...config };
+  for (const [key, prop] of Object.entries(schema.properties)) {
+    if (prop.secret && out[key] != null && out[key] !== "") {
+      out[key] = SECRET_UNCHANGED;
+    }
+  }
+  return out;
+}
 
 const MAX_UPLOAD_BYTES = 50 * 1024 * 1024; // 50 MB
 const BLOCKED_PREFIXES = [
@@ -82,7 +99,10 @@ export function pluginApi(
         version: meta.version,
         source: meta.source,
         enabled: meta.enabled,
-        config: meta.config,
+        config: redactSecrets(
+          meta.config,
+          bridge.getPluginConfigSchema?.(meta.name),
+        ),
         circuitBreaker: info.circuitBreakers[meta.name],
         devices: info.devices
           .filter((d) => d.pluginName === meta.name)

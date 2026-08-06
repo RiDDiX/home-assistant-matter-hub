@@ -8,14 +8,15 @@ import {
   type CircuitBreakerState,
   SafePluginRunner,
 } from "./safe-plugin-runner.js";
-import type {
-  MatterHubPlugin,
-  MatterHubPluginConstructor,
-  PluginConfigSchema,
-  PluginContext,
-  PluginDevice,
-  PluginDomainMapping,
-  PluginMetadata,
+import {
+  type MatterHubPlugin,
+  type MatterHubPluginConstructor,
+  type PluginConfigSchema,
+  type PluginContext,
+  type PluginDevice,
+  type PluginDomainMapping,
+  type PluginMetadata,
+  SECRET_UNCHANGED,
 } from "./types.js";
 
 const logger = Logger.get("PluginManager");
@@ -326,6 +327,10 @@ export class PluginManager {
       } else if (this.runner.getState(name).failures === 0) {
         instance.started = true;
       }
+      // onStart may merge persisted config, keep the listing in sync
+      if (instance.plugin.getCurrentConfig) {
+        instance.metadata.config = instance.plugin.getCurrentConfig();
+      }
     }
   }
 
@@ -438,6 +443,19 @@ export class PluginManager {
   ): Promise<boolean> {
     const instance = this.instances.get(pluginName);
     if (!instance) return false;
+    config = { ...config };
+    // The listing redacts secret fields to the placeholder; a save carrying
+    // it back means "keep what is stored", never store the placeholder itself.
+    const schema = instance.plugin.getConfigSchema?.();
+    if (schema) {
+      for (const [key, prop] of Object.entries(schema.properties)) {
+        if (prop.secret && config[key] === SECRET_UNCHANGED) {
+          const stored = instance.metadata.config[key];
+          if (stored == null) delete config[key];
+          else config[key] = stored;
+        }
+      }
+    }
     instance.metadata.config = config;
     this.registry?.updateConfig(pluginName, config);
     if (instance.plugin.onConfigChanged) {

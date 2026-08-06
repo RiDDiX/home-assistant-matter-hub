@@ -59,6 +59,10 @@ export class CameraPlugin implements MatterHubPlugin {
     await this.teardown();
   }
 
+  getCurrentConfig(): Record<string, unknown> {
+    return { ...this.config };
+  }
+
   getConfigSchema(): PluginConfigSchema {
     return {
       title: "Camera",
@@ -77,6 +81,7 @@ export class CameraPlugin implements MatterHubPlugin {
           description:
             "Leave empty to use the bridge's Home Assistant connection.",
           required: false,
+          secret: true,
         },
         cameras: {
           type: "string",

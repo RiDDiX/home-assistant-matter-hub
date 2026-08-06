@@ -1,6 +1,10 @@
 import type { Logger } from "@matter/general";
 import type { EndpointType } from "@matter/main";
 
+// Stands in for a stored secret on the wire: the listing sends it instead of
+// the real value, and a save carrying it back keeps the stored value.
+export const SECRET_UNCHANGED = "__unchanged__";
+
 /**
  * Configuration schema for plugin settings UI.
  * Uses a simplified JSON Schema subset for frontend rendering.
@@ -16,6 +20,8 @@ export interface PluginConfigSchema {
       description?: string;
       default?: unknown;
       required?: boolean;
+      // Never serve the stored value to the browser, see SECRET_UNCHANGED.
+      secret?: boolean;
       options?: Array<{ label: string; value: string }>;
     }
   >;
@@ -156,6 +162,13 @@ export interface MatterHubPlugin {
 
   /** Optional: JSON schema for plugin config UI */
   getConfigSchema?(): PluginConfigSchema;
+
+  /**
+   * Optional: the config the plugin currently runs with. Plugins that merge
+   * persisted config during onStart report it here so the plugin listing
+   * shows the effective values, not the registration seed.
+   */
+  getCurrentConfig?(): Record<string, unknown>;
 
   /** Called when the user updates plugin config via the UI */
   onConfigChanged?(config: Record<string, unknown>): Promise<void>;

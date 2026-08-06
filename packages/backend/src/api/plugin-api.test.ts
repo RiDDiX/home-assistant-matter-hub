@@ -133,6 +133,77 @@ describe("plugin api with a server mode bridge present (#430)", () => {
   });
 });
 
+describe("secret config values in the listing", () => {
+  const bridgeWithToken = {
+    id: "b1",
+    data: { name: "Bridge One" },
+    getPluginConfigSchema: (name: string) =>
+      name === "camera"
+        ? {
+            title: "Camera",
+            properties: {
+              haToken: { type: "string", title: "Token", secret: true },
+              cameras: { type: "string", title: "Cameras" },
+            },
+          }
+        : undefined,
+    pluginInfo: {
+      metadata: [
+        {
+          name: "camera",
+          version: "1.0.0",
+          source: "builtin",
+          enabled: true,
+          config: { cameras: "camera.x", haToken: "very-secret-token" },
+        },
+      ],
+      circuitBreakers: {},
+      devices: [],
+    },
+  };
+
+  it("never serves a stored secret to the browser", async () => {
+    await withRouter(
+      async (base) => {
+        const res = await fetch(`${base}/plugins`);
+        const body = (await res.json()) as Array<{
+          plugins: Array<{ config: Record<string, unknown> }>;
+        }>;
+        expect(body[0].plugins[0].config).toEqual({
+          cameras: "camera.x",
+          haToken: "__unchanged__",
+        });
+      },
+      [bridgeWithToken],
+    );
+  });
+
+  it("leaves an unset secret alone so the dialog shows it empty", async () => {
+    const noToken = {
+      ...bridgeWithToken,
+      pluginInfo: {
+        ...bridgeWithToken.pluginInfo,
+        metadata: [
+          {
+            ...bridgeWithToken.pluginInfo.metadata[0],
+            config: { cameras: "camera.x" },
+          },
+        ],
+      },
+    };
+    await withRouter(
+      async (base) => {
+        const res = await fetch(`${base}/plugins`);
+        const body = (await res.json()) as Array<{
+          plugins: Array<{ config: Record<string, unknown> }>;
+        }>;
+        expect(body[0].plugins[0].config).toEqual({ cameras: "camera.x" });
+      },
+      [noToken],
+    );
+  });
+});
+
 // #432: the reporter typed "camera", the name of a built-in plugin, into the
 // npm install dialog and npm pulled an unrelated public package.
 function install(base: string, packageName: string): Promise<Response> {
