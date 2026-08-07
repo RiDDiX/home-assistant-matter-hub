@@ -9,6 +9,7 @@ import {
   FanDevice as Device,
   OnOffPlugInUnitDevice,
 } from "@matter/main/devices";
+import { autoPresetName } from "../../../../utils/converters/fan-mode.js";
 import type { FeatureSelection } from "../../../../utils/feature-selection.js";
 import { testBit } from "../../../../utils/test-bit.js";
 import { BasicInformationServer } from "../../../behaviors/basic-information-server.js";
@@ -77,7 +78,7 @@ export function FanDevice(
   }
 
   // Auto only if a preset really is "auto", else HA rejects the "Auto" we send (#387).
-  if (hasPresetMode && presetModes.some((m) => /auto/i.test(m))) {
+  if (hasPresetMode && autoPresetName(presetModes) !== undefined) {
     features.add("Auto");
   }
   if (testBit(supportedFeatures, FanDeviceFeature.DIRECTION)) {

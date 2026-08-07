@@ -1,9 +1,26 @@
+import type { HomeAssistantEntityState } from "@home-assistant-matter-hub/common";
+import type { Agent } from "@matter/main";
 import { describe, expect, it } from "vitest";
 import {
+  climateFanControlConfig,
   rockSettingToSwingMode,
   swingModesToRockSupport,
   swingModeToRockSetting,
 } from "./climate-fan-control-server.js";
+
+function agentFor(attributes: Record<string, unknown>): Agent {
+  const entityState = {
+    entity_id: "climate.test",
+    state: "fan_only",
+    attributes,
+    context: { id: "ctx" },
+    last_changed: "x",
+    last_updated: "x",
+  } as unknown as HomeAssistantEntityState;
+  return {
+    get: () => ({ state: { entity: { state: entityState } } }),
+  } as unknown as Agent;
+}
 
 describe("climate fan rocking", () => {
   it("maps HA swing modes to Matter rock support", () => {
@@ -40,5 +57,26 @@ describe("climate fan rocking", () => {
     expect(
       rockSettingToSwingMode({ rockLeftRight: true, rockUpDown: true }),
     ).toBe("both");
+  });
+});
+
+// #436 review: the Auto feature gate matches fan modes case-insensitively,
+// but setAutoMode sent the literal "auto". HA fan mode names are
+// case-sensitive, so an entity declaring "AUTO" rejected the call.
+describe("climate setAutoMode fan mode casing (#436)", () => {
+  it("sends the entity's own auto fan mode name", () => {
+    const agent = agentFor({ fan_modes: ["AUTO", "Low", "High"] });
+    expect(climateFanControlConfig.setAutoMode(undefined, agent)).toEqual({
+      action: "climate.set_fan_mode",
+      data: { fan_mode: "AUTO" },
+    });
+  });
+
+  it("falls back to the literal when no auto mode is listed", () => {
+    const agent = agentFor({ fan_modes: ["Low", "High"] });
+    expect(climateFanControlConfig.setAutoMode(undefined, agent)).toEqual({
+      action: "climate.set_fan_mode",
+      data: { fan_mode: "auto" },
+    });
   });
 });

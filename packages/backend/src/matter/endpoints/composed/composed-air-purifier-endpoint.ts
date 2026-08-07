@@ -25,6 +25,7 @@ import type { BridgeRegistry } from "../../../services/bridges/bridge-registry.j
 import { EntityStateProvider } from "../../../services/bridges/entity-state-provider.js";
 import { HomeAssistantConfig } from "../../../services/home-assistant/home-assistant-config.js";
 import type { HomeAssistantStates } from "../../../services/home-assistant/home-assistant-registry.js";
+import { autoPresetName } from "../../../utils/converters/fan-mode.js";
 import { Temperature } from "../../../utils/converters/temperature.js";
 import type { FeatureSelection } from "../../../utils/feature-selection.js";
 import { testBit } from "../../../utils/test-bit.js";
@@ -195,13 +196,18 @@ export class ComposedAirPurifierEndpoint extends Endpoint {
     const airPurifierAttributes = primaryPayload.state
       .attributes as AirPurifierAttributes;
     const supportedFeatures = airPurifierAttributes.supported_features ?? 0;
+    const presetModes = airPurifierAttributes.preset_modes ?? [];
     const features: FeatureSelection<typeof FanControl.Cluster> = new Set();
 
     if (testBit(supportedFeatures, FanDeviceFeature.SET_SPEED)) {
       features.add("MultiSpeed");
       features.add("Step");
     }
-    if (testBit(supportedFeatures, FanDeviceFeature.PRESET_MODE)) {
+    // Auto only if a preset really is "auto", else HA rejects the "auto" we send.
+    if (
+      testBit(supportedFeatures, FanDeviceFeature.PRESET_MODE) &&
+      autoPresetName(presetModes) !== undefined
+    ) {
       features.add("Auto");
     }
     if (testBit(supportedFeatures, FanDeviceFeature.DIRECTION)) {
@@ -210,7 +216,6 @@ export class ComposedAirPurifierEndpoint extends Endpoint {
     if (testBit(supportedFeatures, FanDeviceFeature.OSCILLATE)) {
       features.add("Rocking");
     }
-    const presetModes = airPurifierAttributes.preset_modes ?? [];
     const hasWindModes = presetModes.some(
       (m) =>
         m.toLowerCase() === "natural" ||

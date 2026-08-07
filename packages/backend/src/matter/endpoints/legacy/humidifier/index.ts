@@ -1,6 +1,7 @@
 import type { HumidiferDeviceAttributes } from "@home-assistant-matter-hub/common";
 import type { EndpointType } from "@matter/main";
 import { FanDevice as Device } from "@matter/main/devices";
+import { autoPresetName } from "../../../../utils/converters/fan-mode.js";
 import { BasicInformationServer } from "../../../behaviors/basic-information-server.js";
 import { HomeAssistantEntityBehavior } from "../../../behaviors/home-assistant-entity-behavior.js";
 import { IdentifyServer } from "../../../behaviors/identify-server.js";
@@ -53,8 +54,8 @@ export function HumidifierDevice(
     .attributes as HumidiferDeviceAttributes;
 
   // Check if device supports Auto mode
-  const availableModes = attributes.available_modes ?? [];
-  const supportsAuto = availableModes.some((m) => m.toLowerCase() === "auto");
+  const supportsAuto =
+    autoPresetName(attributes.available_modes ?? undefined) !== undefined;
 
   // Check if device has current humidity sensor
   const hasHumiditySensor = attributes.current_humidity != null;

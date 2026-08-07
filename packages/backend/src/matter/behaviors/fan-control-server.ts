@@ -109,10 +109,9 @@ export class FanControlServerBase extends FeaturedBase {
   }
 
   override async initialize() {
-    // fanModeSequence is mandatory. update() writes it through applyPatchState,
-    // which skips values equal to what state already holds, so a computed
-    // sequence matching the cluster default would never be written and
-    // matter.js then fails conformance with "you must set this attribute".
+    // fanModeSequence is mandatory and has no model default, so it is still
+    // unset when update() bails out on an entity without state or attributes,
+    // and matter.js then fails conformance with "you must set this attribute".
     // The seed must match the AUT feature: Matter rejects the non-auto
     // sequences while Auto is present, and the auto ones while it is absent.
     if (this.state.fanModeSequence == null) {
@@ -236,12 +235,10 @@ export class FanControlServerBase extends FeaturedBase {
         presetModes.filter((m) => m.toLowerCase() !== "auto"),
       );
       // Preset-driven fans expose exactly as many speeds as Home Assistant
-      // declares. Padding up to minSpeedMax invents speeds the entity cannot
-      // accept, which controllers then offer to the user.
-      speedMax = Math.max(
-        1,
-        Math.min(maxSpeedMax, speedPresets.length || minSpeedMax),
-      );
+      // declares. Padding invents speeds the entity cannot accept, which
+      // controllers then offer to the user. An auto-only preset list still
+      // reports one speed, Matter requires SpeedMax >= 1.
+      speedMax = Math.max(1, Math.min(maxSpeedMax, speedPresets.length));
 
       // Map current preset to speed level
       if (entity.state.state === "off" || !currentPresetMode) {
@@ -266,10 +263,7 @@ export class FanControlServerBase extends FeaturedBase {
     // causes Apple Home to stay on "Turning off..." indefinitely (#219).
     const isOff = percentage === 0;
 
-    const supportsAuto = presetModes.some(
-      (mode) => mode.toLowerCase() === "auto",
-    );
-    const fanModeSequence = this.getFanModeSequence(speedMax, supportsAuto);
+    const fanModeSequence = this.getFanModeSequence(speedMax);
     // When the fan is off, fanMode MUST be Off regardless of preset_mode.
     // HA fans (especially Dyson) keep preset_mode="Auto" even when off;
     // setting fanMode=Auto + onOff=false causes Apple Home to show
@@ -592,10 +586,11 @@ export class FanControlServerBase extends FeaturedBase {
     });
   }
 
-  private getFanModeSequence(speedCount?: number, hasAuto?: boolean) {
-    // The Auto feature is only compiled in for entities that really offer it;
-    // hasAuto lets callers narrow it further from the entity's preset list.
-    const auto = hasAuto ?? this.features.auto;
+  private getFanModeSequence(speedCount?: number) {
+    // The sequence family must agree with the compiled AUT feature or Matter
+    // rejects the value, so it derives from features.auto alone. Endpoints
+    // decide that feature from the entity's presets via autoPresetName.
+    const auto = this.features.auto;
     if (!this.features.multiSpeed) {
       return auto
         ? FanControl.FanModeSequence.OffHighAuto

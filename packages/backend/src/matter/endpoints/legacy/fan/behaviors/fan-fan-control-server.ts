@@ -7,6 +7,7 @@ import {
 } from "@home-assistant-matter-hub/common";
 import type { Agent } from "@matter/main";
 import { FanControl } from "@matter/main/clusters";
+import { autoPresetName } from "../../../../../utils/converters/fan-mode.js";
 import { testBit } from "../../../../../utils/test-bit.js";
 import {
   FanControlServer,
@@ -48,7 +49,8 @@ export function windSupportFor(
   };
 }
 
-const fanControlConfig: FanControlServerConfig = {
+// Exported for tests.
+export const fanControlConfig: FanControlServerConfig = {
   getPercentage: (state) =>
     state.state === "off" ? 0 : attributes(state).percentage,
   getStepSize: (state) => attributes(state).percentage_step,
@@ -58,7 +60,8 @@ const fanControlConfig: FanControlServerConfig = {
       : attributes(state).current_direction === FanDeviceDirection.REVERSE
         ? FanControl.AirflowDirection.Reverse
         : FanControl.AirflowDirection.Forward,
-  isInAutoMode: (state) => attributes(state).preset_mode === "Auto",
+  isInAutoMode: (state) =>
+    attributes(state).preset_mode?.toLowerCase() === "auto",
   // Preset mode support
   getPresetModes: (state) => attributes(state).preset_modes,
   getCurrentPresetMode: (state) => attributes(state).preset_mode,
@@ -105,7 +108,14 @@ const fanControlConfig: FanControlServerConfig = {
     action: "fan.set_percentage",
     data: { percentage },
   }),
-  setAutoMode: () => ({ action: "fan.turn_on", data: { preset_mode: "Auto" } }),
+  // HA preset names are case-sensitive, so send the entity's own auto preset.
+  setAutoMode: (_, agent) => {
+    const entityState = agent.get(HomeAssistantEntityBehavior).state.entity
+      .state;
+    const presetMode =
+      autoPresetName(attributes(entityState).preset_modes) ?? "Auto";
+    return { action: "fan.turn_on", data: { preset_mode: presetMode } };
+  },
   setAirflowDirection: (direction) => ({
     action: "fan.set_direction",
     data: {

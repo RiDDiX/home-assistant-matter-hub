@@ -1,4 +1,5 @@
 import type {
+  ClimateDeviceAttributes,
   EntityMappingConfig,
   HomeAssistantEntityInformation,
   HomeAssistantEntityState,
@@ -22,6 +23,7 @@ import {
   ClimateCompanionFanControlServer,
   ClimateCompanionFanOnOffServer,
 } from "../legacy/climate/behaviors/climate-companion-fan-control-server.js";
+import { climateSupportsAutoFanMode } from "../legacy/climate/behaviors/climate-fan-control-server.js";
 import { ClimateDevice } from "../legacy/climate/index.js";
 
 const logger = Logger.get("ComposedClimateFanEndpoint");
@@ -112,11 +114,14 @@ export class ComposedClimateFanEndpoint extends Endpoint {
       return undefined;
     }
 
+    const fanAttributes = payload.state.attributes as ClimateDeviceAttributes;
     const fanType = FanDevice.with(
       IdentifyServer,
       HomeAssistantEntityBehavior,
       ClimateCompanionFanOnOffServer,
-      ClimateCompanionFanControlServer(),
+      ClimateCompanionFanControlServer(
+        climateSupportsAutoFanMode(fanAttributes.fan_modes),
+      ),
     ).set({
       homeAssistantEntity: { entity: payload, mapping },
     });

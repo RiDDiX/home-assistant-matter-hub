@@ -4,10 +4,12 @@ import {
   type HomeAssistantEntityState,
 } from "@home-assistant-matter-hub/common";
 import type { HomeAssistantAction } from "../../../../../services/home-assistant/home-assistant-actions.js";
+import { autoPresetName } from "../../../../../utils/converters/fan-mode.js";
 import {
   FanControlServer,
   type FanControlServerConfig,
 } from "../../../../behaviors/fan-control-server.js";
+import { HomeAssistantEntityBehavior } from "../../../../behaviors/home-assistant-entity-behavior.js";
 import { OnOffServer } from "../../../../behaviors/on-off-server.js";
 
 const attributes = (entity: HomeAssistantEntityState) =>
@@ -28,7 +30,8 @@ export function isFanOnly(state: HomeAssistantEntityState): boolean {
   return state.state === ClimateHvacMode.fan_only;
 }
 
-const config: FanControlServerConfig = {
+// Exported for tests.
+export const companionFanControlConfig: FanControlServerConfig = {
   getPercentage: () => undefined,
   getStepSize: () => undefined,
   getAirflowDirection: () => undefined,
@@ -53,10 +56,17 @@ const config: FanControlServerConfig = {
     action: "climate.set_hvac_mode",
     data: { hvac_mode: ClimateHvacMode.fan_only },
   }),
-  setAutoMode: () => ({
-    action: "climate.set_fan_mode",
-    data: { fan_mode: "auto" },
-  }),
+  // HA fan mode names are case-sensitive, send the entity's own auto mode.
+  setAutoMode: (_, agent) => {
+    const entityState = agent.get(HomeAssistantEntityBehavior).state.entity
+      .state;
+    const fanMode =
+      autoPresetName(attributes(entityState).fan_modes ?? undefined) ?? "auto";
+    return {
+      action: "climate.set_fan_mode",
+      data: { fan_mode: fanMode },
+    };
+  },
   setAirflowDirection: () => ({ action: "homeassistant.turn_on" }),
   // Speed change: set the AC fan_mode without leaving fan_only.
   setPresetMode: (presetMode) => ({
@@ -78,12 +88,10 @@ export const ClimateCompanionFanOnOffServer = OnOffServer({
   turnOff: () => fanOffAction(),
 });
 
-const features: ("MultiSpeed" | "Step" | "Auto")[] = [
-  "MultiSpeed",
-  "Step",
-  "Auto",
-];
+const baseFeatures: ("MultiSpeed" | "Step")[] = ["MultiSpeed", "Step"];
 
-export function ClimateCompanionFanControlServer() {
-  return FanControlServer(config).with(...features);
+export function ClimateCompanionFanControlServer(supportsAutoFanMode = true) {
+  return FanControlServer(companionFanControlConfig, {
+    auto: supportsAutoFanMode,
+  }).with(...baseFeatures, ...(supportsAutoFanMode ? (["Auto"] as const) : []));
 }

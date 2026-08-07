@@ -2,11 +2,13 @@ import type {
   ClimateDeviceAttributes,
   HomeAssistantEntityState,
 } from "@home-assistant-matter-hub/common";
+import { autoPresetName } from "../../../../../utils/converters/fan-mode.js";
 import {
   type FanControlRockSetting,
   FanControlServer,
   type FanControlServerConfig,
 } from "../../../../behaviors/fan-control-server.js";
+import { HomeAssistantEntityBehavior } from "../../../../behaviors/home-assistant-entity-behavior.js";
 
 const attributes = (entity: HomeAssistantEntityState) =>
   entity.attributes as ClimateDeviceAttributes;
@@ -51,7 +53,8 @@ export function rockSettingToSwingMode(setting: FanControlRockSetting): string {
   return "off";
 }
 
-const config: FanControlServerConfig = {
+// Exported for tests.
+export const climateFanControlConfig: FanControlServerConfig = {
   getPercentage: () => undefined,
   getStepSize: () => undefined,
   getAirflowDirection: () => undefined,
@@ -85,10 +88,17 @@ const config: FanControlServerConfig = {
     action: "climate.set_fan_mode",
     data: { fan_mode: "on" },
   }),
-  setAutoMode: () => ({
-    action: "climate.set_fan_mode",
-    data: { fan_mode: "auto" },
-  }),
+  // HA fan mode names are case-sensitive, send the entity's own auto mode.
+  setAutoMode: (_, agent) => {
+    const entityState = agent.get(HomeAssistantEntityBehavior).state.entity
+      .state;
+    const fanMode =
+      autoPresetName(attributes(entityState).fan_modes ?? undefined) ?? "auto";
+    return {
+      action: "climate.set_fan_mode",
+      data: { fan_mode: fanMode },
+    };
+  },
   setAirflowDirection: () => ({
     action: "homeassistant.turn_on",
   }),
@@ -115,14 +125,14 @@ const baseFeatures: ("MultiSpeed" | "Step")[] = ["MultiSpeed", "Step"];
 export function climateSupportsAutoFanMode(
   fanModes: string[] | null | undefined,
 ): boolean {
-  return (fanModes ?? []).some((mode) => mode.toLowerCase() === "auto");
+  return autoPresetName(fanModes ?? undefined) !== undefined;
 }
 
 export function ClimateFanControlServer(
   rockSupport: FanControlRockSetting | undefined,
   supportsAutoFanMode = true,
 ) {
-  return FanControlServer(config, {
+  return FanControlServer(climateFanControlConfig, {
     rockSupport: rockSupport ?? { rockUpDown: true },
     auto: supportsAutoFanMode,
   }).with(
