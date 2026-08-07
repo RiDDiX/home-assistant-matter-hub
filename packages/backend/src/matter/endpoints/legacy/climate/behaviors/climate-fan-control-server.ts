@@ -109,16 +109,25 @@ const config: FanControlServerConfig = {
   }),
 };
 
-const features: ("MultiSpeed" | "Step" | "Auto")[] = [
-  "MultiSpeed",
-  "Step",
-  "Auto",
-];
+const baseFeatures: ("MultiSpeed" | "Step")[] = ["MultiSpeed", "Step"];
+
+/** True when the climate entity declares an "auto" fan mode. */
+export function climateSupportsAutoFanMode(
+  fanModes: string[] | null | undefined,
+): boolean {
+  return (fanModes ?? []).some((mode) => mode.toLowerCase() === "auto");
+}
 
 export function ClimateFanControlServer(
   rockSupport: FanControlRockSetting | undefined,
+  supportsAutoFanMode = true,
 ) {
   return FanControlServer(config, {
     rockSupport: rockSupport ?? { rockUpDown: true },
-  }).with(...features, ...(rockSupport ? (["Rocking"] as const) : []));
+    auto: supportsAutoFanMode,
+  }).with(
+    ...baseFeatures,
+    ...(supportsAutoFanMode ? (["Auto"] as const) : []),
+    ...(rockSupport ? (["Rocking"] as const) : []),
+  );
 }
