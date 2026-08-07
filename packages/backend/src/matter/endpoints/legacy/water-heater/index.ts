@@ -22,7 +22,7 @@ const WaterHeaterDeviceType = ThermostatDevice.with(
  * Convert HA temperature to Matter temperature (0.01°C units).
  * Returns undefined if value is null/undefined/invalid.
  */
-function toMatterTemp(
+export function toMatterTemp(
   value: string | number | null | undefined,
 ): number | undefined {
   if (value == null) return undefined;

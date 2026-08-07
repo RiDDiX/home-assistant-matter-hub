@@ -75,6 +75,7 @@ import { MountedOnOffControlType } from "./switch/mounted-on-off-control.js";
 import { VacuumDevice } from "./vacuum/index.js";
 import { ValveDevice } from "./valve/index.js";
 import { WaterHeaterDevice } from "./water-heater/index.js";
+import { WaterHeaterManagementDevice } from "./water-heater/water-heater-management-device.js";
 import { WeatherDevice } from "./weather/index.js";
 
 const legacyLogger = Logger.get("LegacyEndpointType");
@@ -359,6 +360,7 @@ const matterDeviceTypeFactories: Partial<
   pump: PumpEndpoint,
   rain_sensor: (ha) => RainSensorType.set({ homeAssistantEntity: ha }),
   water_heater: WaterHeaterDevice,
+  water_heater_management: WaterHeaterManagementDevice,
   generic_switch: EventDevice,
   smoke_co_alarm: (ha) => SmokeAlarmType.set({ homeAssistantEntity: ha }),
   water_freeze_detector: (ha) =>
