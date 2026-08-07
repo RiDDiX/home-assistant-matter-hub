@@ -95,7 +95,7 @@ Re-assign the affected devices to their rooms after they reconnect. See the [doc
 - 📷 **Camera bridges enable Matter-over-TCP** for SmartThings live view, and camera endpoints set the mandatory AV stream attributes ([#419](https://github.com/RiDDiX/home-assistant-matter-hub/issues/419))
 - 🔧 **Valve and cover overrides route On/Off to their services** ([#65](https://github.com/RiDDiX/home-assistant-matter-hub/issues/65))
 - 🌍 **Brazilian Portuguese** added ([#420](https://github.com/RiDDiX/home-assistant-matter-hub/issues/420))
-- 🧵 **matter.js 0.17.7**
+- 🧵 **matter.js 0.17.9**
 - ⬆️ Dependency vulnerabilities resolved (websocket-driver, react-router 8, fast-uri, js-yaml and friends)
 
 **Previously in v2.0.49:**
@@ -129,7 +129,7 @@ Re-assign the affected devices to their rooms after they reconnect. See the [doc
 - 🖥️ **Standalone (non-vacuum) devices in server mode**, plus `lawn_mower` entities exposed as a robotic mower
 - 🪟 Cover exposed as a **dimmable light** for Alexa routines ([#372](https://github.com/RiDDiX/home-assistant-matter-hub/issues/372)), per-entity **update throttle** ([#351](https://github.com/RiDDiX/home-assistant-matter-hub/issues/351)), **charging-state sensor** mapping ([#377](https://github.com/RiDDiX/home-assistant-matter-hub/issues/377))
 - 📷 Experimental built-in **WebRTC camera plugin** (SmartThings-only, media path not verified yet)
-- 🧵 **matter.js 0.17.7**
+- 🧵 **matter.js 0.17.9**
 
 **Previously in v2.0.46:**
 
