@@ -25,6 +25,22 @@ class WaterHeaterModeServerBase extends Base {
   declare state: WaterHeaterModeServerBase.State;
 
   override async initialize() {
+    // currentMode is quality N: a value stored by an earlier run overrides the
+    // seeded default. When that mode has left operation_list since, the base
+    // server's assertMode would brick the endpoint, so clamp it first.
+    if (
+      !this.state.supportedModes.some((m) => m.mode === this.state.currentMode)
+    ) {
+      const entityState = (await this.agent.load(HomeAssistantEntityBehavior))
+        .entity.state;
+      this.state.currentMode = entityState?.attributes
+        ? currentMode(
+            this.state.mapping,
+            entityState.state,
+            entityState.attributes as WaterHeaterDeviceAttributes,
+          )
+        : this.state.mapping.manualMode;
+    }
     await super.initialize();
     const homeAssistant = await this.agent.load(HomeAssistantEntityBehavior);
     this.update(homeAssistant.entity);

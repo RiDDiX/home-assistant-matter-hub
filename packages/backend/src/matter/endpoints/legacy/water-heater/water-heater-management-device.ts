@@ -6,6 +6,7 @@ import { BasicInformationServer } from "../../../behaviors/basic-information-ser
 import { HomeAssistantEntityBehavior } from "../../../behaviors/home-assistant-entity-behavior.js";
 import { IdentifyServer } from "../../../behaviors/identify-server.js";
 import { ThermostatUiConfigServer } from "../../../behaviors/thermostat-ui-config-server.js";
+import { WaterHeaterBoostMemoryBehavior } from "./behaviors/water-heater-boost-memory.js";
 import { WaterHeaterManagementServer } from "./behaviors/water-heater-management-server.js";
 import { WaterHeaterModeServer } from "./behaviors/water-heater-mode-server.js";
 import { WaterHeaterThermostatServer } from "./behaviors/water-heater-thermostat-server.js";
@@ -57,6 +58,7 @@ export function WaterHeaterManagementDevice(
     WaterHeaterThermostatServer,
     ThermostatUiConfigServer,
     WaterHeaterManagementServer(modeMapping, heaterTypes(attributes)),
+    WaterHeaterBoostMemoryBehavior,
     WaterHeaterModeServer(modeMapping, initialMode),
   ).set({
     homeAssistantEntity,

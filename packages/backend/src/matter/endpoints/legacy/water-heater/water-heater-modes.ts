@@ -97,6 +97,34 @@ export interface WaterHeaterModeMapping {
   readonly boostOperationMode?: string;
 }
 
+/**
+ * Integrations disagree on casing ("Eco", "High Demand"), the mode tables are
+ * HA snake_case. Labels and HA service calls keep the entity's own spelling.
+ */
+export function normalizeOperationMode(operationMode: string): string {
+  return operationMode.toLowerCase().replaceAll(" ", "_");
+}
+
+function isOffMode(operationMode: string): boolean {
+  return normalizeOperationMode(operationMode) === WaterHeaterOperationMode.off;
+}
+
+/** First preference present in the list, in the list's original casing. */
+function preferred(
+  preference: string[],
+  operationModes: string[],
+): string | undefined {
+  for (const wanted of preference) {
+    const match = operationModes.find(
+      (mode) => normalizeOperationMode(mode) === wanted,
+    );
+    if (match != null) {
+      return match;
+    }
+  }
+  return undefined;
+}
+
 function humanize(operationMode: string): string {
   const label = operationMode
     .split("_")
@@ -119,16 +147,12 @@ export function buildModeMapping(
   const operationList = (attributes.operation_list ?? []).filter(
     (mode): mode is string => typeof mode === "string" && mode.length > 0,
   );
-  const heatingModes = operationList.filter(
-    (mode) => mode !== WaterHeaterOperationMode.off,
-  );
+  const heatingModes = operationList.filter((mode) => !isOffMode(mode));
 
   const haOperationModes: Record<number, string | null> = {
     // Off is synthesized when HA does not list it, and then falls back to
     // water_heater.turn_off.
-    [OFF_MODE]: operationList.includes(WaterHeaterOperationMode.off)
-      ? WaterHeaterOperationMode.off
-      : null,
+    [OFF_MODE]: operationList.find(isOffMode) ?? null,
   };
 
   const supportedModes: WaterHeaterMode.ModeOption[] = [
@@ -139,12 +163,10 @@ export function buildModeMapping(
     },
   ];
 
-  const manualOperationMode = MANUAL_PREFERENCE.find((mode) =>
-    heatingModes.includes(mode),
-  );
+  const manualOperationMode = preferred(MANUAL_PREFERENCE, heatingModes);
   const manualMode =
     manualOperationMode != null
-      ? KNOWN_MODE_VALUES[manualOperationMode]
+      ? KNOWN_MODE_VALUES[normalizeOperationMode(manualOperationMode)]
       : SYNTHETIC_MANUAL_MODE;
 
   if (manualOperationMode == null) {
@@ -160,7 +182,8 @@ export function buildModeMapping(
 
   let nextUnknownMode = UNKNOWN_MODE_BASE;
   for (const operationMode of heatingModes) {
-    const mode = KNOWN_MODE_VALUES[operationMode] ?? nextUnknownMode++;
+    const normalized = normalizeOperationMode(operationMode);
+    const mode = KNOWN_MODE_VALUES[normalized] ?? nextUnknownMode++;
     if (haOperationModes[mode] !== undefined) {
       // Duplicate entry in operation_list, keep the first.
       continue;
@@ -174,7 +197,7 @@ export function buildModeMapping(
           value:
             operationMode === manualOperationMode
               ? WaterHeaterMode.ModeTag.Manual
-              : (MODE_TAGS[operationMode] ?? WaterHeaterMode.ModeTag.Auto),
+              : (MODE_TAGS[normalized] ?? WaterHeaterMode.ModeTag.Auto),
         },
       ],
     });
@@ -184,9 +207,7 @@ export function buildModeMapping(
     supportedModes,
     haOperationModes,
     manualMode,
-    boostOperationMode: BOOST_PREFERENCE.find((mode) =>
-      heatingModes.includes(mode),
-    ),
+    boostOperationMode: preferred(BOOST_PREFERENCE, heatingModes),
   };
 }
 
@@ -196,18 +217,20 @@ export function currentMode(
   entityState: string,
   attributes: WaterHeaterDeviceAttributes,
 ): number {
-  if (entityState === WaterHeaterOperationMode.off) {
+  if (isOffMode(entityState)) {
     return OFF_MODE;
   }
   const operationMode = attributes.operation_mode;
-  if (operationMode === WaterHeaterOperationMode.off) {
+  if (operationMode == null) {
+    return mapping.manualMode;
+  }
+  if (isOffMode(operationMode)) {
     return OFF_MODE;
   }
-  if (operationMode != null) {
-    for (const [mode, haMode] of Object.entries(mapping.haOperationModes)) {
-      if (haMode === operationMode) {
-        return Number(mode);
-      }
+  const normalized = normalizeOperationMode(operationMode);
+  for (const [mode, haMode] of Object.entries(mapping.haOperationModes)) {
+    if (haMode != null && normalizeOperationMode(haMode) === normalized) {
+      return Number(mode);
     }
   }
   return mapping.manualMode;
@@ -219,7 +242,10 @@ export function heaterTypes(
 ): WaterHeaterManagement.WaterHeaterHeatSource {
   const sources: WaterHeaterManagement.WaterHeaterHeatSource = {};
   for (const operationMode of attributes.operation_list ?? []) {
-    const source = operationMode != null ? HEAT_SOURCES[operationMode] : null;
+    const source =
+      typeof operationMode === "string"
+        ? HEAT_SOURCES[normalizeOperationMode(operationMode)]
+        : null;
     if (source) {
       sources[source] = true;
     }
@@ -236,7 +262,10 @@ export function activeHeatSource(
   attributes: WaterHeaterDeviceAttributes,
 ): WaterHeaterManagement.WaterHeaterHeatSource {
   const operationMode = attributes.operation_mode;
-  const source = operationMode != null ? HEAT_SOURCES[operationMode] : null;
+  const source =
+    typeof operationMode === "string"
+      ? HEAT_SOURCES[normalizeOperationMode(operationMode)]
+      : null;
   if (source) {
     return { [source]: true };
   }

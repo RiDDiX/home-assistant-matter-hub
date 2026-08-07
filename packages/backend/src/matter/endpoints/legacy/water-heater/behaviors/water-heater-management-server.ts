@@ -17,8 +17,10 @@ import { Temperature } from "../../../../../utils/converters/temperature.js";
 import { HomeAssistantEntityBehavior } from "../../../../behaviors/home-assistant-entity-behavior.js";
 import {
   activeHeatSource,
+  normalizeOperationMode,
   type WaterHeaterModeMapping,
 } from "../water-heater-modes.js";
+import { WaterHeaterBoostMemoryBehavior } from "./water-heater-boost-memory.js";
 
 const logger = Logger.get("WaterHeaterManagementServer");
 
@@ -41,6 +43,12 @@ interface BoostSession {
   /** Boost target in HA units, used for the OneShot cut-off. */
   boostTarget?: number;
   oneShot: boolean;
+  /**
+   * HA confirms set_operation_mode asynchronously, so the first state events
+   * after Boost may still carry the pre-boost mode. Only once the entity has
+   * been seen in the boost mode does a different mode mean an external cancel.
+   */
+  observedInBoostMode: boolean;
 }
 
 const boostSessions = new WeakMap<object, BoostSession>();
@@ -82,8 +90,47 @@ class WaterHeaterManagementServerBase extends Base {
   override async initialize() {
     await super.initialize();
     const homeAssistant = await this.agent.load(HomeAssistantEntityBehavior);
+    await this.resumeBoostAfterRestart();
     this.update(homeAssistant.entity);
     this.reactTo(homeAssistant.onChange, this.update, { offline: true });
+  }
+
+  /**
+   * Pick a boost that spanned a bridge restart back up from the persisted
+   * memory. A OneShot boost and an expired one end right here with the usual
+   * restore, a still-running one gets its session and timer back.
+   */
+  private async resumeBoostAfterRestart() {
+    const memory = (await this.agent.load(WaterHeaterBoostMemoryBehavior))
+      .state;
+    if (!memory.active || boostSessions.has(this.endpoint)) {
+      return;
+    }
+    const session: BoostSession = {
+      // Whether a OneShot target was reached during the downtime is
+      // unknowable, so a OneShot boost always ends with the restart.
+      oneShot: false,
+      previousOperationMode: memory.previousOperationMode || undefined,
+      restoreTemperature: memory.hasRestoreTemperature
+        ? memory.restoreTemperature
+        : undefined,
+      // The pre-restart run already saw HA confirm the boost mode.
+      observedInBoostMode: true,
+    };
+    boostSessions.set(this.endpoint, session);
+
+    const expired = memory.expiresAt > 0 && memory.expiresAt <= Date.now();
+    if (memory.oneShot || expired) {
+      this.endBoost({ restoreMode: true });
+      return;
+    }
+
+    applyPatchState(this.state, {
+      boostState: WaterHeaterManagement.BoostState.Active,
+    });
+    if (memory.expiresAt > 0) {
+      this.armBoostTimer((memory.expiresAt - Date.now()) / 1000);
+    }
   }
 
   override async [Symbol.asyncDispose]() {
@@ -106,8 +153,11 @@ class WaterHeaterManagementServerBase extends Base {
     }
     const attributes = entity.state.attributes as WaterHeaterDeviceAttributes;
     const isOff =
-      entity.state.state === WaterHeaterOperationMode.off ||
-      attributes.operation_mode === WaterHeaterOperationMode.off;
+      normalizeOperationMode(entity.state.state) ===
+        WaterHeaterOperationMode.off ||
+      (attributes.operation_mode != null &&
+        normalizeOperationMode(attributes.operation_mode) ===
+          WaterHeaterOperationMode.off);
 
     const session = boostSessions.get(this.endpoint);
     const boosting =
@@ -116,9 +166,22 @@ class WaterHeaterManagementServerBase extends Base {
     if (boosting && session) {
       // The boost ends when Home Assistant leaves the boost mode behind our
       // back, and — for a OneShot boost — once the water is up to temperature.
+      // HA confirms set_operation_mode asynchronously though, so events that
+      // still carry the pre-boost mode do not count until the entity has been
+      // seen in the boost mode once.
+      // boostOperationMode keeps operation_list's casing, state updates may
+      // report the mode differently ("High Demand" vs "high_demand").
       const boostMode = this.state.mapping.boostOperationMode;
-      const leftBoostMode =
-        isOff || (boostMode != null && attributes.operation_mode !== boostMode);
+      const inBoostMode =
+        !isOff &&
+        (boostMode == null ||
+          (attributes.operation_mode != null &&
+            normalizeOperationMode(attributes.operation_mode) ===
+              normalizeOperationMode(boostMode)));
+      if (inBoostMode) {
+        session.observedInBoostMode = true;
+      }
+      const leftBoostMode = session.observedInBoostMode && !inBoostMode;
       const current = numeric(attributes.current_temperature);
       const target = session.boostTarget ?? numeric(attributes.temperature);
       const reachedTarget =
@@ -128,7 +191,7 @@ class WaterHeaterManagementServerBase extends Base {
         current >= target;
 
       if (leftBoostMode || reachedTarget) {
-        this.endBoost({ restore: reachedTarget });
+        this.endBoost({ restoreMode: reachedTarget });
         return;
       }
     }
@@ -157,11 +220,6 @@ class WaterHeaterManagementServerBase extends Base {
     const attributes = this.attributes;
     const info = request.boostInfo;
 
-    // A fresh Boost supersedes a running one, but must not overwrite the
-    // pre-boost mode we still owe a restore to.
-    const running = boostSessions.get(this.endpoint);
-    clearBoostTimer(this.endpoint);
-
     // TargetPercentage and TargetReheat are conformant only under the
     // TankPercent feature, which this server does not support. The spec and the
     // reference implementation both reject the command rather than ignore the
@@ -172,6 +230,16 @@ class WaterHeaterManagementServerBase extends Base {
         StatusCode.InvalidCommand,
       );
     }
+    if (info.temporarySetpoint != null) {
+      this.assertSetpointInRange(info.temporarySetpoint);
+    }
+
+    // A fresh Boost supersedes a running one, but must not overwrite the
+    // pre-boost mode we still owe a restore to. Teardown only after the
+    // request validated: a rejected Boost must leave the running one, and
+    // above all its expiry timer, untouched.
+    const running = boostSessions.get(this.endpoint);
+    clearBoostTimer(this.endpoint);
 
     const session: BoostSession = {
       oneShot: info.oneShot === true,
@@ -180,6 +248,7 @@ class WaterHeaterManagementServerBase extends Base {
         attributes.operation_mode ??
         undefined,
       restoreTemperature: running?.restoreTemperature,
+      observedInBoostMode: false,
     };
 
     const actions: HomeAssistantAction[] = [];
@@ -195,7 +264,6 @@ class WaterHeaterManagementServerBase extends Base {
     }
 
     if (info.temporarySetpoint != null) {
-      this.assertSetpointInRange(info.temporarySetpoint);
       const temperature = Temperature.celsius(info.temporarySetpoint / 100);
       if (temperature) {
         const value = temperature.toUnit(this.unit);
@@ -212,6 +280,7 @@ class WaterHeaterManagementServerBase extends Base {
     }
 
     boostSessions.set(this.endpoint, session);
+    this.saveBoostMemory(session, info.duration);
     for (const action of actions) {
       homeAssistant.callAction(action);
     }
@@ -265,22 +334,23 @@ class WaterHeaterManagementServerBase extends Base {
     ) {
       return;
     }
-    this.endBoost({ restore: true });
+    this.endBoost({ restoreMode: true });
   }
 
   /**
    * Stop the boost and put the entity back the way it was.
    *
-   * restore: false skips the Home Assistant calls, for the case where HA itself
-   * already moved the entity off the boost mode and re-applying the old mode
-   * would fight the user.
+   * restoreMode: false skips only the operation-mode restore, for the case
+   * where HA itself already moved the entity off the boost mode and
+   * re-applying the old mode would fight the user. The temporary setpoint
+   * override is ours in every case and always goes back.
    */
-  private endBoost(options: { restore: boolean }) {
+  private endBoost(options: { restoreMode: boolean }) {
     clearBoostTimer(this.endpoint);
     const session = boostSessions.get(this.endpoint);
     boostSessions.delete(this.endpoint);
 
-    if (options.restore && session) {
+    if (session) {
       const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);
       if (session.restoreTemperature != null) {
         homeAssistant.callAction({
@@ -288,7 +358,7 @@ class WaterHeaterManagementServerBase extends Base {
           data: { temperature: session.restoreTemperature },
         });
       }
-      if (session.previousOperationMode != null) {
+      if (options.restoreMode && session.previousOperationMode != null) {
         homeAssistant.callAction({
           action: "water_heater.set_operation_mode",
           data: { operation_mode: session.previousOperationMode },
@@ -296,10 +366,37 @@ class WaterHeaterManagementServerBase extends Base {
       }
     }
 
+    this.clearBoostMemory();
     applyPatchState(this.state, {
       boostState: WaterHeaterManagement.BoostState.Inactive,
     });
     this.events.boostEnded.emit(undefined, this.context);
+  }
+
+  /** Mirror the restore data into quality N state, see resumeBoostAfterRestart. */
+  private saveBoostMemory(session: BoostSession, durationSeconds: number) {
+    const delay = durationSeconds * 1000;
+    const bounded =
+      Number.isFinite(delay) && delay > 0 && delay <= MAX_TIMER_MS;
+    applyPatchState(this.agent.get(WaterHeaterBoostMemoryBehavior).state, {
+      active: true,
+      previousOperationMode: session.previousOperationMode ?? "",
+      hasRestoreTemperature: session.restoreTemperature != null,
+      restoreTemperature: session.restoreTemperature ?? 0,
+      expiresAt: bounded ? Date.now() + delay : 0,
+      oneShot: session.oneShot,
+    });
+  }
+
+  private clearBoostMemory() {
+    applyPatchState(this.agent.get(WaterHeaterBoostMemoryBehavior).state, {
+      active: false,
+      previousOperationMode: "",
+      hasRestoreTemperature: false,
+      restoreTemperature: 0,
+      expiresAt: 0,
+      oneShot: false,
+    });
   }
 
   /** Auto-cancel once the requested boost duration is up. */
@@ -320,7 +417,7 @@ class WaterHeaterManagementServerBase extends Base {
           await endpoint.act((agent) => {
             agent
               .get(WaterHeaterManagementServerBase)
-              .endBoost({ restore: true });
+              .endBoost({ restoreMode: true });
           });
         } catch (error) {
           logger.debug(
