@@ -42,6 +42,7 @@ Rows flagged with a footnote number link to the vendor source that establishes t
 | `valve` | WaterValve | ❌ [⁵](#sources) | ❌ [¹](#sources) | ❌ [²](#sources) | ✅ [⁴](#sources) | ❓ |
 | `vacuum` | RoboticVacuumCleaner | ✅ [³](#sources)[⁵](#sources) | ✅ [¹](#sources) | ✅* [²](#sources) | ✅ [⁴](#sources) | ❓ |
 | `water_heater` | Thermostat | ✅ | ✅ | ✅ | ✅ [⁴](#sources) | ❓ |
+| `water_heater` (override) | WaterHeater (Matter 1.4) | ❌ | ❌ | ❓ | ❓ | ❓ |
 | `alarm_control_panel` | ModeSelect | ❌ [⁵](#sources) | ❓ | ❌** | ❓ | ❓ |
 | `select` | ModeSelect | ❌ [⁵](#sources) | ❌*** | ❌** | ❓ | ❓ |
 | `event` | GenericSwitch | ✅ [⁵](#sources) | ❓ | ✅ [²](#sources) | ❓ | ❓ |
@@ -51,6 +52,16 @@ Rows flagged with a footnote number link to the vendor source that establishes t
 
 :::note EnergyEvse is opt-in and bridge-sensitive
 EnergyEvse (0x050C) is only used when you set the Matter device type to "EV Charger (EVSE)" by hand. Home Assistant and Aqara Home render it; SmartThings announced support but it is unconfirmed here. A bridged EVSE has been reported to break Alexa device recognition, so keep it off any bridge that Alexa pairs with. See [mapping blueprints](./mapping-blueprints.md#ev-charger-evse).
+:::
+
+:::note The Matter 1.4 water heater is opt-in
+By default a `water_heater` entity is exposed as a plain heating Thermostat, which every controller
+renders. Setting the Matter device type to "Water Heater with Boost (Matter 1.4)" by hand swaps the
+endpoint to WaterHeater (0x050F) with the WaterHeaterManagement (cluster revision 2), WaterHeaterMode
+and Thermostat clusters, which adds the Boost and CancelBoost commands for energy-management
+controllers. No
+mainstream controller renders 0x050F today, and changing the type on an already-paired entity
+requires re-pairing it. See [mapping blueprints](./mapping-blueprints.md).
 :::
 
 :::note Leak and freeze detectors are opt-in

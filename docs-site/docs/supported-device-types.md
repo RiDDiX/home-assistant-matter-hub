@@ -597,6 +597,7 @@ You can override the default device type mapping per entity using the Entity Map
 - AirQualitySensor, BatteryStorage, TVOCSensor
 - WaterValve, Pump
 - WaterHeater
+- WaterHeaterManagement — "Water Heater with Boost (Matter 1.4)", the 0x050F device type with the WaterHeaterManagement (Boost / CancelBoost), WaterHeaterMode and heating Thermostat clusters. Opt-in: it is aimed at energy-management controllers, no mainstream controller renders 0x050F yet, and switching an already-paired entity to it needs a re-pair
 - Dishwasher
 - GenericSwitch
 - SmokeCO Alarm, Water Leak Detector, Water Freeze Detector

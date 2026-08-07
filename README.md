@@ -390,7 +390,7 @@ Matter Bridge, Multi-Fabric support, Health Monitoring, Bridge Wizard, AirQualit
 | `vacuum` | Robot Vacuum Cleaner | `serverMode`, `roomEntities`, `batteryEntity`, `cleaningModeEntity`, `suctionLevelEntity`, `mopIntensityEntity`, `customServiceAreas`, `vacuumMinimalClusters`, `chargingStateEntity` ([#377](https://github.com/RiDDiX/home-assistant-matter-hub/issues/377)) |
 | `lawn_mower` | Robotic Lawn Mower (RVC-based) | reuses the robot-vacuum flags ([#301](https://github.com/RiDDiX/home-assistant-matter-hub/issues/301)) |
 | `humidifier` | Humidifier/Dehumidifier | |
-| `water_heater` | Thermostat (Heating) | |
+| `water_heater` | Thermostat (Heating) | Optional `water_heater_management` override exposes the Matter 1.4 Water Heater (0x050F) with WaterHeaterManagement Boost/CancelBoost, WaterHeaterMode and a heating Thermostat |
 | `automation`, `script`, `scene` | On/Off Switch | The per-entity "On/Off Switch" override now produces a real `0x0100` On/Off Light (controllers render a switch), needs a one-time re-pair, and no longer carries power/energy fields ([#380](https://github.com/RiDDiX/home-assistant-matter-hub/issues/380)) |
 
 > 📖 See [Supported Device Types Documentation](https://riddix.github.io/home-assistant-matter-hub/supported-device-types) for details

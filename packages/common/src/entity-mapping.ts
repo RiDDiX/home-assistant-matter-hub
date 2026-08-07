@@ -46,6 +46,7 @@ export type MatterDeviceType =
   | "thermostat"
   | "tvoc_sensor"
   | "water_heater"
+  | "water_heater_management"
   | "water_freeze_detector"
   | "water_leak_detector"
   | "water_valve"
@@ -538,6 +539,7 @@ export const matterDeviceTypeLabels: Record<MatterDeviceType, string> = {
   thermostat: "Thermostat",
   tvoc_sensor: "TVOC / VOC Index Sensor",
   water_heater: "Water Heater",
+  water_heater_management: "Water Heater with Boost (Matter 1.4)",
   water_freeze_detector: "Water Freeze Detector",
   water_leak_detector: "Water Leak Detector",
   water_valve: "Water Valve",
@@ -794,6 +796,13 @@ export const matterDeviceTypeControllerSupport: Record<
     note: "Apple added leak sensors in iOS 18.4.",
   },
   water_heater: { apple: "no", google: "no", alexa: "unknown", aqara: "yes" },
+  water_heater_management: {
+    apple: "no",
+    google: "no",
+    alexa: "unknown",
+    aqara: "unknown",
+    note: "Matter 1.4 Water Heater (0x050F) with WaterHeaterManagement Boost/CancelBoost. Energy-management controllers only, no mainstream controller renders it yet.",
+  },
   generic_switch: {
     apple: "partial",
     google: "no",
@@ -902,5 +911,5 @@ export const domainToDefaultMatterTypes: Partial<
   ],
   vacuum: ["robot_vacuum_cleaner"],
   valve: ["water_valve", "on_off_plugin_unit"],
-  water_heater: ["water_heater", "thermostat"],
+  water_heater: ["water_heater", "water_heater_management", "thermostat"],
 };
