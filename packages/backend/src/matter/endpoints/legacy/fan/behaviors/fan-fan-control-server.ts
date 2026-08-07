@@ -27,6 +27,27 @@ const isEnglishNatural = (m: string) => {
 };
 const isEnglishSleep = (m: string) => m.toLowerCase() === "sleep";
 
+/**
+ * Which wind modes an entity really offers, derived from its preset_modes.
+ * Matter's WindSupport is a claim about the device: advertising a mode the
+ * entity lacks makes controllers offer it, and Home Assistant then rejects
+ * the resulting fan.set_preset_mode call.
+ */
+export function windSupportFor(
+  presetModes: string[] | undefined,
+  presets: FanWindPresets,
+): { naturalWind: boolean; sleepWind: boolean } {
+  const modes = presetModes ?? [];
+  return {
+    naturalWind: modes.some(
+      (m) => isEnglishNatural(m) || !!presets.natural?.includes(m),
+    ),
+    sleepWind: modes.some(
+      (m) => isEnglishSleep(m) || !!presets.sleep?.includes(m),
+    ),
+  };
+}
+
 const fanControlConfig: FanControlServerConfig = {
   getPercentage: (state) =>
     state.state === "off" ? 0 : attributes(state).percentage,
@@ -75,6 +96,9 @@ const fanControlConfig: FanControlServerConfig = {
         !!presets.sleep?.includes(m),
     );
   },
+  // Advertise only the wind modes this entity really has (#fan-modes).
+  getWindSupport: (state, agent) =>
+    windSupportFor(attributes(state).preset_modes, windPresets(agent)),
 
   turnOff: () => ({ action: "fan.turn_off" }),
   turnOn: (percentage) => ({

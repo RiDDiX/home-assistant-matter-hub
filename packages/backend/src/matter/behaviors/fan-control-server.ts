@@ -7,7 +7,10 @@ import {
 } from "@matter/main/behaviors";
 import { FanControl } from "@matter/main/clusters";
 import { applyPatchState } from "../../utils/apply-patch-state.js";
-import { FanMode } from "../../utils/converters/fan-mode.js";
+import {
+  FanMode,
+  fanModeSequenceFor,
+} from "../../utils/converters/fan-mode.js";
 import {
   percentToPresetIndex,
   toAscendingSpeedPresets,
@@ -33,11 +36,14 @@ export interface FanControlRockSetting {
   rockRound?: boolean;
 }
 
+// Auto is deliberately NOT part of the shared base. Matter forbids the
+// non-auto FanModeSequence values while the AUT feature is present, so an
+// entity without an auto mode must not declare the feature at all - otherwise
+// controllers keep offering an "Auto" Home Assistant cannot honour.
 const FeaturedBase = Base.with(
   "Step",
   "MultiSpeed",
   "AirflowDirection",
-  "Auto",
   "Rocking",
   "Wind",
 ).set({
@@ -60,6 +66,9 @@ export interface FanControlServerConfig {
   // Wind mode support - returns preset mode name that maps to wind
   getWindMode: ValueGetter<"natural" | "sleep" | undefined>;
   supportsWind: ValueGetter<boolean>;
+  // Which wind modes the entity actually offers. Defaults to both when the
+  // domain does not implement it, preserving the previous behaviour.
+  getWindSupport?: ValueGetter<{ naturalWind: boolean; sleepWind: boolean }>;
 
   turnOff: ValueSetter<void>;
   turnOn: ValueSetter<number>;
@@ -100,6 +109,17 @@ export class FanControlServerBase extends FeaturedBase {
   }
 
   override async initialize() {
+    // fanModeSequence is mandatory. update() writes it through applyPatchState,
+    // which skips values equal to what state already holds, so a computed
+    // sequence matching the cluster default would never be written and
+    // matter.js then fails conformance with "you must set this attribute".
+    // The seed must match the AUT feature: Matter rejects the non-auto
+    // sequences while Auto is present, and the auto ones while it is absent.
+    if (this.state.fanModeSequence == null) {
+      this.state.fanModeSequence = this.features.auto
+        ? FanControl.FanModeSequence.OffLowMedHighAuto
+        : FanControl.FanModeSequence.OffLowMedHigh;
+    }
     // Matter.js defaults: speedMax=0, percentSetting=null, percentCurrent=0
     // speedMax=0 is invalid for MultiSpeed feature - must be >= 1 per Matter spec
     if (this.features.multiSpeed) {
@@ -215,9 +235,12 @@ export class FanControlServerBase extends FeaturedBase {
       const speedPresets = toAscendingSpeedPresets(
         presetModes.filter((m) => m.toLowerCase() !== "auto"),
       );
+      // Preset-driven fans expose exactly as many speeds as Home Assistant
+      // declares. Padding up to minSpeedMax invents speeds the entity cannot
+      // accept, which controllers then offer to the user.
       speedMax = Math.max(
-        minSpeedMax,
-        Math.min(maxSpeedMax, speedPresets.length),
+        1,
+        Math.min(maxSpeedMax, speedPresets.length || minSpeedMax),
       );
 
       // Map current preset to speed level
@@ -243,7 +266,10 @@ export class FanControlServerBase extends FeaturedBase {
     // causes Apple Home to stay on "Turning off..." indefinitely (#219).
     const isOff = percentage === 0;
 
-    const fanModeSequence = this.getFanModeSequence();
+    const supportsAuto = presetModes.some(
+      (mode) => mode.toLowerCase() === "auto",
+    );
+    const fanModeSequence = this.getFanModeSequence(speedMax, supportsAuto);
     // When the fan is off, fanMode MUST be Off regardless of preset_mode.
     // HA fans (especially Dyson) keep preset_mode="Auto" even when off;
     // setting fanMode=Auto + onOff=false causes Apple Home to show
@@ -298,6 +324,9 @@ export class FanControlServerBase extends FeaturedBase {
 
         ...(this.features.wind
           ? {
+              windSupport: config.getWindSupport
+                ? config.getWindSupport(entity.state, this.agent)
+                : { naturalWind: true, sleepWind: true },
               windSetting: this.mapWindModeToSetting(
                 config.getWindMode(entity.state, this.agent),
               ),
@@ -563,15 +592,16 @@ export class FanControlServerBase extends FeaturedBase {
     });
   }
 
-  private getFanModeSequence() {
-    if (this.features.multiSpeed) {
-      return this.features.auto
-        ? FanControl.FanModeSequence.OffLowMedHighAuto
-        : FanControl.FanModeSequence.OffLowMedHigh;
+  private getFanModeSequence(speedCount?: number, hasAuto?: boolean) {
+    // The Auto feature is only compiled in for entities that really offer it;
+    // hasAuto lets callers narrow it further from the entity's preset list.
+    const auto = hasAuto ?? this.features.auto;
+    if (!this.features.multiSpeed) {
+      return auto
+        ? FanControl.FanModeSequence.OffHighAuto
+        : FanControl.FanModeSequence.OffHigh;
     }
-    return this.features.auto
-      ? FanControl.FanModeSequence.OffHighAuto
-      : FanControl.FanModeSequence.OffHigh;
+    return fanModeSequenceFor(speedCount, auto);
   }
 
   private targetRockSettingChanged(
@@ -699,11 +729,16 @@ export namespace FanControlServerBase {
   }
 }
 
+const FanControlServerWithAuto = FanControlServerBase.with("Auto");
+
 export function FanControlServer(
   config: FanControlServerConfig,
-  defaults: { rockSupport?: FanControlRockSetting } = {},
+  defaults: { rockSupport?: FanControlRockSetting; auto?: boolean } = {},
 ) {
-  return FanControlServerBase.set({
+  // Default stays "auto supported" so existing endpoints are unchanged.
+  const base =
+    defaults.auto === false ? FanControlServerBase : FanControlServerWithAuto;
+  return base.set({
     config,
     rockSupport: defaults.rockSupport ?? { rockUpDown: true },
   });

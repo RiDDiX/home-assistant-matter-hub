@@ -17,6 +17,7 @@ import { DefaultPowerSourceServer } from "../../../behaviors/power-source-server
 import { ThermostatUiConfigServer } from "../../../behaviors/thermostat-ui-config-server.js";
 import {
   ClimateFanControlServer,
+  climateSupportsAutoFanMode,
   swingModesToRockSupport,
 } from "./behaviors/climate-fan-control-server.js";
 import { ClimateHumidityMeasurementServer } from "./behaviors/climate-humidity-measurement-server.js";
@@ -41,6 +42,7 @@ const ClimateDeviceType = (
   supportsOnOff: boolean,
   supportsHumidity: boolean,
   supportsFanMode: boolean,
+  supportsAutoFanMode: boolean,
   rockSupport:
     | { rockLeftRight?: boolean; rockUpDown?: boolean; rockRound?: boolean }
     | undefined,
@@ -80,7 +82,7 @@ const ClimateDeviceType = (
       HomeAssistantEntityBehavior,
       thermostatServer,
       ThermostatUiConfigServer,
-      ClimateFanControlServer(rockSupport),
+      ClimateFanControlServer(rockSupport, supportsAutoFanMode),
       ...additionalClusters,
       ...basicInfo,
     );
@@ -191,6 +193,7 @@ export function ClimateDevice(
   const supportsFanMode =
     testBit(supportedFeatures, ClimateDeviceFeature.FAN_MODE) &&
     homeAssistantEntity.mapping?.disableClimateFanControl !== true;
+  const supportsAutoFanMode = climateSupportsAutoFanMode(attributes.fan_modes);
   const supportsVerticalSwing = testBit(
     supportedFeatures,
     ClimateDeviceFeature.SWING_MODE,
@@ -269,6 +272,7 @@ export function ClimateDevice(
     supportsOnOff,
     supportsHumidity,
     supportsFanMode,
+    supportsAutoFanMode,
     rockSupport,
     hasBattery,
     {
