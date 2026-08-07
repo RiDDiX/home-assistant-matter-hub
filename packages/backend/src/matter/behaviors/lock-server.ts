@@ -435,6 +435,17 @@ namespace LockServerBase {
  *
  * Voice unlock stays disabled by Google policy, not a Matter limitation.
  */
+// v2.0.7..v2.0.16 wrote sendPinOverTheAir=true for every lock and matter.js
+// persisted it. With the User feature active the attribute is illegal
+// (conformance [!USR & PIN]), so the stored leftover fails doorLock init on
+// every start (#433). Clearing pre-initialize also deletes the stored key.
+function clearStaleSendPinOverTheAir(state: object) {
+  const s = state as { sendPinOverTheAir?: boolean };
+  if (s.sendPinOverTheAir !== undefined) {
+    s.sendPinOverTheAir = undefined;
+  }
+}
+
 const PinCredentialBase = Base.with(
   "User",
   "PinCredential",
@@ -452,6 +463,7 @@ class LockServerWithPinBase extends PinCredentialBase {
   declare state: LockServerWithPinBase.State;
 
   override async initialize() {
+    clearStaleSendPinOverTheAir(this.state);
     // Set required PinCredential defaults BEFORE super.initialize() to prevent
     // "Behaviors have errors" validation failures
     if (this.state.numberOfPinUsersSupported === undefined) {
@@ -686,6 +698,7 @@ class LockServerWithPinAndUnboltBase extends PinCredentialUnboltBase {
   declare state: LockServerWithPinAndUnboltBase.State;
 
   override async initialize() {
+    clearStaleSendPinOverTheAir(this.state);
     if (this.state.numberOfPinUsersSupported === undefined) {
       this.state.numberOfPinUsersSupported = 1;
     }
