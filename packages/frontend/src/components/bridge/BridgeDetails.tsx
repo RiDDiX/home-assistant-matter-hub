@@ -6,6 +6,7 @@ import EditIcon from "@mui/icons-material/Edit";
 import ErrorOutlineIcon from "@mui/icons-material/ErrorOutline";
 import FilterListIcon from "@mui/icons-material/FilterList";
 import InfoIcon from "@mui/icons-material/Info";
+import InfoOutlinedIcon from "@mui/icons-material/InfoOutlined";
 import QrCode2Icon from "@mui/icons-material/QrCode2";
 import RemoveIcon from "@mui/icons-material/Remove";
 import SyncIcon from "@mui/icons-material/Sync";
@@ -32,9 +33,11 @@ import Tooltip from "@mui/material/Tooltip";
 import Typography from "@mui/material/Typography";
 import { QRCodeSVG } from "qrcode.react";
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router";
 import { forceSyncBridge, openCommissioningWindow } from "../../api/bridges.ts";
 import { navigation } from "../../routes.tsx";
+import { timeAgo } from "../../time.ts";
 import { FabricList } from "../fabric/FabricList.tsx";
 import { useNotifications } from "../notifications/use-notifications.ts";
 
@@ -82,6 +85,9 @@ export const BridgeDetails = ({ bridge }: BridgeDetailsProps) => {
         <FiltersCard bridge={bridge} />
       </Grid>
       <Grid size={{ xs: 12 }}>
+        <ControllerWarnings bridge={bridge} />
+      </Grid>
+      <Grid size={{ xs: 12 }}>
         <FailedEntities bridge={bridge} />
       </Grid>
     </Grid>
@@ -89,6 +95,7 @@ export const BridgeDetails = ({ bridge }: BridgeDetailsProps) => {
 };
 
 const PairingCard = ({ bridge }: { bridge: BridgeDataWithMetadata }) => {
+  const { t } = useTranslation();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [opening, setOpening] = useState(false);
   const notification = useNotifications();
@@ -116,10 +123,10 @@ const PairingCard = ({ bridge }: { bridge: BridgeDataWithMetadata }) => {
             <Avatar sx={{ bgcolor: "grey.500" }}>
               <QrCode2Icon />
             </Avatar>
-            <Typography variant="h6">Pairing</Typography>
+            <Typography variant="h6">{t("bridge.pairing")}</Typography>
           </Box>
           <Typography color="text.secondary">
-            Bridge is not running. Start the bridge to see pairing information.
+            {t("bridge.bridgeNotRunning")}
           </Typography>
         </CardContent>
       </Card>
@@ -138,7 +145,7 @@ const PairingCard = ({ bridge }: { bridge: BridgeDataWithMetadata }) => {
             <Avatar sx={{ bgcolor: "primary.main" }}>
               <QrCode2Icon />
             </Avatar>
-            <Typography variant="h6">Pairing</Typography>
+            <Typography variant="h6">{t("bridge.pairing")}</Typography>
           </Box>
 
           <Box
@@ -158,7 +165,11 @@ const PairingCard = ({ bridge }: { bridge: BridgeDataWithMetadata }) => {
                     zIndex: 1,
                   }}
                 >
-                  <Chip label="Commissioned" color="success" size="small" />
+                  <Chip
+                    label={t("bridge.commissioned")}
+                    color="success"
+                    size="small"
+                  />
                 </Box>
               )}
               <Box
@@ -183,7 +194,7 @@ const PairingCard = ({ bridge }: { bridge: BridgeDataWithMetadata }) => {
                 justifyContent="space-between"
               >
                 <Typography variant="body2" color="text.secondary">
-                  Manual Code:
+                  {t("bridge.manualCode")}:
                 </Typography>
                 <Box display="flex" alignItems="center" gap={0.5}>
                   <Typography variant="body2" fontFamily="monospace">
@@ -213,8 +224,8 @@ const PairingCard = ({ bridge }: { bridge: BridgeDataWithMetadata }) => {
                 fullWidth
               >
                 {opening
-                  ? "Opening Commissioning Window..."
-                  : "Add Another Controller"}
+                  ? t("bridge.openingWindow")
+                  : t("bridge.addController")}
               </Button>
             )}
           </Box>
@@ -231,6 +242,7 @@ const PairingCard = ({ bridge }: { bridge: BridgeDataWithMetadata }) => {
 };
 
 const InfoCard = ({ bridge }: { bridge: BridgeDataWithMetadata }) => {
+  const { t } = useTranslation();
   return (
     <Card sx={{ height: "100%" }}>
       <CardContent>
@@ -238,13 +250,13 @@ const InfoCard = ({ bridge }: { bridge: BridgeDataWithMetadata }) => {
           <Avatar sx={{ bgcolor: "info.main" }}>
             <InfoIcon />
           </Avatar>
-          <Typography variant="h6">Bridge Info</Typography>
+          <Typography variant="h6">{t("bridge.bridgeInfo")}</Typography>
         </Box>
 
         <Stack spacing={1.5}>
           <Box>
             <Typography variant="caption" color="text.secondary">
-              Bridge ID
+              {t("bridge.bridgeId")}
             </Typography>
             <Typography variant="body2" fontFamily="monospace" noWrap>
               {bridge.id}
@@ -253,7 +265,7 @@ const InfoCard = ({ bridge }: { bridge: BridgeDataWithMetadata }) => {
           <Divider />
           <Box display="flex" justifyContent="space-between">
             <Typography variant="body2" color="text.secondary">
-              Port
+              {t("common.port")}
             </Typography>
             <Typography variant="body2" fontWeight="medium">
               {bridge.port}
@@ -261,7 +273,7 @@ const InfoCard = ({ bridge }: { bridge: BridgeDataWithMetadata }) => {
           </Box>
           <Box display="flex" justifyContent="space-between">
             <Typography variant="body2" color="text.secondary">
-              Devices
+              {t("common.devices")}
             </Typography>
             <Chip
               icon={<DevicesIcon />}
@@ -275,7 +287,7 @@ const InfoCard = ({ bridge }: { bridge: BridgeDataWithMetadata }) => {
             <>
               <Box display="flex" justifyContent="space-between">
                 <Typography variant="body2" color="text.secondary">
-                  Passcode
+                  {t("bridge.passcode")}
                 </Typography>
                 <Typography variant="body2" fontFamily="monospace">
                   {bridge.commissioning.passcode}
@@ -283,7 +295,7 @@ const InfoCard = ({ bridge }: { bridge: BridgeDataWithMetadata }) => {
               </Box>
               <Box display="flex" justifyContent="space-between">
                 <Typography variant="body2" color="text.secondary">
-                  Discriminator
+                  {t("bridge.discriminator")}
                 </Typography>
                 <Typography variant="body2" fontFamily="monospace">
                   {bridge.commissioning.discriminator}
@@ -298,6 +310,7 @@ const InfoCard = ({ bridge }: { bridge: BridgeDataWithMetadata }) => {
 };
 
 const FabricsCard = ({ bridge }: { bridge: BridgeDataWithMetadata }) => {
+  const { t } = useTranslation();
   const fabrics = bridge.commissioning?.fabrics ?? [];
   const [syncing, setSyncing] = useState(false);
   const notification = useNotifications();
@@ -330,14 +343,20 @@ const FabricsCard = ({ bridge }: { bridge: BridgeDataWithMetadata }) => {
             <WifiIcon />
           </Avatar>
           <Typography variant="h6">
-            Connected Fabrics ({fabrics.length})
+            {t("bridge.connectedFabrics", { count: fabrics.length })}
           </Typography>
+          <Tooltip title="A fabric represents a connection to a Matter controller (e.g., Apple Home, Google Home, Alexa). Each controller creates one fabric when paired.">
+            <InfoOutlinedIcon
+              fontSize="small"
+              color="action"
+              sx={{ cursor: "help" }}
+            />
+          </Tooltip>
         </Box>
 
         {fabrics.length === 0 ? (
           <Typography color="text.secondary">
-            No controllers connected yet. Scan the QR code with your Matter
-            controller to pair this bridge.
+            {t("bridge.noFabrics")}
           </Typography>
         ) : (
           <Stack spacing={2}>
@@ -353,7 +372,7 @@ const FabricsCard = ({ bridge }: { bridge: BridgeDataWithMetadata }) => {
                 disabled={syncing}
                 fullWidth
               >
-                {syncing ? "Syncing..." : "Force Sync"}
+                {syncing ? t("bridge.syncing") : t("bridge.forceSync")}
               </Button>
             </Tooltip>
           </Stack>
@@ -364,6 +383,7 @@ const FabricsCard = ({ bridge }: { bridge: BridgeDataWithMetadata }) => {
 };
 
 const FiltersCard = ({ bridge }: { bridge: BridgeDataWithMetadata }) => {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const hasFilters =
     bridge.filter.include.length > 0 || bridge.filter.exclude.length > 0;
@@ -376,9 +396,13 @@ const FiltersCard = ({ bridge }: { bridge: BridgeDataWithMetadata }) => {
             <FilterListIcon />
           </Avatar>
           <Typography variant="h6" sx={{ flexGrow: 1 }}>
-            Entity Filters
+            {t("bridge.entityFilters")}
           </Typography>
-          <Tooltip title={hasFilters ? "Edit Filters" : "Add Filters"}>
+          <Tooltip
+            title={
+              hasFilters ? t("bridge.editFilters") : t("bridge.addFilters")
+            }
+          >
             <IconButton
               size="small"
               onClick={() => navigate(navigation.editBridge(bridge.id))}
@@ -421,7 +445,7 @@ const FiltersCard = ({ bridge }: { bridge: BridgeDataWithMetadata }) => {
           </Stack>
         ) : (
           <Typography variant="body2" color="text.secondary">
-            No filters configured. All supported entities will be exposed.
+            {t("bridge.noFilters")}
           </Typography>
         )}
       </CardContent>
@@ -438,6 +462,7 @@ const PairingDialog = ({
   open: boolean;
   onClose: () => void;
 }) => {
+  const { t } = useTranslation();
   if (!bridge.commissioning) {
     return null;
   }
@@ -451,13 +476,12 @@ const PairingDialog = ({
       <DialogTitle>
         <Box display="flex" alignItems="center" gap={1}>
           <QrCode2Icon />
-          Add Another Controller
+          {t("bridge.addController")}
         </Box>
       </DialogTitle>
       <DialogContent>
         <Typography variant="body2" color="text.secondary" gutterBottom>
-          Scan this QR code with your Matter controller (Apple Home, Google
-          Home, Alexa, etc.) to add this bridge to another ecosystem.
+          {t("bridge.scanQrCode")}
         </Typography>
 
         <Box display="flex" justifyContent="center" my={3}>
@@ -544,9 +568,50 @@ const PairingDialog = ({
         </Alert>
       </DialogContent>
       <DialogActions>
-        <Button onClick={onClose}>Close</Button>
+        <Button onClick={onClose}>{t("common.close")}</Button>
       </DialogActions>
     </Dialog>
+  );
+};
+
+const ControllerWarnings = ({ bridge }: { bridge: BridgeDataWithMetadata }) => {
+  const warnings = bridge.controllerWarnings;
+  if (!warnings || warnings.length === 0) {
+    return null;
+  }
+
+  return (
+    <Card>
+      <CardContent>
+        <Alert severity="warning" icon={<ErrorOutlineIcon />}>
+          <AlertTitle>Controller warnings ({warnings.length})</AlertTitle>
+          <Typography variant="body2" component="div">
+            A commissioned controller may not show these devices:
+          </Typography>
+          <Box sx={{ mt: 1, maxHeight: 200, overflow: "auto" }}>
+            {warnings.map((w) => (
+              <Box
+                key={`${w.entityId}:${w.deviceTypeId}:${w.controller}`}
+                sx={{ mb: 0.5 }}
+              >
+                <Typography variant="body2" component="span" fontWeight="bold">
+                  {w.entityId}
+                </Typography>
+                <Typography
+                  variant="body2"
+                  component="span"
+                  color="text.secondary"
+                >
+                  {" on "}
+                  {w.controllerLabel}
+                  {w.note ? ` (${w.note})` : ""}
+                </Typography>
+              </Box>
+            ))}
+          </Box>
+        </Alert>
+      </CardContent>
+    </Card>
   );
 };
 
@@ -575,8 +640,9 @@ const FailedEntities = ({ bridge }: { bridge: BridgeDataWithMetadata }) => {
                   component="span"
                   color="text.secondary"
                 >
-                  {" — "}
+                  {", "}
                   {entity.reason}
+                  {entity.failedAt ? ` (${timeAgo(entity.failedAt)})` : ""}
                 </Typography>
               </Box>
             ))}

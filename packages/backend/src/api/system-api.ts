@@ -2,9 +2,11 @@ import { exec } from "node:child_process";
 import os from "node:os";
 import { promisify } from "node:util";
 import v8 from "node:v8";
+import { Logger } from "@matter/general";
 import express from "express";
 
 const execAsync = promisify(exec);
+const logger = Logger.get("SystemApi");
 
 export interface NetworkInterface {
   name: string;
@@ -73,8 +75,53 @@ function detectEnvironment(): string {
   return "Standalone";
 }
 
+export interface GithubLatestRelease {
+  tag_name: string;
+  html_url: string;
+  published_at: string;
+  body?: string;
+}
+
+export function toUpdateCheckResponse(
+  version: string,
+  data: GithubLatestRelease,
+  environment: string,
+) {
+  const latestVersion = data.tag_name.replace(/^v/, "");
+  return {
+    currentVersion: version,
+    latestVersion,
+    updateAvailable: version !== "0.0.0-dev" && latestVersion !== version,
+    releaseUrl: data.html_url,
+    publishedAt: data.published_at,
+    releaseNotes: data.body || undefined,
+    environment,
+  };
+}
+
 export function systemApi(version: string): express.Router {
   const router = express.Router();
+
+  router.get("/update-check", async (_req, res) => {
+    try {
+      const response = await fetch(
+        "https://api.github.com/repos/riddix/home-assistant-matter-hub/releases/latest",
+        {
+          headers: { Accept: "application/vnd.github.v3+json" },
+          signal: AbortSignal.timeout(10000),
+        },
+      );
+      if (!response.ok) {
+        res.status(502).json({ error: "Failed to check for updates" });
+        return;
+      }
+      const data = (await response.json()) as GithubLatestRelease;
+      res.json(toUpdateCheckResponse(version, data, detectEnvironment()));
+    } catch (error) {
+      logger.error("Failed to check for updates:", error);
+      res.status(500).json({ error: "Failed to check for updates" });
+    }
+  });
 
   router.get("/info", async (_req, res) => {
     try {
@@ -127,7 +174,7 @@ export function systemApi(version: string): express.Router {
 
       res.json(systemInfo);
     } catch (error) {
-      console.error("Failed to get system info:", error);
+      logger.error("Failed to get system info:", error);
       res.status(500).json({ error: "Failed to get system info" });
     }
   });
@@ -189,7 +236,7 @@ async function getStorageInfo(): Promise<{
       return await getUnixStorageInfo(pathToCheck);
     }
   } catch (error) {
-    console.error("Failed to get storage info:", error);
+    logger.error("Failed to get storage info:", error);
     return { total: 0, used: 0, free: 0 };
   }
 }

@@ -28,6 +28,7 @@ import TextField from "@mui/material/TextField";
 import Tooltip from "@mui/material/Tooltip";
 import Typography from "@mui/material/Typography";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import {
   type FilterValues,
   fetchAreas,
@@ -113,6 +114,7 @@ const ValueList = ({
 };
 
 export const LabelsPage = () => {
+  const { t } = useTranslation();
   const [labels, setLabels] = useState<HomeAssistantLabel[]>([]);
   const [areas, setAreas] = useState<HomeAssistantArea[]>([]);
   const [filterValues, setFilterValues] = useState<FilterValues | null>(null);
@@ -133,11 +135,11 @@ export const LabelsPage = () => {
       setFilterValues(filterData);
       setError(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load data");
+      setError(err instanceof Error ? err.message : t("labels.loadFailed"));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     load();
@@ -161,12 +163,11 @@ export const LabelsPage = () => {
     <Box sx={{ p: 2 }}>
       <Typography variant="h5" component="h1" sx={{ mb: 3 }}>
         <FilterListIcon sx={{ mr: 1, verticalAlign: "middle" }} />
-        Filter Reference
+        {t("labels.title")}
       </Typography>
 
       <Alert severity="info" sx={{ mb: 3 }}>
-        Browse all available filter values for your bridge configuration. Click
-        any value to copy it to your clipboard.
+        {t("labels.info")}
       </Alert>
 
       {error && (
@@ -178,19 +179,16 @@ export const LabelsPage = () => {
       {/* Labels */}
       <Typography variant="h6" sx={{ mb: 1 }}>
         <LabelIcon sx={{ mr: 0.5, fontSize: 20, verticalAlign: "middle" }} />
-        Labels ({labels.length})
+        {t("labels.labelsSection")} ({labels.length})
       </Typography>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-        Use with filter type <b>&quot;entity_label&quot;</b> or{" "}
-        <b>&quot;device_label&quot;</b>. You can use either the display name or
-        the label_id.
+        {t("labels.labelsHint")}
       </Typography>
       <Card sx={{ mb: 4 }}>
         {labels.length === 0 ? (
           <Box sx={{ p: 3, textAlign: "center" }}>
             <Typography color="text.secondary">
-              No labels found in Home Assistant. Create labels under Settings
-              &gt; Labels.
+              {t("labels.noLabels")}
             </Typography>
           </Box>
         ) : (
@@ -199,9 +197,11 @@ export const LabelsPage = () => {
               <TableHead>
                 <TableRow>
                   <TableCell sx={{ fontWeight: "bold" }}>
-                    Display Name
+                    {t("labels.displayName")}
                   </TableCell>
-                  <TableCell sx={{ fontWeight: "bold" }}>label_id</TableCell>
+                  <TableCell sx={{ fontWeight: "bold" }}>
+                    {t("labels.labelId")}
+                  </TableCell>
                   <TableCell width={48} />
                 </TableRow>
               </TableHead>
@@ -231,7 +231,9 @@ export const LabelsPage = () => {
                     <TableCell>
                       <Tooltip
                         title={
-                          copiedId === label.label_id ? "Copied!" : "Copy ID"
+                          copiedId === label.label_id
+                            ? t("common.copied")
+                            : t("common.copyId")
                         }
                       >
                         <IconButton
@@ -255,18 +257,16 @@ export const LabelsPage = () => {
         <MeetingRoomIcon
           sx={{ mr: 0.5, fontSize: 20, verticalAlign: "middle" }}
         />
-        Areas ({areas.length})
+        {t("labels.areasSection")} ({areas.length})
       </Typography>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-        Use with filter type <b>&quot;area&quot;</b>. Areas are also used for
-        automatic room assignment in Matter controllers.
+        {t("labels.areasHint")}
       </Typography>
       <Card sx={{ mb: 4 }}>
         {areas.length === 0 ? (
           <Box sx={{ p: 3, textAlign: "center" }}>
             <Typography color="text.secondary">
-              No areas found in Home Assistant. Create areas under Settings &gt;
-              Areas.
+              {t("labels.noAreas")}
             </Typography>
           </Box>
         ) : (
@@ -275,9 +275,11 @@ export const LabelsPage = () => {
               <TableHead>
                 <TableRow>
                   <TableCell sx={{ fontWeight: "bold" }}>
-                    Display Name
+                    {t("labels.displayName")}
                   </TableCell>
-                  <TableCell sx={{ fontWeight: "bold" }}>area_id</TableCell>
+                  <TableCell sx={{ fontWeight: "bold" }}>
+                    {t("labels.areaId")}
+                  </TableCell>
                   <TableCell width={48} />
                 </TableRow>
               </TableHead>
@@ -291,7 +293,9 @@ export const LabelsPage = () => {
                     <TableCell>
                       <Tooltip
                         title={
-                          copiedId === area.area_id ? "Copied!" : "Copy ID"
+                          copiedId === area.area_id
+                            ? t("common.copied")
+                            : t("common.copyId")
                         }
                       >
                         <IconButton
@@ -314,13 +318,15 @@ export const LabelsPage = () => {
       {filterValues && (
         <>
           <Typography variant="h6" sx={{ mb: 2 }}>
-            Other Filter Values
+            {t("labels.otherFilterValues")}
           </Typography>
 
           <Accordion defaultExpanded>
             <AccordionSummary expandIcon={<ExpandMoreIcon />}>
               <ViewModuleIcon sx={{ mr: 1 }} />
-              <Typography>Domains ({filterValues.domains.length})</Typography>
+              <Typography>
+                {t("labels.domains")} ({filterValues.domains.length})
+              </Typography>
             </AccordionSummary>
             <AccordionDetails sx={{ p: 0 }}>
               <Typography
@@ -328,7 +334,7 @@ export const LabelsPage = () => {
                 color="text.secondary"
                 sx={{ px: 2, pb: 1 }}
               >
-                Use with filter type <b>&quot;domain&quot;</b>.
+                {t("labels.domainsHint")}
               </Typography>
               <ValueList
                 values={filterValues.domains}
@@ -342,7 +348,7 @@ export const LabelsPage = () => {
             <AccordionSummary expandIcon={<ExpandMoreIcon />}>
               <ExtensionIcon sx={{ mr: 1 }} />
               <Typography>
-                Platforms / Integrations ({filterValues.platforms.length})
+                {t("labels.platforms")} ({filterValues.platforms.length})
               </Typography>
             </AccordionSummary>
             <AccordionDetails sx={{ p: 0 }}>
@@ -351,7 +357,7 @@ export const LabelsPage = () => {
                 color="text.secondary"
                 sx={{ px: 2, pb: 1 }}
               >
-                Use with filter type <b>&quot;platform&quot;</b>.
+                {t("labels.platformsHint")}
               </Typography>
               <ValueList
                 values={filterValues.platforms}
@@ -365,7 +371,8 @@ export const LabelsPage = () => {
             <AccordionSummary expandIcon={<ExpandMoreIcon />}>
               <CategoryIcon sx={{ mr: 1 }} />
               <Typography>
-                Entity Categories ({filterValues.entityCategories.length})
+                {t("labels.entityCategories")} (
+                {filterValues.entityCategories.length})
               </Typography>
             </AccordionSummary>
             <AccordionDetails sx={{ p: 0 }}>
@@ -374,7 +381,7 @@ export const LabelsPage = () => {
                 color="text.secondary"
                 sx={{ px: 2, pb: 1 }}
               >
-                Use with filter type <b>&quot;entity_category&quot;</b>.
+                {t("labels.entityCategoriesHint")}
               </Typography>
               <ValueList
                 values={filterValues.entityCategories}
@@ -388,7 +395,8 @@ export const LabelsPage = () => {
             <AccordionSummary expandIcon={<ExpandMoreIcon />}>
               <CategoryIcon sx={{ mr: 1 }} />
               <Typography>
-                Device Classes ({filterValues.deviceClasses.length})
+                {t("labels.deviceClasses")} ({filterValues.deviceClasses.length}
+                )
               </Typography>
             </AccordionSummary>
             <AccordionDetails sx={{ p: 0 }}>
@@ -397,7 +405,7 @@ export const LabelsPage = () => {
                 color="text.secondary"
                 sx={{ px: 2, pb: 1 }}
               >
-                Use with filter type <b>&quot;device_class&quot;</b>.
+                {t("labels.deviceClassesHint")}
               </Typography>
               <ValueList
                 values={filterValues.deviceClasses}
@@ -412,7 +420,7 @@ export const LabelsPage = () => {
             <AccordionSummary expandIcon={<ExpandMoreIcon />}>
               <DevicesIcon sx={{ mr: 1 }} />
               <Typography>
-                Device Names ({filterValues.deviceNames.length})
+                {t("labels.deviceNames")} ({filterValues.deviceNames.length})
               </Typography>
             </AccordionSummary>
             <AccordionDetails sx={{ p: 0 }}>
@@ -421,7 +429,7 @@ export const LabelsPage = () => {
                 color="text.secondary"
                 sx={{ px: 2, pb: 1 }}
               >
-                Use with filter type <b>&quot;device_name&quot;</b>.
+                {t("labels.deviceNamesHint")}
               </Typography>
               <ValueList
                 values={filterValues.deviceNames}
@@ -436,7 +444,7 @@ export const LabelsPage = () => {
             <AccordionSummary expandIcon={<ExpandMoreIcon />}>
               <DevicesIcon sx={{ mr: 1 }} />
               <Typography>
-                Product Names ({filterValues.productNames.length})
+                {t("labels.productNames")} ({filterValues.productNames.length})
               </Typography>
             </AccordionSummary>
             <AccordionDetails sx={{ p: 0 }}>
@@ -445,7 +453,7 @@ export const LabelsPage = () => {
                 color="text.secondary"
                 sx={{ px: 2, pb: 1 }}
               >
-                Use with filter type <b>&quot;product_name&quot;</b>.
+                {t("labels.productNamesHint")}
               </Typography>
               <ValueList
                 values={filterValues.productNames}

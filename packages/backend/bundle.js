@@ -82,7 +82,8 @@ function stubBunImports() {
       });
       build.onLoad({ filter: /.*/, namespace: "bun-stub" }, () => {
         return {
-          contents: "export default {}; export const Database = class {};",
+          contents:
+            "export default {}; export const Database = class {}; export const constants = {};",
           loader: "js",
         };
       });

@@ -3,20 +3,26 @@ import Container from "@mui/material/Container";
 import Divider from "@mui/material/Divider";
 import Grid from "@mui/material/Grid";
 import Link from "@mui/material/Link";
+import { useTranslation } from "react-i18next";
 import { navigation } from "../routes.tsx";
 
-const links: { name: string; url: string }[] = [
-  {
-    name: "GitHub",
-    url: navigation.githubRepository,
-  },
-  {
-    name: "Documentation",
-    url: navigation.documentation,
-  },
-];
-
 export const AppFooter = () => {
+  const { t } = useTranslation();
+
+  const links: { name: string; url: string }[] = [
+    {
+      name: t("footer.github"),
+      url: navigation.githubRepository,
+    },
+    {
+      name: t("footer.documentation"),
+      url: navigation.documentation,
+    },
+    {
+      name: t("footer.support"),
+      url: navigation.support,
+    },
+  ];
   return (
     <Container sx={{ mt: 16, mb: 4 }}>
       <Divider sx={{ mt: 4, mb: 4 }} />

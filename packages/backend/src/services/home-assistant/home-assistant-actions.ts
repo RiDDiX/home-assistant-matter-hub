@@ -5,6 +5,8 @@ import type { LoggerService } from "../../core/app/logger.js";
 import { Service } from "../../core/ioc/service.js";
 import { DebounceContext } from "../../utils/debounce-context.js";
 import { CircuitBreaker, withRetry } from "../../utils/retry.js";
+import { sendHaMessage } from "../../utils/send-ha-message.js";
+import { diagnosticEventBus } from "../diagnostics/diagnostic-event-bus.js";
 import type { HomeAssistantClient } from "./home-assistant-client.js";
 
 export interface HomeAssistantAction {
@@ -75,6 +77,14 @@ export class HomeAssistantActions extends Service {
         `Failed to call action '${action}' for entity '${entity_id ?? "(no target)"}': ${errorMsg}`,
       );
     });
+    diagnosticEventBus.emit(
+      "command_received",
+      `Action ${action} for ${entity_id ?? "(no target)"}`,
+      {
+        entityId: entity_id ?? calls[0].entityId,
+        details: { action, data },
+      },
+    );
     this.fireEvent("hamh_action", {
       entity_id: entity_id ?? calls[0].entityId,
       action,
@@ -199,17 +209,14 @@ export class HomeAssistantActions extends Service {
   }
 
   fireEvent(eventType: string, eventData?: Record<string, unknown>): void {
-    const connection = this.client.connection;
-    connection
-      .sendMessagePromise({
-        type: "fire_event",
-        event_type: eventType,
-        event_data: eventData,
-      })
-      .catch((error) => {
-        const errorMsg = this.formatError(error);
-        this.log.warn(`Failed to fire event '${eventType}': ${errorMsg}`);
-      });
+    sendHaMessage(this.client.connection, {
+      type: "fire_event",
+      event_type: eventType,
+      event_data: eventData,
+    }).catch((error) => {
+      const errorMsg = this.formatError(error);
+      this.log.warn(`Failed to fire event '${eventType}': ${errorMsg}`);
+    });
   }
 
   override async dispose(): Promise<void> {

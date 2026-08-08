@@ -26,13 +26,24 @@ export function MediaPlayerDevice(
 ) {
   const attributes = homeAssistantEntity.entity.state
     .attributes as MediaPlayerDeviceAttributes;
-  const supportedFeatures = attributes.supported_features ?? 0;
 
   // Auto-detect TVs by device_class and use VideoPlayerDevice (#162)
-  // TVs have better on/off support via BasicVideoPlayerDevice
+  // TVs have better on/off support via BasicVideoPlayerDevice.
+  // Explicit overrides to "speaker" bypass this by calling
+  // SpeakerMediaPlayerDevice directly (#293).
   if (attributes.device_class === MediaPlayerDeviceClass.Tv) {
     return VideoPlayerDevice(homeAssistantEntity);
   }
+
+  return SpeakerMediaPlayerDevice(homeAssistantEntity);
+}
+
+export function SpeakerMediaPlayerDevice(
+  homeAssistantEntity: HomeAssistantEntityBehavior.State,
+) {
+  const attributes = homeAssistantEntity.entity.state
+    .attributes as MediaPlayerDeviceAttributes;
+  const supportedFeatures = attributes.supported_features ?? 0;
 
   let device = SpeakerEndpointType;
   const supportsPower =

@@ -1,4 +1,5 @@
 import type { LockCredentialRequest } from "@home-assistant-matter-hub/common";
+import { assertOk, parseJsonResponse } from "./fetch-utils.js";
 
 /**
  * Sanitized credential returned from API (PIN is never exposed)
@@ -16,10 +17,8 @@ export async function fetchLockCredentials(): Promise<{
   credentials: SanitizedCredential[];
 }> {
   const response = await fetch("api/lock-credentials");
-  if (!response.ok) {
-    throw new Error(`Failed to fetch lock credentials: ${response.statusText}`);
-  }
-  return response.json();
+  await assertOk(response, "Failed to fetch lock credentials");
+  return parseJsonResponse(response);
 }
 
 export async function updateLockCredential(
@@ -34,13 +33,8 @@ export async function updateLockCredential(
       body: JSON.stringify(config),
     },
   );
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({}));
-    throw new Error(
-      error.error || `Failed to update lock credential: ${response.statusText}`,
-    );
-  }
-  return response.json();
+  await assertOk(response, "Failed to update lock credential");
+  return parseJsonResponse(response);
 }
 
 export async function toggleLockCredentialEnabled(
@@ -55,13 +49,8 @@ export async function toggleLockCredentialEnabled(
       body: JSON.stringify({ enabled }),
     },
   );
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({}));
-    throw new Error(
-      error.error || `Failed to toggle credential: ${response.statusText}`,
-    );
-  }
-  return response.json();
+  await assertOk(response, "Failed to toggle credential");
+  return parseJsonResponse(response);
 }
 
 export async function deleteLockCredential(entityId: string): Promise<void> {
@@ -69,7 +58,5 @@ export async function deleteLockCredential(entityId: string): Promise<void> {
     `api/lock-credentials/${encodeURIComponent(entityId)}`,
     { method: "DELETE" },
   );
-  if (!response.ok) {
-    throw new Error(`Failed to delete lock credential: ${response.statusText}`);
-  }
+  await assertOk(response, "Failed to delete lock credential");
 }

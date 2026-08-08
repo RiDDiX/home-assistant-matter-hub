@@ -103,3 +103,45 @@ function _autoSupported(sequence: FanControl.FanModeSequence): boolean {
       return false;
   }
 }
+
+/**
+ * The entity's auto preset, if it really has one. Exact case-insensitive match
+ * only: a preset like "Automatic" or "Auto Comfort" cannot be commanded by
+ * sending "auto", so it must not count as Auto support. Every place that
+ * decides Auto (feature gates, sequence, commands) goes through this so they
+ * cannot disagree; a featureMap/sequence mismatch is a conformance error.
+ */
+export function autoPresetName(
+  presetModes: string[] | undefined,
+): string | undefined {
+  return presetModes?.find((mode) => mode.toLowerCase() === "auto");
+}
+
+/**
+ * Pick the FanModeSequence that matches how many speeds the entity actually
+ * exposes. Home Assistant entities frequently offer fewer than three speeds
+ * (a climate with fan_modes ["low","high"], a fan with a single preset), and
+ * advertising OffLowMedHigh for those makes controllers show speeds the entity
+ * will reject.
+ *
+ * @param speedCount number of selectable speeds, excluding off/auto
+ * @param auto whether the entity supports an auto mode
+ */
+export function fanModeSequenceFor(
+  speedCount: number | undefined,
+  auto: boolean,
+): FanControl.FanModeSequence {
+  if (speedCount != null && speedCount <= 1) {
+    return auto
+      ? FanControl.FanModeSequence.OffHighAuto
+      : FanControl.FanModeSequence.OffHigh;
+  }
+  if (speedCount === 2) {
+    return auto
+      ? FanControl.FanModeSequence.OffLowHighAuto
+      : FanControl.FanModeSequence.OffLowHigh;
+  }
+  return auto
+    ? FanControl.FanModeSequence.OffLowMedHighAuto
+    : FanControl.FanModeSequence.OffLowMedHigh;
+}

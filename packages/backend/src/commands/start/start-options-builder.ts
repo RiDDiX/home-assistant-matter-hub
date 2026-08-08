@@ -24,6 +24,13 @@ export function startOptionsBuilder(yargs: Argv): Argv<StartOptions> {
       choices: ["silly", "debug", "info", "notice", "warn", "error", "fatal"],
       default: "info",
     })
+    .option("protocol-log-level", {
+      type: "string",
+      choices: ["silly", "debug", "info", "notice", "warn", "error", "fatal"],
+      default: "info",
+      description:
+        "Log level for matter.js MessageChannel/MessageExchange facilities. These emit per-packet payloads at debug. Only lower it if you're debugging matter.js.",
+    })
     .option("disable-log-colors", {
       type: "boolean",
       default: false,
@@ -51,9 +58,20 @@ export function startOptionsBuilder(yargs: Argv): Argv<StartOptions> {
       description:
         "Only allow the specified IPv4, IPv6 or CIDR. You can specify this option multiple times. When configured via ENV variables, you can only specify ONE value. Defaults to allow every IP address.",
     })
+    .option("mdns-disable-ipv4", {
+      type: "boolean",
+      default: false,
+      description: "Disable IPv4 for mDNS, so only IPv6 will be used",
+    })
     .option("mdns-network-interface", {
       type: "string",
       description: "Limit mDNS to this network interface",
+    })
+    .option("mdns-strip-global-ipv6", {
+      type: "boolean",
+      default: false,
+      description:
+        "Drop global IPv6 (GUA) from mDNS so controllers use a locally reachable address (#361)",
     })
     .option("home-assistant-url", {
       type: "string",
@@ -68,6 +86,12 @@ export function startOptionsBuilder(yargs: Argv): Argv<StartOptions> {
       description:
         "The refresh rate (in seconds) to detect new devices & entities or their configurations",
       default: 60,
+    })
+    .option("ha-message-timeout", {
+      type: "number",
+      description:
+        "Timeout in milliseconds for individual Home Assistant WebSocket requests (registry fetches, action calls). Raise this if you see 'HA message ... timed out' warnings on a large or slow HA instance.",
+      default: 60_000,
     })
     .option("http-auth-username", {
       type: "string",

@@ -1,4 +1,5 @@
 import type {
+  CleanAreaRoom,
   CustomServiceArea,
   VacuumDeviceAttributes,
   VacuumRoom,
@@ -249,6 +250,39 @@ export function createCustomServiceAreaServer(
 
   logger.info(
     `Using ${customAreas.length} custom service areas: ${customAreas.map((a) => a.name).join(", ")}`,
+  );
+
+  return ServiceAreaServer({
+    supportedAreas,
+    selectedAreas: [],
+    currentArea: null,
+  });
+}
+
+/**
+ * Create a ServiceAreaServer from HA areas resolved via CLEAN_AREA mapping.
+ * Each area corresponds to an HA area that the user has mapped vacuum segments to.
+ * When cleaning is triggered, the RvcRunModeServer calls vacuum.clean_area
+ * with the corresponding HA area IDs.
+ */
+export function createCleanAreaServiceAreaServer(
+  cleanAreaRooms: CleanAreaRoom[],
+) {
+  const supportedAreas: ServiceArea.Area[] = cleanAreaRooms.map((room) => ({
+    areaId: room.areaId,
+    mapId: null,
+    areaInfo: {
+      locationInfo: {
+        locationName: room.name,
+        floorNumber: null,
+        areaType: null,
+      },
+      landmarkInfo: null,
+    },
+  }));
+
+  logger.info(
+    `Using ${cleanAreaRooms.length} HA areas via CLEAN_AREA: ${cleanAreaRooms.map((r) => r.name).join(", ")}`,
   );
 
   return ServiceAreaServer({

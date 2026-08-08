@@ -5,6 +5,7 @@ import Box from "@mui/material/Box";
 import Chip from "@mui/material/Chip";
 import Tooltip from "@mui/material/Tooltip";
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useWebSocketStatus } from "../../contexts/WebSocketContext.tsx";
 
 interface HealthStatus {
@@ -24,6 +25,7 @@ interface HealthStatus {
 }
 
 export function StatusIndicator() {
+  const { t } = useTranslation();
   const { isConnected: wsConnected } = useWebSocketStatus();
   const [health, setHealth] = useState<HealthStatus | null>(null);
   const [healthError, setHealthError] = useState(false);
@@ -68,33 +70,38 @@ export function StatusIndicator() {
   const tooltipContent = health ? (
     <Box sx={{ p: 0.5 }}>
       <div>
-        <strong>Version:</strong> {health.version ?? "Unknown"}
+        <strong>{t("health.version")}:</strong>{" "}
+        {health.version ?? t("status.unknown")}
       </div>
       <div>
-        <strong>Uptime:</strong> {formatUptime(health.uptime ?? 0)}
+        <strong>{t("health.uptime")}:</strong>{" "}
+        {formatUptime(health.uptime ?? 0)}
       </div>
       {health.services?.bridges && (
         <div>
-          <strong>Bridges:</strong> {health.services.bridges.running ?? 0}/
-          {health.services.bridges.total ?? 0} running
+          <strong>{t("nav.bridges")}:</strong>{" "}
+          {health.services.bridges.running ?? 0}/
+          {health.services.bridges.total ?? 0}{" "}
+          {t("common.running").toLowerCase()}
           {(health.services.bridges.stopped ?? 0) > 0 &&
-            ` (${health.services.bridges.stopped} stopped)`}
+            ` (${health.services.bridges.stopped} ${t("common.stopped").toLowerCase()})`}
         </div>
       )}
       {health.services?.homeAssistant && (
         <div>
-          <strong>Home Assistant:</strong>{" "}
+          <strong>{t("health.homeAssistant")}:</strong>{" "}
           {health.services.homeAssistant.connected
-            ? "Connected"
-            : "Disconnected"}
+            ? t("health.connected")
+            : t("health.disconnected")}
         </div>
       )}
       <div>
-        <strong>WebSocket:</strong> {wsConnected ? "Connected" : "Disconnected"}
+        <strong>WebSocket:</strong>{" "}
+        {wsConnected ? t("health.connected") : t("health.disconnected")}
       </div>
     </Box>
   ) : (
-    "Loading health status..."
+    t("status.loadingHealth")
   );
 
   const getStatusIcon = () => {
@@ -119,21 +126,21 @@ export function StatusIndicator() {
 
   const getStatusLabel = (): string => {
     if (healthError) {
-      return "Error";
+      return t("status.error");
     }
     if (!isHealthy) {
-      return "Unhealthy";
+      return t("status.unhealthy");
     }
     if (!wsConnected) {
-      return "Offline";
+      return t("common.offline");
     }
     if (noBridgesConfigured) {
-      return "No Bridges";
+      return t("status.noBridges");
     }
     if (!allBridgesRunning) {
-      return "Starting";
+      return t("common.starting");
     }
-    return "Online";
+    return t("common.online");
   };
 
   return (

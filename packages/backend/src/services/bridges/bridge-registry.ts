@@ -1,15 +1,21 @@
 import type {
+  CleanAreaRoom,
   HomeAssistantDeviceRegistry,
   HomeAssistantEntityRegistry,
   HomeAssistantEntityState,
   HomeAssistantFilter,
+  HomeAssistantMatcher,
   SensorDeviceAttributes,
   VacuumRoom,
 } from "@home-assistant-matter-hub/common";
-import { SensorDeviceClass } from "@home-assistant-matter-hub/common";
+import {
+  SensorDeviceClass,
+  VacuumDeviceFeature,
+} from "@home-assistant-matter-hub/common";
 import { Logger } from "@matter/general";
 import { callService } from "home-assistant-js-websocket";
 import { keys, pickBy, values } from "lodash-es";
+import { sendHaMessage } from "../../utils/send-ha-message.js";
 import type { HomeAssistantClient } from "../home-assistant/home-assistant-client.js";
 import type {
   HomeAssistantDevices,
@@ -18,6 +24,7 @@ import type {
   HomeAssistantStates,
 } from "../home-assistant/home-assistant-registry.js";
 import type { BridgeDataProvider } from "./bridge-data-provider.js";
+import { resolveBatteryPercent } from "./entity-state-provider.js";
 import { testMatchers } from "./matcher/matches-entity-filter.js";
 
 export interface BridgeRegistryProps {
@@ -38,6 +45,8 @@ export class BridgeRegistry {
   private _usedBatteryEntities: Set<string> = new Set();
   // Cache for battery entity lookups (deviceId -> entityId or null)
   private _batteryEntityCache: Map<string, string | null> = new Map();
+  // Cache for problem entity lookups (deviceId -> entityId or null) (#408)
+  private _problemEntityCache: Map<string, string | null> = new Map();
   // Track humidity entities that have been auto-assigned to temperature sensors
   private _usedHumidityEntities: Set<string> = new Set();
   // Track pressure entities that have been auto-assigned to temperature sensors
@@ -60,51 +69,29 @@ export class BridgeRegistry {
     return this._states[entityId];
   }
 
-  /**
-   * Get all entities that belong to the same HA device as the given entity.
-   * This enables domain endpoints to access neighbor entities (e.g., a thermostat
-   * accessing an external temperature sensor from the same device).
-   */
-  neighborsOf(entityId: string): Map<string, HomeAssistantEntityRegistry> {
-    const entity = this._entities[entityId];
-    if (!entity?.device_id) {
-      return new Map();
-    }
-
-    const neighbors = new Map<string, HomeAssistantEntityRegistry>();
-    for (const [id, ent] of Object.entries(this.registry.entities)) {
-      if (ent.device_id === entity.device_id && id !== entityId) {
-        neighbors.set(id, ent);
-      }
-    }
-    return neighbors;
+  // The complete HA entity set (unfiltered). Used by orphan tombstone stamping
+  // so a filter change or a scope narrowing never looks like a removal.
+  get fullEntities() {
+    return this.registry.entities;
   }
 
-  /**
-   * Get neighbor entity information including state for domain endpoints.
-   */
-  neighborInfoOf(
+  // composed sub-entities may sit outside the bridge filter (#408), so these
+  // fall back to the full HA registry. keep them separate from the strict
+  // accessors above, every other caller must stay filtered.
+  initialStateIncludingUnfiltered(entityId: string) {
+    return this._states[entityId] ?? this.registry.states[entityId];
+  }
+  entityIncludingUnfiltered(entityId: string) {
+    return this._entities[entityId] ?? this.registry.entities[entityId];
+  }
+  deviceOfIncludingUnfiltered(
     entityId: string,
-  ): Map<
-    string,
-    { entity: HomeAssistantEntityRegistry; state: HomeAssistantStates[string] }
-  > {
-    const neighbors = this.neighborsOf(entityId);
-    const result = new Map<
-      string,
-      {
-        entity: HomeAssistantEntityRegistry;
-        state: HomeAssistantStates[string];
-      }
-    >();
-
-    for (const [id, entity] of neighbors) {
-      const state = this.registry.states[id];
-      if (state) {
-        result.set(id, { entity, state });
-      }
-    }
-    return result;
+  ): HomeAssistantDeviceRegistry | undefined {
+    const entity = this.entityIncludingUnfiltered(entityId);
+    if (!entity) return undefined;
+    return (
+      this._devices[entity.device_id] ?? this.registry.devices[entity.device_id]
+    );
   }
 
   /**
@@ -124,6 +111,7 @@ export class BridgeRegistry {
     const entities = values(this.registry.entities);
     const sameDevice = entities.filter((e) => e.device_id === deviceId);
 
+    // Prefer numeric sensor.* battery entities (percentage values).
     for (const entity of sameDevice) {
       if (!entity.entity_id.startsWith("sensor.")) continue;
 
@@ -133,12 +121,59 @@ export class BridgeRegistry {
       }
 
       const attrs = state.attributes as SensorDeviceAttributes;
-      if (attrs.device_class === SensorDeviceClass.battery) {
-        // Cache the result
+      if (
+        attrs.device_class === SensorDeviceClass.battery &&
+        resolveBatteryPercent(state.state) != null
+      ) {
         this._batteryEntityCache.set(deviceId, entity.entity_id);
         return entity.entity_id;
       }
     }
+
+    // Fallback: binary_sensor.* with device_class=battery (on/off for LOW_BAT).
+    // Old Homematic classic sensors only expose a binary LOW_BAT entity.
+    for (const entity of sameDevice) {
+      if (!entity.entity_id.startsWith("binary_sensor.")) continue;
+
+      const state = this.registry.states[entity.entity_id];
+      if (!state) continue;
+
+      const attrs = state.attributes as { device_class?: string };
+      if (
+        attrs.device_class === "battery" &&
+        resolveBatteryPercent(state.state) != null
+      ) {
+        this._batteryEntityCache.set(deviceId, entity.entity_id);
+        return entity.entity_id;
+      }
+    }
+
+    // Fallback: enum-like HA battery sensors such as Overkiz full/normal/low.
+    // A classless sensor needs a real battery hint (unit "%" or "batt" in the
+    // id), otherwise things like last_clean_area=27 get mistaken for a battery.
+    for (const entity of sameDevice) {
+      if (!entity.entity_id.startsWith("sensor.")) continue;
+
+      const state = this.registry.states[entity.entity_id];
+      if (!state) continue;
+
+      const attrs = state.attributes as {
+        device_class?: string;
+        unit_of_measurement?: string;
+      };
+      const looksLikeBattery =
+        attrs.unit_of_measurement === "%" ||
+        entity.entity_id.toLowerCase().includes("batt");
+      if (
+        (attrs.device_class === "enum" ||
+          (attrs.device_class == null && looksLikeBattery)) &&
+        resolveBatteryPercent(state.state) != null
+      ) {
+        this._batteryEntityCache.set(deviceId, entity.entity_id);
+        return entity.entity_id;
+      }
+    }
+
     // Cache the negative result
     this._batteryEntityCache.set(deviceId, null);
     return undefined;
@@ -159,6 +194,43 @@ export class BridgeRegistry {
   }
 
   /**
+   * Find a problem/safety binary sensor on the same HA device, so a smoke/CO
+   * alarm can drive hardwareFaultAlert from it. Prefers device_class=problem
+   * over safety. Returns the entity_id, or undefined if none found (#408).
+   */
+  findProblemEntityForDevice(deviceId: string): string | undefined {
+    if (this._problemEntityCache.has(deviceId)) {
+      const cached = this._problemEntityCache.get(deviceId);
+      return cached === null ? undefined : cached;
+    }
+
+    // Search the FULL HA registry, not the filtered bridge entities, the
+    // problem sensor may not match the bridge filter (same as battery).
+    const entities = values(this.registry.entities);
+    const sameDevice = entities.filter((e) => e.device_id === deviceId);
+
+    let safety: string | undefined;
+    for (const entity of sameDevice) {
+      if (!entity.entity_id.startsWith("binary_sensor.")) continue;
+
+      const state = this.registry.states[entity.entity_id];
+      if (!state) continue;
+
+      const attrs = state.attributes as { device_class?: string };
+      if (attrs.device_class === "problem") {
+        this._problemEntityCache.set(deviceId, entity.entity_id);
+        return entity.entity_id;
+      }
+      if (attrs.device_class === "safety" && !safety) {
+        safety = entity.entity_id;
+      }
+    }
+
+    this._problemEntityCache.set(deviceId, safety ?? null);
+    return safety;
+  }
+
+  /**
    * Check if auto battery mapping is enabled for this bridge.
    */
   isAutoBatteryMappingEnabled(): boolean {
@@ -171,10 +243,10 @@ export class BridgeRegistry {
   /**
    * Check if auto composed devices mode is enabled.
    * When enabled, temperature sensors with auto-mapped humidity/pressure/battery
-   * create real Matter Composed Devices (BridgedNodeEndpoint with sub-endpoints)
-   * instead of adding extra clusters to a flat TemperatureSensor endpoint.
-   * This ensures Apple Home, Google Home, and Alexa properly display
-   * humidity and pressure readings using their correct device types.
+   * build real Matter Composed Devices (BridgedNodeEndpoint with sub-endpoints)
+   * rather than stacking extra clusters onto a flat TemperatureSensor.
+   * Apple Home, Google Home, and Alexa render each sub-endpoint using its
+   * own device type.
    */
   isAutoComposedDevicesEnabled(): boolean {
     return this.dataProvider.featureFlags?.autoComposedDevices === true;
@@ -182,16 +254,16 @@ export class BridgeRegistry {
 
   /**
    * Check if auto humidity mapping is enabled for this bridge.
-   * Default: false (disabled by default, user must explicitly enable).
+   * Default: true (enabled by default).
    * When enabled, humidity sensors on the same device as a temperature sensor
    * are combined into a single TemperatureHumiditySensor endpoint.
    * Note: Apple Home does not display humidity on TemperatureSensorDevice
-   * endpoints, so users on Apple Home should keep this disabled.
+   * endpoints, so users on Apple Home should explicitly disable this.
    * See: https://github.com/RiDDiX/home-assistant-matter-hub/issues/133
    */
   isAutoHumidityMappingEnabled(): boolean {
     return (
-      this.dataProvider.featureFlags?.autoHumidityMapping === true ||
+      this.dataProvider.featureFlags?.autoHumidityMapping !== false ||
       this.dataProvider.featureFlags?.autoComposedDevices === true
     );
   }
@@ -307,6 +379,12 @@ export class BridgeRegistry {
     return this.dataProvider.featureFlags?.vacuumOnOff === true;
   }
 
+  // Consume frozen device identities (#404). Seeding always runs; only
+  // consumption of the stored endpoint id/anchor is gated on this flag.
+  isStableIdentityEnabled(): boolean {
+    return this.dataProvider.featureFlags?.stableIdentity === true;
+  }
+
   /**
    * Check if the vacuum OnOff cluster should be included for server-mode vacuums.
    * Defaults to OFF. OnOff is NOT part of the RoboticVacuumCleaner (0x74) device
@@ -319,10 +397,6 @@ export class BridgeRegistry {
     return this.dataProvider.featureFlags?.vacuumOnOff === true;
   }
 
-  isVacuumMinimalClustersEnabled(): boolean {
-    return this.dataProvider.featureFlags?.vacuumMinimalClusters === true;
-  }
-
   /**
    * Auto-detect vacuum-related select entities on the same HA device.
    * HA integrations (Dreame, Roborock, Ecovacs, Valetudo, etc.) expose vacuum
@@ -333,6 +407,7 @@ export class BridgeRegistry {
     cleaningModeEntity?: string;
     suctionLevelEntity?: string;
     mopIntensityEntity?: string;
+    currentRoomEntity?: string;
   } {
     const entities = values(this.registry.entities);
     const sameDevice = entities.filter(
@@ -358,8 +433,8 @@ export class BridgeRegistry {
           const options = (state.attributes as { options?: string[] })?.options;
           if (
             options?.some((o) =>
-              /^(vacuum|mop|sweep|vacuum_and_mop|vacuum_then_mop|mopping|sweeping|sweeping_and_mopping|mopping_after_sweeping)$/i.test(
-                o,
+              /^(vacuum|mop|sweep|sweep_mop|sweep_before_mopping|sweep_then_mop|vacuum_and_mop|vacuum_then_mop|mopping|sweeping|sweeping_and_mopping|mopping_after_sweeping)$/i.test(
+                o.replace(/\s+/g, "_"),
               ),
             )
           ) {
@@ -392,7 +467,25 @@ export class BridgeRegistry {
       }
     }
 
-    return { cleaningModeEntity, suctionLevelEntity, mopIntensityEntity };
+    // Current room sensor: Dreame (Tasshack) exposes sensor.*_current_room
+    // which reports the room name the vacuum is currently in.
+    let currentRoomEntity: string | undefined;
+    const sameDeviceSensors = entities.filter(
+      (e) => e.device_id === deviceId && e.entity_id.startsWith("sensor."),
+    );
+    for (const entity of sameDeviceSensors) {
+      if (entity.entity_id.toLowerCase().endsWith("_current_room")) {
+        currentRoomEntity = entity.entity_id;
+        break;
+      }
+    }
+
+    return {
+      cleaningModeEntity,
+      suctionLevelEntity,
+      mopIntensityEntity,
+      currentRoomEntity,
+    };
   }
 
   private static readonly valetudoLogger = Logger.get("ValetudoRooms");
@@ -508,6 +601,114 @@ export class BridgeRegistry {
     }
   }
 
+  private static readonly cleanAreaLogger = Logger.get("CleanAreaRooms");
+
+  /**
+   * Resolve HA areas mapped to vacuum segments via HA 2026.3 CLEAN_AREA.
+   * Fetches the full entity registry entry (including options.vacuum.area_mapping)
+   * and resolves HA area names from the area registry.
+   * Returns CleanAreaRoom[] sorted alphabetically, or empty array if
+   * CLEAN_AREA is not supported or no area_mapping is configured.
+   */
+  async resolveCleanAreaRooms(
+    entityId: string,
+    supportedFeatures: number,
+  ): Promise<CleanAreaRoom[]> {
+    if (!this.client) return [];
+    if (!(supportedFeatures & VacuumDeviceFeature.CLEAN_AREA)) return [];
+
+    try {
+      const entry = await sendHaMessage<{
+        options?: Record<string, Record<string, unknown>>;
+      }>(this.client.connection, {
+        type: "config/entity_registry/get",
+        entity_id: entityId,
+      });
+
+      const vacuumOptions = entry?.options?.vacuum as
+        | { area_mapping?: Record<string, string[]> }
+        | undefined;
+      const areaMapping = vacuumOptions?.area_mapping;
+      if (!areaMapping || Object.keys(areaMapping).length === 0) {
+        BridgeRegistry.cleanAreaLogger.debug(
+          `${entityId}: CLEAN_AREA supported but no area_mapping configured`,
+        );
+        return [];
+      }
+
+      // Fetch the vacuum's current segments to detect stale area_mapping
+      // entries whose segment IDs no longer exist on the device.
+      let validSegmentIds: Set<string> | undefined;
+      try {
+        const segmentsResponse = await sendHaMessage<
+          { id: string; name: string; group?: string | null }[]
+        >(this.client.connection, {
+          type: "vacuum/get_segments",
+          entity_id: entityId,
+        });
+        if (Array.isArray(segmentsResponse)) {
+          validSegmentIds = new Set(segmentsResponse.map((s) => s.id));
+          BridgeRegistry.cleanAreaLogger.debug(
+            `${entityId}: Current vacuum segments: ${[...validSegmentIds].join(", ")}`,
+          );
+        }
+      } catch {
+        // Older HA versions may not have the vacuum/get_segments endpoint.
+        BridgeRegistry.cleanAreaLogger.debug(
+          `${entityId}: vacuum/get_segments not available, skipping stale entry detection`,
+        );
+      }
+
+      const rooms: CleanAreaRoom[] = [];
+      for (const haAreaId of Object.keys(areaMapping)) {
+        const segments = areaMapping[haAreaId];
+        if (!segments || segments.length === 0) {
+          BridgeRegistry.cleanAreaLogger.debug(
+            `${entityId}: Skipping HA area ${haAreaId}, no segments mapped`,
+          );
+          continue;
+        }
+        // Skip entries where none of the segment IDs exist on the vacuum.
+        if (
+          validSegmentIds &&
+          !segments.some((sid) => validSegmentIds!.has(sid))
+        ) {
+          const areaName = this.registry.areas.get(haAreaId) ?? haAreaId;
+          BridgeRegistry.cleanAreaLogger.info(
+            `${entityId}: Skipping stale HA area "${areaName}" (${haAreaId}), segments [${segments.join(", ")}] no longer exist on vacuum`,
+          );
+          continue;
+        }
+        const areaName = this.registry.areas.get(haAreaId) ?? haAreaId;
+        rooms.push({
+          areaId: hashAreaId(haAreaId),
+          haAreaId,
+          name: areaName,
+        });
+      }
+
+      rooms.sort((a, b) => a.name.localeCompare(b.name));
+
+      if (rooms.length > 0) {
+        BridgeRegistry.cleanAreaLogger.info(
+          `${entityId}: Resolved ${rooms.length} HA areas via CLEAN_AREA mapping`,
+        );
+      }
+      return rooms;
+    } catch (error) {
+      const msg =
+        error instanceof Error
+          ? error.message
+          : typeof error === "object" && error !== null
+            ? JSON.stringify(error)
+            : String(error);
+      BridgeRegistry.cleanAreaLogger.warn(
+        `${entityId}: Failed to resolve CLEAN_AREA mapping: ${msg}`,
+      );
+      return [];
+    }
+  }
+
   /**
    * Find a pressure sensor entity that belongs to the same HA device.
    * Returns the entity_id of the pressure sensor, or undefined if none found.
@@ -610,6 +811,13 @@ export class BridgeRegistry {
     this.refresh();
   }
 
+  mergeExternalStates(states: HomeAssistantStates): void {
+    const registryStates = this.registry.states;
+    for (const entityId of Object.keys(states)) {
+      registryStates[entityId] = states[entityId];
+    }
+  }
+
   /**
    * Get the area name for an entity, resolving from HA area registry.
    * Priority: entity area_id > device area_id > undefined
@@ -644,8 +852,9 @@ export class BridgeRegistry {
     this._usedPowerEntities.clear();
     this._usedEnergyEntities.clear();
     this._usedComposedSubEntities.clear();
-    // Clear battery lookup cache
+    // Clear lookup caches
     this._batteryEntityCache.clear();
+    this._problemEntityCache.clear();
 
     this._entities = pickBy(this.registry.entities, (entity) => {
       const device = this.registry.devices[entity.device_id];
@@ -677,8 +886,8 @@ export class BridgeRegistry {
         .some((id) => d.id === id),
     );
 
-    // Pre-calculate auto-assignments BEFORE endpoints are created
-    // This ensures entities are marked as "used" regardless of processing order
+    // Pre-calculate auto-assignments before endpoint creation so entities
+    // are marked "used" regardless of the order they're processed later.
     this.preCalculateAutoAssignments();
   }
 
@@ -749,12 +958,19 @@ export class BridgeRegistry {
         // Skip entities that are already marked as used (e.g., humidity sensors)
         if (this._usedHumidityEntities.has(entity.entity_id)) continue;
 
-        // Skip battery sensors themselves
+        // Skip battery sensors themselves (numeric and binary)
         if (entity.entity_id.startsWith("sensor.")) {
           const state = this._states[entity.entity_id];
           if (state) {
             const attrs = state.attributes as SensorDeviceAttributes;
             if (attrs.device_class === SensorDeviceClass.battery) continue;
+          }
+        }
+        if (entity.entity_id.startsWith("binary_sensor.")) {
+          const state = this._states[entity.entity_id];
+          if (state) {
+            const attrs = state.attributes as { device_class?: string };
+            if (attrs.device_class === "battery") continue;
           }
         }
 
@@ -769,6 +985,23 @@ export class BridgeRegistry {
         }
       }
     }
+  }
+
+  /**
+   * The first already-matched entity the given matcher tests true for.
+   * Server mode pins the primary entity to the first include matcher with
+   * this, independent of HA registry order (#301).
+   */
+  firstEntityMatching(matcher: HomeAssistantMatcher): string | undefined {
+    const labels = this.registry.labels;
+    for (const entity of values(this._entities)) {
+      const device = this.registry.devices[entity.device_id];
+      const state = this.registry.states[entity.entity_id];
+      if (testMatchers([matcher], device, entity, "any", state, labels)) {
+        return entity.entity_id;
+      }
+    }
+    return undefined;
   }
 
   private matchesFilter(
@@ -799,4 +1032,14 @@ export class BridgeRegistry {
     }
     return true;
   }
+}
+
+function hashAreaId(areaId: string): number {
+  let hash = 0;
+  for (let i = 0; i < areaId.length; i++) {
+    const char = areaId.charCodeAt(i);
+    hash = (hash << 5) - hash + char;
+    hash |= 0;
+  }
+  return Math.abs(hash);
 }

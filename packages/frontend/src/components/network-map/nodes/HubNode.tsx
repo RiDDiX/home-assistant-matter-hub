@@ -1,5 +1,6 @@
 import HubIcon from "@mui/icons-material/Hub";
 import Box from "@mui/material/Box";
+import { useTheme } from "@mui/material/styles";
 import Typography from "@mui/material/Typography";
 import { Handle, type NodeProps, Position } from "@xyflow/react";
 
@@ -12,10 +13,13 @@ export interface HubNodeData {
 
 export const HubNode = ({ data }: NodeProps) => {
   const { label, bridgeCount, deviceCount } = data as unknown as HubNodeData;
+  const theme = useTheme();
+  const primary = theme.palette.primary.main;
+  const primaryDark = theme.palette.primary.dark;
   return (
     <Box
       sx={{
-        background: "linear-gradient(135deg, #1976d2, #1565c0)",
+        background: `linear-gradient(135deg, ${primary}, ${primaryDark})`,
         borderRadius: "50%",
         width: 120,
         height: 120,
@@ -23,8 +27,8 @@ export const HubNode = ({ data }: NodeProps) => {
         flexDirection: "column",
         alignItems: "center",
         justifyContent: "center",
-        color: "#fff",
-        boxShadow: "0 4px 20px rgba(25,118,210,0.4)",
+        color: theme.palette.primary.contrastText,
+        boxShadow: `0 4px 20px ${theme.palette.mode === "dark" ? "rgba(0,0,0,0.5)" : "rgba(25,118,210,0.4)"}`,
         border: "3px solid rgba(255,255,255,0.3)",
       }}
     >

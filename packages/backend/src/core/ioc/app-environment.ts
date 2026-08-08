@@ -1,5 +1,6 @@
 import { type Environment, StorageService } from "@matter/main";
 import { WebApi } from "../../api/web-api.js";
+import { BackupService } from "../../services/backup/backup-service.js";
 import { BridgeFactory } from "../../services/bridges/bridge-factory.js";
 import { BridgeService } from "../../services/bridges/bridge-service.js";
 import { HomeAssistantActions } from "../../services/home-assistant/home-assistant-actions.js";
@@ -9,6 +10,7 @@ import { HomeAssistantRegistry } from "../../services/home-assistant/home-assist
 import { AppSettingsStorage } from "../../services/storage/app-settings-storage.js";
 import { AppStorage } from "../../services/storage/app-storage.js";
 import { BridgeStorage } from "../../services/storage/bridge-storage.js";
+import { EntityIdentityStorage } from "../../services/storage/entity-identity-storage.js";
 import { EntityMappingStorage } from "../../services/storage/entity-mapping-storage.js";
 import { LockCredentialStorage } from "../../services/storage/lock-credential-storage.js";
 import { LoggerService } from "../app/logger.js";
@@ -50,6 +52,10 @@ export class AppEnvironment extends EnvironmentBase {
       new EntityMappingStorage(await this.load(AppStorage)),
     );
     this.set(
+      EntityIdentityStorage,
+      new EntityIdentityStorage(await this.load(AppStorage)),
+    );
+    this.set(
       LockCredentialStorage,
       new LockCredentialStorage(await this.load(AppStorage)),
     );
@@ -78,13 +84,29 @@ export class AppEnvironment extends EnvironmentBase {
       ),
     );
 
-    this.set(BridgeFactory, new BridgeEnvironmentFactory(this));
+    this.set(
+      BridgeFactory,
+      new BridgeEnvironmentFactory(this, this.options.webApi.storageLocation),
+    );
     this.set(
       BridgeService,
       new BridgeService(
         await this.load(BridgeStorage),
         await this.load(BridgeFactory),
         this.options.bridgeService,
+      ),
+    );
+
+    this.set(
+      BackupService,
+      new BackupService(
+        await this.load(BridgeStorage),
+        await this.load(EntityMappingStorage),
+        await this.load(AppSettingsStorage),
+        {
+          storageLocation: this.options.webApi.storageLocation,
+          appVersion: this.options.webApi.version,
+        },
       ),
     );
 
@@ -97,8 +119,10 @@ export class AppEnvironment extends EnvironmentBase {
         await this.load(HomeAssistantRegistry),
         await this.load(BridgeStorage),
         await this.load(EntityMappingStorage),
+        await this.load(EntityIdentityStorage),
         await this.load(LockCredentialStorage),
         await this.load(AppSettingsStorage),
+        await this.load(BackupService),
         this.options.webApi,
       ),
     );

@@ -2,6 +2,7 @@ import type {
   LockCredential,
   LockCredentialRequest,
   LockCredentialsResponse,
+  SanitizedLockCredential,
 } from "@home-assistant-matter-hub/common";
 import { type Request, type Response, Router } from "express";
 import type { LockCredentialStorage } from "../services/storage/lock-credential-storage.js";
@@ -9,7 +10,9 @@ import type { LockCredentialStorage } from "../services/storage/lock-credential-
 /**
  * Sanitize credential for API response - never expose PIN hash/salt
  */
-function sanitizeCredential(credential: LockCredential) {
+function sanitizeCredential(
+  credential: LockCredential,
+): SanitizedLockCredential {
   return {
     entityId: credential.entityId,
     name: credential.name,
@@ -33,9 +36,7 @@ export function lockCredentialApi(
       const credentials = lockCredentialStorage.getAllCredentials();
       // Sanitize credentials - never expose PIN hash/salt
       const sanitizedCredentials = credentials.map(sanitizeCredential);
-      res.json({
-        credentials: sanitizedCredentials as unknown as LockCredential[],
-      });
+      res.json({ credentials: sanitizedCredentials });
     },
   );
 

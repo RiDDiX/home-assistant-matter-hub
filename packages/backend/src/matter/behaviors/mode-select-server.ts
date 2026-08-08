@@ -7,6 +7,14 @@ import { HomeAssistantEntityBehavior } from "./home-assistant-entity-behavior.js
 
 const logger = Logger.get("ModeSelectServer");
 
+export function buildSupportedModes(options: string[]) {
+  return options.map((label, index) => ({
+    label: label.length > 64 ? label.substring(0, 64) : label,
+    mode: index,
+    semanticTags: [],
+  }));
+}
+
 export interface SelectModeConfig {
   getOptions: (entity: HomeAssistantEntityInformation) => string[];
   getCurrentOption: (
@@ -23,15 +31,11 @@ class ModeSelectServerBase extends Base {
     await super.initialize();
     const homeAssistant = await this.agent.load(HomeAssistantEntityBehavior);
     this.update(homeAssistant.entity);
-    if (homeAssistant.state.managedByEndpoint) {
-      homeAssistant.registerUpdate(this.callback(this.update));
-    } else {
-      this.reactTo(homeAssistant.onChange, this.update);
-    }
+    this.reactTo(homeAssistant.onChange, this.update);
   }
 
-  public update(entity: HomeAssistantEntityInformation) {
-    if (!entity.state) {
+  private update(entity: HomeAssistantEntityInformation) {
+    if (!entity.state || !entity.state.attributes) {
       return;
     }
     const config = this.state.config;
@@ -47,6 +51,7 @@ class ModeSelectServerBase extends Base {
       : -1;
 
     applyPatchState(this.state, {
+      supportedModes: buildSupportedModes(options),
       currentMode: currentIndex >= 0 ? currentIndex : 0,
     });
   }

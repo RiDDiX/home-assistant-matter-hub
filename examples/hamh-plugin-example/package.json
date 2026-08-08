@@ -1,0 +1,10 @@
+{
+  "name": "hamh-plugin-example",
+  "version": "1.0.0",
+  "description": "Example HAMH plugin, virtual temperature sensor",
+  "main": "index.js",
+  "type": "module",
+  "keywords": ["hamh-plugin", "matter", "home-assistant"],
+  "hamhPluginApiVersion": 1,
+  "license": "MIT"
+}

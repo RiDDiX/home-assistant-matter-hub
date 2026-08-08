@@ -1,0 +1,10 @@
+{
+  "name": "hamh-plugin-broken",
+  "version": "1.0.0",
+  "description": "Intentionally broken plugin for testing HAMH failure isolation",
+  "main": "index.js",
+  "type": "module",
+  "keywords": ["hamh-plugin", "matter", "home-assistant", "test"],
+  "hamhPluginApiVersion": 1,
+  "license": "MIT"
+}

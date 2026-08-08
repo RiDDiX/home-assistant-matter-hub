@@ -25,6 +25,8 @@ import type { HomeAssistantStates } from "../../../services/home-assistant/home-
 import { convertPressureToHpa } from "../../../utils/converters/pressure.js";
 import { Temperature } from "../../../utils/converters/temperature.js";
 import { BasicInformationServer } from "../../behaviors/basic-information-server.js";
+import { HaElectricalEnergyMeasurementServer } from "../../behaviors/electrical-energy-measurement-server.js";
+import { HaElectricalPowerMeasurementServer } from "../../behaviors/electrical-power-measurement-server.js";
 import { HomeAssistantEntityBehavior } from "../../behaviors/home-assistant-entity-behavior.js";
 import {
   type HumidityMeasurementConfig,
@@ -32,6 +34,7 @@ import {
 } from "../../behaviors/humidity-measurement-server.js";
 import { IdentifyServer } from "../../behaviors/identify-server.js";
 import { PowerSourceServer } from "../../behaviors/power-source-server.js";
+import { HaPowerTopologyServer } from "../../behaviors/power-topology-server.js";
 import {
   type PressureMeasurementConfig,
   PressureMeasurementServer,
@@ -86,7 +89,7 @@ const batteryConfig = {
     const batteryEntity = homeAssistant.state.mapping?.batteryEntity;
     if (batteryEntity) {
       const stateProvider = agent.env.get(EntityStateProvider);
-      const battery = stateProvider.getNumericState(batteryEntity);
+      const battery = stateProvider.getBatteryPercent(batteryEntity);
       if (battery != null) return Math.max(0, Math.min(100, battery));
     }
     return null;
@@ -120,14 +123,16 @@ function createEndpointId(entityId: string, customName?: string): string {
   return baseName.replace(/\./g, "_").replace(/\s+/g, "_");
 }
 
+// sub-entities may sit outside the bridge filter (#426, like #408); all three
+// accessors must be unfiltered together, the strict deviceOf throws otherwise.
 function buildEntityPayload(
   registry: BridgeRegistry,
   entityId: string,
 ): HomeAssistantEntityInformation | undefined {
-  const state = registry.initialState(entityId);
+  const state = registry.initialStateIncludingUnfiltered(entityId);
   if (!state) return undefined;
-  const entity = registry.entity(entityId);
-  const deviceRegistry = registry.deviceOf(entityId);
+  const entity = registry.entityIncludingUnfiltered(entityId);
+  const deviceRegistry = registry.deviceOfIncludingUnfiltered(entityId);
   return {
     entity_id: entityId,
     state,
@@ -144,18 +149,25 @@ export interface ComposedSensorConfig {
   humidityEntityId?: string;
   pressureEntityId?: string;
   batteryEntityId?: string;
+  powerEntityId?: string;
+  energyEntityId?: string;
   customName?: string;
   areaName?: string;
+  // Resolved stable endpoint id (keyed on the primary entity). Falls back to the
+  // entity_id derivation when unset (#404).
+  endpointId?: string;
+  // Identity anchor (the primary's seed entity_id) so the parent freezes
+  // uniqueId/serialNumber across a rename of the primary (#404).
+  identityAnchor?: string;
 }
 
 // --- Main class ---
 
 /**
- * A composed sensor endpoint that uses BridgedNodeEndpoint as the parent
- * with separate sub-endpoints for each sensor type. This ensures that
- * each sensor has the correct Matter device type, which is required for
- * Apple Home, Google Home, and Amazon Alexa to properly display humidity
- * and pressure readings.
+ * Composed sensor endpoint built on BridgedNodeEndpoint with one
+ * sub-endpoint per sensor type. Each sub-endpoint carries its own Matter
+ * device type, required for Apple Home, Google Home, and Alexa to
+ * render humidity and pressure readings with the right icons and units.
  *
  * Structure:
  *   BridgedNodeEndpoint (parent - basic info + optional battery)
@@ -165,6 +177,7 @@ export interface ComposedSensorConfig {
  */
 export class ComposedSensorEndpoint extends Endpoint {
   readonly entityId: string;
+  readonly mappedEntityIds: string[];
   private subEndpoints = new Map<string, Endpoint>();
   private lastStates = new Map<string, string>();
   private debouncedUpdates = new Map<
@@ -194,10 +207,22 @@ export class ComposedSensorEndpoint extends Endpoint {
       ...(config.batteryEntityId
         ? { batteryEntity: config.batteryEntityId }
         : {}),
+      ...(config.powerEntityId ? { powerEntity: config.powerEntityId } : {}),
+      ...(config.energyEntityId ? { energyEntity: config.energyEntityId } : {}),
     };
 
     if (config.batteryEntityId) {
       parentType = parentType.with(PowerSourceServer(batteryConfig));
+    }
+
+    if (config.powerEntityId || config.energyEntityId) {
+      parentType = parentType.with(HaPowerTopologyServer);
+    }
+    if (config.powerEntityId) {
+      parentType = parentType.with(HaElectricalPowerMeasurementServer);
+    }
+    if (config.energyEntityId) {
+      parentType = parentType.with(HaElectricalEnergyMeasurementServer);
     }
 
     if (config.areaName) {
@@ -213,7 +238,8 @@ export class ComposedSensorEndpoint extends Endpoint {
     }
 
     // Build sub-endpoints
-    const endpointId = createEndpointId(primaryEntityId, config.customName);
+    const endpointId =
+      config.endpointId ?? createEndpointId(primaryEntityId, config.customName);
     const parts: Endpoint[] = [];
 
     // Temperature sub-endpoint (always present)
@@ -264,14 +290,24 @@ export class ComposedSensorEndpoint extends Endpoint {
         entity: primaryPayload,
         customName: config.customName,
         mapping: mapping as EntityMappingConfig,
+        identityAnchor: config.identityAnchor,
       },
     });
+
+    // Expose non-primary sub-entity IDs so bridge-endpoint-manager subscribes
+    // to their state changes via WebSocket.
+    const mappedIds: string[] = [];
+    if (config.humidityEntityId) mappedIds.push(config.humidityEntityId);
+    if (config.pressureEntityId) mappedIds.push(config.pressureEntityId);
+    if (config.powerEntityId) mappedIds.push(config.powerEntityId);
+    if (config.energyEntityId) mappedIds.push(config.energyEntityId);
 
     const endpoint = new ComposedSensorEndpoint(
       parentTypeWithState,
       primaryEntityId,
       endpointId,
       parts,
+      mappedIds,
     );
 
     // Register sub-endpoints for state updates
@@ -285,7 +321,7 @@ export class ComposedSensorEndpoint extends Endpoint {
 
     logger.info(
       `Created composed sensor ${primaryEntityId} with ${parts.length} sub-endpoint(s): ` +
-        `T${humSub ? "+H" : ""}${pressSub ? "+P" : ""}${config.batteryEntityId ? "+Bat" : ""}`,
+        `T${humSub ? "+H" : ""}${pressSub ? "+P" : ""}${config.batteryEntityId ? "+Bat" : ""}${config.powerEntityId ? "+Pwr" : ""}${config.energyEntityId ? "+Nrg" : ""}`,
     );
 
     return endpoint;
@@ -296,9 +332,11 @@ export class ComposedSensorEndpoint extends Endpoint {
     entityId: string,
     id: string,
     parts: Endpoint[],
+    mappedEntityIds: string[],
   ) {
     super(type, { id, parts });
     this.entityId = entityId;
+    this.mappedEntityIds = mappedEntityIds;
   }
 
   async updateStates(states: HomeAssistantStates): Promise<void> {

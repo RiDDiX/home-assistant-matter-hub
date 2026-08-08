@@ -64,6 +64,17 @@ export function bridgeIconApi(storageLocation: string): express.Router {
     },
   );
 
+  // Tells the UI whether a custom icon exists, without a 404 probe
+  router.get(
+    "/:bridgeId/exists",
+    (req: express.Request, res: express.Response) => {
+      const bridgeId = req.params.bridgeId;
+      const files = fs.readdirSync(iconsDir);
+      const exists = files.some((f) => f.startsWith(`${bridgeId}.`));
+      res.json({ exists });
+    },
+  );
+
   // Get icon for a bridge
   router.get("/:bridgeId", (req: express.Request, res: express.Response) => {
     const bridgeId = req.params.bridgeId;
@@ -97,19 +108,6 @@ export function bridgeIconApi(storageLocation: string): express.Router {
     const filePath = path.join(iconsDir, iconFile);
     fs.unlinkSync(filePath);
     res.json({ success: true });
-  });
-
-  // Check if bridge has custom icon
-  router.head("/:bridgeId", (req: express.Request, res: express.Response) => {
-    const bridgeId = req.params.bridgeId;
-    const files = fs.readdirSync(iconsDir);
-    const iconFile = files.find((f) => f.startsWith(`${bridgeId}.`));
-
-    if (iconFile) {
-      res.status(200).end();
-    } else {
-      res.status(404).end();
-    }
   });
 
   return router;

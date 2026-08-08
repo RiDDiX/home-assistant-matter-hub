@@ -3,51 +3,107 @@ import type {
   CreateBridgeRequest,
   UpdateBridgeRequest,
 } from "@home-assistant-matter-hub/common";
+import { assertOk, parseJsonResponse } from "./fetch-utils.js";
 
 export async function fetchBridges() {
   const res = await fetch(`api/matter/bridges?_s=${Date.now()}`);
-  const json = await res.json();
-  return json as BridgeDataWithMetadata[];
+  await assertOk(res, "Failed to fetch bridges");
+  return parseJsonResponse<BridgeDataWithMetadata[]>(res);
 }
 
 export async function createBridge(req: CreateBridgeRequest) {
-  return fetch("api/matter/bridges", {
+  const res = await fetch("api/matter/bridges", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
     },
     body: JSON.stringify(req),
-  }).then((res) => res.json() as Promise<BridgeDataWithMetadata>);
+  });
+  await assertOk(res, "Failed to create bridge");
+  return parseJsonResponse<BridgeDataWithMetadata>(res);
 }
 
 export async function updateBridge(req: UpdateBridgeRequest) {
-  return fetch(`api/matter/bridges/${req.id}`, {
+  const res = await fetch(`api/matter/bridges/${req.id}`, {
     method: "PUT",
     headers: {
       "Content-Type": "application/json",
     },
     body: JSON.stringify(req),
-  }).then((res) => res.json() as Promise<BridgeDataWithMetadata>);
+  });
+  await assertOk(res, "Failed to update bridge");
+  return parseJsonResponse<BridgeDataWithMetadata>(res);
 }
 
 export async function deleteBridge(bridgeId: string) {
-  await fetch(`api/matter/bridges/${bridgeId}`, {
+  const res = await fetch(`api/matter/bridges/${bridgeId}`, {
     method: "DELETE",
   });
+  await assertOk(res, "Failed to delete bridge");
 }
 
 export async function resetBridge(bridgeId: string) {
-  return await fetch(`api/matter/bridges/${bridgeId}/actions/factory-reset`, {
-    method: "POST",
-  }).then((res) => res.json() as Promise<BridgeDataWithMetadata>);
+  const res = await fetch(
+    `api/matter/bridges/${bridgeId}/actions/factory-reset`,
+    {
+      method: "POST",
+    },
+  );
+  await assertOk(res, "Factory reset failed");
+  return parseJsonResponse<BridgeDataWithMetadata>(res);
+}
+
+export interface OrphanCandidate {
+  // Identity key for an "identity" row, mapping entityId for a "mapping" row.
+  identityKey: string;
+  lastEntityId: string;
+  missingSince: string;
+  hasMapping: boolean;
+  kind: "identity" | "mapping";
+}
+
+export interface OrphanCleanupResult {
+  identityKey: string;
+  deleted: boolean;
+  reason?: string;
+}
+
+export async function getOrphans(
+  bridgeId: string,
+): Promise<{ candidates: OrphanCandidate[] }> {
+  const res = await fetch(
+    `api/matter/bridges/${bridgeId}/orphans?_s=${Date.now()}`,
+  );
+  await assertOk(res, "Failed to load orphaned records");
+  return parseJsonResponse(res);
+}
+
+export async function cleanupOrphans(
+  bridgeId: string,
+  identityKeys: string[],
+): Promise<{ results: OrphanCleanupResult[] }> {
+  const res = await fetch(
+    `api/matter/bridges/${bridgeId}/actions/cleanup-orphans`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ identityKeys }),
+    },
+  );
+  await assertOk(res, "Cleanup failed");
+  return parseJsonResponse(res);
 }
 
 export async function forceSyncBridge(
   bridgeId: string,
 ): Promise<{ syncedCount: number; bridge: BridgeDataWithMetadata }> {
-  return await fetch(`api/matter/bridges/${bridgeId}/actions/force-sync`, {
+  const res = await fetch(`api/matter/bridges/${bridgeId}/actions/force-sync`, {
     method: "POST",
-  }).then((res) => res.json());
+  });
+  await assertOk(res, "Force sync failed");
+  return parseJsonResponse(res);
 }
 
 export async function openCommissioningWindow(
@@ -57,16 +113,8 @@ export async function openCommissioningWindow(
     `api/matter/bridges/${bridgeId}/actions/open-commissioning-window`,
     { method: "POST" },
   );
-  if (!res.ok) {
-    const err = await res
-      .json()
-      .catch(() => ({ error: "Failed to open commissioning window" }));
-    throw new Error(
-      (err as { error?: string }).error ??
-        "Failed to open commissioning window",
-    );
-  }
-  return res.json();
+  await assertOk(res, "Failed to open commissioning window");
+  return parseJsonResponse(res);
 }
 
 export interface BridgePriorityUpdate {
@@ -96,7 +144,8 @@ export async function startAllBridges(): Promise<{
   const res = await fetch("api/matter/bridges/actions/start-all", {
     method: "POST",
   });
-  return res.json();
+  await assertOk(res, "Failed to start all bridges");
+  return parseJsonResponse(res);
 }
 
 export async function stopAllBridges(): Promise<{
@@ -106,7 +155,8 @@ export async function stopAllBridges(): Promise<{
   const res = await fetch("api/matter/bridges/actions/stop-all", {
     method: "POST",
   });
-  return res.json();
+  await assertOk(res, "Failed to stop all bridges");
+  return parseJsonResponse(res);
 }
 
 export async function restartAllBridges(): Promise<{
@@ -116,7 +166,8 @@ export async function restartAllBridges(): Promise<{
   const res = await fetch("api/matter/bridges/actions/restart-all", {
     method: "POST",
   });
-  return res.json();
+  await assertOk(res, "Failed to restart all bridges");
+  return parseJsonResponse(res);
 }
 
 export async function cloneBridge(
@@ -125,9 +176,6 @@ export async function cloneBridge(
   const res = await fetch(`api/matter/bridges/${bridgeId}/clone`, {
     method: "POST",
   });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ error: "Clone failed" }));
-    throw new Error((err as { error?: string }).error ?? "Clone failed");
-  }
-  return res.json() as Promise<BridgeDataWithMetadata>;
+  await assertOk(res, "Clone failed");
+  return parseJsonResponse<BridgeDataWithMetadata>(res);
 }

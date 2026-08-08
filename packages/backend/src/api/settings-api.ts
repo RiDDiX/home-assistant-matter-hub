@@ -1,5 +1,11 @@
 import { type Request, type Response, Router } from "express";
-import type { AppSettingsStorage } from "../services/storage/app-settings-storage.js";
+import type { BridgeService } from "../services/bridges/bridge-service.js";
+import {
+  type AppSettingsStorage,
+  MAX_RECOVERY_INTERVAL_MS,
+  MIN_RECOVERY_INTERVAL_MS,
+  type RecoverySettings,
+} from "../services/storage/app-settings-storage.js";
 
 export interface SettingsAuthResponse {
   enabled: boolean;
@@ -9,6 +15,7 @@ export interface SettingsAuthResponse {
 
 export function settingsApi(
   settingsStorage: AppSettingsStorage,
+  bridgeService: BridgeService,
   envAuth?: { username: string; password: string },
 ): Router {
   const router = Router();
@@ -76,6 +83,39 @@ export function settingsApi(
       }
       await settingsStorage.setAuth(undefined);
       res.json({ enabled: false, source: "none" });
+    },
+  );
+
+  router.get("/recovery", (_req: Request, res: Response<RecoverySettings>) => {
+    res.json(settingsStorage.recoverySettings);
+  });
+
+  router.put(
+    "/recovery",
+    async (
+      req: Request<unknown, unknown, Partial<RecoverySettings>>,
+      res: Response<RecoverySettings | { error: string }>,
+    ) => {
+      const next = { ...settingsStorage.recoverySettings };
+      const { autoRecoveryEnabled, recoveryIntervalMs } = req.body;
+      if (typeof autoRecoveryEnabled === "boolean") {
+        next.autoRecoveryEnabled = autoRecoveryEnabled;
+      }
+      if (typeof recoveryIntervalMs === "number") {
+        if (
+          recoveryIntervalMs < MIN_RECOVERY_INTERVAL_MS ||
+          recoveryIntervalMs > MAX_RECOVERY_INTERVAL_MS
+        ) {
+          res.status(400).json({
+            error: `recoveryIntervalMs must be between ${MIN_RECOVERY_INTERVAL_MS} and ${MAX_RECOVERY_INTERVAL_MS}`,
+          });
+          return;
+        }
+        next.recoveryIntervalMs = recoveryIntervalMs;
+      }
+      await settingsStorage.setRecoverySettings(next);
+      bridgeService.applyRecoverySettings(next);
+      res.json(next);
     },
   );
 

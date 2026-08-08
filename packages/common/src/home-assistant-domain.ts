@@ -11,6 +11,7 @@ export enum HomeAssistantDomain {
   input_boolean = "input_boolean",
   input_button = "input_button",
   input_select = "input_select",
+  lawn_mower = "lawn_mower",
   light = "light",
   lock = "lock",
   media_player = "media_player",
@@ -19,8 +20,10 @@ export enum HomeAssistantDomain {
   select = "select",
   script = "script",
   sensor = "sensor",
+  siren = "siren",
   switch = "switch",
   vacuum = "vacuum",
   valve = "valve",
   water_heater = "water_heater",
+  weather = "weather",
 }

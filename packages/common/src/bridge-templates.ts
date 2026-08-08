@@ -116,7 +116,7 @@ export const bridgeTemplates: BridgeTemplate[] = [
     id: "robot_vacuum",
     name: "Robot Vacuum (Server Mode)",
     description:
-      "Single vacuum bridge with Server Mode enabled. Required for Apple Home Siri commands and proper Alexa discovery. Add only ONE vacuum to this bridge.",
+      "Single vacuum bridge with Server Mode enabled. Required for Apple Home Siri commands and proper Alexa discovery. Best with just the vacuum on this bridge.",
     icon: "vacuum",
     filter: {
       include: [{ type: HomeAssistantMatcherType.Domain, value: "vacuum" }],

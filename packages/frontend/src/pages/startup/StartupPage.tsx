@@ -27,6 +27,7 @@ import Chip from "@mui/material/Chip";
 import Stack from "@mui/material/Stack";
 import Typography from "@mui/material/Typography";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import {
   checkBridgeIconExists,
   getBridgeIconUrl,
@@ -153,6 +154,7 @@ const SortableBridgeCard = ({ bridge, index }: SortableBridgeCardProps) => {
 };
 
 export const StartupPage = () => {
+  const { t } = useTranslation();
   const notifications = useNotifications();
   const { content: bridges, isLoading } = useBridges();
   const updatePriorities = useUpdateBridgePriorities();
@@ -205,18 +207,17 @@ export const StartupPage = () => {
     try {
       await updatePriorities(updates);
       notifications.show({
-        message: "Startup order saved successfully",
+        message: t("startup.saveSuccess"),
         severity: "success",
       });
       setHasChanges(false);
     } catch (e) {
       notifications.show({
-        message:
-          e instanceof Error ? e.message : "Failed to save startup order",
+        message: e instanceof Error ? e.message : t("startup.saveFailed"),
         severity: "error",
       });
     }
-  }, [orderedBridges, updatePriorities, notifications]);
+  }, [orderedBridges, updatePriorities, notifications, t]);
 
   const bridgeIds = useMemo(
     () => orderedBridges.map((b) => b.id),
@@ -224,15 +225,15 @@ export const StartupPage = () => {
   );
 
   if (isLoading) {
-    return <Typography>Loading...</Typography>;
+    return <Typography>{t("common.loading")}...</Typography>;
   }
 
   return (
     <Stack spacing={3}>
       <Breadcrumbs
         items={[
-          { name: "Bridges", to: navigation.bridges },
-          { name: "Startup Order", to: navigation.startup },
+          { name: t("nav.bridges"), to: navigation.bridges },
+          { name: t("startup.title"), to: navigation.startup },
         ]}
       />
 
@@ -240,11 +241,10 @@ export const StartupPage = () => {
         <RocketLaunch color="primary" fontSize="large" />
         <Box>
           <Typography variant="h5" fontWeight={600}>
-            Startup Order
+            {t("startup.title")}
           </Typography>
           <Typography variant="body2" color="text.secondary">
-            Drag and drop bridges to set the startup order. Lower positions
-            start first.
+            {t("startup.description")}
           </Typography>
         </Box>
       </Box>
@@ -259,11 +259,11 @@ export const StartupPage = () => {
               startIcon={<Save />}
               onClick={handleSave}
             >
-              Save Changes
+              {t("startup.saveChanges")}
             </Button>
           }
         >
-          You have unsaved changes to the startup order.
+          {t("startup.unsavedChanges")}
         </Alert>
       )}
 
@@ -290,14 +290,14 @@ export const StartupPage = () => {
 
       {orderedBridges.length === 0 && (
         <Typography color="text.secondary" textAlign="center" py={4}>
-          No bridges configured yet.
+          {t("startup.noBridges")}
         </Typography>
       )}
 
       {hasChanges && orderedBridges.length > 0 && (
         <Box display="flex" justifyContent="flex-end">
           <Button variant="contained" startIcon={<Save />} onClick={handleSave}>
-            Save Startup Order
+            {t("startup.saveOrder")}
           </Button>
         </Box>
       )}

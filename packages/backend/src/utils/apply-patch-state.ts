@@ -48,7 +48,7 @@ function applyPatch<T extends object>(
   // Set properties individually with per-property error handling.
   // Previously, a single try-catch wrapped the entire loop, so if ANY property
   // write failed (e.g., a Fixed quality attribute), ALL subsequent properties
-  // were skipped — including critical ones like systemMode, localTemperature,
+  // were skipped, including critical ones like systemMode, localTemperature,
   // and setpoints. This caused thermostats to appear completely broken (#52).
   const failedKeys: string[] = [];
   for (const key in actualPatch) {
@@ -57,7 +57,7 @@ function applyPatch<T extends object>(
       state[key] = actualPatch[key] as T[Extract<keyof T, string>];
     } catch (e) {
       const errorMessage = e instanceof Error ? e.message : String(e);
-      // Endpoint not yet attached to a node — all remaining writes will fail too
+      // Endpoint not yet attached to a node, all remaining writes will fail too
       if (
         errorMessage.includes(
           "Endpoint storage inaccessible because endpoint is not a node and is not owned by another endpoint",
@@ -68,7 +68,7 @@ function applyPatch<T extends object>(
         );
         return actualPatch;
       }
-      // Transaction conflict — all remaining writes will also fail
+      // Transaction conflict, all remaining writes will also fail
       if (errorMessage.includes("synchronous-transaction-conflict")) {
         logger.warn(
           `Transaction conflict, state update DROPPED: ${JSON.stringify(actualPatch)}`,

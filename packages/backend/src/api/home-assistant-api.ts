@@ -275,7 +275,7 @@ export function homeAssistantApi(
 
   router.post("/refresh", async (_, res) => {
     try {
-      await (haRegistry as unknown as { reload(): Promise<void> }).reload();
+      await haRegistry.reload();
       res.json({ success: true, message: "Registry refreshed" });
     } catch (error) {
       const message =

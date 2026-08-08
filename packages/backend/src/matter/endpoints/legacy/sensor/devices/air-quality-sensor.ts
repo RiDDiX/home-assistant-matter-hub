@@ -27,14 +27,13 @@ class AirQualitySensorServerImpl extends AirQualityServerWithFeatures {
     await super.initialize();
     const homeAssistant = await this.agent.load(HomeAssistantEntityBehavior);
     this.update(homeAssistant.entity);
-    if (homeAssistant.state.managedByEndpoint) {
-      homeAssistant.registerUpdate(this.callback(this.update));
-    } else {
-      this.reactTo(homeAssistant.onChange, this.update);
-    }
+    this.reactTo(homeAssistant.onChange, this.update, { offline: true });
   }
 
-  public update(entity: HomeAssistantEntityInformation) {
+  private update(entity: HomeAssistantEntityInformation) {
+    if (!entity.state || !entity.state.attributes) {
+      return;
+    }
     const state = entity.state.state;
     const attributes = entity.state.attributes as SensorDeviceAttributes;
     const deviceClass = attributes.device_class;

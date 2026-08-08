@@ -1,12 +1,13 @@
 import type { FailedEntity } from "@home-assistant-matter-hub/common";
 import { Logger } from "@matter/general";
+import { diagnosticEventBus } from "../diagnostics/diagnostic-event-bus.js";
 
 const logger = Logger.get("EntityIsolation");
 
 /**
- * Service to track and isolate entities that cause runtime errors.
- * This allows the bridge to continue functioning even when individual
- * entities have issues (e.g., Invalid intervalMs from subscription timing).
+ * Tracks and isolates entities that throw at runtime so the bridge keeps
+ * running when individual entities hit issues (e.g. Invalid intervalMs
+ * from subscription timing).
  */
 class EntityIsolationServiceImpl {
   private isolatedEntities: Map<string, FailedEntity> = new Map();
@@ -37,13 +38,43 @@ class EntityIsolationServiceImpl {
     bridgeId: string;
     entityName: string;
   } | null {
-    // Match pattern: bridgeId.aggregator.entityName.cluster.attribute/command
-    const match = errorMessage.match(/([a-f0-9]{32})\.aggregator\.([^.]+)\./i);
+    // Match pattern: bridgeId.aggregator.entityName[.cluster.attribute]
+    // The trailing segments are optional, a part that fails during construction
+    // is named without them.
+    const match = errorMessage.match(/([a-f0-9]{32})\.aggregator\.([^.\s>]+)/i);
     if (match) {
       return {
         bridgeId: match[1],
         entityName: match[2],
       };
+    }
+    return null;
+  }
+
+  private classifyError(msg: string): string | null {
+    if (msg.includes("Invalid intervalMs")) {
+      return "Subscription timing error (Invalid intervalMs)";
+    }
+    if (msg.includes("Behaviors have errors")) {
+      return "Behavior initialization failure";
+    }
+    if (msg.includes("TransactionDestroyedError")) {
+      return "Transaction destroyed during operation";
+    }
+    if (msg.includes("DestroyedDependencyError")) {
+      return "Dependency destroyed during operation";
+    }
+    if (msg.includes("UninitializedDependencyError")) {
+      return "Uninitialized dependency access";
+    }
+    if (msg.includes("Endpoint storage inaccessible")) {
+      return "Endpoint storage inaccessible";
+    }
+    if (msg.includes("Error initializing part")) {
+      return "Endpoint construction failure";
+    }
+    if (msg.includes("aggregator.")) {
+      return "Runtime error in endpoint";
     }
     return null;
   }
@@ -55,8 +86,8 @@ class EntityIsolationServiceImpl {
   async isolateFromError(error: unknown): Promise<boolean> {
     const msg = error instanceof Error ? error.message : String(error);
 
-    // Only handle specific subscription timing errors
-    if (!msg.includes("Invalid intervalMs")) {
+    const classification = this.classifyError(msg);
+    if (!classification) {
       return false;
     }
 
@@ -83,12 +114,21 @@ class EntityIsolationServiceImpl {
       return true; // Already isolated
     }
 
-    const reason = `Subscription timing error (Invalid intervalMs). Entity isolated to protect bridge stability.`;
-    this.isolatedEntities.set(key, { entityId: entityName, reason });
+    const reason = `${classification}. Entity isolated to protect bridge stability.`;
+    this.isolatedEntities.set(key, {
+      entityId: entityName,
+      reason,
+      failedAt: new Date().toISOString(),
+    });
 
     logger.warn(
       `Isolating entity "${entityName}" from bridge ${bridgeId} due to: ${reason}`,
     );
+    diagnosticEventBus.emit("entity_error", `Entity isolated: ${entityName}`, {
+      bridgeId,
+      entityId: entityName,
+      details: { reason: classification },
+    });
 
     try {
       await callback(entityName);

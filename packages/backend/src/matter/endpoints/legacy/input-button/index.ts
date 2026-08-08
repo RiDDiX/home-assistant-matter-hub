@@ -5,13 +5,14 @@ import { HomeAssistantEntityBehavior } from "../../../behaviors/home-assistant-e
 import { IdentifyServer } from "../../../behaviors/identify-server.js";
 import { OnOffServer } from "../../../behaviors/on-off-server.js";
 
+// No Lighting feature, same conformance reason as automation (#182).
 const InputButtonOnOffServer = OnOffServer({
   isOn: () => false,
   turnOn: () => ({
     action: "input_button.press",
   }),
   turnOff: null,
-}).with("Lighting");
+});
 
 const InputButtonEndpointType = OnOffPlugInUnitDevice.with(
   BasicInformationServer,

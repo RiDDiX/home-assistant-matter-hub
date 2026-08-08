@@ -27,6 +27,8 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
+import { collectLeafEndpoints } from "../../components/endpoints/collect-leaf-endpoints.ts";
 import { getEndpointName } from "../../components/endpoints/EndpointName.tsx";
 import { BridgeNode } from "../../components/network-map/nodes/BridgeNode.tsx";
 import { DeviceNode } from "../../components/network-map/nodes/DeviceNode.tsx";
@@ -46,16 +48,6 @@ const nodeTypes = {
   failed: FailedNode,
 };
 
-function collectLeafEndpoints(endpoint: EndpointData): EndpointData[] {
-  if (!endpoint.parts || endpoint.parts.length === 0) {
-    if (endpoint.endpoint !== 0) {
-      return [endpoint];
-    }
-    return [];
-  }
-  return endpoint.parts.flatMap(collectLeafEndpoints);
-}
-
 interface LayoutConfig {
   hubX: number;
   minBridgeSpacingY: number;
@@ -67,10 +59,19 @@ interface LayoutConfig {
   deviceOffsetX: number;
 }
 
+interface EdgeColors {
+  running: string;
+  inactive: string;
+  device: string;
+  failed: string;
+  fabric: string;
+}
+
 function buildGraph(
   bridges: BridgeDataWithMetadata[],
   devicesByBridge: Record<string, EndpointData | undefined>,
   layout: LayoutConfig,
+  colors: EdgeColors,
 ): { nodes: Node[]; edges: Edge[] } {
   const nodes: Node[] = [];
   const edges: Edge[] = [];
@@ -86,7 +87,10 @@ function buildGraph(
   // Pre-calculate per-bridge section heights for dynamic vertical positioning
   const bridgeSections = bridges.map((bridge) => {
     const rootEndpoint = devicesByBridge[bridge.id];
-    const devices = rootEndpoint ? collectLeafEndpoints(rootEndpoint) : [];
+    // the map skips endpoint 0 (the root/aggregator node)
+    const devices = rootEndpoint
+      ? collectLeafEndpoints(rootEndpoint).filter((ep) => ep.endpoint !== 0)
+      : [];
     const failedCount = bridge.failedEntities?.length ?? 0;
     const totalItems = devices.length + failedCount;
     const rows = Math.min(totalItems, layout.devicesPerColumn);
@@ -143,7 +147,7 @@ function buildGraph(
       type: "smoothstep",
       animated: bridge.status === "running",
       style: {
-        stroke: bridge.status === "running" ? "#4caf50" : "#bdbdbd",
+        stroke: bridge.status === "running" ? colors.running : colors.inactive,
         strokeWidth: 2,
       },
     });
@@ -199,7 +203,7 @@ function buildGraph(
         source: bridgeId,
         target: deviceId,
         type: "smoothstep",
-        style: { stroke: "#90caf9", strokeWidth: 1 },
+        style: { stroke: colors.device, strokeWidth: 1 },
       });
     });
 
@@ -229,7 +233,7 @@ function buildGraph(
         target: failedId,
         type: "smoothstep",
         style: {
-          stroke: "#f44336",
+          stroke: colors.failed,
           strokeWidth: 1,
           strokeDasharray: "5,5",
         },
@@ -269,7 +273,7 @@ function buildGraph(
         target: `bridge-${bridgeIdRaw}`,
         type: "smoothstep",
         animated: true,
-        style: { stroke: "#ce93d8", strokeWidth: 1.5 },
+        style: { stroke: colors.fabric, strokeWidth: 1.5 },
       });
     }
   });
@@ -278,6 +282,7 @@ function buildGraph(
 }
 
 export const NetworkMapPage = () => {
+  const { t } = useTranslation();
   const dispatch = useAppDispatch();
   const { content: bridges, isLoading: bridgesLoading } = useBridges();
   const allDeviceStates = useAppSelector((state) => state.devices.byBridge);
@@ -332,7 +337,15 @@ export const NetworkMapPage = () => {
       deviceOffsetX: 280,
     };
 
-    const graph = buildGraph(bridges, devicesByBridge, layout);
+    const edgeColors: EdgeColors = {
+      running: isDark ? "#81c784" : "#4caf50",
+      inactive: isDark ? "#616161" : "#bdbdbd",
+      device: isDark ? "#90caf9" : "#64b5f6",
+      failed: isDark ? "#ef5350" : "#f44336",
+      fabric: isDark ? "#ce93d8" : "#ab47bc",
+    };
+
+    const graph = buildGraph(bridges, devicesByBridge, layout, edgeColors);
 
     // Restore saved positions from localStorage
     const STORAGE_KEY = "hamh-network-map-positions";
@@ -355,7 +368,7 @@ export const NetworkMapPage = () => {
 
     setNodes(graph.nodes);
     setEdges(graph.edges);
-  }, [bridges, devicesByBridge, devicesLoaded, setNodes, setEdges]);
+  }, [bridges, devicesByBridge, devicesLoaded, setNodes, setEdges, isDark]);
 
   const handleRefresh = useCallback(() => {
     dispatch(loadBridges());
@@ -439,10 +452,10 @@ export const NetworkMapPage = () => {
           sx={{ display: "flex", alignItems: "center", gap: 2 }}
         >
           <AccountTreeIcon />
-          Network Map
+          {t("networkMap.title")}
         </Typography>
         <Box sx={{ display: "flex", gap: 0.5 }}>
-          <Tooltip title="Undo last move">
+          <Tooltip title={t("networkMap.undoMove")}>
             <span>
               <IconButton
                 onClick={handleUndo}
@@ -453,17 +466,23 @@ export const NetworkMapPage = () => {
               </IconButton>
             </span>
           </Tooltip>
-          <Tooltip title="Reset layout">
+          <Tooltip title={t("networkMap.resetLayout")}>
             <IconButton onClick={handleResetLayout} color="primary">
               <RestartAltIcon />
             </IconButton>
           </Tooltip>
-          <Tooltip title="Refresh data">
+          <Tooltip title={t("networkMap.refreshData")}>
             <IconButton onClick={handleRefresh} color="primary">
               <RefreshIcon />
             </IconButton>
           </Tooltip>
-          <Tooltip title={isFullscreen ? "Exit Fullscreen" : "Fullscreen"}>
+          <Tooltip
+            title={
+              isFullscreen
+                ? t("networkMap.exitFullscreen")
+                : t("networkMap.fullscreen")
+            }
+          >
             <IconButton
               onClick={() => setIsFullscreen((f) => !f)}
               color="primary"
@@ -541,7 +560,7 @@ export const NetworkMapPage = () => {
         }}
       >
         <Typography variant="caption" color="text.secondary" fontWeight={600}>
-          Legend:
+          {t("networkMap.legend")}:
         </Typography>
         <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
           <Box
@@ -553,7 +572,7 @@ export const NetworkMapPage = () => {
             }}
           />
           <Typography variant="caption" color="text.secondary">
-            Controller
+            {t("networkMap.controller")}
           </Typography>
         </Box>
         <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
@@ -566,7 +585,7 @@ export const NetworkMapPage = () => {
             }}
           />
           <Typography variant="caption" color="text.secondary">
-            HAMH Hub
+            {t("networkMap.hub")}
           </Typography>
         </Box>
         <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
@@ -580,7 +599,7 @@ export const NetworkMapPage = () => {
             }}
           />
           <Typography variant="caption" color="text.secondary">
-            Bridge
+            {t("networkMap.bridge")}
           </Typography>
         </Box>
         <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
@@ -594,7 +613,7 @@ export const NetworkMapPage = () => {
             }}
           />
           <Typography variant="caption" color="text.secondary">
-            Device
+            {t("networkMap.device")}
           </Typography>
         </Box>
         <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
@@ -608,7 +627,7 @@ export const NetworkMapPage = () => {
             }}
           />
           <Typography variant="caption" color="text.secondary">
-            Failed
+            {t("networkMap.failed")}
           </Typography>
         </Box>
       </Box>

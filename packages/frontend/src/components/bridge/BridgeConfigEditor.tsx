@@ -14,6 +14,7 @@ import Link from "@mui/material/Link";
 import Stack from "@mui/material/Stack";
 import Typography from "@mui/material/Typography";
 import { useCallback, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { navigation } from "../../routes.tsx";
 import { FormEditor } from "../misc/editors/FormEditor";
 import { JsonEditor } from "../misc/editors/JsonEditor";
@@ -22,6 +23,7 @@ import { BridgeIconUpload } from "./BridgeIconUpload.tsx";
 import { FilterPreview } from "./FilterPreview.tsx";
 import { BridgeObjectFieldTemplate } from "./rjsf/BridgeObjectFieldTemplate.tsx";
 import { CompactArrayFieldTemplate } from "./rjsf/CompactArrayFieldTemplate.tsx";
+import { EntityFilterRuleField } from "./rjsf/EntityFilterRuleField.tsx";
 import { FeatureFlagsField } from "./rjsf/FeatureFlagsField.tsx";
 
 enum BridgeEditorMode {
@@ -38,6 +40,7 @@ export interface BridgeConfigEditorProps {
 }
 
 export const BridgeConfigEditor = (props: BridgeConfigEditorProps) => {
+  const { t } = useTranslation();
   const [editorMode, setEditorMode] = useState<BridgeEditorMode>(
     BridgeEditorMode.FIELDS_EDITOR,
   );
@@ -104,8 +107,9 @@ export const BridgeConfigEditor = (props: BridgeConfigEditorProps) => {
       result.push({
         severity: "warning",
         message:
-          "Server Mode is enabled. Only ONE device should be in this bridge. " +
-          "Multiple devices will cause errors.",
+          "Server Mode is enabled. The node carries up to 10 devices; the " +
+          "first entity is the primary and drives the node name and type. " +
+          "More than one device is experimental.",
       });
     }
 
@@ -179,8 +183,8 @@ export const BridgeConfigEditor = (props: BridgeConfigEditorProps) => {
             onClick={() => toggleEditor()}
             title={
               editorMode === BridgeEditorMode.FIELDS_EDITOR
-                ? "JSON editor"
-                : "Form editor"
+                ? t("bridge.jsonEditor")
+                : t("bridge.formEditor")
             }
           >
             {editorMode === BridgeEditorMode.FIELDS_EDITOR ? (
@@ -204,17 +208,22 @@ export const BridgeConfigEditor = (props: BridgeConfigEditorProps) => {
                   "ui:options": {
                     ArrayFieldTemplate: CompactArrayFieldTemplate,
                   },
+                  items: { "ui:field": "entityFilterRule" },
                 },
                 exclude: {
                   "ui:options": {
                     ArrayFieldTemplate: CompactArrayFieldTemplate,
                   },
+                  items: { "ui:field": "entityFilterRule" },
                 },
               },
             }}
             customValidate={validatePort}
             templates={{ ObjectFieldTemplate: BridgeObjectFieldTemplate }}
-            fields={{ featureFlags: FeatureFlagsField }}
+            fields={{
+              featureFlags: FeatureFlagsField,
+              entityFilterRule: EntityFilterRuleField,
+            }}
           />
         )}
 
@@ -234,7 +243,7 @@ export const BridgeConfigEditor = (props: BridgeConfigEditorProps) => {
         <Card variant="outlined">
           <CardContent>
             <Typography variant="subtitle1" gutterBottom fontWeight={600}>
-              Bridge Icon
+              {t("bridge.iconLabel")}
             </Typography>
             <BridgeIconUpload
               bridgeId={props.bridgeId}
@@ -252,7 +261,7 @@ export const BridgeConfigEditor = (props: BridgeConfigEditorProps) => {
               color="error"
               onClick={props.onCancel}
             >
-              Cancel
+              {t("common.cancel")}
             </Button>
           </Grid>
           <Grid
@@ -266,7 +275,7 @@ export const BridgeConfigEditor = (props: BridgeConfigEditorProps) => {
               disabled={!isValid}
               onClick={saveAction}
             >
-              Save
+              {t("common.save")}
             </Button>
           </Grid>
         </Grid>

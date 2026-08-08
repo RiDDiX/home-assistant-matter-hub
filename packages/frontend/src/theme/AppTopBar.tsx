@@ -11,6 +11,7 @@ import LockIcon from "@mui/icons-material/Lock";
 import MenuIcon from "@mui/icons-material/Menu";
 import MonitorHeartIcon from "@mui/icons-material/MonitorHeart";
 import RocketLaunchIcon from "@mui/icons-material/RocketLaunch";
+import RouterIcon from "@mui/icons-material/Router";
 import SettingsIcon from "@mui/icons-material/Settings";
 import AppBar from "@mui/material/AppBar";
 import Box from "@mui/material/Box";
@@ -26,7 +27,8 @@ import Toolbar from "@mui/material/Toolbar";
 import Tooltip from "@mui/material/Tooltip";
 import useMediaQuery from "@mui/material/useMediaQuery";
 import { type ReactNode, useState } from "react";
-import { Link, useNavigate } from "react-router";
+import { useTranslation } from "react-i18next";
+import { Link, useLocation, useNavigate } from "react-router";
 import { LogViewer } from "../components/logs/LogViewer.tsx";
 import { StatusIndicator } from "../components/status/StatusIndicator.tsx";
 import { navigation } from "../routes.tsx";
@@ -45,45 +47,75 @@ export const AppTopBar = () => {
   const [logViewerOpen, setLogViewerOpen] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const navigate = useNavigate();
+  const location = useLocation();
+
+  const isActive = (path?: string) => {
+    if (!path) return false;
+    if (path === "/") return location.pathname === "/";
+    return location.pathname.startsWith(path);
+  };
 
   const toggleColorMode = () => {
     setMode(mode === "dark" ? "light" : "dark");
   };
 
+  const { t } = useTranslation();
+
   const navItems: NavItem[] = [
-    { label: "Dashboard", icon: <HomeIcon />, to: navigation.dashboard },
-    { label: "Bridges", icon: <HubIcon />, to: navigation.bridges },
-    { label: "All Devices", icon: <DevicesIcon />, to: navigation.devices },
     {
-      label: "Network Map",
+      label: t("dashboard.title"),
+      icon: <HomeIcon />,
+      to: navigation.dashboard,
+    },
+    { label: t("nav.bridges"), icon: <HubIcon />, to: navigation.bridges },
+    { label: t("nav.devices"), icon: <DevicesIcon />, to: navigation.devices },
+    {
+      label: t("nav.standaloneDevices", "Standalone Devices"),
+      icon: <RouterIcon />,
+      to: navigation.standaloneDevices,
+    },
+    {
+      label: t("nav.networkMap"),
       icon: <AccountTreeIcon />,
       to: navigation.networkMap,
     },
     {
-      label: "Startup Order",
+      label: t("nav.startupOrder"),
       icon: <RocketLaunchIcon />,
       to: navigation.startup,
     },
     {
-      label: "Lock Credentials",
+      label: t("nav.lockCredentials"),
       icon: <LockIcon />,
       to: navigation.lockCredentials,
     },
-    { label: "Filter Reference", icon: <LabelIcon />, to: navigation.labels },
-    { label: "Plugins", icon: <ExtensionIcon />, to: navigation.plugins },
-    { label: "Settings", icon: <SettingsIcon />, to: navigation.settings },
     {
-      label: mode === "dark" ? "Light Mode" : "Dark Mode",
+      label: t("nav.filterReference"),
+      icon: <LabelIcon />,
+      to: navigation.labels,
+    },
+    {
+      label: "Plugins",
+      icon: <ExtensionIcon />,
+      to: navigation.plugins,
+    },
+    {
+      label: t("nav.settings"),
+      icon: <SettingsIcon />,
+      to: navigation.settings,
+    },
+    {
+      label: mode === "dark" ? t("nav.lightMode") : t("nav.darkMode"),
       icon: mode === "dark" ? <LightModeIcon /> : <DarkModeIcon />,
       onClick: toggleColorMode,
     },
     {
-      label: "System Logs",
+      label: t("nav.systemLogs"),
       icon: <BugReportIcon />,
       onClick: () => setLogViewerOpen(true),
     },
     {
-      label: "Health Dashboard",
+      label: t("nav.health"),
       icon: <MonitorHeartIcon />,
       to: navigation.health,
     },
@@ -122,7 +154,13 @@ export const AppTopBar = () => {
                       <IconButton
                         component={Link}
                         to={item.to}
-                        sx={{ color: "inherit" }}
+                        sx={{
+                          color: "inherit",
+                          bgcolor: isActive(item.to)
+                            ? "rgba(255,255,255,0.15)"
+                            : "transparent",
+                          borderRadius: 1,
+                        }}
                       >
                         {item.icon}
                       </IconButton>
@@ -163,6 +201,7 @@ export const AppTopBar = () => {
           {navItems.map((item) => (
             <ListItemButton
               key={item.label}
+              selected={isActive(item.to)}
               onClick={() => handleDrawerItemClick(item)}
             >
               <ListItemIcon>{item.icon}</ListItemIcon>

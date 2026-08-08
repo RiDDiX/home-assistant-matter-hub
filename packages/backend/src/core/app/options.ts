@@ -12,9 +12,6 @@ import type { MdnsOptions } from "./mdns.js";
 import type { StorageOptions } from "./storage.js";
 
 function resolveAppVersion(): string {
-  if (process.env.APP_VERSION) {
-    return process.env.APP_VERSION;
-  }
   try {
     const require = createRequire(import.meta.url);
     // When installed globally via npm, this resolves to the published package.json
@@ -22,11 +19,14 @@ function resolveAppVersion(): string {
     const pkg = require("home-assistant-matter-hub/package.json") as {
       version?: string;
     };
-    if (pkg.version) {
+    if (pkg.version && pkg.version !== "0.0.0") {
       return pkg.version;
     }
   } catch {
-    // ignore
+    // ignore, fall through to env var
+  }
+  if (process.env.APP_VERSION) {
+    return process.env.APP_VERSION;
   }
   return "0.0.0-dev";
 }
@@ -40,14 +40,16 @@ export class Options {
 
   get mdns(): MdnsOptions {
     return {
-      ipv4: true,
+      ipv4: !this.startOptions.mdnsDisableIpv4,
       networkInterface: notEmpty(this.startOptions.mdnsNetworkInterface),
+      stripGlobalIpv6: this.startOptions.mdnsStripGlobalIpv6 ?? false,
     };
   }
 
   get logging(): LoggerServiceProps {
     return {
       level: this.startOptions.logLevel,
+      protocolLevel: this.startOptions.protocolLogLevel,
       disableColors: this.startOptions.disableLogColors ?? false,
       jsonOutput: this.startOptions.jsonLogs ?? false,
     };
@@ -64,6 +66,7 @@ export class Options {
       url: this.startOptions.homeAssistantUrl,
       accessToken: this.startOptions.homeAssistantAccessToken,
       refreshInterval: this.startOptions.homeAssistantRefreshInterval,
+      messageTimeoutMs: this.startOptions.haMessageTimeout,
     };
   }
 
@@ -85,6 +88,8 @@ export class Options {
       storageLocation: this.resolveStorageLocation(),
       basePath: normalizeBasePath(this.startOptions.httpBasePath),
       auth,
+      mdnsInterface: notEmpty(this.startOptions.mdnsNetworkInterface),
+      mdnsIpv4: !this.startOptions.mdnsDisableIpv4,
     };
   }
 
@@ -106,6 +111,7 @@ export class Options {
         productLabel: "Home Assistant Matter Hub",
         hardwareVersion: new Date().getFullYear(),
         softwareVersion: new Date().getFullYear(),
+        softwareVersionString: resolveAppVersion(),
       },
     };
   }

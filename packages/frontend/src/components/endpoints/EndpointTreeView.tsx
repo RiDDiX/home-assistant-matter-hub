@@ -1,8 +1,11 @@
 import type { EndpointData } from "@home-assistant-matter-hub/common";
+import WarningAmberIcon from "@mui/icons-material/WarningAmber";
 import Box from "@mui/material/Box";
+import Tooltip from "@mui/material/Tooltip";
 import { SimpleTreeView } from "@mui/x-tree-view/SimpleTreeView";
 import { TreeItem } from "@mui/x-tree-view/TreeItem";
 import { useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { EndpointIcon } from "./EndpointIcon.tsx";
 import { EndpointName, getEndpointName } from "./EndpointName.tsx";
 
@@ -80,8 +83,19 @@ const EndpointTreeItem = (props: EndpointTreeItemProps) => {
 };
 
 const EndpointTreeItemLabel = (props: EndpointTreeItemProps) => {
+  const { t } = useTranslation();
+  const isUnavailable = useMemo(() => {
+    const state = props.endpoint.state as {
+      homeAssistantEntity?: {
+        entity?: { state?: { state?: string } };
+      };
+    };
+    const haState = state.homeAssistantEntity?.entity?.state?.state;
+    return haState === "unavailable" || haState === "unknown";
+  }, [props.endpoint.state]);
+
   return (
-    <Box display="flex">
+    <Box display="flex" alignItems="center">
       <EndpointIcon endpoint={props.endpoint} />
       <Box
         marginLeft={1}
@@ -89,9 +103,18 @@ const EndpointTreeItemLabel = (props: EndpointTreeItemProps) => {
         whiteSpace="nowrap"
         textOverflow="ellipsis"
         overflow="hidden"
+        sx={isUnavailable ? { opacity: 0.6 } : undefined}
       >
         <EndpointName endpoint={props.endpoint} />
       </Box>
+      {isUnavailable && (
+        <Tooltip title={t("endpoints.entityUnavailable")}>
+          <WarningAmberIcon
+            color="warning"
+            sx={{ fontSize: 16, ml: 0.5, flexShrink: 0 }}
+          />
+        </Tooltip>
+      )}
     </Box>
   );
 };

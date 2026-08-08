@@ -1,3 +1,5 @@
+import { assertOk, parseJsonResponse } from "./fetch-utils.js";
+
 const BASE_URL = "api/device-images";
 
 export interface DeviceImageInfo {
@@ -16,7 +18,7 @@ export async function resolveDeviceImages(
   if (!response.ok) {
     return {};
   }
-  return response.json();
+  return parseJsonResponse(response);
 }
 
 export async function uploadDeviceImage(
@@ -31,21 +33,14 @@ export async function uploadDeviceImage(
     body: formData,
   });
 
-  if (!response.ok) {
-    const error = await response.json();
-    throw new Error(error.error || "Failed to upload image");
-  }
+  await assertOk(response, "Failed to upload image");
 }
 
 export async function deleteDeviceImage(entityId: string): Promise<void> {
   const response = await fetch(`${BASE_URL}/${encodeURIComponent(entityId)}`, {
     method: "DELETE",
   });
-
-  if (!response.ok) {
-    const error = await response.json();
-    throw new Error(error.error || "Failed to delete image");
-  }
+  await assertOk(response, "Failed to delete image");
 }
 
 export function getDeviceImageUrl(entityId: string): string {

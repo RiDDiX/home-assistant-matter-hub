@@ -1,3 +1,4 @@
+import { GroupsServer, ScenesManagementServer } from "@matter/main/behaviors";
 import { ColorTemperatureLightDevice as Device } from "@matter/main/devices";
 import { BasicInformationServer } from "../../../../behaviors/basic-information-server.js";
 import { HomeAssistantEntityBehavior } from "../../../../behaviors/home-assistant-entity-behavior.js";
@@ -10,6 +11,8 @@ export const ColorTemperatureLightType = Device.with(
   IdentifyServer,
   BasicInformationServer,
   HomeAssistantEntityBehavior,
+  GroupsServer,
+  ScenesManagementServer,
   LightOnOffServer,
   LightLevelControlServer,
   LightColorControlServer.with("ColorTemperature"),

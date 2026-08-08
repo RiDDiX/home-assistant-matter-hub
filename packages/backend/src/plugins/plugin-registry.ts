@@ -16,8 +16,8 @@ export interface InstalledPlugin {
 }
 
 /**
- * Persists the list of installed plugins to a JSON file in the storage directory.
- * This allows the system to know which npm packages to load on startup.
+ * Persists the list of installed plugins to a JSON file in the storage
+ * directory so the loader knows which npm packages to pick up on startup.
  */
 export class PluginRegistry {
   private plugins: InstalledPlugin[] = [];

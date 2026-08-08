@@ -1,4 +1,4 @@
-ARG NODE_VERSION="22"
+ARG NODE_VERSION="24"
 
 FROM node:${NODE_VERSION}-alpine AS nodebuild
 
@@ -29,7 +29,27 @@ LABEL \
 
 RUN mkdir /install
 COPY package.tgz /install/package.tgz
-RUN npm install -g /install/package.tgz
-RUN rm -rf /install
+# Install the tarball inside a wrapper project so its "overrides" field
+# actually applies during resolution. `npm install -g <tgz>` ignores
+# transitive overrides, which leaves vulnerable minimatch/path-to-regexp
+# copies in place. The wrapper project plus a symlinked bin avoids that.
+RUN printf '%s\n' \
+      '{' \
+      '  "name": "hamh-wrapper",' \
+      '  "version": "0.0.0",' \
+      '  "private": true,' \
+      '  "dependencies": {' \
+      '    "home-assistant-matter-hub": "file:/install/package.tgz"' \
+      '  },' \
+      '  "overrides": {' \
+      '    "minimatch": "9.0.7",' \
+      '    "path-to-regexp": "^8.4.0",' \
+      '    "glob": "^13.0.0"' \
+      '  }' \
+      '}' > /install/package.json \
+ && cd /install \
+ && npm install --omit=dev --no-audit --no-fund \
+ && ln -s /install/node_modules/.bin/home-assistant-matter-hub /usr/local/bin/home-assistant-matter-hub \
+ && rm /install/package.tgz
 
-CMD /docker-entrypoint.sh
+CMD ["/docker-entrypoint.sh"]

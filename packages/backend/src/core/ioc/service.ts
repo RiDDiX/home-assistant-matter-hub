@@ -1,8 +1,8 @@
 export abstract class Service {
-  readonly construction: Promise<void> = new Promise((resolve) => {
+  readonly construction: Promise<void> = new Promise((resolve, reject) => {
     setImmediate(() => {
       const init = this.initialize?.bind(this) ?? (async () => {});
-      init().then(resolve);
+      init().then(resolve, reject);
     });
   });
 

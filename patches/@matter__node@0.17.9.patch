@@ -1,0 +1,38 @@
+diff --git a/dist/cjs/node/server/ServerSubscription.js b/dist/cjs/node/server/ServerSubscription.js
+index 97a786839b4daf262cb980e82f1b76c242a8c5df..f85d1ec9c6c34b0388a2f20429add5ea4b017094 100644
+--- a/dist/cjs/node/server/ServerSubscription.js
++++ b/dist/cjs/node/server/ServerSubscription.js
+@@ -686,6 +686,14 @@ class ServerSubscription {
+     }
+   }
+   async #sendUpdateMessage(lifetime, attributeFilter, eventsMinNumber, onlyWithData, session) {
++    if (session === void 0) {
++      const ownSession = this.#context.session;
++      if (ownSession !== void 0 && !ownSession.isClosing && !ownSession.isClosed) {
++        session = ownSession;
++      } else {
++        return false;
++      }
++    }
+     const exchange = this.#context.initiateExchange(session ?? this.#peerAddress, import_types.INTERACTION_PROTOCOL_ID);
+     if (exchange === void 0) {
+       return false;
+diff --git a/dist/esm/node/server/ServerSubscription.js b/dist/esm/node/server/ServerSubscription.js
+index 77934d8fd3cdafa2d26ec2545224027e81d892ea..6b2e75da17d83b45d4214a48be359579b64a67d3 100644
+--- a/dist/esm/node/server/ServerSubscription.js
++++ b/dist/esm/node/server/ServerSubscription.js
+@@ -692,6 +692,14 @@ class ServerSubscription {
+     }
+   }
+   async #sendUpdateMessage(lifetime, attributeFilter, eventsMinNumber, onlyWithData, session) {
++    if (session === void 0) {
++      const ownSession = this.#context.session;
++      if (ownSession !== void 0 && !ownSession.isClosing && !ownSession.isClosed) {
++        session = ownSession;
++      } else {
++        return false;
++      }
++    }
+     const exchange = this.#context.initiateExchange(session ?? this.#peerAddress, INTERACTION_PROTOCOL_ID);
+     if (exchange === void 0) {
+       return false;

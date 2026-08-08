@@ -18,6 +18,7 @@ import ListItemText from "@mui/material/ListItemText";
 import Switch from "@mui/material/Switch";
 import Typography from "@mui/material/Typography";
 import { useCallback, useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { importBridges, previewImport } from "../../api/bridge-export.js";
 
 interface BridgeImportDialogProps {
@@ -33,6 +34,7 @@ export function BridgeImportDialog({
   onClose,
   onImported,
 }: BridgeImportDialogProps) {
+  const { t } = useTranslation();
   const [preview, setPreview] = useState<
     | (BridgeImportPreview & { migrated?: boolean; sourceVersion?: string })
     | null
@@ -67,13 +69,11 @@ export function BridgeImportDialog({
           ),
         );
       } catch {
-        setError(
-          "Failed to parse import file. Please select a valid export file.",
-        );
+        setError(t("bridge.importParseFailed"));
       }
     };
     reader.readAsText(file);
-  }, [open, file]);
+  }, [open, file, t]);
 
   const handleToggle = useCallback((id: string) => {
     setSelectedIds((prev) => {
@@ -131,7 +131,7 @@ export function BridgeImportDialog({
 
   return (
     <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
-      <DialogTitle>Import Bridges</DialogTitle>
+      <DialogTitle>{t("bridge.importTitle")}</DialogTitle>
       <DialogContent>
         {error && (
           <Alert severity="error" sx={{ mb: 2 }}>
@@ -163,10 +163,10 @@ export function BridgeImportDialog({
 
             <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
               <Button size="small" onClick={handleSelectAll}>
-                Select All
+                {t("common.selectAll")}
               </Button>
               <Button size="small" onClick={handleSelectNone}>
-                Select None
+                {t("common.selectNone")}
               </Button>
             </div>
 
@@ -205,13 +205,15 @@ export function BridgeImportDialog({
                   onChange={(e) => setOverwriteExisting(e.target.checked)}
                 />
               }
-              label="Overwrite existing bridges"
+              label={t("bridge.overwriteExisting")}
             />
           </>
         )}
       </DialogContent>
       <DialogActions>
-        <Button onClick={onClose}>{result ? "Close" : "Cancel"}</Button>
+        <Button onClick={onClose}>
+          {result ? t("common.close") : t("common.cancel")}
+        </Button>
         {!result && (
           <Button
             onClick={handleImport}
@@ -219,8 +221,8 @@ export function BridgeImportDialog({
             disabled={importing || selectedIds.size === 0}
           >
             {importing
-              ? "Importing..."
-              : `Import ${selectedIds.size} Bridge(s)`}
+              ? t("bridge.importing")
+              : t("bridge.importCount", { count: selectedIds.size })}
           </Button>
         )}
       </DialogActions>

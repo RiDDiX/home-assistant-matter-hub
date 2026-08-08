@@ -33,6 +33,15 @@ const advertisedOperationalStates: number[] = [
   OperationalState.Docked,
 ];
 
+export function makeRvcOperationalError(
+  errorStateId: ErrorState,
+): RvcOperationalState.ErrorStateStruct {
+  if (errorStateId === ErrorState.NoError) {
+    return { errorStateId };
+  }
+  return { errorStateId, errorStateDetails: ErrorState[errorStateId] };
+}
+
 export interface RvcOperationalStateServerConfig {
   getOperationalState: ValueGetter<OperationalState>;
   pause: ValueSetter<void>;
@@ -56,16 +65,18 @@ class RvcOperationalStateServerBase extends Base {
 
     await super.initialize();
     const homeAssistant = await this.agent.load(HomeAssistantEntityBehavior);
+
     this.update(homeAssistant.entity);
-    if (homeAssistant.state.managedByEndpoint) {
-      homeAssistant.registerUpdate(this.callback(this.update));
-    } else {
-      this.reactTo(homeAssistant.onChange, this.update);
-    }
+    // offline: true makes the reactor run in its own LocalActorContext
+    // with a fresh transaction, instead of the parent's postCommit phase.
+    // Without this, reactor writes are buffered but never produce
+    // subscription reports (the parent transaction has already finalized),
+    // so controllers like Apple Home never see state transitions.
+    this.reactTo(homeAssistant.onChange, this.update, { offline: true });
   }
 
-  public update(entity: HomeAssistantEntityInformation) {
-    if (!entity.state) {
+  private update(entity: HomeAssistantEntityInformation) {
+    if (!entity.state || !entity.state.attributes) {
       return;
     }
     const newState = this.state.config.getOperationalState(
@@ -74,15 +85,20 @@ class RvcOperationalStateServerBase extends Base {
     );
     const previousState = this.state.operationalState;
 
-    applyPatchState(this.state, {
-      operationalState: newState,
-      operationalError: {
-        errorStateId:
-          newState === OperationalState.Error
-            ? ErrorState.Stuck
-            : ErrorState.NoError,
+    const errorStateId =
+      newState === OperationalState.Error
+        ? ErrorState.Stuck
+        : ErrorState.NoError;
+    const operationalError = makeRvcOperationalError(errorStateId);
+
+    applyPatchState(
+      this.state,
+      {
+        operationalState: newState,
+        operationalError,
       },
-    });
+      { force: true },
+    );
 
     // Emit OperationCompletion event when transitioning from an active state
     // (Running, SeekingCharger) to an inactive state (Docked, Stopped, Paused).

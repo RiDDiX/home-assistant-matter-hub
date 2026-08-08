@@ -59,8 +59,7 @@ export class DebounceContext<TPayload> {
   }
 
   unregisterAll() {
-    const keys = Object.keys(this.fn);
-    for (const key of keys) {
+    for (const key of [...this.debouncers.keys()]) {
       this.unregister(key);
     }
   }

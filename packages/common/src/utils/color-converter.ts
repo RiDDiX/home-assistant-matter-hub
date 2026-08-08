@@ -170,11 +170,36 @@ export abstract class ColorConverter {
   }
 
   /**
-   * Convert Color Tempareture from Mireds to Kelvin
-   * @param temperatureMireds Temperature in Mireds
-   * @return Temperature in Kelvin
+   * Extract CIE chromaticity x, y in Matter's UInt16 encoding (0..65279 ≈ 0..1).
+   * @param color The Color
+   * @return [currentX, currentY]
    */
-  public static temperatureMiredsToKelvin(temperatureMireds: number): number {
+  public static toMatterXY(
+    color: ColorInstance,
+  ): [currentX: number, currentY: number] {
+    const [X, Y, Z] = color.xyz().array();
+    const sum = X + Y + Z;
+    if (!Number.isFinite(sum) || sum <= 0) {
+      return [0, 0];
+    }
+    const x = X / sum;
+    const y = Y / sum;
+    const encode = (v: number) =>
+      Math.min(65279, Math.max(0, Math.round(v * 65536)));
+    return [encode(x), encode(y)];
+  }
+
+  /**
+   * Convert Color Tempareture from Mireds to Kelvin
+   * @param temperatureMireds Temperature in Mireds (must be finite and > 0)
+   * @return Temperature in Kelvin, or null if the input is 0 / negative / non-finite
+   */
+  public static temperatureMiredsToKelvin(
+    temperatureMireds: number,
+  ): number | null {
+    if (!Number.isFinite(temperatureMireds) || temperatureMireds <= 0) {
+      return null;
+    }
     return 1_000_000 / temperatureMireds;
   }
 

@@ -11,7 +11,12 @@ const logger = Logger.get("BinarySensorDevice");
 import {
   ContactSensorType,
   ContactSensorWithBatteryType,
+  DetectorContactSensorType,
 } from "./contact-sensor.js";
+import {
+  MotionSensorType,
+  MotionSensorWithBatteryType,
+} from "./motion-sensor.js";
 import {
   OccupancySensorType,
   OccupancySensorWithBatteryType,
@@ -26,14 +31,12 @@ import {
   SmokeAlarmType,
   SmokeAlarmWithBatteryType,
 } from "./smoke-co-alarm.js";
-import { WaterFreezeDetectorType } from "./water-freeze-detector.js";
-import { WaterLeakDetectorType } from "./water-leak-detector.js";
 
 type CombinedType =
   | typeof ContactSensorType
+  | typeof DetectorContactSensorType
+  | typeof MotionSensorType
   | typeof OccupancySensorType
-  | typeof WaterFreezeDetectorType
-  | typeof WaterLeakDetectorType
   | typeof SmokeAlarmType
   | typeof CoAlarmType
   | typeof OnOffSensorType;
@@ -49,7 +52,7 @@ const deviceClasses: Partial<Record<BinarySensorDeviceClass, CombinedType>> = {
   [BinarySensorDeviceClass.Running]: OnOffSensorType,
 
   [BinarySensorDeviceClass.Battery]: ContactSensorType,
-  [BinarySensorDeviceClass.Cold]: WaterFreezeDetectorType,
+  [BinarySensorDeviceClass.Cold]: DetectorContactSensorType,
   [BinarySensorDeviceClass.Connectivity]: ContactSensorType,
   [BinarySensorDeviceClass.Door]: ContactSensorType,
   [BinarySensorDeviceClass.GarageDoor]: ContactSensorType,
@@ -64,19 +67,20 @@ const deviceClasses: Partial<Record<BinarySensorDeviceClass, CombinedType>> = {
   [BinarySensorDeviceClass.Vibration]: ContactSensorType,
   [BinarySensorDeviceClass.Window]: ContactSensorType,
 
-  [BinarySensorDeviceClass.Motion]: OccupancySensorType,
-  [BinarySensorDeviceClass.Moving]: OccupancySensorType,
+  [BinarySensorDeviceClass.Motion]: MotionSensorType,
+  [BinarySensorDeviceClass.Moving]: MotionSensorType,
   [BinarySensorDeviceClass.Occupancy]: OccupancySensorType,
   [BinarySensorDeviceClass.Presence]: OccupancySensorType,
 
   [BinarySensorDeviceClass.Smoke]: SmokeAlarmType,
 
-  [BinarySensorDeviceClass.Moisture]: WaterLeakDetectorType,
+  [BinarySensorDeviceClass.Moisture]: DetectorContactSensorType,
 };
 
 // Mapping from normal type to battery type
 const batteryTypes = new Map<CombinedType, CombinedType>([
   [ContactSensorType, ContactSensorWithBatteryType],
+  [MotionSensorType, MotionSensorWithBatteryType],
   [OccupancySensorType, OccupancySensorWithBatteryType],
   [OnOffSensorType, OnOffSensorWithBatteryType],
   [SmokeAlarmType, SmokeAlarmWithBatteryType],

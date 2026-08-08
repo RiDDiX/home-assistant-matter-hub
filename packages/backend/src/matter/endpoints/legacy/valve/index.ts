@@ -4,6 +4,7 @@ import { WaterValveDevice } from "@matter/main/devices";
 import { BasicInformationServer } from "../../../behaviors/basic-information-server.js";
 import { HomeAssistantEntityBehavior } from "../../../behaviors/home-assistant-entity-behavior.js";
 import { IdentifyServer } from "../../../behaviors/identify-server.js";
+import { DefaultPowerSourceServer } from "../../../behaviors/power-source-server.js";
 import { ValveConfigurationAndControlServer } from "../../../behaviors/valve-configuration-and-control-server.js";
 
 const ValveServer = ValveConfigurationAndControlServer({
@@ -29,8 +30,28 @@ const ValveEndpointType = WaterValveDevice.with(
   ValveServer,
 );
 
+const ValveWithBatteryEndpointType = WaterValveDevice.with(
+  BasicInformationServer,
+  IdentifyServer,
+  HomeAssistantEntityBehavior,
+  ValveServer,
+  DefaultPowerSourceServer,
+);
+
 export function ValveDevice(
   homeAssistantEntity: HomeAssistantEntityBehavior.State,
 ): EndpointType {
-  return ValveEndpointType.set({ homeAssistantEntity });
+  const attrs = homeAssistantEntity.entity.state.attributes as {
+    battery?: number;
+    battery_level?: number;
+  };
+  const hasBatteryAttr = attrs.battery_level != null || attrs.battery != null;
+  const hasBatteryEntity = !!homeAssistantEntity.mapping?.batteryEntity;
+
+  const device =
+    hasBatteryAttr || hasBatteryEntity
+      ? ValveWithBatteryEndpointType
+      : ValveEndpointType;
+
+  return device.set({ homeAssistantEntity });
 }

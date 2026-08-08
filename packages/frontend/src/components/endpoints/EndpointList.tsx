@@ -26,6 +26,7 @@ import ToggleButtonGroup from "@mui/material/ToggleButtonGroup";
 import Tooltip from "@mui/material/Tooltip";
 import Typography from "@mui/material/Typography";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Link } from "react-router";
 import type { DeviceImageInfo } from "../../api/device-images";
 import { resolveDeviceImages } from "../../api/device-images";
@@ -35,6 +36,7 @@ import {
 } from "../../api/entity-mappings";
 import { navigation } from "../../routes.tsx";
 import { EntityMappingDialog } from "../entity-mapping/EntityMappingDialog.tsx";
+import { collectLeafEndpoints } from "./collect-leaf-endpoints.ts";
 import { EndpointCard } from "./EndpointCard.tsx";
 import { getEndpointName } from "./EndpointName.tsx";
 import { EndpointState } from "./EndpointState.tsx";
@@ -46,15 +48,8 @@ export interface EndpointListProps {
   onMappingSaved?: () => void;
 }
 
-const collectLeafEndpoints = (endpoint: EndpointData): EndpointData[] => {
-  const parts = endpoint.parts ?? [];
-  if (parts.length === 0) {
-    return [endpoint];
-  }
-  return parts.flatMap((part) => collectLeafEndpoints(part));
-};
-
 export const EndpointList = (props: EndpointListProps) => {
+  const { t } = useTranslation();
   const [selectedItem, setSelectedItem] = useState<EndpointData | undefined>(
     undefined,
   );
@@ -221,9 +216,9 @@ export const EndpointList = (props: EndpointListProps) => {
       >
         <Box display="flex" alignItems="center" gap={2}>
           <Typography variant="h6" component="span">
-            Endpoints ({endpoints.length})
+            {t("endpoints.title")} ({endpoints.length})
           </Typography>
-          <Tooltip title="View All Devices">
+          <Tooltip title={t("endpoints.viewAll")}>
             <IconButton
               component={Link}
               to={navigation.devices}
@@ -238,7 +233,7 @@ export const EndpointList = (props: EndpointListProps) => {
         <Box display="flex" alignItems="center" gap={1} flexGrow={1}>
           <TextField
             size="small"
-            placeholder="Search endpoints..."
+            placeholder={t("endpoints.searchPlaceholder")}
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             sx={{ flexGrow: 1, maxWidth: 300 }}
@@ -248,14 +243,19 @@ export const EndpointList = (props: EndpointListProps) => {
             <Tooltip
               title={
                 showOnlyUnavailable
-                  ? "Show all entities"
-                  : `Show ${unavailableCount} unavailable`
+                  ? t("endpoints.showAll")
+                  : t("endpoints.showUnavailable", { count: unavailableCount })
               }
             >
               <IconButton
                 size="small"
                 color={showOnlyUnavailable ? "warning" : "default"}
                 onClick={() => setShowOnlyUnavailable((v) => !v)}
+                aria-label={
+                  showOnlyUnavailable
+                    ? "Show all entities"
+                    : `Show ${unavailableCount} unavailable entities`
+                }
               >
                 <Badge badgeContent={unavailableCount} color="warning" max={99}>
                   <WarningAmberIcon />
@@ -267,18 +267,20 @@ export const EndpointList = (props: EndpointListProps) => {
           <FormControl size="small" sx={{ minWidth: 120 }}>
             <InputLabel id="sort-label">
               <Box display="flex" alignItems="center" gap={0.5}>
-                <SortIcon fontSize="small" /> Sort
+                <SortIcon fontSize="small" /> {t("endpoints.sortBy")}
               </Box>
             </InputLabel>
             <Select
               labelId="sort-label"
               value={sortBy}
-              label="Sort"
+              label={t("endpoints.sortBy")}
               onChange={(e) => setSortBy(e.target.value as SortOption)}
             >
-              <MenuItem value="name">Name</MenuItem>
-              <MenuItem value="endpoint">Endpoint ID</MenuItem>
-              <MenuItem value="type">Type</MenuItem>
+              <MenuItem value="name">{t("endpoints.sortName")}</MenuItem>
+              <MenuItem value="endpoint">
+                {t("endpoints.sortEndpoint")}
+              </MenuItem>
+              <MenuItem value="type">{t("endpoints.sortType")}</MenuItem>
             </Select>
           </FormControl>
 
@@ -287,14 +289,15 @@ export const EndpointList = (props: EndpointListProps) => {
             exclusive
             onChange={(_, value) => value && setViewMode(value)}
             size="small"
+            aria-label="View mode"
           >
-            <ToggleButton value="cards">
-              <Tooltip title="Card View">
+            <ToggleButton value="cards" aria-label="Card view">
+              <Tooltip title={t("endpoints.cardView")}>
                 <GridViewIcon />
               </Tooltip>
             </ToggleButton>
-            <ToggleButton value="tree">
-              <Tooltip title="Tree View">
+            <ToggleButton value="tree" aria-label="Tree view">
+              <Tooltip title={t("endpoints.treeView")}>
                 <ListIcon />
               </Tooltip>
             </ToggleButton>

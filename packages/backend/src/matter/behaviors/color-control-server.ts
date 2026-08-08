@@ -12,8 +12,35 @@ import type { ValueGetter, ValueSetter } from "./utils/cluster-config.js";
 
 const logger = Logger.get("ColorControlServer");
 
+// Track optimistic color writes to prevent stale HA state from overwriting them.
+// Instead of a blanket cooldown, track expected values and only skip stale updates.
+interface OptimisticColorState {
+  colorTemperatureMireds?: number;
+  currentHue?: number;
+  currentSaturation?: number;
+  timestamp: number;
+}
+const optimisticColorState = new Map<string, OptimisticColorState>();
+const OPTIMISTIC_TIMEOUT_MS = 3000;
+const OPTIMISTIC_TOLERANCE = 5;
+
+// Pre-staged color data for Adaptive Lighting. When a controller adjusts
+// color while the light is off (executeIfOff), the action is stored here
+// instead of calling HA (which would turn the light on). The OnOff handler
+// merges this into the turn-on action so the light comes on at the correct color.
+const pendingColorStaging = new Map<string, object>();
+
+export function consumePendingColorStaging(
+  entityId: string,
+): object | undefined {
+  const data = pendingColorStaging.get(entityId);
+  pendingColorStaging.delete(entityId);
+  return data;
+}
+
 export type ColorControlMode =
   | ColorControl.ColorMode.CurrentHueAndCurrentSaturation
+  | ColorControl.ColorMode.CurrentXAndCurrentY
   | ColorControl.ColorMode.ColorTemperatureMireds;
 
 export interface ColorControlConfig {
@@ -27,11 +54,18 @@ export interface ColorControlConfig {
   setColor: ValueSetter<ColorInstance>;
 }
 
-const FeaturedBase = Base.with("ColorTemperature", "HueSaturation");
+const FeaturedBase = Base.with("ColorTemperature", "HueSaturation", "Xy");
 
 export class ColorControlServerBase extends FeaturedBase {
   declare state: ColorControlServerBase.State;
   private pendingTransitionTime: number | undefined;
+
+  override async [Symbol.asyncDispose]() {
+    const entityId = this.agent.get(HomeAssistantEntityBehavior).entityId;
+    optimisticColorState.delete(entityId);
+    pendingColorStaging.delete(entityId);
+    await super[Symbol.asyncDispose]();
+  }
 
   override async initialize() {
     // CRITICAL: Set default values BEFORE super.initialize() to prevent validation errors.
@@ -71,6 +105,21 @@ export class ColorControlServerBase extends FeaturedBase {
       );
     }
 
+    // Drop stale hue/sat that an older matter.js persisted, else conformance
+    // rejects them on a color-temp-only light and the endpoint fails (#370).
+    if (!this.features.hueSaturation) {
+      const hsState = this.state as {
+        currentHue?: number;
+        currentSaturation?: number;
+      };
+      if (hsState.currentHue != null) {
+        hsState.currentHue = undefined;
+      }
+      if (hsState.currentSaturation != null) {
+        hsState.currentSaturation = undefined;
+      }
+    }
+
     if (this.features.hueSaturation) {
       // Default hue/saturation to 0 (red, no saturation = white)
       if (this.state.currentHue == null) {
@@ -84,15 +133,11 @@ export class ColorControlServerBase extends FeaturedBase {
     await super.initialize();
     const homeAssistant = await this.agent.load(HomeAssistantEntityBehavior);
     this.update(homeAssistant.entity);
-    if (homeAssistant.state.managedByEndpoint) {
-      homeAssistant.registerUpdate(this.callback(this.update));
-    } else {
-      this.reactTo(homeAssistant.onChange, this.update);
-    }
+    this.reactTo(homeAssistant.onChange, this.update);
   }
 
-  public update(entity: HomeAssistantEntityInformation) {
-    if (!entity.state) {
+  private update(entity: HomeAssistantEntityInformation) {
+    if (!entity.state || !entity.state.attributes) {
       return;
     }
     const config = this.state.config;
@@ -114,6 +159,9 @@ export class ColorControlServerBase extends FeaturedBase {
 
     const color = config.getColor(entity.state, this.agent);
     const [hue, saturation] = color ? ColorConverter.toMatterHS(color) : [0, 0];
+    const [xyX, xyY] = color
+      ? ColorConverter.toMatterXY(color)
+      : [this.state.currentX, this.state.currentY];
 
     const minMireds = Math.floor(
       ColorConverter.temperatureKelvinToMireds(maxKelvin),
@@ -136,6 +184,45 @@ export class ColorControlServerBase extends FeaturedBase {
     const newColorMode = this.getColorModeFromFeatures(
       config.getCurrentMode(entity.state, this.agent),
     );
+
+    // Protect optimistic color values from stale HA state updates.
+    // Accept updates that confirm expected values; skip stale ones.
+    const optimistic = optimisticColorState.get(entity.entity_id);
+    let skipColorTemp = false;
+    let skipHueSat = false;
+    if (optimistic != null) {
+      if (Date.now() - optimistic.timestamp > OPTIMISTIC_TIMEOUT_MS) {
+        optimisticColorState.delete(entity.entity_id);
+      } else {
+        if (
+          optimistic.colorTemperatureMireds != null &&
+          currentMireds != null
+        ) {
+          if (
+            Math.abs(currentMireds - optimistic.colorTemperatureMireds) <=
+            OPTIMISTIC_TOLERANCE
+          ) {
+            optimisticColorState.delete(entity.entity_id);
+          } else {
+            skipColorTemp = true;
+          }
+        }
+        if (
+          optimistic.currentHue != null &&
+          optimistic.currentSaturation != null
+        ) {
+          if (
+            Math.abs(hue - optimistic.currentHue) <= OPTIMISTIC_TOLERANCE &&
+            Math.abs(saturation - optimistic.currentSaturation) <=
+              OPTIMISTIC_TOLERANCE
+          ) {
+            optimisticColorState.delete(entity.entity_id);
+          } else {
+            skipHueSat = true;
+          }
+        }
+      }
+    }
 
     // CRITICAL: For ColorTemperature, we must set boundaries FIRST, then values.
     // Matter.js validates that colorTemperatureMireds and startUpColorTemperatureMireds
@@ -178,17 +265,41 @@ export class ColorControlServerBase extends FeaturedBase {
       applyPatchState(this.state, {
         coupleColorTempToLevelMinMireds: minMireds,
         startUpColorTemperatureMireds: startUpMireds,
-        colorTemperatureMireds: effectiveMireds,
+        ...(skipColorTemp ? {} : { colorTemperatureMireds: effectiveMireds }),
       });
     }
 
-    // Set colorMode and hueSaturation attributes
+    // Only publish colorMode alongside the cluster values that actually
+    // changed this cycle. When hue/sat is skipped but CT isn't (or vice
+    // versa), writing colorMode without its companion values produced a
+    // mismatched snapshot that controllers read back inconsistently.
+    const writingHueSat = this.features.hueSaturation && !skipHueSat;
+    const writingXy = this.features.xy && !skipHueSat && color != null;
+    const writingColorTemp =
+      !skipColorTemp &&
+      newColorMode === ColorControl.ColorMode.ColorTemperatureMireds;
+    const shouldPublishColorMode =
+      ((writingHueSat || writingXy) &&
+        newColorMode !== ColorControl.ColorMode.ColorTemperatureMireds) ||
+      writingColorTemp;
     applyPatchState(this.state, {
-      colorMode: newColorMode,
-      ...(this.features.hueSaturation
+      ...(shouldPublishColorMode
+        ? {
+            colorMode: newColorMode,
+            enhancedColorMode:
+              newColorMode as unknown as ColorControl.EnhancedColorMode,
+          }
+        : {}),
+      ...(writingHueSat
         ? {
             currentHue: hue,
             currentSaturation: saturation,
+          }
+        : {}),
+      ...(writingXy
+        ? {
+            currentX: xyX,
+            currentY: xyY,
           }
         : {}),
     });
@@ -201,6 +312,97 @@ export class ColorControlServerBase extends FeaturedBase {
     return super.moveToColorTemperature(request);
   }
 
+  override stepColorTemperatureLogic(
+    stepMode: ColorControl.StepMode,
+    stepSize: number,
+  ) {
+    const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);
+    const current = homeAssistant.entity.state;
+    const currentKelvin = this.state.config.getCurrentKelvin(
+      current,
+      this.agent,
+    );
+
+    // Get range from the entity because the method parameters default to 0
+    const minimumKelvin = this.state.config.getMinColorTempKelvin(
+      current,
+      this.agent,
+    );
+    const maximumKelvin = this.state.config.getMaxColorTempKelvin(
+      current,
+      this.agent,
+    );
+    if (
+      currentKelvin == null ||
+      minimumKelvin == null ||
+      maximumKelvin == null
+    ) {
+      return;
+    }
+
+    // Step from the optimistic Matter mireds so rapid steps accumulate. Only
+    // trust it while a fresh optimistic write is still pending; once that
+    // expires (or never existed) the HA read wins, so a command HA never
+    // confirmed can't seed later steps.
+    const optimistic = optimisticColorState.get(homeAssistant.entityId);
+    const optimisticFresh =
+      optimistic?.colorTemperatureMireds != null &&
+      Date.now() - optimistic.timestamp <= OPTIMISTIC_TIMEOUT_MS;
+    const currentMireds =
+      optimisticFresh && this.state.colorTemperatureMireds != null
+        ? this.state.colorTemperatureMireds
+        : ColorConverter.temperatureKelvinToMireds(currentKelvin);
+
+    const direction = stepMode === ColorControl.StepMode.Up ? 1 : -1;
+
+    // Clamp into the device mireds range before converting, so a large
+    // overshoot lands on the boundary instead of dropping to a null kelvin.
+    const minMireds = ColorConverter.temperatureKelvinToMireds(maximumKelvin);
+    const maxMireds = ColorConverter.temperatureKelvinToMireds(minimumKelvin);
+    const steppedMireds = Math.max(
+      minMireds,
+      Math.min(maxMireds, currentMireds + stepSize * direction),
+    );
+
+    // No-op only when the step lands exactly on its own base (e.g. already at a
+    // boundary). Compare in the mireds base the step used, not the stale HA
+    // read, else a reversing step back to the HA value gets dropped.
+    if (steppedMireds === currentMireds) {
+      return;
+    }
+
+    const steppedKelvin =
+      ColorConverter.temperatureMiredsToKelvin(steppedMireds);
+
+    if (steppedKelvin == null) {
+      return;
+    }
+
+    const targetKelvin = Math.max(
+      minimumKelvin,
+      Math.min(maximumKelvin, steppedKelvin),
+    );
+
+    const targetMireds = ColorConverter.temperatureKelvinToMireds(targetKelvin);
+    const action = this.state.config.setTemperature(targetKelvin, this.agent);
+    this.applyTransition(action);
+    applyPatchState(this.state, {
+      colorTemperatureMireds: targetMireds,
+      colorMode: ColorControl.ColorMode.ColorTemperatureMireds,
+      enhancedColorMode: ColorControl.EnhancedColorMode.ColorTemperatureMireds,
+    });
+    optimisticColorState.set(homeAssistant.entityId, {
+      colorTemperatureMireds: targetMireds,
+      timestamp: Date.now(),
+    });
+
+    if (this.isLightOff()) {
+      pendingColorStaging.set(homeAssistant.entityId, action.data ?? {});
+      return;
+    }
+    homeAssistant.callAction(action);
+  }
+
   override moveToColorTemperatureLogic(targetMireds: number) {
     const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);
     const current = homeAssistant.entity.state;
@@ -209,6 +411,12 @@ export class ColorControlServerBase extends FeaturedBase {
       this.agent,
     );
     const targetKelvin = ColorConverter.temperatureMiredsToKelvin(targetMireds);
+    if (targetKelvin == null) {
+      // Matter allows colorTemperatureMireds = 0 in some contexts, but HA's
+      // light.turn_on expects a finite kelvin/mireds value. Drop the command
+      // rather than pass Infinity through.
+      return;
+    }
 
     if (currentKelvin === targetKelvin) {
       return;
@@ -216,12 +424,20 @@ export class ColorControlServerBase extends FeaturedBase {
 
     const action = this.state.config.setTemperature(targetKelvin, this.agent);
     this.applyTransition(action);
-    // Update state immediately so controllers get instant feedback
-    // in the command response, matching the OnOffServer pattern.
     applyPatchState(this.state, {
       colorTemperatureMireds: targetMireds,
       colorMode: ColorControl.ColorMode.ColorTemperatureMireds,
+      enhancedColorMode: ColorControl.EnhancedColorMode.ColorTemperatureMireds,
     });
+    optimisticColorState.set(homeAssistant.entityId, {
+      colorTemperatureMireds: targetMireds,
+      timestamp: Date.now(),
+    });
+
+    if (this.isLightOff()) {
+      pendingColorStaging.set(homeAssistant.entityId, action.data ?? {});
+      return;
+    }
     homeAssistant.callAction(action);
   }
 
@@ -258,14 +474,56 @@ export class ColorControlServerBase extends FeaturedBase {
     const color = ColorConverter.fromMatterHS(targetHue, targetSaturation);
     const action = this.state.config.setColor(color, this.agent);
     this.applyTransition(action);
-    // Update state immediately so controllers get instant feedback
-    // in the command response, matching the OnOffServer pattern.
     applyPatchState(this.state, {
       currentHue: targetHue,
       currentSaturation: targetSaturation,
       colorMode: ColorControl.ColorMode.CurrentHueAndCurrentSaturation,
+      enhancedColorMode:
+        ColorControl.EnhancedColorMode.CurrentHueAndCurrentSaturation,
     });
+    optimisticColorState.set(homeAssistant.entityId, {
+      currentHue: targetHue,
+      currentSaturation: targetSaturation,
+      timestamp: Date.now(),
+    });
+
+    if (this.isLightOff()) {
+      pendingColorStaging.set(homeAssistant.entityId, action.data ?? {});
+      return;
+    }
     homeAssistant.callAction(action);
+  }
+
+  override moveToColor(request: ColorControl.MoveToColorRequest) {
+    this.pendingTransitionTime = request.transitionTime;
+    return super.moveToColor(request);
+  }
+
+  override moveToColorLogic(targetX: number, targetY: number) {
+    const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);
+    if (targetX === this.state.currentX && targetY === this.state.currentY) {
+      return;
+    }
+    const color = ColorConverter.fromXY(targetX / 65536, targetY / 65536);
+    const action = this.state.config.setColor(color, this.agent);
+    this.applyTransition(action);
+    applyPatchState(this.state, {
+      currentX: targetX,
+      currentY: targetY,
+      colorMode: ColorControl.ColorMode.CurrentXAndCurrentY,
+      enhancedColorMode: ColorControl.EnhancedColorMode.CurrentXAndCurrentY,
+    });
+
+    if (this.isLightOff()) {
+      pendingColorStaging.set(homeAssistant.entityId, action.data ?? {});
+      return;
+    }
+    homeAssistant.callAction(action);
+  }
+
+  private isLightOff(): boolean {
+    const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);
+    return homeAssistant.entity.state.state === "off";
   }
 
   private applyTransition(action: { data?: object }) {

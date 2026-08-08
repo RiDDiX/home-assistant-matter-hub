@@ -5,6 +5,7 @@ test/
 build.js
 tsconfig.json
 package.tgz
+*.map
 
 # EXPLICITLY INCLUDE
 !dist/

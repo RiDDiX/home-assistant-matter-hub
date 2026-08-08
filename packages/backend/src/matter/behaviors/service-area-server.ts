@@ -1,16 +1,39 @@
 import { Logger } from "@matter/general";
+import type { Agent } from "@matter/main";
 import { ServiceAreaBehavior } from "@matter/main/behaviors";
 import { ServiceArea } from "@matter/main/clusters";
+import { HomeAssistantEntityBehavior } from "./home-assistant-entity-behavior.js";
 
 const logger = Logger.get("ServiceAreaServer");
+
+/**
+ * Apple Home sends the areas in tap order. Vacuums that clean a batch of
+ * segments in ascending id order (Roborock) need the stored selection in
+ * that same order, so display, dispatch and progress agree (#368).
+ */
+function orderSelection(areas: number[], agent: Agent | undefined): number[] {
+  try {
+    const ascending =
+      agent?.get(HomeAssistantEntityBehavior).state.mapping
+        ?.vacuumAscendingRoomOrder === true;
+    return ascending ? [...areas].sort((a, b) => a - b) : areas;
+  } catch {
+    return areas;
+  }
+}
+
+const ServiceAreaWithProgress = ServiceAreaBehavior.with(
+  ServiceArea.Feature.ProgressReporting,
+);
 
 /**
  * ServiceArea server implementation:
  * - No custom initialize() that calls super.initialize()
  * - Only override command handlers
  * - State is set via .set() at endpoint creation time
+ * - ProgressReporting feature enables controllers to display per-area status
  */
-export class ServiceAreaServerBase extends ServiceAreaBehavior {
+export class ServiceAreaServerBase extends ServiceAreaWithProgress {
   declare state: ServiceAreaServerBase.State;
 
   override selectAreas(
@@ -22,8 +45,8 @@ export class ServiceAreaServerBase extends ServiceAreaBehavior {
       `ServiceArea selectAreas called with: ${JSON.stringify(newAreas)}`,
     );
 
-    // Remove duplicates
-    const uniqueAreas = [...new Set(newAreas)];
+    // Remove duplicates, then apply the configured cleaning order
+    const uniqueAreas = orderSelection([...new Set(newAreas)], this.agent);
 
     // Validate that all requested areas exist in supportedAreas
     const supportedAreaIds = this.state.supportedAreas.map((a) => a.areaId);
@@ -41,6 +64,17 @@ export class ServiceAreaServerBase extends ServiceAreaBehavior {
 
     // Store selected areas - actual cleaning starts when RvcRunMode.changeToMode(Cleaning) is called
     this.state.selectedAreas = uniqueAreas;
+
+    // Initialize progress for all selected areas as Pending
+    this.state.progress = uniqueAreas.map((areaId) => ({
+      areaId,
+      status: ServiceArea.OperationalStatus.Pending,
+    }));
+
+    // A fresh selection means the device is no longer operating in a
+    // previously cleaned area. A stale currentArea makes Apple Home treat
+    // the vacuum as busy and drop part of the new selection (#335, #367).
+    this.state.currentArea = null;
 
     logger.info(
       `ServiceArea: Stored ${uniqueAreas.length} areas for cleaning: ${uniqueAreas.join(", ")}`,
@@ -63,7 +97,7 @@ export class ServiceAreaServerBase extends ServiceAreaBehavior {
 }
 
 export namespace ServiceAreaServerBase {
-  export class State extends ServiceAreaBehavior.State {}
+  export class State extends ServiceAreaWithProgress.State {}
 }
 
 export interface ServiceAreaServerInitialState {
@@ -89,19 +123,24 @@ export function ServiceAreaServer(initialState: ServiceAreaServerInitialState) {
     supportedAreas: initialState.supportedAreas,
     selectedAreas: initialState.selectedAreas ?? [],
     currentArea: initialState.currentArea ?? null,
+    progress: [],
   });
 }
 
 // --- Maps-enabled variant ---
 
-const ServiceAreaWithMaps = ServiceAreaBehavior.with(ServiceArea.Feature.Maps);
+const ServiceAreaWithMapsAndProgress = ServiceAreaBehavior.with(
+  ServiceArea.Feature.Maps,
+  ServiceArea.Feature.ProgressReporting,
+);
 
 /**
- * ServiceArea server with Maps feature enabled.
- * Allows controllers to group and filter areas by map/floor.
+ * ServiceArea server with Maps + ProgressReporting features enabled.
+ * Allows controllers to group and filter areas by map/floor,
+ * and display per-area cleaning status.
  */
 // biome-ignore lint/correctness/noUnusedVariables: Used via .set() in factory function below
-class ServiceAreaServerWithMapsBase extends ServiceAreaWithMaps {
+class ServiceAreaServerWithMapsBase extends ServiceAreaWithMapsAndProgress {
   declare state: ServiceAreaServerWithMapsBase.State;
 
   override selectAreas(
@@ -113,7 +152,7 @@ class ServiceAreaServerWithMapsBase extends ServiceAreaWithMaps {
       `ServiceArea selectAreas called with: ${JSON.stringify(newAreas)}`,
     );
 
-    const uniqueAreas = [...new Set(newAreas)];
+    const uniqueAreas = orderSelection([...new Set(newAreas)], this.agent);
 
     const supportedAreaIds = this.state.supportedAreas.map((a) => a.areaId);
     const invalidAreas = uniqueAreas.filter(
@@ -129,6 +168,17 @@ class ServiceAreaServerWithMapsBase extends ServiceAreaWithMaps {
     }
 
     this.state.selectedAreas = uniqueAreas;
+
+    // Initialize progress for all selected areas as Pending
+    this.state.progress = uniqueAreas.map((areaId) => ({
+      areaId,
+      status: ServiceArea.OperationalStatus.Pending,
+    }));
+
+    // A fresh selection means the device is no longer operating in a
+    // previously cleaned area. A stale currentArea makes Apple Home treat
+    // the vacuum as busy and drop part of the new selection (#335, #367).
+    this.state.currentArea = null;
 
     logger.info(
       `ServiceArea: Stored ${uniqueAreas.length} areas for cleaning: ${uniqueAreas.join(", ")}`,
@@ -150,7 +200,7 @@ class ServiceAreaServerWithMapsBase extends ServiceAreaWithMaps {
 }
 
 namespace ServiceAreaServerWithMapsBase {
-  export class State extends ServiceAreaWithMaps.State {}
+  export class State extends ServiceAreaWithMapsAndProgress.State {}
 }
 
 export interface ServiceAreaServerWithMapsInitialState
@@ -180,5 +230,6 @@ export function ServiceAreaServerWithMaps(
     supportedMaps: initialState.supportedMaps,
     selectedAreas: initialState.selectedAreas ?? [],
     currentArea: initialState.currentArea ?? null,
+    progress: [],
   });
 }

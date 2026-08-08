@@ -1,3 +1,4 @@
+import os from "node:os";
 import express from "express";
 import type { LoggerService } from "../core/app/logger.js";
 
@@ -6,16 +7,26 @@ export interface LogEntry {
   level: string;
   message: string;
   context?: Record<string, unknown>;
+  category?: string;
+  facility?: string;
 }
+
+type LogListener = (entry: LogEntry) => void;
 
 interface LogBuffer {
   entries: LogEntry[];
   maxSize: number;
+  listeners: Set<LogListener>;
 }
+
+// Use a smaller log buffer on systems with limited memory to reduce overhead.
+const totalMemMB = Math.round(os.totalmem() / 1024 / 1024);
+const defaultMaxSize = totalMemMB < 2048 ? 200 : 1000;
 
 export const logBuffer: LogBuffer = {
   entries: [],
-  maxSize: 1000,
+  maxSize: defaultMaxSize,
+  listeners: new Set(),
 };
 
 export function addLogEntry(entry: LogEntry) {
@@ -23,13 +34,27 @@ export function addLogEntry(entry: LogEntry) {
   if (logBuffer.entries.length > logBuffer.maxSize) {
     logBuffer.entries.shift();
   }
+  for (const listener of logBuffer.listeners) {
+    try {
+      listener(entry);
+    } catch {
+      // Listener errors should not break log ingestion
+    }
+  }
 }
 
 export function logsApi(_logger: LoggerService): express.Router {
   const router = express.Router();
 
   router.get("/", (req, res) => {
-    const { level, search, limit = "100", offset = "0" } = req.query;
+    const {
+      level,
+      search,
+      category,
+      facility,
+      limit = "100",
+      offset = "0",
+    } = req.query;
     const limitNum = Math.min(
       500,
       Math.max(1, parseInt(limit as string, 10) || 100),
@@ -41,6 +66,20 @@ export function logsApi(_logger: LoggerService): express.Router {
     if (level && typeof level === "string") {
       const levels = level.split(",").map((l) => l.toLowerCase().trim());
       entries = entries.filter((e) => levels.includes(e.level.toLowerCase()));
+    }
+
+    if (category && typeof category === "string") {
+      const cats = category.split(",").map((c) => c.toLowerCase().trim());
+      entries = entries.filter(
+        (e) => e.category != null && cats.includes(e.category.toLowerCase()),
+      );
+    }
+
+    if (facility && typeof facility === "string") {
+      const facLower = facility.toLowerCase();
+      entries = entries.filter((e) =>
+        e.facility?.toLowerCase().includes(facLower),
+      );
     }
 
     if (search && typeof search === "string") {
@@ -91,11 +130,14 @@ export function logsApi(_logger: LoggerService): express.Router {
       sendLog(log);
     }
 
+    logBuffer.listeners.add(sendLog);
+
     const intervalId = setInterval(() => {
       res.write(": keepalive\n\n");
     }, 30000);
 
     req.on("close", () => {
+      logBuffer.listeners.delete(sendLog);
       clearInterval(intervalId);
     });
   });

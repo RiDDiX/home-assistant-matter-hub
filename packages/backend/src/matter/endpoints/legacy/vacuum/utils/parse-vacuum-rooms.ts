@@ -179,8 +179,8 @@ export function parseVacuumRooms(
   // Reset floor counter for each parse call (avoids accumulating offsets across restarts/updates)
   floorCounter = 0;
 
-  // Try each attribute source in order, return first one with valid rooms
-  // This ensures that if 'rooms' exists but has no valid data, we still check 'segments'
+  // Try each attribute source in order; fall through to the next when
+  // the current one exists but yields no valid rooms.
   const sources = [attributes.rooms, attributes.segments, attributes.room_list];
 
   for (const source of sources) {
@@ -213,8 +213,8 @@ export function parseVacuumRooms(
 export const ROOM_MODE_BASE = 100;
 
 /**
- * Convert a room ID to a numeric mode-compatible value.
- * This ensures consistency between ServiceArea and RvcRunMode.
+ * Convert a room ID to a numeric mode-compatible value so ServiceArea
+ * and RvcRunMode address the same room under the same number.
  */
 function roomIdToNumeric(roomId: string | number): number {
   if (typeof roomId === "number") {

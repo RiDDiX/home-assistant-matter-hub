@@ -9,14 +9,10 @@ export class MediaPlayerMediaPlaybackServer extends Base {
     await super.initialize();
     const homeAssistant = await this.agent.load(HomeAssistantEntityBehavior);
     this.update(homeAssistant.entity);
-    if (homeAssistant.state.managedByEndpoint) {
-      homeAssistant.registerUpdate(this.callback(this.update));
-    } else {
-      this.reactTo(homeAssistant.onChange, this.update);
-    }
+    this.reactTo(homeAssistant.onChange, this.update);
   }
 
-  public update(entity: HomeAssistantEntityInformation) {
+  private update(entity: HomeAssistantEntityInformation) {
     const state = entity.state.state;
     let currentState: MediaPlayback.PlaybackState;
 

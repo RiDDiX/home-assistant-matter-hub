@@ -118,6 +118,15 @@ describe("ColorConverter", () => {
         0,
       );
     });
+
+    it("returns null for 0, negative, and non-finite inputs", () => {
+      expect(ColorConverter.temperatureMiredsToKelvin(0)).toBeNull();
+      expect(ColorConverter.temperatureMiredsToKelvin(-1)).toBeNull();
+      expect(ColorConverter.temperatureMiredsToKelvin(Number.NaN)).toBeNull();
+      expect(
+        ColorConverter.temperatureMiredsToKelvin(Number.POSITIVE_INFINITY),
+      ).toBeNull();
+    });
   });
 
   describe("temperatureKelvinToMireds", () => {

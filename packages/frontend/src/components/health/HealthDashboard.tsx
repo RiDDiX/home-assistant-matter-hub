@@ -28,9 +28,12 @@ import Select from "@mui/material/Select";
 import Tooltip from "@mui/material/Tooltip";
 import Typography from "@mui/material/Typography";
 import { useCallback, useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
+import { timeAgo } from "../../time.ts";
 import { BackupRestore } from "../backup/BackupRestore.tsx";
 import { FabricIcon } from "../fabric/FabricIcon.tsx";
 import { getVendorName } from "../fabric/vendor-names.ts";
+import { FabricHealthCard } from "./FabricHealthCard.tsx";
 
 type SortField = "name" | "created";
 type SortDirection = "asc" | "desc";
@@ -45,17 +48,51 @@ interface BridgeHealthInfo {
   fabricCount: number;
   fabrics: Array<{
     fabricIndex: number;
+    fabricId: number;
+    nodeId: number;
+    rootNodeId: number;
     label: string;
     rootVendorId: number;
   }>;
   failedEntityCount: number;
+  controllerWarnings?: Array<{
+    entityId: string;
+    deviceTypeId: number;
+    controller: string;
+    controllerLabel: string;
+    note?: string;
+  }>;
+  entityDiagnostics?: Array<{
+    entityId: string;
+    deviceTypeId?: number;
+    status: "ok" | "failed" | "limited";
+    reason?: string;
+    failedAt?: string;
+    unsupportedBy?: Array<{
+      controller: string;
+      controllerLabel: string;
+      note?: string;
+    }>;
+  }>;
   connectivity?: {
     totalSessions: number;
     totalSubscriptions: number;
     sessions: Array<{
       id: number;
       peerNodeId: string;
+      fabricIndex: number | null;
       subscriptionCount: number;
+      subscriptions?: Array<{
+        scope: "wildcard" | "endpoint-specific" | "unknown";
+        endpointIds: number[];
+      }>;
+      lastActiveMsAgo?: number | null;
+      isPeerActive?: boolean;
+    }>;
+    fabricSummary?: Array<{
+      fabricIndex: number;
+      sessions: number;
+      subscriptions: number;
     }>;
   };
 }
@@ -79,6 +116,12 @@ interface DetailedHealthStatus {
     enabled: boolean;
     lastRecoveryAttempt?: string;
     recoveryCount: number;
+    history?: Array<{
+      timestamp: string;
+      bridgeId: string;
+      bridgeName: string;
+      outcome: "success" | "failed";
+    }>;
   };
 }
 
@@ -99,6 +142,7 @@ export interface HealthDashboardProps {
 }
 
 export function HealthDashboard(props: HealthDashboardProps = {}) {
+  const { t } = useTranslation();
   const [health, setHealth] = useState<DetailedHealthStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -120,14 +164,14 @@ export function HealthDashboard(props: HealthDashboardProps = {}) {
         setHealth(data);
         setError(null);
       } else {
-        setError("Failed to fetch health status");
+        setError(t("health.fetchFailed"));
       }
     } catch {
-      setError("Connection error");
+      setError(t("health.connectionError"));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     fetchHealth();
@@ -154,9 +198,9 @@ export function HealthDashboard(props: HealthDashboardProps = {}) {
         URL.revokeObjectURL(url);
       }
     } catch {
-      setError("Failed to export diagnostic data");
+      setError(t("health.exportFailed"));
     }
-  }, []);
+  }, [t]);
 
   const handleRestart = async (bridgeId: string) => {
     try {
@@ -165,7 +209,7 @@ export function HealthDashboard(props: HealthDashboardProps = {}) {
       });
       fetchHealth();
     } catch {
-      setError("Failed to restart bridge");
+      setError(t("health.restartFailed"));
     }
   };
 
@@ -180,7 +224,7 @@ export function HealthDashboard(props: HealthDashboardProps = {}) {
   if (error || !health) {
     return (
       <Alert severity="error" sx={{ m: 2 }}>
-        {error ?? "Unable to load health status"}
+        {error ?? t("health.unableToLoad")}
       </Alert>
     );
   }
@@ -204,7 +248,7 @@ export function HealthDashboard(props: HealthDashboardProps = {}) {
       >
         <Box display="flex" alignItems="center" gap={1}>
           {statusIcon}
-          <Typography variant="h5">System Health</Typography>
+          <Typography variant="h5">{t("health.systemHealth")}</Typography>
           <Chip
             label={health.status.toUpperCase()}
             color={
@@ -224,10 +268,10 @@ export function HealthDashboard(props: HealthDashboardProps = {}) {
             startIcon={<BugReportIcon />}
             onClick={handleDiagnosticExport}
           >
-            Export Diagnostic
+            {t("health.exportDiagnostic")}
           </Button>
-          <Tooltip title="Refresh">
-            <IconButton onClick={fetchHealth}>
+          <Tooltip title={t("common.refresh")}>
+            <IconButton onClick={fetchHealth} aria-label="Refresh health data">
               <RefreshIcon />
             </IconButton>
           </Tooltip>
@@ -238,7 +282,7 @@ export function HealthDashboard(props: HealthDashboardProps = {}) {
         <Grid size={{ xs: 12, md: 4 }}>
           <Paper sx={{ p: 2 }}>
             <Typography variant="subtitle2" color="text.secondary">
-              Version
+              {t("health.version")}
             </Typography>
             <Typography variant="h6">{health.version}</Typography>
           </Paper>
@@ -246,7 +290,7 @@ export function HealthDashboard(props: HealthDashboardProps = {}) {
         <Grid size={{ xs: 12, md: 4 }}>
           <Paper sx={{ p: 2 }}>
             <Typography variant="subtitle2" color="text.secondary">
-              Uptime
+              {t("health.uptime")}
             </Typography>
             <Typography variant="h6">{formatUptime(health.uptime)}</Typography>
           </Paper>
@@ -254,13 +298,13 @@ export function HealthDashboard(props: HealthDashboardProps = {}) {
         <Grid size={{ xs: 12, md: 4 }}>
           <Paper sx={{ p: 2 }}>
             <Typography variant="subtitle2" color="text.secondary">
-              Home Assistant
+              {t("health.homeAssistant")}
             </Typography>
             <Chip
               label={
                 health.services.homeAssistant.connected
-                  ? "Connected"
-                  : "Disconnected"
+                  ? t("health.connected")
+                  : t("health.disconnected")
               }
               color={
                 health.services.homeAssistant.connected ? "success" : "error"
@@ -283,9 +327,9 @@ export function HealthDashboard(props: HealthDashboardProps = {}) {
       >
         <Box display="flex" alignItems="center" gap={1}>
           <MemoryIcon />
-          <Typography variant="h6">Bridge Status</Typography>
+          <Typography variant="h6">{t("health.bridgeStatus")}</Typography>
           <Chip
-            label={`${health.services.bridges.running}/${health.services.bridges.total} Running`}
+            label={`${health.services.bridges.running}/${health.services.bridges.total} ${t("common.running")}`}
             size="small"
             variant="outlined"
           />
@@ -293,22 +337,29 @@ export function HealthDashboard(props: HealthDashboardProps = {}) {
         <Box display="flex" alignItems="center" gap={1}>
           <SortIcon fontSize="small" color="action" />
           <FormControl size="small" sx={{ minWidth: 120 }}>
-            <InputLabel>Sort by</InputLabel>
+            <InputLabel>{t("health.sortBy")}</InputLabel>
             <Select
               value={sortField}
-              label="Sort by"
+              label={t("health.sortBy")}
               onChange={(e) => setSortField(e.target.value as SortField)}
             >
-              <MenuItem value="name">Name</MenuItem>
-              <MenuItem value="created">Created</MenuItem>
+              <MenuItem value="name">{t("common.name")}</MenuItem>
+              <MenuItem value="created">{t("health.created")}</MenuItem>
             </Select>
           </FormControl>
-          <Tooltip title={sortDirection === "asc" ? "Ascending" : "Descending"}>
+          <Tooltip
+            title={
+              sortDirection === "asc"
+                ? t("health.ascending")
+                : t("health.descending")
+            }
+          >
             <IconButton
               size="small"
               onClick={() =>
                 setSortDirection(sortDirection === "asc" ? "desc" : "asc")
               }
+              aria-label={`Sort ${sortDirection === "asc" ? "descending" : "ascending"}`}
             >
               {sortDirection === "asc" ? (
                 <ArrowUpwardIcon fontSize="small" />
@@ -403,7 +454,7 @@ export function HealthDashboard(props: HealthDashboardProps = {}) {
                         size="small"
                       />
                       {bridge.status === "failed" && (
-                        <Tooltip title="Restart Bridge">
+                        <Tooltip title={t("bridge.restart")}>
                           <IconButton
                             size="small"
                             onClick={() => handleRestart(bridge.id)}
@@ -433,19 +484,19 @@ export function HealthDashboard(props: HealthDashboardProps = {}) {
                       alignItems="center"
                     >
                       <Chip
-                        label={`Port ${bridge.port}`}
+                        label={`${t("common.port")} ${bridge.port}`}
                         size="small"
                         variant="outlined"
                         color="default"
                       />
                       <Chip
-                        label={`${bridge.deviceCount} Devices`}
+                        label={`${bridge.deviceCount} ${t("common.devices")}`}
                         size="small"
                         variant="outlined"
                         color="default"
                       />
                       <Chip
-                        label={`${bridge.fabricCount} Fabrics`}
+                        label={`${bridge.fabricCount} ${t("common.fabrics")}`}
                         size="small"
                         variant="outlined"
                         color="default"
@@ -463,8 +514,13 @@ export function HealthDashboard(props: HealthDashboardProps = {}) {
                   {bridge.connectivity && bridge.status === "running" && (
                     <Box sx={{ mt: 1, flexShrink: 0 }}>
                       <Typography variant="caption" color="text.secondary">
-                        Sessions: {bridge.connectivity.totalSessions} | Subs:{" "}
+                        {t("health.sessions")}:{" "}
+                        {bridge.connectivity.totalSessions} |{" "}
+                        {t("health.subscriptions")}:{" "}
                         {bridge.connectivity.totalSubscriptions}
+                        {bridge.connectivity.fabricSummary &&
+                          bridge.connectivity.fabricSummary.length > 1 &&
+                          ` (${bridge.connectivity.fabricSummary.length} ${t("health.fabrics")})`}
                       </Typography>
                     </Box>
                   )}
@@ -472,27 +528,119 @@ export function HealthDashboard(props: HealthDashboardProps = {}) {
                   {bridge.fabrics.length > 0 && (
                     <Box sx={{ mt: 1, flexShrink: 0 }}>
                       <Typography variant="caption" color="text.secondary">
-                        Connected to:
+                        {t("health.connectedTo")}:
                       </Typography>
                       <Box display="flex" gap={0.5} flexWrap="wrap" mt={0.5}>
                         {bridge.fabrics.map((fabric) => (
-                          <Chip
+                          <Tooltip
                             key={fabric.fabricIndex}
-                            icon={
-                              <FabricIcon
-                                fabric={fabric as unknown as BridgeFabric}
-                              />
+                            title={
+                              <Box sx={{ fontSize: "0.75rem" }}>
+                                <div>Fabric #{fabric.fabricIndex}</div>
+                                <div>
+                                  Vendor: {getVendorName(fabric.rootVendorId)}{" "}
+                                  (0x
+                                  {fabric.rootVendorId
+                                    .toString(16)
+                                    .toUpperCase()
+                                    .padStart(4, "0")}
+                                  )
+                                </div>
+                                <div>Fabric ID: {fabric.fabricId}</div>
+                                <div>Node ID: {fabric.nodeId}</div>
+                                <div>Root Node ID: {fabric.rootNodeId}</div>
+                              </Box>
                             }
-                            label={
-                              fabric.label || getVendorName(fabric.rootVendorId)
-                            }
-                            size="small"
-                            variant="outlined"
-                          />
+                          >
+                            <Chip
+                              icon={
+                                <FabricIcon
+                                  fabric={fabric as unknown as BridgeFabric}
+                                />
+                              }
+                              label={
+                                fabric.label ||
+                                getVendorName(fabric.rootVendorId)
+                              }
+                              size="small"
+                              variant="outlined"
+                            />
+                          </Tooltip>
                         ))}
                       </Box>
                     </Box>
                   )}
+
+                  {bridge.connectivity && bridge.status === "running" && (
+                    <Box sx={{ mt: 1, flexShrink: 0 }}>
+                      <FabricHealthCard
+                        fabrics={bridge.fabrics}
+                        sessions={bridge.connectivity.sessions}
+                      />
+                    </Box>
+                  )}
+
+                  {(() => {
+                    const failed = (bridge.entityDiagnostics ?? []).filter(
+                      (d) => d.status === "failed",
+                    );
+                    return failed.length > 0 ? (
+                      <Alert
+                        severity="error"
+                        sx={{ mt: 1, flexShrink: 0, py: 0 }}
+                      >
+                        <Typography variant="caption" component="div">
+                          {t(
+                            "health.failedDevicesTitle",
+                            "Devices that failed to start:",
+                          )}{" "}
+                          ({failed.length})
+                        </Typography>
+                        <Box sx={{ maxHeight: 160, overflowY: "auto" }}>
+                          {failed.map((d) => (
+                            <Typography
+                              key={d.entityId}
+                              variant="caption"
+                              component="div"
+                              color="text.secondary"
+                            >
+                              {d.entityId}
+                              {d.reason ? `: ${d.reason}` : ""}
+                              {d.failedAt ? ` (${timeAgo(d.failedAt)})` : ""}
+                            </Typography>
+                          ))}
+                        </Box>
+                      </Alert>
+                    ) : null;
+                  })()}
+                  {bridge.controllerWarnings &&
+                    bridge.controllerWarnings.length > 0 && (
+                      <Alert
+                        severity="warning"
+                        sx={{ mt: 1, flexShrink: 0, py: 0 }}
+                      >
+                        <Typography variant="caption" component="div">
+                          {t(
+                            "health.controllerWarningsTitle",
+                            "Some devices may not show up in a connected controller:",
+                          )}{" "}
+                          ({bridge.controllerWarnings.length})
+                        </Typography>
+                        <Box sx={{ maxHeight: 160, overflowY: "auto" }}>
+                          {bridge.controllerWarnings.map((w) => (
+                            <Typography
+                              key={`${w.entityId}:${w.deviceTypeId}:${w.controller}`}
+                              variant="caption"
+                              component="div"
+                              color="text.secondary"
+                            >
+                              {w.entityId} on {w.controllerLabel}
+                              {w.note ? ` (${w.note})` : ""}
+                            </Typography>
+                          ))}
+                        </Box>
+                      </Alert>
+                    )}
                 </CardContent>
               </Card>
             </Grid>
@@ -504,14 +652,28 @@ export function HealthDashboard(props: HealthDashboardProps = {}) {
           <Divider sx={{ my: 3 }} />
           <Box display="flex" alignItems="center" gap={1} mb={1}>
             <AutorenewIcon />
-            <Typography variant="h6">Auto Recovery</Typography>
-            <Chip label="Enabled" color="success" size="small" />
+            <Typography variant="h6">{t("health.autoRecovery")}</Typography>
+            <Chip label={t("common.enabled")} color="success" size="small" />
           </Box>
           <Typography variant="body2" color="text.secondary">
-            Recovery attempts: {health.recovery.recoveryCount}
+            {t("health.recoveryAttempts")}: {health.recovery.recoveryCount}
             {health.recovery.lastRecoveryAttempt &&
               ` | Last attempt: ${new Date(health.recovery.lastRecoveryAttempt).toLocaleString()}`}
           </Typography>
+          {health.recovery.history && health.recovery.history.length > 0 && (
+            <Box sx={{ mt: 1 }}>
+              {[...health.recovery.history].reverse().map((h, i) => (
+                <Typography
+                  key={`${h.timestamp}:${h.bridgeId}:${i}`}
+                  variant="caption"
+                  component="div"
+                  color="text.secondary"
+                >
+                  {timeAgo(h.timestamp)}: {h.bridgeName} ({h.outcome})
+                </Typography>
+              ))}
+            </Box>
+          )}
         </>
       )}
 

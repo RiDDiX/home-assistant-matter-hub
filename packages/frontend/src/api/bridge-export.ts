@@ -4,12 +4,11 @@ import type {
   BridgeImportRequest,
   BridgeImportResult,
 } from "@home-assistant-matter-hub/common";
+import { assertOk, parseJsonResponse } from "./fetch-utils.js";
 
 export async function exportAllBridges(): Promise<void> {
   const response = await fetch("api/bridges/export");
-  if (!response.ok) {
-    throw new Error(`Failed to export bridges: ${response.statusText}`);
-  }
+  await assertOk(response, "Failed to export bridges");
   const blob = await response.blob();
   const contentDisposition = response.headers.get("Content-Disposition");
   const filename =
@@ -20,9 +19,7 @@ export async function exportAllBridges(): Promise<void> {
 
 export async function exportBridge(bridgeId: string): Promise<void> {
   const response = await fetch(`api/bridges/export/${bridgeId}`);
-  if (!response.ok) {
-    throw new Error(`Failed to export bridge: ${response.statusText}`);
-  }
+  await assertOk(response, "Failed to export bridge");
   const blob = await response.blob();
   const contentDisposition = response.headers.get("Content-Disposition");
   const filename =
@@ -39,10 +36,8 @@ export async function previewImport(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data),
   });
-  if (!response.ok) {
-    throw new Error(`Failed to preview import: ${response.statusText}`);
-  }
-  return response.json();
+  await assertOk(response, "Failed to preview import");
+  return parseJsonResponse(response);
 }
 
 export async function importBridges(
@@ -54,10 +49,8 @@ export async function importBridges(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ data, options }),
   });
-  if (!response.ok) {
-    throw new Error(`Failed to import bridges: ${response.statusText}`);
-  }
-  return response.json();
+  await assertOk(response, "Failed to import bridges");
+  return parseJsonResponse(response);
 }
 
 function downloadBlob(blob: Blob, filename: string): void {

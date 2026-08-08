@@ -13,7 +13,7 @@ import debounce from "debounce";
 import type { BridgeRegistry } from "../../services/bridges/bridge-registry.js";
 import type { HomeAssistantStates } from "../../services/home-assistant/home-assistant-registry.js";
 import { HomeAssistantEntityBehavior } from "../behaviors/home-assistant-entity-behavior.js";
-import { EntityEndpoint } from "./entity-endpoint.js";
+import { EntityEndpoint, getMappedEntityIds } from "./entity-endpoint.js";
 import { supportsCleaningModes } from "./legacy/vacuum/behaviors/vacuum-rvc-clean-mode-server.js";
 import { ServerModeVacuumDevice } from "./legacy/vacuum/server-mode-vacuum-device.js";
 
@@ -31,6 +31,7 @@ export class ServerModeVacuumEndpoint extends EntityEndpoint {
     registry: BridgeRegistry,
     entityId: string,
     mapping?: EntityMappingConfig,
+    endpointId?: string,
   ): Promise<ServerModeVacuumEndpoint | undefined> {
     const deviceRegistry = registry.deviceOf(entityId);
     let state = registry.initialState(entityId);
@@ -42,11 +43,16 @@ export class ServerModeVacuumEndpoint extends EntityEndpoint {
 
     // Auto-assign battery entity if not manually set
     let effectiveMapping = mapping;
+    // disableBatteryMapping wins over a manual batteryEntity too, matching the
+    // legacy and user-composed paths (#427).
+    if (mapping?.disableBatteryMapping && mapping.batteryEntity) {
+      effectiveMapping = { ...mapping, batteryEntity: undefined };
+    }
     logger.info(
       `${entityId}: device_id=${entity.device_id}, manualBattery=${mapping?.batteryEntity ?? "none"}`,
     );
     if (entity.device_id) {
-      if (!mapping?.batteryEntity) {
+      if (!mapping?.batteryEntity && !mapping?.disableBatteryMapping) {
         const batteryEntityId = registry.findBatteryEntityForDevice(
           entity.device_id,
         );
@@ -59,9 +65,16 @@ export class ServerModeVacuumEndpoint extends EntityEndpoint {
           registry.markBatteryEntityUsed(batteryEntityId);
           logger.info(`${entityId}: Auto-assigned battery ${batteryEntityId}`);
         } else {
-          logger.warn(
-            `${entityId}: No battery entity found for device ${entity.device_id}`,
-          );
+          const attrs = state.attributes as VacuumDeviceAttributes;
+          if (attrs.battery_level != null || attrs.battery != null) {
+            logger.info(
+              `${entityId}: No battery entity found, using battery attribute from vacuum state`,
+            );
+          } else {
+            logger.warn(
+              `${entityId}: No battery entity found for device ${entity.device_id}`,
+            );
+          }
         }
       }
 
@@ -108,10 +121,48 @@ export class ServerModeVacuumEndpoint extends EntityEndpoint {
           `${entityId}: Auto-assigned mopIntensity ${vacuumEntities.mopIntensityEntity}`,
         );
       }
+      if (
+        !effectiveMapping?.currentRoomEntity &&
+        vacuumEntities.currentRoomEntity
+      ) {
+        effectiveMapping = {
+          ...effectiveMapping,
+          entityId: effectiveMapping?.entityId ?? entityId,
+          currentRoomEntity: vacuumEntities.currentRoomEntity,
+        };
+        logger.info(
+          `${entityId}: Auto-assigned currentRoom ${vacuumEntities.currentRoomEntity}`,
+        );
+      }
 
-      // Auto-detect rooms when no rooms in attributes
+      // HA 2026.3 CLEAN_AREA: resolve HA area mapping before vendor-specific room detection.
+      // When CLEAN_AREA is supported and area_mapping is configured, this takes priority
+      // over all vendor-specific room detection methods.
+      const supportedFeatures =
+        (state.attributes as VacuumDeviceAttributes).supported_features ?? 0;
+      const cleanAreaRooms = await registry.resolveCleanAreaRooms(
+        entityId,
+        supportedFeatures,
+      );
+      if (cleanAreaRooms.length > 0) {
+        effectiveMapping = {
+          ...effectiveMapping,
+          entityId: effectiveMapping?.entityId ?? entityId,
+          cleanAreaRooms,
+        };
+        logger.info(
+          `${entityId}: Using ${cleanAreaRooms.length} HA areas via CLEAN_AREA`,
+        );
+      }
+
+      // Auto-detect rooms when no rooms in attributes and no CLEAN_AREA mapping
       const vacAttrs = state.attributes as VacuumDeviceAttributes;
-      if (!vacAttrs.rooms && !vacAttrs.segments && !vacAttrs.room_mapping) {
+      if (
+        cleanAreaRooms.length === 0 &&
+        !vacAttrs.rooms &&
+        !vacAttrs.segments &&
+        !vacAttrs.room_mapping
+      ) {
         // Try Valetudo map segments sensor (sensor.*_map_segments on same device)
         const valetudoRooms = registry.findValetudoMapSegments(
           entity.device_id,
@@ -153,7 +204,7 @@ export class ServerModeVacuumEndpoint extends EntityEndpoint {
         }
       }
     } else {
-      logger.warn(`${entityId}: No device_id — cannot auto-assign battery`);
+      logger.warn(`${entityId}: No device_id, cannot auto-assign battery`);
     }
 
     const payload = {
@@ -199,7 +250,6 @@ export class ServerModeVacuumEndpoint extends EntityEndpoint {
         mapping: effectiveMapping,
       },
       registry.isServerModeVacuumOnOffEnabled(),
-      registry.isVacuumMinimalClustersEnabled(),
       cleaningModeOptions,
     );
 
@@ -207,37 +257,59 @@ export class ServerModeVacuumEndpoint extends EntityEndpoint {
       return undefined;
     }
 
-    return new ServerModeVacuumEndpoint(endpointType, entityId, customName);
+    const mappedIds = getMappedEntityIds(effectiveMapping);
+    return new ServerModeVacuumEndpoint(
+      endpointType,
+      entityId,
+      customName,
+      mappedIds,
+      endpointId,
+    );
   }
 
   private lastState?: HomeAssistantEntityState;
+  private pendingMappedChange = false;
   private readonly flushUpdate: ReturnType<typeof debounce>;
 
   private constructor(
     type: EndpointType,
     entityId: string,
     customName?: string,
+    mappedEntityIds?: string[],
+    endpointId?: string,
   ) {
-    super(type, entityId, customName);
+    super(type, entityId, customName, mappedEntityIds, endpointId);
     // Debounce state updates to batch rapid changes into a single transaction.
     // HA sends vacuum state updates every 5-10s even when unchanged.
     // Without debouncing, each triggers a separate Matter.js transaction.
     this.flushUpdate = debounce(this.flushPendingUpdate.bind(this), 50);
   }
 
-  override async delete() {
+  private clearTimers(): void {
     this.flushUpdate.clear();
+  }
+
+  // dispose calls close(), not delete(), so clean up in both
+  override async delete() {
+    this.clearTimers();
     await super.delete();
+  }
+
+  override async close() {
+    this.clearTimers();
+    await super.close();
   }
 
   async updateStates(states: HomeAssistantStates): Promise<void> {
     const state = states[this.entityId] ?? {};
-    // Compare only meaningful fields — ignore volatile HA metadata
+    const mappedChanged = this.hasMappedEntityChanged(states);
+    // Compare only meaningful fields, ignore volatile HA metadata
     // (last_changed, last_updated, context) that changes on every event
     // even when the actual device state/attributes are identical.
     // Skipping these prevents unnecessary Matter subscription reports
     // and reduces MRP traffic that can cause session loss.
     if (
+      !mappedChanged &&
       state.state === this.lastState?.state &&
       JSON.stringify(state.attributes) ===
         JSON.stringify(this.lastState?.attributes)
@@ -245,6 +317,12 @@ export class ServerModeVacuumEndpoint extends EntityEndpoint {
       return;
     }
 
+    if (mappedChanged) {
+      this.pendingMappedChange = true;
+      logger.debug(
+        `Mapped entity change detected for ${this.entityId}, forcing update`,
+      );
+    }
     logger.debug(
       `State update received for ${this.entityId}: state=${state.state}`,
     );
@@ -261,8 +339,17 @@ export class ServerModeVacuumEndpoint extends EntityEndpoint {
 
     try {
       const current = this.stateOf(HomeAssistantEntityBehavior).entity;
+      // When only a mapped entity changed (e.g. battery sensor), the primary
+      // entity state is structurally identical. matter.js uses isDeepEqual on
+      // setStateOf, so the entity$Changed event would never fire. Bump
+      // last_updated to force a structural difference.
+      let effectiveState = state;
+      if (this.pendingMappedChange) {
+        this.pendingMappedChange = false;
+        effectiveState = { ...state, last_updated: new Date().toISOString() };
+      }
       await this.setStateOf(HomeAssistantEntityBehavior, {
-        entity: { ...current, state },
+        entity: { ...current, state: effectiveState },
       });
     } catch (error) {
       if (

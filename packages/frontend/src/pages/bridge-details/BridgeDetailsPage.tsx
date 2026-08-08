@@ -3,6 +3,7 @@ import type {
   EndpointData,
   FailedEntity,
 } from "@home-assistant-matter-hub/common";
+import InfoOutlinedIcon from "@mui/icons-material/InfoOutlined";
 import RocketLaunchIcon from "@mui/icons-material/RocketLaunch";
 import WarningIcon from "@mui/icons-material/Warning";
 import Alert from "@mui/material/Alert";
@@ -19,6 +20,7 @@ import Stack from "@mui/material/Stack";
 import Tooltip from "@mui/material/Tooltip";
 import Typography from "@mui/material/Typography";
 import { memo, useCallback, useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useParams } from "react-router";
 import { updateBridge } from "../../api/bridges.ts";
 import { Breadcrumbs } from "../../components/breadcrumbs/Breadcrumbs.tsx";
@@ -44,6 +46,7 @@ const FailedEntitiesAlert = ({
 }: {
   failedEntities: FailedEntity[];
 }) => {
+  const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
 
   if (!failedEntities || failedEntities.length === 0) {
@@ -58,9 +61,9 @@ const FailedEntitiesAlert = ({
     >
       <Typography variant="body2">
         <strong>
-          {failedEntities.length} entity/entities could not be loaded.
+          {t("bridge.failedEntitiesCount", { count: failedEntities.length })}
         </strong>{" "}
-        Click to {expanded ? "hide" : "show"} details.
+        {t(expanded ? "bridge.clickToHide" : "bridge.clickToShow")}
       </Typography>
       <Collapse in={expanded}>
         <List dense sx={{ mt: 1 }}>
@@ -87,6 +90,7 @@ const FailedEntitiesAlert = ({
 };
 
 export const BridgeDetailsPage = () => {
+  const { t } = useTranslation();
   const notifications = useNotifications();
   const dispatch = useAppDispatch();
 
@@ -112,11 +116,11 @@ export const BridgeDetailsPage = () => {
   useEffect(() => {
     if (bridgeError) {
       notifications.show({
-        message: bridgeError.message ?? "Failed to load Bridge details",
+        message: bridgeError.message ?? t("bridge.loadFailed"),
         severity: "error",
       });
     }
-  }, [bridgeError, notifications]);
+  }, [bridgeError, notifications, t]);
 
   useEffect(() => {
     if (devicesError?.message) {
@@ -125,18 +129,18 @@ export const BridgeDetailsPage = () => {
   }, [devicesError, notifications]);
 
   if (!bridge && bridgeLoading) {
-    return "Loading";
+    return t("common.loading");
   }
 
   if (!bridge) {
-    return "Not found";
+    return t("common.notFound");
   }
 
   return (
     <Stack spacing={4}>
       <Breadcrumbs
         items={[
-          { name: "Bridges", to: navigation.bridges },
+          { name: t("nav.bridges"), to: navigation.bridges },
           { name: bridge.name, to: navigation.bridge(bridgeId) },
         ]}
       />
@@ -149,6 +153,18 @@ export const BridgeDetailsPage = () => {
       </Box>
 
       <BridgeStatusHint status={bridge.status} reason={bridge.statusReason} />
+
+      {bridge.status === "running" &&
+        bridge.commissioning &&
+        !bridge.commissioning.isCommissioned &&
+        bridge.commissioning.fabrics.length === 0 && (
+          <Alert severity="info" icon={<InfoOutlinedIcon />}>
+            <AlertTitle>{t("bridge.pairHint")}</AlertTitle>
+            <Typography variant="body2" sx={{ mb: 1 }}>
+              {t("bridge.pairDescription")}
+            </Typography>
+          </Alert>
+        )}
 
       {bridge.failedEntities && bridge.failedEntities.length > 0 && (
         <FailedEntitiesAlert failedEntities={bridge.failedEntities} />
@@ -166,9 +182,9 @@ export const BridgeDetailsPage = () => {
         <Stack spacing={2}>
           <Box display="flex" justifyContent="flex-end" alignItems="center">
             {timer != null && (
-              <Tooltip title="New devices and changes on labels are discovered every 30 seconds.">
+              <Tooltip title={t("bridge.refreshHint")}>
                 <Typography variant="body2" color="textSecondary">
-                  Refreshing states in {timer - 1} seconds...
+                  {t("bridge.refreshingStates", { seconds: timer - 1 })}
                 </Typography>
               </Tooltip>
             )}
@@ -210,6 +226,7 @@ const ServerModeRecommendation = ({
   bridge: BridgeDataWithMetadata;
   devices: EndpointData | undefined;
 }) => {
+  const { t } = useTranslation();
   const notifications = useNotifications();
   const [enabling, setEnabling] = useState(false);
 
@@ -244,13 +261,14 @@ const ServerModeRecommendation = ({
         priority: bridge.priority,
       });
       notifications.show({
-        message:
-          "Server Mode enabled. The bridge will restart with your vacuum as a standalone device.",
+        message: t("bridge.serverModeEnabled"),
         severity: "success",
       });
     } catch (e) {
       notifications.show({
-        message: `Failed to enable Server Mode: ${e instanceof Error ? e.message : String(e)}`,
+        message: t("bridge.serverModeEnableFailed", {
+          error: e instanceof Error ? e.message : String(e),
+        }),
         severity: "error",
       });
     } finally {
@@ -275,24 +293,18 @@ const ServerModeRecommendation = ({
             startIcon={enabling ? <CircularProgress size={16} /> : undefined}
             sx={{ whiteSpace: "nowrap" }}
           >
-            {enabling ? "Enabling..." : "Enable Server Mode"}
+            {enabling ? t("bridge.enabling") : t("bridge.enableServerMode")}
           </Button>
         ) : undefined
       }
     >
-      <AlertTitle>Server Mode Recommended for Robot Vacuums</AlertTitle>
+      <AlertTitle>{t("bridge.serverModeRecommended")}</AlertTitle>
       <Typography variant="body2">
-        This bridge contains a robot vacuum in <strong>bridged mode</strong>.
-        Apple Home and Alexa will show the bridge as an additional device,
-        resulting in duplicate entries. Enable <strong>Server Mode</strong> to
-        expose the vacuum as a standalone Matter device for full Siri/Alexa
-        voice command support and no duplicates.
+        {t("bridge.serverModeDescription")}
       </Typography>
       {!isSingleDevice && (
         <Typography variant="body2" sx={{ mt: 1 }}>
-          <strong>Note:</strong> Server Mode requires the vacuum to be the only
-          device on this bridge. Please remove other entities from this bridge
-          first, then enable Server Mode in the bridge settings.
+          {t("bridge.serverModeSingleDeviceNote")}
         </Typography>
       )}
     </Alert>

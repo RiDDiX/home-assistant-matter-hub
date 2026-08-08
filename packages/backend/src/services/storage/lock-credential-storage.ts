@@ -1,4 +1,4 @@
-import { pbkdf2Sync, randomBytes } from "node:crypto";
+import { pbkdf2Sync, randomBytes, timingSafeEqual } from "node:crypto";
 import type {
   LockCredential,
   LockCredentialLegacy,
@@ -113,8 +113,15 @@ export class LockCredentialStorage extends Service {
     if (!credential?.enabled) {
       return false;
     }
-    const hash = this.hashPin(pin, credential.pinCodeSalt);
-    return hash === credential.pinCodeHash;
+    const computed = Buffer.from(
+      this.hashPin(pin, credential.pinCodeSalt),
+      "hex",
+    );
+    const expected = Buffer.from(credential.pinCodeHash, "hex");
+    if (computed.length !== expected.length) {
+      return false;
+    }
+    return timingSafeEqual(computed, expected);
   }
 
   /**
@@ -123,6 +130,14 @@ export class LockCredentialStorage extends Service {
   hasCredential(entityId: string): boolean {
     const credential = this.credentials.get(entityId);
     return !!credential?.enabled && !!credential.pinCodeHash;
+  }
+
+  /**
+   * True if a user slot exists, even when no PIN was set yet
+   * (Apple Home does SetUser before SetCredential)
+   */
+  hasUser(entityId: string): boolean {
+    return this.credentials.has(entityId);
   }
 
   getAllCredentials(): LockCredential[] {
@@ -149,13 +164,54 @@ export class LockCredentialStorage extends Service {
       entityId: request.entityId,
       pinCodeHash: hash,
       pinCodeSalt: salt,
-      name: request.name?.trim() || undefined,
+      name: request.name?.trim() || existing?.name,
       enabled: request.enabled ?? true,
       createdAt: existing?.createdAt ?? now,
       updatedAt: now,
+      userName: request.userName ?? existing?.userName,
+      userUniqueId: request.userUniqueId ?? existing?.userUniqueId,
+      creatorFabricIndex:
+        existing?.creatorFabricIndex ?? request.creatorFabricIndex,
+      lastModifiedFabricIndex:
+        request.lastModifiedFabricIndex ??
+        request.creatorFabricIndex ??
+        existing?.lastModifiedFabricIndex,
     };
 
     this.credentials.set(request.entityId, credential);
+    await this.persist();
+    return credential;
+  }
+
+  /**
+   * Upsert user metadata for an entity without changing the PIN. Used by the
+   * Matter SetUser flow (Apple Home calls SetUser before SetCredential).
+   */
+  async setUser(params: {
+    entityId: string;
+    userName?: string;
+    userUniqueId?: number;
+    fabricIndex?: number;
+  }): Promise<LockCredential> {
+    const now = Date.now();
+    const existing = this.credentials.get(params.entityId);
+    const credential: LockCredential = {
+      entityId: params.entityId,
+      pinCodeHash: existing?.pinCodeHash ?? "",
+      pinCodeSalt: existing?.pinCodeSalt ?? "",
+      name: existing?.name,
+      // A user slot without a PIN should not unlock anything, but it has to
+      // exist so subsequent GetUser calls report Occupied.
+      enabled: existing?.enabled ?? false,
+      createdAt: existing?.createdAt ?? now,
+      updatedAt: now,
+      userName: params.userName ?? existing?.userName,
+      userUniqueId: params.userUniqueId ?? existing?.userUniqueId,
+      creatorFabricIndex: existing?.creatorFabricIndex ?? params.fabricIndex,
+      lastModifiedFabricIndex:
+        params.fabricIndex ?? existing?.lastModifiedFabricIndex,
+    };
+    this.credentials.set(params.entityId, credential);
     await this.persist();
     return credential;
   }

@@ -4,26 +4,36 @@ import type {
   HomeAssistantEntityInformation,
   MatterDeviceType,
 } from "@home-assistant-matter-hub/common";
+import { Logger } from "@matter/general";
 import type { EndpointType } from "@matter/main";
 import { FixedLabelServer } from "@matter/main/behaviors";
 import type { HomeAssistantEntityBehavior } from "../../behaviors/home-assistant-entity-behavior.js";
+import { DefaultPowerSourceServer } from "../../behaviors/power-source-server.js";
+import { validateEndpointType } from "../validate-endpoint-type.js";
 import { AirPurifierEndpoint } from "./air-purifier/index.js";
 import {
   AlarmControlPanelDevice,
   AlarmOnOffDevice,
 } from "./alarm-control-panel/index.js";
 import { AutomationDevice } from "./automation/index.js";
+import { ContactSensorType } from "./binary-sensor/contact-sensor.js";
 import { BinarySensorDevice } from "./binary-sensor/index.js";
+import { MotionSensorType } from "./binary-sensor/motion-sensor.js";
+import { OccupancySensorType } from "./binary-sensor/occupancy-sensor.js";
+import { RainSensorType } from "./binary-sensor/rain-sensor.js";
 import { SmokeAlarmType } from "./binary-sensor/smoke-co-alarm.js";
 import { WaterFreezeDetectorType } from "./binary-sensor/water-freeze-detector.js";
 import { WaterLeakDetectorType } from "./binary-sensor/water-leak-detector.js";
 import { ButtonDevice } from "./button/index.js";
 import { ClimateDevice } from "./climate/index.js";
 import { CoverDevice } from "./cover/index.js";
+import { DishwasherEndpoint } from "./dishwasher/index.js";
+import { DoorbellDevice } from "./event/doorbell.js";
 import { EventDevice } from "./event/index.js";
 import { FanDevice } from "./fan/index.js";
 import { HumidifierDevice } from "./humidifier/index.js";
 import { InputButtonDevice } from "./input-button/index.js";
+import { LawnMowerDevice } from "./lawn-mower/index.js";
 import { ColorTemperatureLightType } from "./light/devices/color-temperature-light.js";
 import { DimmableLightType } from "./light/devices/dimmable-light.js";
 import { ExtendedColorLightType } from "./light/devices/extended-color-light.js";
@@ -31,7 +41,10 @@ import { OnOffLightType } from "./light/devices/on-off-light-device.js";
 import { LightDevice } from "./light/index.js";
 import { LockDevice } from "./lock/index.js";
 import { VideoPlayerDevice } from "./media-player/basic-video-player.js";
-import { MediaPlayerDevice } from "./media-player/index.js";
+import {
+  MediaPlayerDevice,
+  SpeakerMediaPlayerDevice,
+} from "./media-player/index.js";
 import { PumpEndpoint } from "./pump/index.js";
 import { RemoteDevice } from "./remote/index.js";
 import { SceneDevice } from "./scene/index.js";
@@ -39,25 +52,44 @@ import { ScriptDevice } from "./script/index.js";
 import { InputSelectDevice, SelectDevice } from "./select/index.js";
 import { AirQualitySensorType } from "./sensor/devices/air-quality-sensor.js";
 import { BatterySensorType } from "./sensor/devices/battery-sensor.js";
+import { batteryStorageEssType } from "./sensor/devices/battery-storage-ess.js";
+import { CarbonMonoxideSensorType } from "./sensor/devices/carbon-monoxide-sensor.js";
+import { ElectricalMeterType } from "./sensor/devices/electrical-meter.js";
+import { ElectricalSensorType } from "./sensor/devices/electrical-sensor.js";
+import { ElectricalUtilityMeterType } from "./sensor/devices/electrical-utility-meter.js";
+import { energyEvseType } from "./sensor/devices/energy-evse.js";
 import { FlowSensorType } from "./sensor/devices/flow-sensor.js";
+import { FormaldehydeSensorType } from "./sensor/devices/formaldehyde-sensor.js";
 import { HumiditySensorType } from "./sensor/devices/humidity-sensor.js";
 import { IlluminanceSensorType } from "./sensor/devices/illuminance-sensor.js";
+import { NitrogenDioxideSensorType } from "./sensor/devices/nitrogen-dioxide-sensor.js";
+import { OzoneSensorType } from "./sensor/devices/ozone-sensor.js";
+import { Pm1SensorType } from "./sensor/devices/pm1-sensor.js";
 import { PressureSensorType } from "./sensor/devices/pressure-sensor.js";
+import { RadonSensorType } from "./sensor/devices/radon-sensor.js";
 import { TemperatureSensorType } from "./sensor/devices/temperature-sensor.js";
 import { TvocSensorType } from "./sensor/devices/tvoc-sensor.js";
 import { SensorDevice } from "./sensor/index.js";
+import { SirenDevice } from "./siren/index.js";
+import { DimmablePlugInUnitType } from "./switch/dimmable-plugin-unit.js";
 import { SwitchDevice } from "./switch/index.js";
+import { MountedOnOffControlType } from "./switch/mounted-on-off-control.js";
 import { VacuumDevice } from "./vacuum/index.js";
 import { ValveDevice } from "./valve/index.js";
 import { WaterHeaterDevice } from "./water-heater/index.js";
+import { WaterHeaterManagementDevice } from "./water-heater/water-heater-management-device.js";
+import { WeatherDevice } from "./weather/index.js";
+
+const legacyLogger = Logger.get("LegacyEndpointType");
 
 /**
  * @deprecated
  */
 export interface LegacyEndpointOptions {
   vacuumOnOff?: boolean;
-  vacuumMinimalClusters?: boolean;
   cleaningModeOptions?: string[];
+  /** Domain mappings registered by plugins (domain → MatterDeviceType key) */
+  pluginDomainMappings?: Map<string, string>;
 }
 
 export function createLegacyEndpointType(
@@ -65,16 +97,43 @@ export function createLegacyEndpointType(
   mapping?: EntityMappingConfig,
   areaName?: string,
   options?: LegacyEndpointOptions,
+  identityAnchor?: string,
 ): EndpointType | undefined {
+  // Some integrations (e.g. Xiaomi Home) report a bogus battery sensor on
+  // mains-powered devices, which the auto battery mapper then attaches,
+  // causing a false low-battery warning. disableBatteryMapping strips both
+  // battery/battery_level attributes and a mapped batteryEntity here, the
+  // one place every domain factory below reads them from (#427). Shallow
+  // copies only, never mutate the registry's entity/mapping objects.
+  if (mapping?.disableBatteryMapping) {
+    entity = {
+      ...entity,
+      state: {
+        ...entity.state,
+        attributes: stripBatteryAttributes(entity.state.attributes),
+      },
+    };
+    mapping = { ...mapping, batteryEntity: undefined };
+  }
+
   const domain = entity.entity_id.split(".")[0] as HomeAssistantDomain;
   const customName = mapping?.customName;
+  // Build the behavior state once so identityAnchor rides along to every factory
+  // and BasicInformationServer freezes uniqueId/serial to it (#404).
+  const ha = { entity, customName, mapping, identityAnchor };
 
   let type: EndpointType | undefined;
 
   if (mapping?.matterDeviceType) {
     const overrideFactory = matterDeviceTypeFactories[mapping.matterDeviceType];
     if (overrideFactory) {
-      type = overrideFactory({ entity, customName, mapping });
+      type = overrideFactory(ha);
+      // Explicit device types skip the domain path that swaps in battery
+      // variants, so attach a power source when a battery entity is mapped
+      // and the type does not already carry one (e.g. vacuum).
+      if (type && mapping.batteryEntity && !hasPowerSource(type)) {
+        type = addPowerSource(type);
+      }
     }
   }
 
@@ -82,23 +141,35 @@ export function createLegacyEndpointType(
     // Vacuum needs special handling for the vacuumOnOff feature flag
     if (domain === "vacuum") {
       type = VacuumDevice(
-        { entity, customName, mapping },
+        ha,
         options?.vacuumOnOff,
-        options?.vacuumMinimalClusters,
         options?.cleaningModeOptions,
       );
     } else {
       const factory = deviceCtrs[domain];
-      if (!factory) {
+      if (factory) {
+        type = factory(ha);
+      } else if (options?.pluginDomainMappings?.has(domain)) {
+        const mappedType = options.pluginDomainMappings.get(domain)!;
+        const mappedFactory =
+          matterDeviceTypeFactories[mappedType as MatterDeviceType];
+        if (mappedFactory) {
+          legacyLogger.info(
+            `Using plugin domain mapping for "${domain}" → "${mappedType}"`,
+          );
+          type = mappedFactory(ha);
+        }
+      } else {
         return undefined;
       }
-      type = factory({ entity, customName, mapping });
     }
   }
 
   if (!type) {
     return undefined;
   }
+
+  validateEndpointType(type, entity.entity_id);
 
   if (areaName) {
     type = addFixedLabel(type, areaName);
@@ -111,7 +182,7 @@ export function createLegacyEndpointType(
  * Add FixedLabel cluster with room name to an endpoint type.
  * Sets { label: "room", value: "<name>" } per Matter spec. No major controller
  * (Google Home, Apple Home, Alexa) currently reads this for automatic room
- * assignment — rooms must be assigned manually. The label is kept for future
+ * assignment, rooms must be assigned manually. The label is kept for future
  * controller support.
  *
  * Uses MutableEndpoint.with() to properly extend behaviors instead of manual
@@ -140,6 +211,38 @@ function addFixedLabel(type: EndpointType, areaName: string): EndpointType {
   } as EndpointType;
 }
 
+function hasPowerSource(type: EndpointType): boolean {
+  return "powerSource" in type.behaviors;
+}
+
+/**
+ * Shallow copy of the entity attributes with the battery/battery_level keys
+ * removed, so domain factories that fall back to the entity's own battery
+ * attribute (rather than a mapped batteryEntity) don't pick a WithBattery
+ * variant either (#427).
+ */
+function stripBatteryAttributes(
+  attributes: HomeAssistantEntityInformation["state"]["attributes"],
+): HomeAssistantEntityInformation["state"]["attributes"] {
+  const stripped = { ...attributes } as typeof attributes & {
+    battery?: number;
+    battery_level?: number;
+  };
+  delete stripped.battery;
+  delete stripped.battery_level;
+  return stripped;
+}
+
+function addPowerSource(type: EndpointType): EndpointType {
+  const mutable = type as EndpointType & {
+    with(...behaviors: unknown[]): EndpointType;
+  };
+  if (typeof mutable.with === "function") {
+    return mutable.with(DefaultPowerSourceServer);
+  }
+  return type;
+}
+
 const deviceCtrs: Partial<
   Record<
     HomeAssistantDomain,
@@ -164,14 +267,17 @@ const deviceCtrs: Partial<
   select: SelectDevice,
   input_select: InputSelectDevice,
   scene: SceneDevice,
+  siren: SirenDevice,
   media_player: MediaPlayerDevice,
   humidifier: HumidifierDevice,
+  lawn_mower: LawnMowerDevice,
   vacuum: VacuumDevice,
   valve: ValveDevice,
   alarm_control_panel: AlarmControlPanelDevice,
   remote: RemoteDevice,
   water_heater: WaterHeaterDevice,
   event: EventDevice,
+  weather: WeatherDevice,
 };
 
 const matterDeviceTypeFactories: Partial<
@@ -182,22 +288,12 @@ const matterDeviceTypeFactories: Partial<
     ) => EndpointType | undefined
   >
 > = {
-  on_off_light: (ha) =>
-    OnOffLightType.set({
-      homeAssistantEntity: { entity: ha.entity, customName: ha.customName },
-    }),
-  dimmable_light: (ha) =>
-    DimmableLightType.set({
-      homeAssistantEntity: { entity: ha.entity, customName: ha.customName },
-    }),
+  on_off_light: (ha) => OnOffLightType.set({ homeAssistantEntity: ha }),
+  dimmable_light: (ha) => DimmableLightType.set({ homeAssistantEntity: ha }),
   color_temperature_light: (ha) =>
-    ColorTemperatureLightType.set({
-      homeAssistantEntity: { entity: ha.entity, customName: ha.customName },
-    }),
+    ColorTemperatureLightType.set({ homeAssistantEntity: ha }),
   extended_color_light: (ha) =>
-    ExtendedColorLightType(true, true).set({
-      homeAssistantEntity: { entity: ha.entity, customName: ha.customName },
-    }),
+    ExtendedColorLightType(true, true).set({ homeAssistantEntity: ha }),
   on_off_plugin_unit: (ha) => {
     const domain = ha.entity.entity_id.split(".")[0];
     if (domain === "alarm_control_panel") {
@@ -205,63 +301,76 @@ const matterDeviceTypeFactories: Partial<
     }
     return SwitchDevice(ha);
   },
-  on_off_switch: SwitchDevice,
+  dishwasher: DishwasherEndpoint,
+  dimmable_plugin_unit: (ha) =>
+    DimmablePlugInUnitType.set({ homeAssistantEntity: ha }),
+  // Expose as On/Off Light (0x0100, an OnOff server) so controllers show a
+  // switch instead of a plug. Plain SwitchDevice is 0x010A (a plug), so the
+  // override had no effect before (#380).
+  on_off_switch: (ha) => OnOffLightType.set({ homeAssistantEntity: ha }),
+  // #380: expose an HA switch as Mounted On/Off Control (0x010F).
+  mounted_on_off_control: (ha) =>
+    MountedOnOffControlType.set({ homeAssistantEntity: ha }),
   door_lock: LockDevice,
   window_covering: CoverDevice,
   thermostat: ClimateDevice,
   fan: FanDevice,
   air_purifier: AirPurifierEndpoint,
   robot_vacuum_cleaner: (ha) => VacuumDevice(ha),
+  robotic_lawn_mower: (ha) => LawnMowerDevice(ha),
   humidifier_dehumidifier: HumidifierDevice,
-  speaker: MediaPlayerDevice,
+  speaker: SpeakerMediaPlayerDevice,
   basic_video_player: VideoPlayerDevice,
-  humidity_sensor: (ha) =>
-    HumiditySensorType.set({
-      homeAssistantEntity: { entity: ha.entity, customName: ha.customName },
-    }),
+  humidity_sensor: (ha) => HumiditySensorType.set({ homeAssistantEntity: ha }),
   temperature_sensor: (ha) =>
-    TemperatureSensorType.set({
-      homeAssistantEntity: { entity: ha.entity, customName: ha.customName },
-    }),
-  pressure_sensor: (ha) =>
-    PressureSensorType.set({
-      homeAssistantEntity: { entity: ha.entity, customName: ha.customName },
-    }),
-  light_sensor: (ha) =>
-    IlluminanceSensorType.set({
-      homeAssistantEntity: { entity: ha.entity, customName: ha.customName },
-    }),
-  flow_sensor: (ha) =>
-    FlowSensorType.set({
-      homeAssistantEntity: { entity: ha.entity, customName: ha.customName },
-    }),
+    TemperatureSensorType.set({ homeAssistantEntity: ha }),
+  pressure_sensor: (ha) => PressureSensorType.set({ homeAssistantEntity: ha }),
+  light_sensor: (ha) => IlluminanceSensorType.set({ homeAssistantEntity: ha }),
+  flow_sensor: (ha) => FlowSensorType.set({ homeAssistantEntity: ha }),
   air_quality_sensor: (ha) =>
-    AirQualitySensorType.set({
-      homeAssistantEntity: { entity: ha.entity, customName: ha.customName },
-    }),
-  battery_storage: (ha) =>
-    BatterySensorType.set({
-      homeAssistantEntity: { entity: ha.entity, customName: ha.customName },
-    }),
-  tvoc_sensor: (ha) =>
-    TvocSensorType.set({
-      homeAssistantEntity: { entity: ha.entity, customName: ha.customName },
-    }),
+    AirQualitySensorType.set({ homeAssistantEntity: ha }),
+  battery_storage: (ha) => {
+    // A mapped power/energy sensor upgrades the battery to a full ESS endpoint.
+    if (ha.mapping?.batteryPowerEntity || ha.mapping?.batteryEnergyEntity) {
+      return batteryStorageEssType(ha.mapping).set({ homeAssistantEntity: ha });
+    }
+    return BatterySensorType.set({ homeAssistantEntity: ha });
+  },
+  tvoc_sensor: (ha) => TvocSensorType.set({ homeAssistantEntity: ha }),
+  carbon_monoxide_sensor: (ha) =>
+    CarbonMonoxideSensorType.set({ homeAssistantEntity: ha }),
+  nitrogen_dioxide_sensor: (ha) =>
+    NitrogenDioxideSensorType.set({ homeAssistantEntity: ha }),
+  ozone_sensor: (ha) => OzoneSensorType.set({ homeAssistantEntity: ha }),
+  formaldehyde_sensor: (ha) =>
+    FormaldehydeSensorType.set({ homeAssistantEntity: ha }),
+  radon_sensor: (ha) => RadonSensorType.set({ homeAssistantEntity: ha }),
+  pm1_sensor: (ha) => Pm1SensorType.set({ homeAssistantEntity: ha }),
+  electrical_meter: (ha) =>
+    ElectricalMeterType.set({ homeAssistantEntity: ha }),
+  // Legacy SolarPower alias, kept for existing mappings.
+  electrical_sensor: (ha) =>
+    ElectricalSensorType.set({ homeAssistantEntity: ha }),
+  solar_power: (ha) => ElectricalSensorType.set({ homeAssistantEntity: ha }),
+  // Matter 1.4 utility meter (0x0511), opt-in so existing pairings keep 0x0514.
+  electrical_utility_meter: (ha) =>
+    ElectricalUtilityMeterType.set({ homeAssistantEntity: ha }),
+  evse: (ha) => energyEvseType().set({ homeAssistantEntity: ha }),
+  contact_sensor: (ha) => ContactSensorType.set({ homeAssistantEntity: ha }),
+  motion_sensor: (ha) => MotionSensorType.set({ homeAssistantEntity: ha }),
+  occupancy_sensor: (ha) =>
+    OccupancySensorType.set({ homeAssistantEntity: ha }),
   mode_select: SelectDevice,
   water_valve: ValveDevice,
   pump: PumpEndpoint,
+  rain_sensor: (ha) => RainSensorType.set({ homeAssistantEntity: ha }),
   water_heater: WaterHeaterDevice,
+  water_heater_management: WaterHeaterManagementDevice,
   generic_switch: EventDevice,
-  smoke_co_alarm: (ha) =>
-    SmokeAlarmType.set({
-      homeAssistantEntity: { entity: ha.entity, customName: ha.customName },
-    }),
+  doorbell: DoorbellDevice,
+  smoke_co_alarm: (ha) => SmokeAlarmType.set({ homeAssistantEntity: ha }),
   water_freeze_detector: (ha) =>
-    WaterFreezeDetectorType.set({
-      homeAssistantEntity: { entity: ha.entity, customName: ha.customName },
-    }),
+    WaterFreezeDetectorType.set({ homeAssistantEntity: ha }),
   water_leak_detector: (ha) =>
-    WaterLeakDetectorType.set({
-      homeAssistantEntity: { entity: ha.entity, customName: ha.customName },
-    }),
+    WaterLeakDetectorType.set({ homeAssistantEntity: ha }),
 };

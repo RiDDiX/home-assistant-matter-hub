@@ -1,3 +1,4 @@
+import { BooleanStateConfigurationServer } from "@matter/main/behaviors";
 import { ContactSensorDevice } from "@matter/main/devices";
 import { EntityStateProvider } from "../../../../services/bridges/entity-state-provider.js";
 import { BasicInformationServer } from "../../../behaviors/basic-information-server.js";
@@ -11,6 +12,20 @@ export const ContactSensorType = ContactSensorDevice.with(
   IdentifyServer,
   HomeAssistantEntityBehavior,
   BooleanStateServer({ inverted: true }),
+  BooleanStateConfigurationServer,
+);
+
+// 1.3-safe ContactSensor (0x15) for leak/freeze/rain detectors. Their dedicated
+// WaterLeak/WaterFreeze/Rain device types are Matter 1.4 and Alexa (1.3) rejects
+// them, which breaks the whole-bridge subscription (#365). Same device type as
+// ContactSensorType but NON-inverted, so a detected alarm (HA "on") still
+// reports stateValue true.
+export const DetectorContactSensorType = ContactSensorDevice.with(
+  BasicInformationServer,
+  IdentifyServer,
+  HomeAssistantEntityBehavior,
+  BooleanStateServer(),
+  BooleanStateConfigurationServer,
 );
 
 export const ContactSensorWithBatteryType = ContactSensorDevice.with(
@@ -18,6 +33,7 @@ export const ContactSensorWithBatteryType = ContactSensorDevice.with(
   IdentifyServer,
   HomeAssistantEntityBehavior,
   BooleanStateServer({ inverted: true }),
+  BooleanStateConfigurationServer,
   PowerSourceServer({
     getBatteryPercent: (entity, agent) => {
       // First check for battery entity from mapping (auto-assigned or manual)
@@ -25,7 +41,7 @@ export const ContactSensorWithBatteryType = ContactSensorDevice.with(
       const batteryEntity = homeAssistant.state.mapping?.batteryEntity;
       if (batteryEntity) {
         const stateProvider = agent.env.get(EntityStateProvider);
-        const battery = stateProvider.getNumericState(batteryEntity);
+        const battery = stateProvider.getBatteryPercent(batteryEntity);
         if (battery != null) {
           return Math.max(0, Math.min(100, battery));
         }

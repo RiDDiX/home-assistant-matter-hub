@@ -8,6 +8,22 @@ import type { ValueGetter, ValueSetter } from "./utils/cluster-config.js";
 
 const logger = Logger.get("SpeakerLevelControlServer");
 
+interface OptimisticLevelState {
+  expectedLevel: number;
+  timestamp: number;
+}
+const optimisticLevelState = new Map<string, OptimisticLevelState>();
+const OPTIMISTIC_TIMEOUT_MS = 3000;
+const OPTIMISTIC_TOLERANCE = 5;
+
+function sweepOptimisticLevel(now: number) {
+  for (const [key, value] of optimisticLevelState) {
+    if (now - value.timestamp > OPTIMISTIC_TIMEOUT_MS) {
+      optimisticLevelState.delete(key);
+    }
+  }
+}
+
 export interface SpeakerLevelControlConfig {
   getValuePercent: ValueGetter<number | null>;
   moveToLevelPercent: ValueSetter<number>;
@@ -49,15 +65,11 @@ export class SpeakerLevelControlServerBase extends FeaturedBase {
     await super.initialize();
     const homeAssistant = await this.agent.load(HomeAssistantEntityBehavior);
     this.update(homeAssistant.entity);
-    if (homeAssistant.state.managedByEndpoint) {
-      homeAssistant.registerUpdate(this.callback(this.update));
-    } else {
-      this.reactTo(homeAssistant.onChange, this.update);
-    }
+    this.reactTo(homeAssistant.onChange, this.update);
   }
 
-  public update(entity: HomeAssistantEntityInformation) {
-    if (!entity.state) {
+  private update(entity: HomeAssistantEntityInformation) {
+    if (!entity.state || !entity.state.attributes) {
       return;
     }
     const { state } = entity;
@@ -87,12 +99,24 @@ export class SpeakerLevelControlServerBase extends FeaturedBase {
       `[${entityId}] Volume update: HA=${currentLevelPercent != null ? Math.round(currentLevelPercent * 100) : "null"}% -> currentLevel=${currentLevel}`,
     );
 
-    // Only set Matter attributes - do NOT set custom fields like currentLevelPercent
-    // as Matter.js might expose them and confuse controllers
+    const optimistic = optimisticLevelState.get(entity.entity_id);
+    if (optimistic != null && currentLevel != null) {
+      if (Date.now() - optimistic.timestamp > OPTIMISTIC_TIMEOUT_MS) {
+        optimisticLevelState.delete(entity.entity_id);
+      } else if (
+        Math.abs(currentLevel - optimistic.expectedLevel) <=
+        OPTIMISTIC_TOLERANCE
+      ) {
+        optimisticLevelState.delete(entity.entity_id);
+      } else {
+        currentLevel = null;
+      }
+    }
+
     applyPatchState(this.state, {
       minLevel: minLevel,
       maxLevel: maxLevel,
-      currentLevel: currentLevel,
+      ...(currentLevel != null ? { currentLevel: currentLevel } : {}),
     });
   }
 
@@ -118,7 +142,7 @@ export class SpeakerLevelControlServerBase extends FeaturedBase {
    *
    * The base class registers a reactor on onOff$Changed that sets
    * currentLevel = onLevel. This is designed for lights (restore brightness
-   * on power-on) but is wrong for speakers — it overwrites the correct
+   * on power-on) but is wrong for speakers, it overwrites the correct
    * volume (e.g. 191 for 75%) with a stale onLevel value, causing Google
    * Home to display the wrong percentage (Issue #79).
    */
@@ -145,8 +169,13 @@ export class SpeakerLevelControlServerBase extends FeaturedBase {
     if (levelPercent === current) {
       return;
     }
-    // Update currentLevel immediately so controllers get instant feedback.
     this.state.currentLevel = level;
+    const now = Date.now();
+    sweepOptimisticLevel(now);
+    optimisticLevelState.set(entityId, {
+      expectedLevel: level,
+      timestamp: now,
+    });
     homeAssistant.callAction(
       config.moveToLevelPercent(levelPercent, this.agent),
     );

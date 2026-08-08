@@ -27,7 +27,7 @@ interface AlarmMode {
   featureFlag?: number;
 }
 
-// All possible alarm modes. "Disarmed" has no featureFlag — always included.
+// All possible alarm modes. "Disarmed" has no featureFlag, always included.
 const ALL_ALARM_MODES: AlarmMode[] = [
   {
     label: "Disarmed",

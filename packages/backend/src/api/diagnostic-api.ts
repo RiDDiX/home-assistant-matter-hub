@@ -1,4 +1,5 @@
 import os from "node:os";
+import type { Endpoint } from "@matter/main";
 import express from "express";
 import type { BridgeService } from "../services/bridges/bridge-service.js";
 import type { HomeAssistantClient } from "../services/home-assistant/home-assistant-client.js";
@@ -49,12 +50,31 @@ interface DiagnosticReport {
       entityId: string;
       reason: string;
     }>;
+    endpointTree?: DiagnosticEndpointNode;
   }>;
   recentLogs: Array<{
     timestamp: string;
     level: string;
     message: string;
   }>;
+}
+
+interface DiagnosticEndpointNode {
+  id: string;
+  endpoint: number;
+  deviceType: string;
+  deviceTypeName: string;
+  parts: DiagnosticEndpointNode[];
+}
+
+function endpointTreeNode(ep: Endpoint): DiagnosticEndpointNode {
+  return {
+    id: ep.id,
+    endpoint: ep.number,
+    deviceType: `0x${ep.type.deviceType.toString(16).padStart(4, "0")}`,
+    deviceTypeName: ep.type.name,
+    parts: [...ep.parts].map((p) => endpointTreeNode(p)),
+  };
 }
 
 function detectEnvironment(): string {
@@ -150,6 +170,13 @@ export function diagnosticApi(
           entityId: anonymize ? anonymizeEntityId(fe.entityId) : fe.entityId,
           reason: fe.reason,
         })),
+        endpointTree: (() => {
+          try {
+            return endpointTreeNode(b.server);
+          } catch {
+            return undefined;
+          }
+        })(),
       };
     });
 

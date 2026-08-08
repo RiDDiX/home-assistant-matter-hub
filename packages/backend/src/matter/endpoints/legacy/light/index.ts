@@ -6,6 +6,7 @@ import type { EndpointType } from "@matter/main";
 import { HaElectricalEnergyMeasurementServer } from "../../../behaviors/electrical-energy-measurement-server.js";
 import { HaElectricalPowerMeasurementServer } from "../../../behaviors/electrical-power-measurement-server.js";
 import type { HomeAssistantEntityBehavior } from "../../../behaviors/home-assistant-entity-behavior.js";
+import { HaPowerTopologyServer } from "../../../behaviors/power-topology-server.js";
 import {
   DimmableLightType,
   DimmableLightWithBatteryType,
@@ -75,10 +76,19 @@ export function LightDevice(
           : OnOffLightType;
   const hasPowerEntity = !!homeAssistantEntity.mapping?.powerEntity;
   const hasEnergyEntity = !!homeAssistantEntity.mapping?.energyEntity;
+  // Voltage/current can be mapped on their own, so gate the power cluster on
+  // any of the three or that data would be dropped.
+  const hasElectricalPower =
+    hasPowerEntity ||
+    !!homeAssistantEntity.mapping?.voltageEntity ||
+    !!homeAssistantEntity.mapping?.currentEntity;
 
   // biome-ignore lint/suspicious/noExplicitAny: Union type doesn't support .with() directly
   let device: any = deviceType;
-  if (hasPowerEntity) {
+  if (hasElectricalPower || hasEnergyEntity) {
+    device = device.with(HaPowerTopologyServer);
+  }
+  if (hasElectricalPower) {
     device = device.with(HaElectricalPowerMeasurementServer);
   }
   if (hasEnergyEntity) {

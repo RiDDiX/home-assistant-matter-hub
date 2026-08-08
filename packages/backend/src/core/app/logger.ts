@@ -1,4 +1,9 @@
-import { LogFormat, Logger, LogLevel as MatterLogLevel } from "@matter/general";
+import {
+  LogDestination,
+  LogFormat,
+  Logger,
+  LogLevel as MatterLogLevel,
+} from "@matter/general";
 import { addLogEntry } from "../../api/logs-api.js";
 import type { Service } from "../ioc/service.js";
 
@@ -11,6 +16,23 @@ type LogLevelName = keyof (typeof CustomLogLevel & typeof MatterLogLevel);
 
 export interface LogContext {
   [key: string]: unknown;
+}
+
+// matter.js facility names that carry controller traffic.
+export const MATTER_TRAFFIC_FACILITIES = new Set([
+  "InteractionServer",
+  "MessageExchange",
+  "MessageChannel",
+  "ServerSubscription",
+  "IncomingInteractionServerMessenger",
+  "ExchangeManager",
+  // Rejected invokes (UnsupportedEndpoint and friends) log here at INFO; a
+  // controller aiming at a stale endpoint number is invisible without it (#423).
+  "CommandInvokeResponse",
+]);
+
+export function categoryFor(facility: string): string | undefined {
+  return MATTER_TRAFFIC_FACILITIES.has(facility) ? "matter-traffic" : undefined;
 }
 
 function logLevelFromString(
@@ -47,6 +69,7 @@ function logLevelToString(level: LogLevel): string {
 
 export interface LoggerServiceProps {
   readonly level: string;
+  readonly protocolLevel?: string;
   readonly disableColors: boolean;
   readonly jsonOutput?: boolean;
 }
@@ -67,7 +90,40 @@ export class LoggerService {
     Logger.level =
       this.customLogLevelMapping[this._level as CustomLogLevel] ??
       (this._level as MatterLogLevel);
+    // quiet matter.js packet-payload facilities unless explicitly asked for
+    const protocolLevel = logLevelFromString(options.protocolLevel ?? "info");
+    const resolvedProtocolLevel =
+      this.customLogLevelMapping[protocolLevel as CustomLogLevel] ??
+      (protocolLevel as MatterLogLevel);
+    Logger.facilityLevels = {
+      MessageChannel: resolvedProtocolLevel,
+      MessageExchange: resolvedProtocolLevel,
+    };
     Logger.format = options.disableColors ? LogFormat.PLAIN : LogFormat.ANSI;
+
+    // Forward matter.js traffic logs into the in-memory buffer.
+    const destinationLevel =
+      this.customLogLevelMapping[this._level as CustomLogLevel] ??
+      (this._level as MatterLogLevel);
+    Logger.destinations["hamh-buffer"] = LogDestination({
+      name: "hamh-buffer",
+      level: destinationLevel,
+      facilityLevels: {
+        MessageChannel: resolvedProtocolLevel,
+        MessageExchange: resolvedProtocolLevel,
+      },
+      write: (text, message) => {
+        const category = categoryFor(message.facility);
+        if (!category) return;
+        addLogEntry({
+          timestamp: message.now.toISOString(),
+          level: logLevelToString(message.level).toLowerCase(),
+          message: text,
+          facility: message.facility,
+          category,
+        });
+      },
+    });
   }
 
   get(name: string): BetterLogger;
@@ -107,42 +163,46 @@ export class BetterLogger extends Logger {
   }
 
   override debug(...values: unknown[]): void {
-    const message = values.map((v) => String(v)).join(" ");
-    addLogEntry({
-      timestamp: new Date().toISOString(),
-      level: "debug",
-      message: `[${this.loggerName}] ${message}`,
-    });
+    if (this._level <= MatterLogLevel.DEBUG) {
+      addLogEntry({
+        timestamp: new Date().toISOString(),
+        level: "debug",
+        message: `[${this.loggerName}] ${values.map((v) => String(v)).join(" ")}`,
+      });
+    }
     super.debug(...values);
   }
 
   override info(...values: unknown[]): void {
-    const message = values.map((v) => String(v)).join(" ");
-    addLogEntry({
-      timestamp: new Date().toISOString(),
-      level: "info",
-      message: `[${this.loggerName}] ${message}`,
-    });
+    if (this._level <= MatterLogLevel.INFO) {
+      addLogEntry({
+        timestamp: new Date().toISOString(),
+        level: "info",
+        message: `[${this.loggerName}] ${values.map((v) => String(v)).join(" ")}`,
+      });
+    }
     super.info(...values);
   }
 
   override warn(...values: unknown[]): void {
-    const message = values.map((v) => String(v)).join(" ");
-    addLogEntry({
-      timestamp: new Date().toISOString(),
-      level: "warn",
-      message: `[${this.loggerName}] ${message}`,
-    });
+    if (this._level <= MatterLogLevel.WARN) {
+      addLogEntry({
+        timestamp: new Date().toISOString(),
+        level: "warn",
+        message: `[${this.loggerName}] ${values.map((v) => String(v)).join(" ")}`,
+      });
+    }
     super.warn(...values);
   }
 
   override error(...values: unknown[]): void {
-    const message = values.map((v) => String(v)).join(" ");
-    addLogEntry({
-      timestamp: new Date().toISOString(),
-      level: "error",
-      message: `[${this.loggerName}] ${message}`,
-    });
+    if (this._level <= MatterLogLevel.ERROR) {
+      addLogEntry({
+        timestamp: new Date().toISOString(),
+        level: "error",
+        message: `[${this.loggerName}] ${values.map((v) => String(v)).join(" ")}`,
+      });
+    }
     super.error(...values);
   }
 

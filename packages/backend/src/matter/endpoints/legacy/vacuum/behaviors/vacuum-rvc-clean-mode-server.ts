@@ -16,7 +16,7 @@ import {
 const logger = Logger.get("VacuumRvcCleanModeServer");
 
 // ---------------------------------------------------------------------------
-// Mode IDs — flat structure matching the pattern Apple Home expects.
+// Mode IDs, flat structure matching the pattern Apple Home expects.
 // Cleaning-type modes and fan-speed modes are siblings, NOT cross-products.
 // Apple Home groups modes by their tags:
 //   • Cleaning types (Vacuum / Mop / Vacuum+Mop / VacuumThenMop) appear
@@ -46,7 +46,7 @@ function isMopIntensityMode(mode: number): boolean {
   return mode >= MOP_INTENSITY_MODE_BASE;
 }
 
-enum CleanType {
+export enum CleanType {
   Sweeping = 0,
   Mopping = 1,
   SweepingAndMopping = 2,
@@ -68,7 +68,7 @@ function resolveCleanTypes(cleaningModeOptions?: string[]): Set<CleanType> {
   return types;
 }
 
-function buildSupportedModes(
+export function buildSupportedModes(
   fanSpeedList?: string[],
   mopIntensityList?: string[],
   cleaningModeOptions?: string[],
@@ -133,37 +133,33 @@ function buildSupportedModes(
   return modes;
 }
 
-// ---------------------------------------------------------------------------
-// Cleaning mode aliases (HA select entity option names → our CleanType)
-// ---------------------------------------------------------------------------
+// Cleaning mode tokens. Classify any vendor phrasing by the words it
+// contains instead of maintaining per-vendor alias lists.
+const CLEAN_TOKENS = {
+  vacuum: /\b(vacuum|vacuuming|sweep|sweeping|suction)\b/i,
+  mop: /\b(mop|mopping|wipe|wet|wash|scrub)\b/i,
+  sequential:
+    /\b(then|after|before|followed|following|first|secondly|sequentially)\b/i,
+} as const;
 
-const CLEANING_MODE_ALIASES: Record<CleanType, string[]> = {
-  [CleanType.Sweeping]: [
-    "Sweeping",
-    "Vacuum",
-    "Vacuuming",
-    "Sweep",
-    "vacuum",
-    "sweeping",
-  ],
-  [CleanType.Mopping]: ["Mopping", "Mop", "mopping", "mop", "wet_mop"],
-  [CleanType.SweepingAndMopping]: [
-    "Sweeping and mopping",
-    "Vacuum and mop",
-    "Vacuum & Mop",
-    "Vacuum & mop",
-    "vacuum_and_mop",
-    "sweeping_and_mopping",
-  ],
-  [CleanType.MoppingAfterSweeping]: [
-    "Mopping after sweeping",
-    "mopping_after_sweeping",
-    "Vacuum then mop",
-    "Mop after vacuum",
-    "vacuum_then_mop",
-    "mop_after_vacuum",
-  ],
-};
+function normalizeCleanLabel(s: string): string {
+  return s
+    .toLowerCase()
+    .replace(/[_\-+&/. ]+/g, " ")
+    .replace(/\band\b/g, " ")
+    .trim();
+}
+
+function classifyCleanOption(option: string): CleanType {
+  const s = normalizeCleanLabel(option);
+  const hasVac = CLEAN_TOKENS.vacuum.test(s);
+  const hasMop = CLEAN_TOKENS.mop.test(s);
+  const hasSeq = CLEAN_TOKENS.sequential.test(s);
+  if (hasVac && hasMop && hasSeq) return CleanType.MoppingAfterSweeping;
+  if (hasVac && hasMop) return CleanType.SweepingAndMopping;
+  if (hasMop) return CleanType.Mopping;
+  return CleanType.Sweeping;
+}
 
 const CLEAN_TYPE_LABELS: Record<CleanType, string> = {
   [CleanType.Sweeping]: "Sweeping",
@@ -224,7 +220,7 @@ function buildFanSpeedModes(
 ): RvcCleanMode.ModeOption[] {
   // Assign intensity tags to ALL matching speeds so Apple Home
   // shows every recognized speed. Multiple speeds can share the
-  // same tag — Apple Home distinguishes them by label.
+  // same tag, Apple Home distinguishes them by label.
   return fanSpeedList.map((name, index) => {
     const tag = getFanSpeedTag(name, customTags);
     const modeTags: { value: number }[] = [
@@ -346,24 +342,9 @@ function matchMopIntensityOption(
 // Helpers
 // ---------------------------------------------------------------------------
 
-function parseCleanType(modeString: string | undefined): CleanType {
+export function parseCleanType(modeString: string | undefined): CleanType {
   if (!modeString) return CleanType.Sweeping;
-  const s = modeString.toLowerCase();
-  if (
-    s.includes("mopping after") ||
-    s.includes("after sweeping") ||
-    s.includes("then_mop") ||
-    s.includes("then mop")
-  ) {
-    return CleanType.MoppingAfterSweeping;
-  }
-  if (s.includes("and") || s.includes("sweeping and mopping")) {
-    return CleanType.SweepingAndMopping;
-  }
-  if (s === "mopping" || s.includes("mop")) {
-    return CleanType.Mopping;
-  }
-  return CleanType.Sweeping;
+  return classifyCleanOption(modeString);
 }
 
 function cleanTypeToModeId(ct: CleanType): number {
@@ -420,38 +401,28 @@ function findMatchingCleanOption(
   ct: CleanType,
   availableOptions: string[] | undefined,
 ): string {
-  const aliases = CLEANING_MODE_ALIASES[ct];
-  if (!availableOptions || availableOptions.length === 0) return aliases[0];
+  if (!availableOptions || availableOptions.length === 0) {
+    return CLEAN_TYPE_LABELS[ct];
+  }
 
   const typesToTry: CleanType[] = [ct];
   const fallback = CLEAN_TYPE_FALLBACK[ct];
   if (fallback !== undefined) typesToTry.push(fallback);
 
   for (const type of typesToTry) {
-    const typeAliases = CLEANING_MODE_ALIASES[type];
-    for (const alias of typeAliases) {
-      const match = availableOptions.find(
-        (o) => o.toLowerCase() === alias.toLowerCase(),
-      );
-      if (match) return match;
-    }
-    for (const alias of typeAliases) {
-      const match = availableOptions.find((o) =>
-        o.toLowerCase().includes(alias.toLowerCase()),
-      );
-      if (match) return match;
-    }
+    const match = availableOptions.find((o) => classifyCleanOption(o) === type);
+    if (match) return match;
   }
 
   logger.warn(
     `No match for ${CLEAN_TYPE_LABELS[ct]} in [${availableOptions.join(", ")}]`,
   );
-  return aliases[0];
+  return availableOptions[0];
 }
 
 /**
  * Build a cleaning mode action for the target type.
- * Always returns an action — the debounce layer ensures rapid switches
+ * Always returns an action, the debounce layer ensures rapid switches
  * resolve to the last requested type.
  */
 function buildCleaningModeAction(
@@ -486,7 +457,7 @@ function matchFanSpeedOption(
     (o) => o.toLowerCase().includes(s) || s.includes(o.toLowerCase()),
   );
   if (contains) return contains;
-  // Alias match via tag category — find sibling names in the same group
+  // Alias match via tag category, find sibling names in the same group
   const tag = getFanSpeedTag(name, customTags);
   if (tag !== undefined) {
     const group = FAN_TAG_PATTERNS.find((p) => p.tag === tag);
@@ -648,7 +619,7 @@ function createCleanModeConfig(
       const mapping = homeAssistant.state.mapping;
 
       logger.info(
-        `setCleanMode(${mode}) for ${vacuumEntityId} — ` +
+        `setCleanMode(${mode}) for ${vacuumEntityId}, ` +
           `suctionEntity=${mapping?.suctionLevelEntity ?? "none"}, ` +
           `mopEntity=${mapping?.mopIntensityEntity ?? "none"}, ` +
           `fanSpeedList=${JSON.stringify(fanSpeedList ?? [])}, ` +

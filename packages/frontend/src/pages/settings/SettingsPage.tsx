@@ -8,17 +8,24 @@ import Button from "@mui/material/Button";
 import Card from "@mui/material/Card";
 import CardContent from "@mui/material/CardContent";
 import CircularProgress from "@mui/material/CircularProgress";
+import Divider from "@mui/material/Divider";
 import TextField from "@mui/material/TextField";
 import Typography from "@mui/material/Typography";
 import { useCallback, useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import {
   deleteAuthSettings,
   fetchAuthSettings,
   type SettingsAuthResponse,
   updateAuthSettings,
 } from "../../api/settings.ts";
+import { BackupRestore } from "../../components/backup/BackupRestore.tsx";
+import { ConfirmDialog } from "../../components/misc/ConfirmDialog.tsx";
+import { UpdateChecker } from "../../components/system/UpdateChecker.tsx";
+import { RecoverySettingsCard } from "./RecoverySettingsCard.tsx";
 
 export const SettingsPage = () => {
+  const { t } = useTranslation();
   const [authState, setAuthState] = useState<SettingsAuthResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -39,12 +46,12 @@ export const SettingsPage = () => {
       setError(null);
     } catch (err) {
       setError(
-        err instanceof Error ? err.message : "Failed to load auth settings",
+        err instanceof Error ? err.message : t("settings.authLoadFailed"),
       );
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     loadAuthSettings();
@@ -52,7 +59,7 @@ export const SettingsPage = () => {
 
   const handleSave = async () => {
     if (!username.trim() || !password.trim()) {
-      setError("Username and password are required");
+      setError(t("settings.usernamePasswordRequired"));
       return;
     }
     setSaving(true);
@@ -67,17 +74,17 @@ export const SettingsPage = () => {
       );
     } catch (err) {
       setError(
-        err instanceof Error ? err.message : "Failed to save auth settings",
+        err instanceof Error ? err.message : t("settings.authSaveFailed"),
       );
     } finally {
       setSaving(false);
     }
   };
 
+  const [confirmDisableAuth, setConfirmDisableAuth] = useState(false);
+
   const handleRemove = async () => {
-    if (!confirm("Are you sure you want to disable authentication?")) {
-      return;
-    }
+    setConfirmDisableAuth(false);
     setSaving(true);
     setError(null);
     setSuccess(null);
@@ -86,10 +93,10 @@ export const SettingsPage = () => {
       setAuthState(response);
       setUsername("");
       setPassword("");
-      setSuccess("Authentication disabled.");
+      setSuccess(t("settings.authDisabled"));
     } catch (err) {
       setError(
-        err instanceof Error ? err.message : "Failed to remove auth settings",
+        err instanceof Error ? err.message : t("settings.authRemoveFailed"),
       );
     } finally {
       setSaving(false);
@@ -102,8 +109,20 @@ export const SettingsPage = () => {
     <Box sx={{ p: 2 }}>
       <Typography variant="h5" component="h1" sx={{ mb: 3 }}>
         <SettingsIcon sx={{ mr: 1, verticalAlign: "middle" }} />
-        Settings
+        {t("settings.title")}
       </Typography>
+
+      <BackupRestore />
+
+      <Divider sx={{ my: 3 }} />
+
+      <UpdateChecker />
+
+      <Divider sx={{ my: 3 }} />
+
+      <RecoverySettingsCard />
+
+      <Divider sx={{ my: 3 }} />
 
       {loading ? (
         <Box sx={{ display: "flex", justifyContent: "center", p: 4 }}>
@@ -116,7 +135,7 @@ export const SettingsPage = () => {
               <SecurityIcon
                 sx={{ mr: 1, verticalAlign: "middle", fontSize: 20 }}
               />
-              Authentication
+              {t("settings.title")}
             </Typography>
 
             {isEnvConfigured && (
@@ -157,7 +176,7 @@ export const SettingsPage = () => {
               }}
             >
               <TextField
-                label="Username"
+                label={t("settings.username")}
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
                 disabled={isEnvConfigured || saving}
@@ -165,7 +184,7 @@ export const SettingsPage = () => {
                 size="small"
               />
               <TextField
-                label="Password"
+                label={t("settings.password")}
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
@@ -174,7 +193,7 @@ export const SettingsPage = () => {
                 size="small"
                 placeholder={
                   authState?.enabled && !isEnvConfigured
-                    ? "Enter new password"
+                    ? t("settings.enterNewPassword")
                     : ""
                 }
               />
@@ -193,18 +212,18 @@ export const SettingsPage = () => {
                   }
                 >
                   {authState?.enabled && !isEnvConfigured
-                    ? "Update"
-                    : "Enable Authentication"}
+                    ? t("common.update")
+                    : t("settings.enableAuth")}
                 </Button>
                 {authState?.enabled && !isEnvConfigured && (
                   <Button
                     variant="outlined"
                     color="error"
-                    onClick={handleRemove}
+                    onClick={() => setConfirmDisableAuth(true)}
                     disabled={saving}
                     startIcon={<DeleteIcon />}
                   >
-                    Disable
+                    {t("common.disabled")}
                   </Button>
                 )}
               </Box>
@@ -219,6 +238,15 @@ export const SettingsPage = () => {
           </CardContent>
         </Card>
       )}
+      <ConfirmDialog
+        open={confirmDisableAuth}
+        title={t("settings.disableAuth")}
+        message={t("settings.disableAuthMessage")}
+        confirmLabel={t("settings.disableAuthConfirm")}
+        confirmColor="error"
+        onConfirm={handleRemove}
+        onCancel={() => setConfirmDisableAuth(false)}
+      />
     </Box>
   );
 };

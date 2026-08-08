@@ -1,3 +1,5 @@
+import { assertOk, parseJsonResponse } from "./fetch-utils.js";
+
 export interface HomeAssistantLabel {
   label_id: string;
   name: string;
@@ -12,18 +14,14 @@ export interface HomeAssistantArea {
 
 export async function fetchLabels(): Promise<HomeAssistantLabel[]> {
   const res = await fetch(`api/matter/labels?_s=${Date.now()}`);
-  if (!res.ok) {
-    throw new Error("Failed to fetch labels");
-  }
-  return res.json();
+  await assertOk(res, "Failed to fetch labels");
+  return parseJsonResponse(res);
 }
 
 export async function fetchAreas(): Promise<HomeAssistantArea[]> {
   const res = await fetch(`api/matter/areas?_s=${Date.now()}`);
-  if (!res.ok) {
-    throw new Error("Failed to fetch areas");
-  }
-  return res.json();
+  await assertOk(res, "Failed to fetch areas");
+  return parseJsonResponse(res);
 }
 
 export interface FilterValues {
@@ -37,8 +35,6 @@ export interface FilterValues {
 
 export async function fetchFilterValues(): Promise<FilterValues> {
   const res = await fetch(`api/matter/filter-values?_s=${Date.now()}`);
-  if (!res.ok) {
-    throw new Error("Failed to fetch filter values");
-  }
-  return res.json();
+  await assertOk(res, "Failed to fetch filter values");
+  return parseJsonResponse(res);
 }

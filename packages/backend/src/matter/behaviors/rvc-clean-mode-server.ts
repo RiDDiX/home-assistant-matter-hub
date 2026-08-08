@@ -39,15 +39,13 @@ class RvcCleanModeServerBase extends Base {
     await super.initialize();
     const homeAssistant = await this.agent.load(HomeAssistantEntityBehavior);
     this.update(homeAssistant.entity);
-    if (homeAssistant.state.managedByEndpoint) {
-      homeAssistant.registerUpdate(this.callback(this.update));
-    } else {
-      this.reactTo(homeAssistant.onChange, this.update);
-    }
+    // offline: true so reactor writes commit independently and emit
+    // subscription reports, matching the sibling RVC behaviors.
+    this.reactTo(homeAssistant.onChange, this.update, { offline: true });
   }
 
-  public update(entity: HomeAssistantEntityInformation) {
-    if (!entity.state) {
+  private update(entity: HomeAssistantEntityInformation) {
+    if (!entity.state || !entity.state.attributes) {
       return;
     }
     const reportedMode = this.state.config.getCurrentMode(
@@ -68,13 +66,17 @@ class RvcCleanModeServerBase extends Base {
       }
     }
 
-    applyPatchState(this.state, {
-      currentMode,
-      supportedModes: this.state.config.getSupportedModes(
-        entity.state,
-        this.agent,
-      ),
-    });
+    applyPatchState(
+      this.state,
+      {
+        currentMode,
+        supportedModes: this.state.config.getSupportedModes(
+          entity.state,
+          this.agent,
+        ),
+      },
+      { force: true },
+    );
   }
 
   override changeToMode(

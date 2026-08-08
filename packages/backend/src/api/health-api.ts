@@ -1,11 +1,48 @@
+import {
+  buildEntityDiagnostics,
+  type ControllerWarning,
+  type EntityDiagnostic,
+} from "@home-assistant-matter-hub/common";
 import express from "express";
-import type { BridgeService } from "../services/bridges/bridge-service.js";
+import type {
+  BridgeService,
+  RecoveryAttempt,
+} from "../services/bridges/bridge-service.js";
+import type { SubscriptionSummary } from "../services/bridges/subscription-summary.js";
 import type { HomeAssistantClient } from "../services/home-assistant/home-assistant-client.js";
 
 export interface SessionInfo {
   id: number;
   peerNodeId: string;
+  fabricIndex: number | null;
   subscriptionCount: number;
+  // Scope of each active subscription on the session (whole-node wildcard vs
+  // endpoint-specific), so the health view can show what the controller watches.
+  subscriptions: SubscriptionSummary[];
+  // #365 diagnostics: tell a healthy session from a wedged one. lastActiveMsAgo
+  // is ms since the controller last sent us anything (resets on each keepalive
+  // ack); lastAnyActivityMsAgo is ms since any traffic in either direction.
+  lastActiveMsAgo: number | null;
+  lastAnyActivityMsAgo: number | null;
+  // ms since the last inbound Interaction Model request on this session, or null
+  // if none was seen. Unlike lastActiveMsAgo this does not advance on MRP acks,
+  // so it tells a healthy session from one wedged on "Updating".
+  lastImRequestMsAgo: number | null;
+  // #365 v2 shadow: ms since the last command-class request (Read/Write/
+  // Invoke/Timed), subscribe and delivery give-up churn over the last 30min,
+  // and what the shadow rule would decide right now.
+  lastCommandImRequestMsAgo: number | null;
+  subscribesLast30Min: number;
+  giveUpsLast30Min: number;
+  wedgeV2WouldRotate: boolean;
+  isPeerActive: boolean;
+  ageMsFromOpen: number | null;
+}
+
+export interface FabricSessionSummary {
+  fabricIndex: number;
+  sessions: number;
+  subscriptions: number;
 }
 
 export interface BridgeHealthInfo {
@@ -14,18 +51,27 @@ export interface BridgeHealthInfo {
   status: string;
   statusReason?: string;
   port: number;
+  priority: number;
   deviceCount: number;
   fabricCount: number;
   fabrics: Array<{
     fabricIndex: number;
+    fabricId: number;
+    nodeId: number;
+    rootNodeId: number;
     label: string;
     rootVendorId: number;
   }>;
   failedEntityCount: number;
+  // Advisory: exposed device types a commissioned controller does not support.
+  controllerWarnings: ControllerWarning[];
+  // Per-entity health roll-up: failed (with reason), limited, or ok.
+  entityDiagnostics: EntityDiagnostic[];
   connectivity: {
     totalSessions: number;
     totalSubscriptions: number;
     sessions: SessionInfo[];
+    fabricSummary: FabricSessionSummary[];
   };
 }
 
@@ -53,6 +99,7 @@ export interface DetailedHealthStatus extends HealthStatus {
     enabled: boolean;
     lastRecoveryAttempt?: string;
     recoveryCount: number;
+    history: RecoveryAttempt[];
   };
 }
 
@@ -111,24 +158,38 @@ export function healthApi(
       const data = b.data;
       const fabrics = data.commissioning?.fabrics ?? [];
       const sessionInfo = b.getSessionInfo();
+      const exposed = b.getExposedDeviceTypes();
+      const controllerWarnings = data.controllerWarnings ?? [];
+      const entityDiagnostics = buildEntityDiagnostics(
+        exposed,
+        data.failedEntities ?? [],
+        controllerWarnings,
+      );
       return {
         id: data.id,
         name: data.name,
         status: data.status,
         statusReason: data.statusReason,
         port: data.port,
+        priority: data.priority ?? 100,
         deviceCount: data.deviceCount,
         fabricCount: fabrics.length,
         fabrics: fabrics.map((f) => ({
           fabricIndex: f.fabricIndex,
+          fabricId: f.fabricId,
+          nodeId: f.nodeId,
+          rootNodeId: f.rootNodeId,
           label: f.label,
           rootVendorId: f.rootVendorId,
         })),
         failedEntityCount: data.failedEntities?.length ?? 0,
+        controllerWarnings,
+        entityDiagnostics,
         connectivity: {
           totalSessions: sessionInfo.totalSessions,
           totalSubscriptions: sessionInfo.totalSubscriptions,
           sessions: sessionInfo.sessions,
+          fabricSummary: sessionInfo.fabrics,
         },
       };
     });
@@ -140,6 +201,7 @@ export function healthApi(
         enabled: bridgeService.autoRecoveryEnabled,
         lastRecoveryAttempt: bridgeService.lastRecoveryAttempt?.toISOString(),
         recoveryCount: bridgeService.recoveryCount,
+        history: bridgeService.recoveryHistory,
       },
     };
     res.json(detailed);

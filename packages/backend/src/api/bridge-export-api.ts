@@ -9,8 +9,11 @@ import type {
   HomeAssistantMatcher,
 } from "@home-assistant-matter-hub/common";
 import { HomeAssistantMatcherType } from "@home-assistant-matter-hub/common";
+import { Logger } from "@matter/general";
 import express from "express";
 import type { BridgeStorage } from "../services/storage/bridge-storage.js";
+
+const logger = Logger.get("BridgeExportApi");
 
 type LegacyMatcher = string | HomeAssistantMatcher;
 
@@ -219,8 +222,10 @@ export function bridgeExportApi(bridgeStorage: BridgeStorage): express.Router {
 
       const result: BridgeImportResult = { imported, skipped, errors };
       res.json(result);
-    } catch {
-      res.status(400).json({ error: "Failed to import bridges" });
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      logger.warn(`Failed to import bridges: ${message}`, e);
+      res.status(400).json({ error: `Failed to import bridges: ${message}` });
     }
   });
 

@@ -1,3 +1,4 @@
+import CleaningServicesIcon from "@mui/icons-material/CleaningServices";
 import DeleteIcon from "@mui/icons-material/Delete";
 import EditIcon from "@mui/icons-material/Edit";
 import MoreVert from "@mui/icons-material/MoreVert";
@@ -10,7 +11,9 @@ import ListItemText from "@mui/material/ListItemText";
 import Menu from "@mui/material/Menu";
 import MenuItem from "@mui/material/MenuItem";
 import * as React from "react";
+import { useTranslation } from "react-i18next";
 import { Link as RouterLink, useNavigate } from "react-router";
+import { ConfirmDialog } from "../../components/misc/ConfirmDialog.tsx";
 import { useNotifications } from "../../components/notifications/use-notifications.ts";
 import {
   useDeleteBridge,
@@ -18,6 +21,7 @@ import {
   useResetBridge,
 } from "../../hooks/data/bridges.ts";
 import { navigation } from "../../routes.tsx";
+import { OrphanCleanupDialog } from "./OrphanCleanupDialog.tsx";
 
 export interface BridgeMoreMenuProps {
   bridge: string;
@@ -29,10 +33,16 @@ export const BridgeMoreMenu = ({ bridge }: BridgeMoreMenuProps) => {
 
   const navigate = useNavigate();
   const notification = useNotifications();
+  const { t } = useTranslation();
 
   const factoryReset = useResetBridge();
   const deleteBridge = useDeleteBridge();
   const forceSync = useForceSyncBridge();
+
+  const [confirmAction, setConfirmAction] = React.useState<
+    "delete" | "reset" | null
+  >(null);
+  const [orphanDialogOpen, setOrphanDialogOpen] = React.useState(false);
 
   const handleOpen = (event: React.MouseEvent<HTMLElement>) =>
     setAnchorEl(event.currentTarget);
@@ -56,11 +66,11 @@ export const BridgeMoreMenu = ({ bridge }: BridgeMoreMenuProps) => {
   };
 
   const handleFactoryReset = async () => {
-    handleClose();
+    setConfirmAction(null);
     await factoryReset(bridge)
       .then(() =>
         notification.show({
-          message: "Bridge Reset successfully",
+          message: t("bridge.resetSuccess"),
           severity: "success",
         }),
       )
@@ -72,11 +82,11 @@ export const BridgeMoreMenu = ({ bridge }: BridgeMoreMenuProps) => {
       );
   };
   const handleDelete = async () => {
-    handleClose();
+    setConfirmAction(null);
     await deleteBridge(bridge)
       .then(() =>
         notification.show({
-          message: "Bridge deleted successfully",
+          message: t("bridge.deleteSuccess"),
           severity: "success",
         }),
       )
@@ -99,28 +109,73 @@ export const BridgeMoreMenu = ({ bridge }: BridgeMoreMenuProps) => {
           <ListItemIcon>
             <EditIcon fontSize="small" />
           </ListItemIcon>
-          <ListItemText>Edit</ListItemText>
+          <ListItemText>{t("common.edit")}</ListItemText>
         </MenuItem>
         <Divider />
         <MenuItem onClick={handleForceSync}>
           <ListItemIcon>
             <SyncIcon fontSize="small" />
           </ListItemIcon>
-          <ListItemText>Force Sync</ListItemText>
+          <ListItemText>{t("bridge.forceSync")}</ListItemText>
         </MenuItem>
-        <MenuItem onClick={handleFactoryReset}>
+        <MenuItem
+          onClick={() => {
+            handleClose();
+            setConfirmAction("reset");
+          }}
+        >
           <ListItemIcon>
             <ResetIcon fontSize="small" />
           </ListItemIcon>
-          <ListItemText>Factory Reset</ListItemText>
+          <ListItemText>{t("bridge.factoryReset")}</ListItemText>
         </MenuItem>
-        <MenuItem onClick={handleDelete}>
+        <MenuItem
+          onClick={() => {
+            handleClose();
+            setOrphanDialogOpen(true);
+          }}
+        >
+          <ListItemIcon>
+            <CleaningServicesIcon fontSize="small" />
+          </ListItemIcon>
+          <ListItemText>{t("bridge.orphanMenu")}</ListItemText>
+        </MenuItem>
+        <MenuItem
+          onClick={() => {
+            handleClose();
+            setConfirmAction("delete");
+          }}
+        >
           <ListItemIcon>
             <DeleteIcon fontSize="small" />
           </ListItemIcon>
-          <ListItemText>Delete</ListItemText>
+          <ListItemText>{t("common.delete")}</ListItemText>
         </MenuItem>
       </Menu>
+
+      <ConfirmDialog
+        open={confirmAction === "reset"}
+        title={t("bridge.confirmResetTitle")}
+        message={t("bridge.confirmResetMessage")}
+        confirmLabel={t("common.reset")}
+        confirmColor="warning"
+        onConfirm={handleFactoryReset}
+        onCancel={() => setConfirmAction(null)}
+      />
+      <ConfirmDialog
+        open={confirmAction === "delete"}
+        title={t("bridge.confirmDeleteTitle")}
+        message={t("bridge.confirmDeleteMessage")}
+        confirmLabel={t("common.delete")}
+        confirmColor="error"
+        onConfirm={handleDelete}
+        onCancel={() => setConfirmAction(null)}
+      />
+      <OrphanCleanupDialog
+        open={orphanDialogOpen}
+        bridgeId={bridge}
+        onClose={() => setOrphanDialogOpen(false)}
+      />
     </>
   );
 };

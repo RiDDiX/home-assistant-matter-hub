@@ -1,4 +1,3 @@
-import type { HomeAssistantEntityInformation } from "@home-assistant-matter-hub/common";
 import { Logger } from "@matter/general";
 import { ElectricalEnergyMeasurementServer as Base } from "@matter/main/behaviors";
 import { ElectricalPowerMeasurement } from "@matter/main/clusters";
@@ -27,15 +26,11 @@ class ElectricalEnergyMeasurementServerBase extends FeaturedBase {
       );
     }
 
-    this.update(homeAssistant.entity);
-    if (homeAssistant.state.managedByEndpoint) {
-      homeAssistant.registerUpdate(this.callback(this.update));
-    } else {
-      this.reactTo(homeAssistant.onChange, this.update);
-    }
+    this.update();
+    this.reactTo(homeAssistant.onChange, this.update, { offline: true });
   }
 
-  public update(_entity: HomeAssistantEntityInformation) {
+  private update() {
     const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);
     const energyEntity = homeAssistant.state.mapping?.energyEntity;
 
@@ -70,6 +65,10 @@ namespace ElectricalEnergyMeasurementServerBase {
 
 export const HaElectricalEnergyMeasurementServer =
   ElectricalEnergyMeasurementServerBase.set({
+    // Match the activePower=0 default in HaElectricalPowerMeasurementServer
+    // so SmartThings doesn't show "- kWh" before the first state update or
+    // when an entity only carries power (not energy) data.
+    cumulativeEnergyImported: { energy: 0 },
     accuracy: {
       measurementType:
         ElectricalPowerMeasurement.MeasurementType.ElectricalEnergy,

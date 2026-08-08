@@ -18,7 +18,7 @@ const homeAssistantMatcherSchema: JSONSchema7 = {
           const: "regex",
           title: "regex",
           description:
-            "Full regular expression matching entity IDs. Use ^ and $ for anchors. Example: '^(light|switch)\\.kitchen_.*' matches all kitchen lights and switches.",
+            "Regex tested against the entity_id only (e.g. 'light.kitchen_lamp'). For labels use entity_label_regex or device_label_regex. Example: '^(light|switch)\\.kitchen_.*'.",
         },
         {
           const: "domain",
@@ -33,6 +33,12 @@ const homeAssistantMatcherSchema: JSONSchema7 = {
             "Match entities by their integration/platform. Example: 'hue', 'zwave', 'mqtt'.",
         },
         {
+          const: "label",
+          title: "label (deprecated)",
+          description:
+            "Deprecated: use entity_label or device_label instead. Behaves like entity_label.",
+        },
+        {
           const: "entity_label",
           title: "entity_label",
           description:
@@ -43,6 +49,24 @@ const homeAssistantMatcherSchema: JSONSchema7 = {
           title: "device_label",
           description:
             "Matches ALL entities of a device if the device has this label. Use this to include a complete device with all its entities.",
+        },
+        {
+          const: "entity_label_regex",
+          title: "entity_label_regex",
+          description:
+            "Regex tested against entity-label slugs and display names. Matches if any label assigned to the entity matches. Example: '^(matter|voice).*'.",
+        },
+        {
+          const: "device_label_regex",
+          title: "device_label_regex",
+          description:
+            "Regex tested against device-label slugs and display names. Matches ALL entities of a device whose label matches. Example: '^(matter|voice).*'.",
+        },
+        {
+          const: "any_field_regex",
+          title: "any_field_regex",
+          description:
+            "Regex tested against a single-line key=value haystack covering entity_id, domain, platform, area, entity_category, device_class, entity_labels, entity_label_names, device_labels, device_label_names, device_name, product_name, manufacturer. Use lookaheads for AND, alternation for OR. Example: '(?=.*domain=light)(?=.*area=living_room)|(?=.*domain=switch)(?=.*entity_labels=.*\\bvoice\\b)'.",
         },
         {
           const: "area",
@@ -67,6 +91,12 @@ const homeAssistantMatcherSchema: JSONSchema7 = {
           title: "product_name",
           description:
             "Match entities by their product/model name. Supports wildcards. Example: 'Hue*Bulb'.",
+        },
+        {
+          const: "manufacturer",
+          title: "manufacturer",
+          description:
+            "Match entities by their device manufacturer. Supports wildcards. Handy for MQTT or other generic integrations. Example: '*Sonoff*'.",
         },
         {
           const: "device_class",
@@ -155,21 +185,12 @@ const featureFlagSchema: JSONSchema7 = {
       default: false,
     },
 
-    alexaPreserveBrightnessOnTurnOn: {
-      title: "Alexa: Preserve Brightness on Turn-On (Deprecated)",
-      description:
-        "This workaround is now always active and this setting has no effect. " +
-        "The bridge automatically ignores brightness commands that set lights to 100% immediately after a turn-on command.",
-      type: "boolean",
-      default: true,
-    },
-
     serverMode: {
-      title: "Server Mode (for Robot Vacuums)",
+      title: "Server Mode (standalone device)",
       description:
-        "Expose the device as a standalone Matter device instead of a bridged device. " +
-        "This is required for Apple Home to properly support Siri voice commands for Robot Vacuums. " +
-        "IMPORTANT: Only ONE device should be in this bridge when server mode is enabled.",
+        "Expose entities as standalone Matter devices instead of bridged ones. " +
+        "Works for any supported device type, e.g. robot vacuums need it for Apple Home Siri voice commands. " +
+        "One node carries up to 10 devices; the first entity is the primary and drives the node name and type (experimental beyond one device).",
       type: "boolean",
       default: false,
     },
@@ -204,9 +225,8 @@ const featureFlagSchema: JSONSchema7 = {
     autoComposedDevices: {
       title: "Auto Composed Devices",
       description:
-        "Master toggle: automatically combine related entities from the same Home Assistant device " +
-        "into single Matter endpoints. Enables battery, humidity, pressure, power, and energy auto-mapping at once. " +
-        "This provides a cleaner device experience in Matter controllers (e.g., a Shelly Plug appears as one device with power monitoring).",
+        "Master toggle: combine related entities from the same Home Assistant device into a single Matter endpoint. " +
+        "Turns on battery, humidity, pressure, power, and energy auto-mapping at once, a Shelly Plug shows up as one device with power monitoring instead of several siblings.",
       type: "boolean",
       default: false,
     },
@@ -221,30 +241,117 @@ const featureFlagSchema: JSONSchema7 = {
       default: false,
     },
 
+    productNameFromNodeLabel: {
+      title: "Product Name from Node Label",
+      description:
+        "Report the entity's node label (custom name / friendly name / entity id) as the Matter productName. " +
+        "Useful for controllers like Aqara that display productName as the device name instead of nodeLabel. " +
+        "A per-entity customProductName still takes precedence.",
+      type: "boolean",
+      default: false,
+    },
+
+    preferEntityRegistryName: {
+      title: "Prefer Entity Registry Name (HA 2026.4 workaround)",
+      description:
+        "Use the entity registry name (or original_name) as nodeLabel instead of the composed friendly_name. " +
+        "Since Home Assistant 2026.4, friendly_name is prefixed with the device name, which breaks voice " +
+        "commands that relied on the short entity name. " +
+        "Resolution order: customName → registry name → registry original_name → friendly_name → entity_id. " +
+        "Matter has no alias concept, this only changes which single name is reported.",
+      type: "boolean",
+      default: false,
+    },
+
     vacuumOnOff: {
       title: "Vacuum: Include OnOff Cluster (Alexa)",
       description:
         "Add an OnOff cluster to robot vacuum endpoints. " +
         "Alexa REQUIRES this (PowerController) to show robotic vacuums in the app. " +
         "Without it, Alexa commissions the device but never displays it. " +
-        "In Server Mode this is enabled automatically — only check this for bridge mode. " +
+        "In Server Mode this is enabled automatically, only check this for bridge mode. " +
         "WARNING: OnOff is NOT part of the Matter RVC device type specification. " +
         "Enabling this may break Apple Home (shows 'Updating') and Google Home.",
       type: "boolean",
     },
 
-    vacuumMinimalClusters: {
-      title: "Vacuum: Minimal Clusters (Alexa troubleshooting)",
+    alexaPreserveBrightnessOnTurnOn: {
+      title: "Alexa: Preserve Brightness on Turn-On",
       description:
-        "Strip the vacuum endpoint to only the clusters required by the Matter RVC spec. " +
-        "Removes PowerSource (battery) and the default ServiceArea placeholder. " +
-        "Enable this if Alexa commissions the vacuum but the device never appears in the app. " +
-        "Trade-off: battery percentage will not be reported to Matter controllers.",
+        "Workaround for Alexa resetting light brightness to 100% after subscription renewal. " +
+        "When enabled, the bridge ignores brightness commands that set lights to 100% within " +
+        "200ms of a turn-on command for the same light. " +
+        "WARNING: breaks Apple Home's 'set room to 100%' Siri commands, which use the same " +
+        "on() + moveToLevel(254) pattern. Only enable on Alexa-only bridges.",
+      type: "boolean",
+      default: false,
+    },
+
+    useHaRegistrySerial: {
+      title: "Use HA Registry Serial Number",
+      description:
+        "Fall back to the Home Assistant device registry serial_number when no per-entity " +
+        "customSerialNumber is configured. Default off because changing serialNumber after " +
+        "commissioning can confuse controllers. A per-entity customSerialNumber still " +
+        "takes precedence.",
+      type: "boolean",
+      default: false,
+    },
+
+    coverSliderDebounceMs: {
+      title: "Cover Slider Debounce (ms)",
+      description:
+        "Override the cover position-update debounce window for this bridge. " +
+        "Some controllers (Apple Home) stream slider updates while the user is " +
+        "still dragging, causing covers to start moving toward an intermediate " +
+        "target. Set to the time the bridge should wait after the last update " +
+        "before sending the final value to Home Assistant. 0 keeps the built-in " +
+        "two-phase debounce (400 ms initial / 150 ms subsequent), which fits " +
+        "most controllers. Try 800-1500 ms for slow blinds. " +
+        "A per-entity override on a single cover wins over this flag.",
+      type: "number",
+      minimum: 0,
+      maximum: 5000,
+      default: 0,
+    },
+
+    fastSessionRecovery: {
+      title: "Fast Session Recovery (Google offline workaround)",
+      description:
+        "When a controller drops all subscriptions, clean up the dead session " +
+        "and re-announce after 5 seconds instead of 60. Opt-in for Google Home " +
+        "users whose devices go offline after a cancelled subscription (#386). " +
+        "It shortens the offline window but cannot stop the controller from " +
+        "rejecting the subscription. Default off.",
+      type: "boolean",
+      default: false,
+    },
+
+    stableIdentity: {
+      title: "Stable Device Identity",
+      description:
+        "Anchor each device to its Home Assistant entity registry id instead " +
+        "of the entity id, so renaming an entity no longer re-adds it in your " +
+        "controller (Alexa, Google Home, Apple Home) and keeps groups and " +
+        "automations. Records are seeded from the start, so enabling this later " +
+        "is safe and never re-adds existing devices. Default off.",
+      type: "boolean",
+      default: false,
+    },
+
+    wedgeWatchdog: {
+      title: "Wedge Watchdog (Apple 'Updating' workaround)",
+      description:
+        "Rotate the one session that looks wedged, subscriptions still alive " +
+        "but no inbound request from the controller for about 45 minutes, " +
+        "earlier than the blind session rotation. Targets Apple Home tiles " +
+        "stuck on 'Updating' where the controller keeps acking but stops " +
+        "consuming data. A false positive only triggers a transparent " +
+        "reconnect, the same as normal rotation. Default off.",
       type: "boolean",
       default: false,
     },
   },
-  additionalProperties: false,
 };
 
 export const bridgeConfigSchema: JSONSchema7 = {
@@ -305,6 +412,37 @@ export const bridgeConfigSchema: JSONSchema7 = {
       default: 100,
       minimum: 1,
       maximum: 999,
+    },
+    serialNumberSuffix: {
+      title: "Serial Number Suffix",
+      type: "string",
+      description:
+        "Append a suffix to every entity serial number on this bridge. " +
+        "Useful for forcing controllers like Aqara to treat devices as new " +
+        "and bypass cached device data. Leave empty for default behavior.",
+      maxLength: 16,
+    },
+    uniqueIdSuffix: {
+      title: "Unique ID Suffix",
+      type: "string",
+      description:
+        "Mixed into the unique ID of every bridged device on this bridge " +
+        "(standard bridge mode). Controllers like Alexa cache device records " +
+        "keyed on the unique ID, so setting or changing this can help mint " +
+        "fresh identities. Applies after a bridge restart, then re-discover " +
+        "in the controller. Leave empty for default behavior.",
+      maxLength: 16,
+    },
+    sessionMaxAgeHours: {
+      title: "Session Rotation Max Age (hours)",
+      type: "number",
+      description:
+        "Rotate matter sessions older than this many hours so controllers " +
+        "re-establish and re-subscribe. Server Mode rotates every 4h by " +
+        "default; standard bridges only rotate when you set a value here. " +
+        "Set 0 to disable. Range 0 to 168. (#287)",
+      minimum: 0,
+      maximum: 168,
     },
     filter: homeAssistantFilterSchema,
     featureFlags: featureFlagSchema,

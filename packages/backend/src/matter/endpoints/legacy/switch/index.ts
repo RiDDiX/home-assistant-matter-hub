@@ -1,13 +1,14 @@
 import type { EndpointType } from "@matter/main";
+import { GroupsServer, ScenesManagementServer } from "@matter/main/behaviors";
 import { OnOffPlugInUnitDevice } from "@matter/main/devices";
-import { EntityStateProvider } from "../../../../services/bridges/entity-state-provider.js";
 import { BasicInformationServer } from "../../../behaviors/basic-information-server.js";
 import { HaElectricalEnergyMeasurementServer } from "../../../behaviors/electrical-energy-measurement-server.js";
 import { HaElectricalPowerMeasurementServer } from "../../../behaviors/electrical-power-measurement-server.js";
 import { HomeAssistantEntityBehavior } from "../../../behaviors/home-assistant-entity-behavior.js";
 import { IdentifyServer } from "../../../behaviors/identify-server.js";
 import { OnOffServer } from "../../../behaviors/on-off-server.js";
-import { PowerSourceServer } from "../../../behaviors/power-source-server.js";
+import { DefaultPowerSourceServer } from "../../../behaviors/power-source-server.js";
+import { HaPowerTopologyServer } from "../../../behaviors/power-topology-server.js";
 
 const SwitchOnOffServer = OnOffServer();
 
@@ -15,6 +16,8 @@ const SwitchEndpointType = OnOffPlugInUnitDevice.with(
   BasicInformationServer,
   IdentifyServer,
   HomeAssistantEntityBehavior,
+  GroupsServer,
+  ScenesManagementServer,
   SwitchOnOffServer,
 );
 
@@ -22,32 +25,10 @@ const SwitchWithBatteryEndpointType = OnOffPlugInUnitDevice.with(
   BasicInformationServer,
   IdentifyServer,
   HomeAssistantEntityBehavior,
+  GroupsServer,
+  ScenesManagementServer,
   SwitchOnOffServer,
-  PowerSourceServer({
-    getBatteryPercent: (entity, agent) => {
-      // First check for battery entity from mapping (auto-assigned or manual)
-      const homeAssistant = agent.get(HomeAssistantEntityBehavior);
-      const batteryEntity = homeAssistant.state.mapping?.batteryEntity;
-      if (batteryEntity) {
-        const stateProvider = agent.env.get(EntityStateProvider);
-        const battery = stateProvider.getNumericState(batteryEntity);
-        if (battery != null) {
-          return Math.max(0, Math.min(100, battery));
-        }
-      }
-
-      // Fallback to entity's own battery attribute
-      const attrs = entity.attributes as {
-        battery?: number;
-        battery_level?: number;
-      };
-      const level = attrs.battery_level ?? attrs.battery;
-      if (level == null || Number.isNaN(Number(level))) {
-        return null;
-      }
-      return Number(level);
-    },
-  }),
+  DefaultPowerSourceServer,
 );
 
 export function SwitchDevice(
@@ -61,13 +42,22 @@ export function SwitchDevice(
   const hasBatteryEntity = !!homeAssistantEntity.mapping?.batteryEntity;
   const hasPowerEntity = !!homeAssistantEntity.mapping?.powerEntity;
   const hasEnergyEntity = !!homeAssistantEntity.mapping?.energyEntity;
+  // Voltage/current can be mapped on their own, so gate the power cluster on
+  // any of the three or that data would be dropped.
+  const hasElectricalPower =
+    hasPowerEntity ||
+    !!homeAssistantEntity.mapping?.voltageEntity ||
+    !!homeAssistantEntity.mapping?.currentEntity;
 
   let device =
     hasBatteryAttr || hasBatteryEntity
       ? SwitchWithBatteryEndpointType
       : SwitchEndpointType;
 
-  if (hasPowerEntity) {
+  if (hasElectricalPower || hasEnergyEntity) {
+    device = device.with(HaPowerTopologyServer);
+  }
+  if (hasElectricalPower) {
     device = device.with(HaElectricalPowerMeasurementServer);
   }
   if (hasEnergyEntity) {

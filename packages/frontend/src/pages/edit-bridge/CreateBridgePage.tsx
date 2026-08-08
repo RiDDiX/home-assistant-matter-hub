@@ -8,6 +8,7 @@ import Link from "@mui/material/Link";
 import Stack from "@mui/material/Stack";
 import Typography from "@mui/material/Typography";
 import { useCallback, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router";
 import { Breadcrumbs } from "../../components/breadcrumbs/Breadcrumbs.tsx";
 import { BridgeConfigEditor } from "../../components/bridge/BridgeConfigEditor.tsx";
@@ -38,6 +39,7 @@ function nextFreePort(usedPorts: Record<number, string>) {
 }
 
 export const CreateBridgePage = () => {
+  const { t } = useTranslation();
   const notifications = useNotifications();
   const navigate = useNavigate();
   const [selectedTemplateId, setSelectedTemplateId] = useState<
@@ -81,7 +83,10 @@ export const CreateBridgePage = () => {
   const saveAction = async (config: BridgeConfig) => {
     await createBridge({ ...config })
       .then(() =>
-        notifications.show({ message: "Bridge saved", severity: "success" }),
+        notifications.show({
+          message: t("bridge.saveSuccess"),
+          severity: "success",
+        }),
       )
       .then(() => cancelAction())
       .catch((err: Error) =>
@@ -90,15 +95,15 @@ export const CreateBridgePage = () => {
   };
 
   if (!bridgeConfig || !usedPorts) {
-    return "Loading";
+    return t("common.loading");
   }
 
   return (
     <Stack spacing={4}>
       <Breadcrumbs
         items={[
-          { name: "Bridges", to: navigation.bridges },
-          { name: "Create New", to: navigation.createBridge },
+          { name: t("nav.bridges"), to: navigation.bridges },
+          { name: t("common.create"), to: navigation.createBridge },
         ]}
       />
 

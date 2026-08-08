@@ -5,9 +5,11 @@ import {
 import type { EndpointType } from "@matter/main";
 import type { FanControl } from "@matter/main/clusters";
 import { AirPurifierDevice as Device } from "@matter/main/devices";
+import { autoPresetName } from "../../../../utils/converters/fan-mode.js";
 import type { FeatureSelection } from "../../../../utils/feature-selection.js";
 import { testBit } from "../../../../utils/test-bit.js";
 import { BasicInformationServer } from "../../../behaviors/basic-information-server.js";
+import { FanSpeedMemoryBehavior } from "../../../behaviors/fan-speed-memory.js";
 import { HomeAssistantEntityBehavior } from "../../../behaviors/home-assistant-entity-behavior.js";
 import { IdentifyServer } from "../../../behaviors/identify-server.js";
 import { FanFanControlServer } from "../fan/behaviors/fan-fan-control-server.js";
@@ -52,12 +54,17 @@ export function AirPurifierEndpoint(
   const supportedFeatures = attributes.supported_features ?? 0;
   const mapping = homeAssistantEntity.mapping;
 
-  const features: FeatureSelection<FanControl.Cluster> = new Set();
+  const presetModes = attributes.preset_modes ?? [];
+  const features: FeatureSelection<typeof FanControl.Cluster> = new Set();
   if (testBit(supportedFeatures, FanDeviceFeature.SET_SPEED)) {
     features.add("MultiSpeed");
     features.add("Step");
   }
-  if (testBit(supportedFeatures, FanDeviceFeature.PRESET_MODE)) {
+  // Auto only if a preset really is "auto", else HA rejects the "auto" we send.
+  if (
+    testBit(supportedFeatures, FanDeviceFeature.PRESET_MODE) &&
+    autoPresetName(presetModes) !== undefined
+  ) {
     features.add("Auto");
   }
   if (testBit(supportedFeatures, FanDeviceFeature.DIRECTION)) {
@@ -67,7 +74,6 @@ export function AirPurifierEndpoint(
     features.add("Rocking");
   }
   // Enable Wind mode if fan has natural/sleep preset modes
-  const presetModes = attributes.preset_modes ?? [];
   const hasWindModes = presetModes.some(
     (m) =>
       m.toLowerCase() === "natural" ||
@@ -85,6 +91,7 @@ export function AirPurifierEndpoint(
     HomeAssistantEntityBehavior,
     FanOnOffServer,
     FanFanControlServer.with(...features),
+    FanSpeedMemoryBehavior,
   );
 
   // Add HEPA filter monitoring if filter life is available (attribute or mapped sensor)

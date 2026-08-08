@@ -1,3 +1,4 @@
+import { Logger } from "@matter/general";
 import * as ws from "ws";
 import type { ArgumentsCamelCase } from "yargs";
 import { WebApi } from "../../api/web-api.js";
@@ -5,48 +6,18 @@ import { configureDefaultEnvironment } from "../../core/app/configure-default-en
 import { Options } from "../../core/app/options.js";
 import { AppEnvironment } from "../../core/ioc/app-environment.js";
 import { patchLevelControlTlv } from "../../matter/patches/patch-level-control-tlv.js";
+import { BackupService } from "../../services/backup/backup-service.js";
 import { BridgeService } from "../../services/bridges/bridge-service.js";
 import { EntityIsolationService } from "../../services/bridges/entity-isolation-service.js";
+import { HomeAssistantClient } from "../../services/home-assistant/home-assistant-client.js";
 import { HomeAssistantRegistry } from "../../services/home-assistant/home-assistant-registry.js";
+import { AppSettingsStorage } from "../../services/storage/app-settings-storage.js";
+import { logStartupMemoryGuard } from "../../utils/log-memory.js";
+import {
+  isIsolatableError,
+  shouldSuppressError,
+} from "./start-error-matchers.js";
 import type { StartOptions } from "./start-options.js";
-
-function extractErrorMessage(error: unknown): string {
-  if (error instanceof Error) return error.message;
-  if (typeof error === "object" && error !== null) {
-    const obj = error as Record<string, unknown>;
-    // HA WebSocket error: { type: 'result', success: false, error: { code: N, message: '...' } }
-    if (typeof obj.error === "object" && obj.error !== null) {
-      const inner = obj.error as Record<string, unknown>;
-      if (typeof inner.message === "string") return inner.message;
-    }
-    if (typeof obj.message === "string") return obj.message;
-  }
-  return String(error);
-}
-
-// Check if an error should be suppressed (not crash the process)
-function shouldSuppressError(error: unknown): boolean {
-  const msg = extractErrorMessage(error);
-  return (
-    msg.includes("Connection lost") ||
-    msg.includes("Endpoint storage inaccessible") ||
-    msg.includes("Invalid intervalMs") ||
-    msg.includes("generalDiagnostics") ||
-    msg.includes("Behaviors have errors") ||
-    msg.includes("TransactionDestroyedError") ||
-    msg.includes("DestroyedDependencyError") ||
-    msg.includes("UninitializedDependencyError") ||
-    msg.includes("mutex-closed") ||
-    msg.includes("not a node and is not owned") ||
-    msg.includes("aggregator.")
-  );
-}
-
-// Check if an error is isolatable (can isolate the entity causing it)
-function isIsolatableError(error: unknown): boolean {
-  const msg = error instanceof Error ? error.message : String(error);
-  return msg.includes("Invalid intervalMs") || msg.includes("aggregator.");
-}
 
 // Register early error handlers to catch errors before Matter.js initializes
 process.on("uncaughtException", (error) => {
@@ -61,15 +32,15 @@ process.on("unhandledRejection", (reason) => {
   if (shouldSuppressError(reason)) {
     return; // Suppress this specific error
   }
-  console.error("Unhandled rejection:", reason);
-  process.exit(1);
+  console.error("Unhandled rejection (process continuing):", reason);
 });
 
 // Re-register error handlers after Matter.js initialization to override its handlers
 // Matter.js registers its own handlers that call process.exit(1), so we need to be last
 function registerFinalErrorHandlers() {
-  // Remove all listeners and re-add ours as the only ones
-  // This ensures our suppression logic takes precedence
+  // Drop every existing listener and re-attach ours so the suppression
+  // logic sits at the end of the chain, matter.js hooks its own handlers
+  // that would otherwise call process.exit(1) before we get a look in.
   process.removeAllListeners("uncaughtException");
   process.removeAllListeners("unhandledRejection");
 
@@ -99,8 +70,9 @@ function registerFinalErrorHandlers() {
       console.warn("Suppressed Matter.js internal error:", reason);
       return;
     }
-    console.error("Unhandled rejection:", reason);
-    process.exit(1);
+    // Log but don't crash, unhandled rejections are non-fatal async failures.
+    // Plugins may emit fire-and-forget promises that escape SafePluginRunner.
+    console.error("Unhandled rejection (process continuing):", reason);
   });
 }
 
@@ -108,15 +80,18 @@ export async function startHandler(
   startOptions: ArgumentsCamelCase<StartOptions>,
   webUiDist?: string,
 ): Promise<void> {
-  Object.assign(globalThis, {
-    WebSocket: globalThis.WebSocket ?? ws.WebSocket,
-  });
+  Object.assign(globalThis, { WebSocket: ws.WebSocket });
 
   // Patch Matter.js TLV schemas before any clusters are instantiated
   patchLevelControlTlv();
 
   const options = new Options({ ...startOptions, webUiDist });
   const rootEnv = configureDefaultEnvironment(options);
+
+  // Log system memory early so low-resource devices get a warning before
+  // heavy initialization (Matter.js, HA registry, bridges) begins.
+  logStartupMemoryGuard(Logger.get("Startup"));
+
   const appEnvironment = await AppEnvironment.create(rootEnv, options);
 
   // Register final error handlers AFTER Matter.js initialization
@@ -126,14 +101,74 @@ export async function startHandler(
   const bridgeService$ = appEnvironment.load(BridgeService);
   const webApi$ = appEnvironment.load(WebApi);
   const registry$ = appEnvironment.load(HomeAssistantRegistry);
+  const backupService$ = appEnvironment.load(BackupService);
 
-  // Wire up WebSocket broadcasts for bridge status changes.
-  // This ensures the frontend receives live updates as each bridge
-  // transitions through Starting → Running during startup.
-  const [bridgeService, webApi] = await Promise.all([bridgeService$, webApi$]);
+  // Wire up WebSocket broadcasts for bridge status changes so the frontend
+  // sees each Stopped → Starting → Running transition as it happens during
+  // startup rather than after the whole set finishes.
+  const [bridgeService, webApi, backupService] = await Promise.all([
+    bridgeService$,
+    webApi$,
+    backupService$,
+  ]);
   bridgeService.onBridgeChanged = (bridgeId) => {
     webApi.websocket.broadcastBridgeUpdate(bridgeId);
   };
+
+  const [haClient, settingsStorage] = await Promise.all([
+    appEnvironment.load(HomeAssistantClient),
+    appEnvironment.load(AppSettingsStorage),
+  ]);
+  // Use the persisted recovery settings instead of the built-in defaults.
+  bridgeService.applyRecoverySettings(settingsStorage.recoverySettings);
+  // When Home Assistant reconnects, try to recover failed bridges right away
+  // instead of waiting for the next interval. Only failed bridges are touched.
+  haClient.connection.addEventListener("ready", () => {
+    bridgeService.recoverFailedBridgesNow();
+  });
+
+  // Register graceful shutdown handlers.
+  // When the process receives SIGTERM (Docker stop) or SIGINT (Ctrl+C),
+  // stop all bridges cleanly so matter.js persists fabric/subscription state.
+  let shuttingDown = false;
+  const gracefulShutdown = async (signal: string) => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    console.log(`Received ${signal}, shutting down gracefully...`);
+    try {
+      // Stop bridges first so each one closes its Matter sessions cleanly and
+      // persists fabric/subscription state before the backup runs and the
+      // container is torn down. Capped so a slow bridge can't block shutdown.
+      await Promise.race([
+        bridgeService.stopAll(),
+        new Promise((resolve) => setTimeout(resolve, 10_000)),
+      ]);
+    } catch (e) {
+      console.warn("Stopping bridges during shutdown failed:", e);
+    }
+    try {
+      await Promise.race([
+        backupService.createAutoBackup(),
+        new Promise((resolve) => setTimeout(resolve, 5_000)),
+      ]);
+    } catch (e) {
+      console.warn("Auto-backup during shutdown failed:", e);
+    }
+    try {
+      // Dispose the whole IoC container so WebApi (releases the HTTP port),
+      // HomeAssistantClient (closes the WS), and every storage service tear
+      // down in reverse creation order before the process exits.
+      await Promise.race([
+        appEnvironment.dispose(),
+        new Promise((resolve) => setTimeout(resolve, 15_000)),
+      ]);
+    } catch (e) {
+      console.warn("Error during graceful shutdown:", e);
+    }
+    process.exit(0);
+  };
+  process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
+  process.on("SIGINT", () => gracefulShutdown("SIGINT"));
 
   const initBridges = bridgeService.startAll();
   const initApi = webApi.start();

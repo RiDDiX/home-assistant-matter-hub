@@ -24,6 +24,11 @@ export interface CircuitBreakerState {
  * Plugins run in-process because they need direct access to matter.js
  * Endpoint objects (structured clone cannot serialize them). Isolation
  * is achieved via defensive wrappers, not OS-level sandboxing.
+ *
+ * Limitation: fire-and-forget promises created by plugins (e.g. inside
+ * setTimeout callbacks) escape this runner's scope. The caller should
+ * ensure a process-level unhandledRejection handler exists to prevent
+ * crashes from such cases.
  */
 export class SafePluginRunner {
   private readonly states = new Map<string, CircuitBreakerState>();
@@ -70,16 +75,19 @@ export class SafePluginRunner {
       return undefined;
     }
 
+    const timeout = this.createTimeout<T>(pluginName, operation, timeoutMs);
     try {
       const result = await Promise.race([
         Promise.resolve().then(fn),
-        this.createTimeout<T>(pluginName, operation, timeoutMs),
+        timeout.promise,
       ]);
 
       // Success: reset failure count
+      timeout.clear();
       state.failures = 0;
       return result;
     } catch (error) {
+      timeout.clear();
       state.failures++;
       state.lastError = error instanceof Error ? error.message : String(error);
 
@@ -144,9 +152,10 @@ export class SafePluginRunner {
     pluginName: string,
     operation: string,
     timeoutMs: number,
-  ): Promise<T> {
-    return new Promise<T>((_, reject) => {
-      setTimeout(() => {
+  ): { promise: Promise<T>; clear: () => void } {
+    let timer: ReturnType<typeof setTimeout>;
+    const promise = new Promise<T>((_, reject) => {
+      timer = setTimeout(() => {
         reject(
           new Error(
             `Plugin "${pluginName}" timed out during ${operation} after ${timeoutMs}ms`,
@@ -154,5 +163,6 @@ export class SafePluginRunner {
         );
       }, timeoutMs);
     });
+    return { promise, clear: () => clearTimeout(timer) };
   }
 }

@@ -42,17 +42,15 @@ export function metricsApi(
   router.get("/", (_, res) => {
     const memoryUsage = process.memoryUsage();
     const bridges = bridgeService.bridges;
+    const datas = bridges.map((b) => b.data);
 
-    const running = bridges.filter((b) => b.data.status === "running").length;
-    const stopped = bridges.filter((b) => b.data.status === "stopped").length;
-    const failed = bridges.filter((b) => b.data.status === "failed").length;
+    const running = datas.filter((d) => d.status === "running").length;
+    const stopped = datas.filter((d) => d.status === "stopped").length;
+    const failed = datas.filter((d) => d.status === "failed").length;
 
-    const totalDevices = bridges.reduce(
-      (sum, b) => sum + b.data.deviceCount,
-      0,
-    );
-    const totalFabrics = bridges.reduce(
-      (sum, b) => sum + (b.data.commissioning?.fabrics?.length ?? 0),
+    const totalDevices = datas.reduce((sum, d) => sum + d.deviceCount, 0);
+    const totalFabrics = datas.reduce(
+      (sum, d) => sum + (d.commissioning?.fabrics?.length ?? 0),
       0,
     );
 
@@ -87,16 +85,14 @@ export function metricsApi(
     const memoryUsage = process.memoryUsage();
     const bridges = bridgeService.bridges;
     const uptime = Math.floor((Date.now() - startTime) / 1000);
+    const datas = bridges.map((b) => b.data);
 
-    const running = bridges.filter((b) => b.data.status === "running").length;
-    const stopped = bridges.filter((b) => b.data.status === "stopped").length;
-    const failed = bridges.filter((b) => b.data.status === "failed").length;
-    const totalDevices = bridges.reduce(
-      (sum, b) => sum + b.data.deviceCount,
-      0,
-    );
-    const totalFabrics = bridges.reduce(
-      (sum, b) => sum + (b.data.commissioning?.fabrics?.length ?? 0),
+    const running = datas.filter((d) => d.status === "running").length;
+    const stopped = datas.filter((d) => d.status === "stopped").length;
+    const failed = datas.filter((d) => d.status === "failed").length;
+    const totalDevices = datas.reduce((sum, d) => sum + d.deviceCount, 0);
+    const totalFabrics = datas.reduce(
+      (sum, d) => sum + (d.commissioning?.fabrics?.length ?? 0),
       0,
     );
 
@@ -156,8 +152,9 @@ export function metricsApi(
     ];
 
     for (const bridge of bridges) {
-      const status = bridge.data.status === "running" ? 1 : 0;
-      const safeName = bridge.data.name.replace(/[^a-zA-Z0-9_]/g, "_");
+      const data = bridge.data;
+      const status = data.status === "running" ? 1 : 0;
+      const safeName = data.name.replace(/[^a-zA-Z0-9_]/g, "_");
       lines.push(
         `# HELP hamh_bridge_status Bridge status (1=running, 0=not running)`,
         `# TYPE hamh_bridge_status gauge`,
@@ -165,7 +162,7 @@ export function metricsApi(
         "",
         `# HELP hamh_bridge_devices Number of devices on bridge`,
         `# TYPE hamh_bridge_devices gauge`,
-        `hamh_bridge_devices{bridge_id="${bridge.id}",bridge_name="${safeName}"} ${bridge.data.deviceCount}`,
+        `hamh_bridge_devices{bridge_id="${bridge.id}",bridge_name="${safeName}"} ${data.deviceCount}`,
         "",
       );
     }

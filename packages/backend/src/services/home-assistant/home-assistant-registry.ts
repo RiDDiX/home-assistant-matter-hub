@@ -5,11 +5,12 @@ import type {
   HomeAssistantEntityState,
 } from "@home-assistant-matter-hub/common";
 import { Logger } from "@matter/general";
-import { getStates } from "home-assistant-js-websocket";
+import type { HassEntity } from "home-assistant-js-websocket";
 import { fromPairs, keyBy, keys, uniq, values } from "lodash-es";
 import { Service } from "../../core/ioc/service.js";
 import { logMemoryUsage } from "../../utils/log-memory.js";
 import { withRetry } from "../../utils/retry.js";
+import { sendHaMessage } from "../../utils/send-ha-message.js";
 import {
   getAreaRegistry,
   getDeviceRegistry,
@@ -67,24 +68,44 @@ export class HomeAssistantRegistry extends Service {
   }
 
   protected override async initialize(): Promise<void> {
-    await this.reload();
+    try {
+      await this.reload();
+    } catch (e) {
+      // HA's WS endpoint can drop in-flight queries during HA's own startup,
+      // and after maxAttempts withRetry gives up. Start empty rather than
+      // tear down the addon. enableAutoRefresh keeps trying every tick.
+      logger.warn(
+        "Initial registry fetch failed, starting empty and relying on auto-refresh:",
+        e,
+      );
+    }
   }
 
   override async dispose(): Promise<void> {
     this.disableAutoRefresh();
   }
 
-  enableAutoRefresh(onRefresh: () => void) {
+  enableAutoRefresh(onRefresh: () => Promise<void> | void) {
     this.disableAutoRefresh();
 
+    let refreshing = false;
     this.autoRefresh = setInterval(async () => {
+      if (refreshing) {
+        // Previous tick is still mid-retry (HA slow / reconnecting).
+        // Skip this tick so reloads don't stack and overwrite each other.
+        logger.debug("Skipping registry refresh, previous tick still running");
+        return;
+      }
+      refreshing = true;
       try {
         const changed = await this.reload();
         if (changed) {
-          onRefresh();
+          await onRefresh();
         }
       } catch (e) {
         logger.warn("Failed to refresh registry, will retry next interval:", e);
+      } finally {
+        refreshing = false;
       }
     }, this.options.refreshInterval * 1000);
   }
@@ -96,11 +117,11 @@ export class HomeAssistantRegistry extends Service {
     this.autoRefresh = undefined;
   }
 
-  private async reload(): Promise<boolean> {
+  async reload(): Promise<boolean> {
     return await withRetry(() => this.fetchRegistries(), {
-      maxAttempts: 5,
+      maxAttempts: 10,
       baseDelayMs: 2000,
-      maxDelayMs: 15000,
+      maxDelayMs: 30000,
       onRetry: (attempt, error, delayMs) => {
         logger.warn(
           `Registry fetch failed (attempt ${attempt}), retrying in ${delayMs}ms:`,
@@ -111,24 +132,66 @@ export class HomeAssistantRegistry extends Service {
   }
 
   private async fetchRegistries(): Promise<boolean> {
+    await this.waitForConnection(30_000);
+    try {
+      return await this.runRegistryQueries();
+    } catch (e) {
+      if (!isConnectionLost(e)) throw e;
+      // WS dropped mid-flight; the library auto-reconnects. Wait for the
+      // next 'ready' and try once more before this attempt is consumed
+      // by withRetry's backoff.
+      logger.debug("Registry fetch hit connection drop, waiting for reconnect");
+      await this.waitForConnection(60_000);
+      return await this.runRegistryQueries();
+    }
+  }
+
+  private async waitForConnection(timeoutMs: number): Promise<void> {
     const connection = this.client.connection;
-    const entityRegistry = await getRegistry(connection);
-    const statesList = await getStates(connection);
-    const deviceRegistry = await getDeviceRegistry(connection);
+    if (connection.connected) return;
+    logger.debug("Connection not ready, waiting for reconnect...");
+    await new Promise<void>((resolve) => {
+      const timeout = setTimeout(() => {
+        connection.removeEventListener("ready", onReady);
+        resolve();
+      }, timeoutMs);
+      const onReady = () => {
+        clearTimeout(timeout);
+        connection.removeEventListener("ready", onReady);
+        resolve();
+      };
+      connection.addEventListener("ready", onReady);
+      if (connection.connected) {
+        clearTimeout(timeout);
+        connection.removeEventListener("ready", onReady);
+        resolve();
+      }
+    });
+  }
 
-    let labels: HomeAssistantLabel[] = [];
-    try {
-      labels = await getLabelRegistry(connection);
-    } catch {
-      // Label registry might not be available in older HA versions
-    }
+  private async runRegistryQueries(): Promise<boolean> {
+    const connection = this.client.connection;
 
-    let areas: Array<{ area_id: string; name: string }> = [];
-    try {
-      areas = await getAreaRegistry(connection);
-    } catch {
-      // Area registry might not be available in older HA versions
-    }
+    // Fire the five HA queries in parallel. Label and area registries aren't
+    // guaranteed on older HA versions, catch and fall back to empty arrays
+    // without failing the whole reload.
+    const timeoutMs = this.options.messageTimeoutMs;
+    const [entityRegistry, statesList, deviceRegistry, labels, areas] =
+      await Promise.all([
+        getRegistry(connection, timeoutMs),
+        sendHaMessage<HassEntity[]>(
+          connection,
+          { type: "get_states" },
+          timeoutMs,
+        ),
+        getDeviceRegistry(connection, timeoutMs),
+        getLabelRegistry(connection, timeoutMs).catch(
+          () => [] as HomeAssistantLabel[],
+        ),
+        getAreaRegistry(connection, timeoutMs).catch(
+          () => [] as Array<{ area_id: string; name: string }>,
+        ),
+      ]);
 
     // Fingerprint structural registry data to detect changes.
     // State *values* change constantly (handled by WebSocket subscription);
@@ -136,11 +199,17 @@ export class HomeAssistantRegistry extends Service {
     const hash = createHash("md5");
     for (const e of entityRegistry) {
       hash.update(
-        `${e.entity_id}\0${e.device_id ?? ""}\0${e.disabled_by ?? ""}\0${e.hidden_by ?? ""}\n`,
+        `${e.entity_id}\0${e.device_id ?? ""}\0${e.disabled_by ?? ""}\0${e.hidden_by ?? ""}\0${e.area_id ?? ""}\0${(e.labels ?? []).join(",")}\0${e.platform ?? ""}\0${e.entity_category ?? ""}\n`,
       );
     }
-    for (const s of statesList) hash.update(`${s.entity_id}\n`);
-    for (const d of deviceRegistry) hash.update(`${d.id}\n`);
+    for (const s of statesList) {
+      hash.update(`${s.entity_id}\0${s.attributes?.device_class ?? ""}\n`);
+    }
+    for (const d of deviceRegistry) {
+      hash.update(
+        `${d.id}\0${(d.labels ?? []).join(",")}\0${d.area_id ?? ""}\0${d.name_by_user ?? ""}\0${d.name ?? ""}\0${d.model ?? ""}\n`,
+      );
+    }
     for (const l of labels) hash.update(`${l.label_id}\n`);
     for (const a of areas) hash.update(`${a.area_id}\0${a.name}\n`);
     const fingerprint = hash.digest("hex");
@@ -155,7 +224,7 @@ export class HomeAssistantRegistry extends Service {
     }
     this.lastRegistryFingerprint = fingerprint;
 
-    // Structure changed — full rebuild
+    // Structure changed, full rebuild
     entityRegistry.forEach((e) => {
       e.device_id = e.device_id ?? mockDeviceId(e.entity_id);
     });
@@ -190,6 +259,13 @@ export class HomeAssistantRegistry extends Service {
 
     return true;
   }
+}
+
+function isConnectionLost(e: unknown): boolean {
+  if (e instanceof Error && e.message.includes("Connection lost")) return true;
+  const inner = (e as { error?: { code?: number; message?: string } } | null)
+    ?.error;
+  return inner?.code === 3 || inner?.message === "Connection lost";
 }
 
 function mockDeviceId(entityId: string) {

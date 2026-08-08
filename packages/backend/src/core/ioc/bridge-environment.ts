@@ -1,9 +1,13 @@
-import path from "node:path";
 import type { BridgeData } from "@home-assistant-matter-hub/common";
 import type { Environment, Logger } from "@matter/general";
-import { StorageService } from "@matter/general";
 import { ServerModeServerNode } from "../../matter/endpoints/server-mode-server-node.js";
+import {
+  bridgeNeedsTcpForCameras,
+  CAMERA_TCP_CONFIG,
+} from "../../plugins/builtin/camera/camera-tcp-requirement.js";
+import { PluginInstaller } from "../../plugins/plugin-installer.js";
 import { PluginManager } from "../../plugins/plugin-manager.js";
+import { PluginRegistry } from "../../plugins/plugin-registry.js";
 import { Bridge } from "../../services/bridges/bridge.js";
 import { BridgeDataProvider } from "../../services/bridges/bridge-data-provider.js";
 import { BridgeEndpointManager } from "../../services/bridges/bridge-endpoint-manager.js";
@@ -14,27 +18,38 @@ import { ServerModeBridge } from "../../services/bridges/server-mode-bridge.js";
 import { ServerModeEndpointManager } from "../../services/bridges/server-mode-endpoint-manager.js";
 import { HomeAssistantClient } from "../../services/home-assistant/home-assistant-client.js";
 import { HomeAssistantRegistry } from "../../services/home-assistant/home-assistant-registry.js";
+import { EntityIdentityStorage } from "../../services/storage/entity-identity-storage.js";
 import { EntityMappingStorage } from "../../services/storage/entity-mapping-storage.js";
 import { LoggerService } from "../app/logger.js";
 import type { AppEnvironment } from "./app-environment.js";
 import { EnvironmentBase } from "./environment-base.js";
 
 export class BridgeEnvironment extends EnvironmentBase {
-  static async create(parent: Environment, initialData: BridgeData) {
-    const bridge = new BridgeEnvironment(parent, initialData);
+  static async create(
+    parent: Environment,
+    initialData: BridgeData,
+    storageLocation?: string,
+  ) {
+    const bridge = new BridgeEnvironment(parent, initialData, storageLocation);
     await bridge.construction;
     return bridge;
   }
 
   private readonly construction: Promise<void>;
   private readonly endpointManagerLogger: Logger;
+  private readonly storageLocation?: string;
 
-  private constructor(parent: Environment, initialData: BridgeData) {
+  private constructor(
+    parent: Environment,
+    initialData: BridgeData,
+    storageLocation?: string,
+  ) {
     const loggerService = parent.get(LoggerService);
     const log = loggerService.get(`BridgeEnvironment / ${initialData.id}`);
 
     super({ id: initialData.id, parent, log });
     this.endpointManagerLogger = loggerService.get("BridgeEndpointManager");
+    this.storageLocation = storageLocation;
     this.construction = this.init();
 
     this.set(BridgeDataProvider, new BridgeDataProvider(initialData));
@@ -43,7 +58,6 @@ export class BridgeEnvironment extends EnvironmentBase {
   private async init() {
     const haRegistry = await this.load(HomeAssistantRegistry);
     const haClient = await this.load(HomeAssistantClient);
-    const bridgeId = this.get(BridgeDataProvider).id;
 
     this.set(
       BridgeRegistry,
@@ -51,9 +65,19 @@ export class BridgeEnvironment extends EnvironmentBase {
     );
     this.set(EntityStateProvider, new EntityStateProvider(haRegistry));
 
-    const storageLocation = this.get(StorageService).location ?? "";
-    const pluginStorageDir = path.join(storageLocation, "plugins", bridgeId);
-    const pluginManager = new PluginManager(bridgeId, pluginStorageDir);
+    const bridgeId = this.get(BridgeDataProvider).id;
+    let pluginManager: PluginManager | undefined;
+    let pluginRegistry: PluginRegistry | undefined;
+    let pluginInstaller: PluginInstaller | undefined;
+    if (this.storageLocation) {
+      pluginManager = new PluginManager(bridgeId, this.storageLocation, {
+        url: haClient.baseUrl,
+        accessToken: haClient.accessToken,
+      });
+      pluginRegistry = new PluginRegistry(this.storageLocation);
+      pluginManager.setRegistry(pluginRegistry);
+      pluginInstaller = new PluginInstaller(this.storageLocation);
+    }
 
     this.set(
       BridgeEndpointManager,
@@ -61,9 +85,12 @@ export class BridgeEnvironment extends EnvironmentBase {
         await this.load(HomeAssistantClient),
         this.get(BridgeRegistry),
         await this.load(EntityMappingStorage),
+        await this.load(EntityIdentityStorage),
         bridgeId,
         this.endpointManagerLogger,
         pluginManager,
+        pluginRegistry,
+        pluginInstaller,
       ),
     );
   }
@@ -107,7 +134,10 @@ export class ServerModeEnvironment extends EnvironmentBase {
 }
 
 export class BridgeEnvironmentFactory extends BridgeFactory {
-  constructor(private readonly parent: AppEnvironment) {
+  constructor(
+    private readonly parent: AppEnvironment,
+    private readonly storageLocation?: string,
+  ) {
     super("BridgeEnvironmentFactory");
   }
 
@@ -122,7 +152,24 @@ export class BridgeEnvironmentFactory extends BridgeFactory {
   }
 
   private async createNormalBridge(initialData: BridgeData): Promise<Bridge> {
-    const env = await BridgeEnvironment.create(this.parent, initialData);
+    const env = await BridgeEnvironment.create(
+      this.parent,
+      initialData,
+      this.storageLocation,
+    );
+    const loggerService = env.get(LoggerService);
+
+    // #419: a bridge with cameras persisted needs Matter over TCP on start.
+    const tcp =
+      this.storageLocation &&
+      bridgeNeedsTcpForCameras(this.storageLocation, initialData.id)
+        ? CAMERA_TCP_CONFIG
+        : undefined;
+    if (tcp) {
+      loggerService
+        .get("BridgeEnvironmentFactory")
+        .info("matter over tcp enabled, cameras configured (#419)");
+    }
 
     class BridgeWithEnvironment extends Bridge {
       override async dispose(): Promise<void> {
@@ -133,9 +180,10 @@ export class BridgeEnvironmentFactory extends BridgeFactory {
 
     const bridge = new BridgeWithEnvironment(
       env,
-      env.get(LoggerService),
+      loggerService,
       await env.load(BridgeDataProvider),
       await env.load(BridgeEndpointManager),
+      tcp ? { tcp } : undefined,
     );
     await bridge.initialize();
     return bridge;
@@ -157,7 +205,8 @@ export class BridgeEnvironmentFactory extends BridgeFactory {
       await env.load(HomeAssistantClient),
       env.get(BridgeRegistry),
       await env.load(EntityMappingStorage),
-      dataProvider.id,
+      await env.load(EntityIdentityStorage),
+      dataProvider,
       loggerService.get("ServerModeEndpointManager"),
     );
 

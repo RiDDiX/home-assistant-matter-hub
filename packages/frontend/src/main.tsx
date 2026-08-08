@@ -4,6 +4,8 @@ import { Provider as StateProvider } from "react-redux";
 import { createBrowserRouter } from "react-router";
 import { RouterProvider } from "react-router/dom";
 
+import "./i18n/index.ts";
+
 import "@fontsource/roboto/300.css";
 import "@fontsource/roboto/400.css";
 import "@fontsource/roboto/500.css";

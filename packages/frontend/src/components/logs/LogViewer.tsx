@@ -16,10 +16,12 @@ import InputLabel from "@mui/material/InputLabel";
 import MenuItem from "@mui/material/MenuItem";
 import Select, { type SelectChangeEvent } from "@mui/material/Select";
 import Stack from "@mui/material/Stack";
+import { useTheme } from "@mui/material/styles";
 import TextField from "@mui/material/TextField";
 import Tooltip from "@mui/material/Tooltip";
 import Typography from "@mui/material/Typography";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 
 interface LogEntry {
   timestamp: string;
@@ -33,13 +35,6 @@ interface LogViewerProps {
   onClose: () => void;
 }
 
-const levelColors = {
-  error: "#d32f2f",
-  warn: "#ed6c02",
-  info: "#0288d1",
-  debug: "#7b1fa2",
-};
-
 const levelIcons = {
   error: ErrorIcon,
   warn: WarningIcon,
@@ -48,6 +43,17 @@ const levelIcons = {
 };
 
 export const LogViewer = ({ open, onClose }: LogViewerProps) => {
+  const { t } = useTranslation();
+  const theme = useTheme();
+  const levelColors = useMemo(
+    () => ({
+      error: theme.palette.error.main,
+      warn: theme.palette.warning.main,
+      info: theme.palette.info.main,
+      debug: theme.palette.secondary.main,
+    }),
+    [theme],
+  );
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [level, setLevel] = useState<string[]>("error,warn,info".split(","));
@@ -123,9 +129,9 @@ export const LogViewer = ({ open, onClose }: LogViewerProps) => {
     <Dialog open={open} onClose={onClose} maxWidth="lg" fullWidth>
       <DialogTitle sx={{ display: "flex", alignItems: "center", gap: 1 }}>
         <BugReportIcon />
-        System Logs
+        {t("logs.title")}
         <Box sx={{ flexGrow: 1 }} />
-        <Tooltip title="Auto Refresh">
+        <Tooltip title={t("logs.autoRefresh")}>
           <Chip
             label={autoRefresh ? "Auto" : "Manual"}
             color={autoRefresh ? "success" : "default"}
@@ -143,10 +149,10 @@ export const LogViewer = ({ open, onClose }: LogViewerProps) => {
         <Stack spacing={2} sx={{ mb: 2 }}>
           <Stack direction="row" spacing={2} alignItems="center">
             <FormControl size="small" sx={{ minWidth: 200 }}>
-              <InputLabel>Log Level</InputLabel>
+              <InputLabel>{t("logs.logLevel")}</InputLabel>
               <Select
                 value={level}
-                label="Log Level"
+                label={t("logs.logLevel")}
                 onChange={handleLevelChange}
                 multiple
                 renderValue={(selected) => (
@@ -168,27 +174,27 @@ export const LogViewer = ({ open, onClose }: LogViewerProps) => {
                   </Box>
                 )}
               >
-                <MenuItem value="error">Error</MenuItem>
-                <MenuItem value="warn">Warning</MenuItem>
-                <MenuItem value="info">Info</MenuItem>
-                <MenuItem value="debug">Debug</MenuItem>
+                <MenuItem value="error">{t("logs.error")}</MenuItem>
+                <MenuItem value="warn">{t("logs.warning")}</MenuItem>
+                <MenuItem value="info">{t("logs.info")}</MenuItem>
+                <MenuItem value="debug">{t("logs.debug")}</MenuItem>
               </Select>
             </FormControl>
 
             <TextField
               size="small"
-              placeholder="Search logs..."
+              placeholder={t("logs.searchPlaceholder")}
               value={search}
               onChange={handleSearchChange}
               sx={{ flexGrow: 1 }}
             />
 
             <Button variant="outlined" onClick={fetchLogs}>
-              Refresh
+              {t("common.refresh")}
             </Button>
 
             <Button variant="outlined" color="error" onClick={handleClearLogs}>
-              Clear
+              {t("common.delete")}
             </Button>
           </Stack>
         </Stack>
@@ -206,11 +212,13 @@ export const LogViewer = ({ open, onClose }: LogViewerProps) => {
         >
           {loading ? (
             <Box sx={{ display: "flex", justifyContent: "center", p: 4 }}>
-              <Typography>Loading logs...</Typography>
+              <Typography>{t("common.loading")}...</Typography>
             </Box>
           ) : logs.length === 0 ? (
             <Box sx={{ display: "flex", justifyContent: "center", p: 4 }}>
-              <Typography color="text.secondary">No logs found</Typography>
+              <Typography color="text.secondary">
+                {t("logs.noResults")}
+              </Typography>
             </Box>
           ) : (
             <Stack spacing={1}>
@@ -244,7 +252,10 @@ export const LogViewer = ({ open, onClose }: LogViewerProps) => {
                       sx={{
                         backgroundColor:
                           levelColors[log.level as keyof typeof levelColors],
-                        color: "white",
+                        color: theme.palette.getContrastText(
+                          levelColors[log.level as keyof typeof levelColors] ??
+                            theme.palette.grey[500],
+                        ),
                         fontSize: "0.7rem",
                         height: 20,
                       }}
@@ -270,7 +281,7 @@ export const LogViewer = ({ open, onClose }: LogViewerProps) => {
       </DialogContent>
 
       <DialogActions>
-        <Button onClick={onClose}>Close</Button>
+        <Button onClick={onClose}>{t("common.close")}</Button>
       </DialogActions>
     </Dialog>
   );

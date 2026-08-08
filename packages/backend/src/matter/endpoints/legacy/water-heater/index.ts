@@ -22,7 +22,7 @@ const WaterHeaterDeviceType = ThermostatDevice.with(
  * Convert HA temperature to Matter temperature (0.01°C units).
  * Returns undefined if value is null/undefined/invalid.
  */
-function toMatterTemp(
+export function toMatterTemp(
   value: string | number | null | undefined,
 ): number | undefined {
   if (value == null) return undefined;
@@ -51,7 +51,7 @@ export function WaterHeaterDevice(
     2100;
   const heatingSetpoint = toMatterTemp(attributes.temperature) ?? 10000;
 
-  // Pass thermostat state at endpoint level — Matter.js reads from here during
+  // Pass thermostat state at endpoint level, Matter.js reads from here during
   // validation, BEFORE our initialize() runs. Without this, limits fall back to
   // the default 0-50°C range (#145, regression from #97 fix).
   // Only include heating attributes since water heater uses heating-only features.

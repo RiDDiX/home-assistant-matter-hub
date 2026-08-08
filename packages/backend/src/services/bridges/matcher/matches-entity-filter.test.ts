@@ -52,6 +52,18 @@ const deviceRegistryWithDefaultModel: HomeAssistantDeviceRegistry = {
   default_model: "Generic LED Bulb",
 };
 
+const deviceRegistryWithManufacturer: HomeAssistantDeviceRegistry = {
+  id: "device4711",
+  area_id: "area_id",
+  manufacturer: "Sonoff",
+};
+
+const deviceRegistryWithDefaultManufacturer: HomeAssistantDeviceRegistry = {
+  id: "device4711",
+  area_id: "area_id",
+  default_manufacturer: "Generic",
+};
+
 describe("matchEntityFilter.testMatcher", () => {
   it("should match the domain", () => {
     expect(
@@ -456,6 +468,200 @@ describe("matchEntityFilter.testMatcher", () => {
     ).toBeFalsy();
   });
 
+  it("should match entity label by regex (slug)", () => {
+    expect(
+      testMatcher(
+        {
+          type: HomeAssistantMatcherType.EntityLabelRegex,
+          value: "^test_.*$",
+        },
+        undefined,
+        registry,
+      ),
+    ).toBeTruthy();
+  });
+  it("should not match entity label regex when entity has no labels", () => {
+    const entityWithoutLabel = { ...registry, labels: [] };
+    expect(
+      testMatcher(
+        {
+          type: HomeAssistantMatcherType.EntityLabelRegex,
+          value: ".*",
+        },
+        undefined,
+        entityWithoutLabel,
+      ),
+    ).toBeFalsy();
+  });
+  it("should match entity label regex against display name", () => {
+    const entityWithLabel = { ...registry, labels: ["matter_v2"] };
+    const labels = [{ label_id: "matter_v2", name: "Matter" }];
+    expect(
+      testMatcher(
+        {
+          type: HomeAssistantMatcherType.EntityLabelRegex,
+          value: "^Matter$",
+        },
+        undefined,
+        entityWithLabel,
+        undefined,
+        labels,
+      ),
+    ).toBeTruthy();
+  });
+  it("should match device label by regex", () => {
+    const entityWithoutLabel = { ...registry, labels: [] };
+    const deviceWithLabel = { ...deviceRegistry, labels: ["matter_room"] };
+    expect(
+      testMatcher(
+        {
+          type: HomeAssistantMatcherType.DeviceLabelRegex,
+          value: "^matter_.*",
+        },
+        deviceWithLabel,
+        entityWithoutLabel,
+      ),
+    ).toBeTruthy();
+  });
+  it("should not match device label regex against entity-only labels", () => {
+    expect(
+      testMatcher(
+        {
+          type: HomeAssistantMatcherType.DeviceLabelRegex,
+          value: "^test_.*$",
+        },
+        deviceRegistry,
+        registry,
+      ),
+    ).toBeFalsy();
+  });
+  it("should return false for invalid label regex", () => {
+    expect(
+      testMatcher(
+        {
+          type: HomeAssistantMatcherType.EntityLabelRegex,
+          value: "[invalid(regex",
+        },
+        undefined,
+        registry,
+      ),
+    ).toBeFalsy();
+  });
+
+  it("should match any_field_regex against domain", () => {
+    expect(
+      testMatcher(
+        {
+          type: HomeAssistantMatcherType.AnyFieldRegex,
+          value: "domain=light",
+        },
+        undefined,
+        registry,
+      ),
+    ).toBeTruthy();
+  });
+  it("should match any_field_regex against manufacturer (#382)", () => {
+    expect(
+      testMatcher(
+        {
+          type: HomeAssistantMatcherType.AnyFieldRegex,
+          value: "manufacturer=Sonoff",
+        },
+        deviceRegistryWithManufacturer,
+        registry,
+      ),
+    ).toBeTruthy();
+  });
+  it("should match any_field_regex with AND via lookahead", () => {
+    expect(
+      testMatcher(
+        {
+          type: HomeAssistantMatcherType.AnyFieldRegex,
+          value: "(?=.*domain=light)(?=.*platform=hue)",
+        },
+        undefined,
+        registry,
+      ),
+    ).toBeTruthy();
+  });
+  it("should not match any_field_regex when AND group fails", () => {
+    expect(
+      testMatcher(
+        {
+          type: HomeAssistantMatcherType.AnyFieldRegex,
+          value: "(?=.*domain=light)(?=.*platform=zwave)",
+        },
+        undefined,
+        registry,
+      ),
+    ).toBeFalsy();
+  });
+  it("should match any_field_regex with OR via alternation", () => {
+    expect(
+      testMatcher(
+        {
+          type: HomeAssistantMatcherType.AnyFieldRegex,
+          value: "domain=switch|domain=light",
+        },
+        undefined,
+        registry,
+      ),
+    ).toBeTruthy();
+  });
+  it("should match any_field_regex against entity label slug", () => {
+    expect(
+      testMatcher(
+        {
+          type: HomeAssistantMatcherType.AnyFieldRegex,
+          value: "entity_labels=.*\\btest_label\\b",
+        },
+        undefined,
+        registry,
+      ),
+    ).toBeTruthy();
+  });
+  it("should match any_field_regex against device label display name", () => {
+    const entityWithoutLabel = { ...registry, labels: [] };
+    const deviceWithLabel = { ...deviceRegistry, labels: ["matter_v2"] };
+    const labelRegistry = [{ label_id: "matter_v2", name: "Matter" }];
+    expect(
+      testMatcher(
+        {
+          type: HomeAssistantMatcherType.AnyFieldRegex,
+          value: "device_label_names=.*\\bMatter\\b",
+        },
+        deviceWithLabel,
+        entityWithoutLabel,
+        undefined,
+        labelRegistry,
+      ),
+    ).toBeTruthy();
+  });
+  it("should match any_field_regex against area from device", () => {
+    expect(
+      testMatcher(
+        {
+          type: HomeAssistantMatcherType.AnyFieldRegex,
+          value: "area=area_id",
+        },
+        deviceRegistry,
+        registry,
+      ),
+    ).toBeTruthy();
+  });
+  it("should return false for invalid any_field_regex", () => {
+    expect(
+      testMatcher(
+        {
+          type: HomeAssistantMatcherType.AnyFieldRegex,
+          value: "[invalid(regex",
+        },
+        undefined,
+        registry,
+      ),
+    ).toBeFalsy();
+  });
+
   it("should match the device name", () => {
     expect(
       testMatcher(
@@ -609,6 +815,65 @@ describe("matchEntityFilter.testMatcher", () => {
           value: "Hue",
         },
         deviceRegistry,
+        registry,
+      ),
+    ).toBeFalsy();
+  });
+
+  it("should match the manufacturer (#382)", () => {
+    expect(
+      testMatcher(
+        { type: HomeAssistantMatcherType.Manufacturer, value: "sonoff" },
+        deviceRegistryWithManufacturer,
+        registry,
+      ),
+    ).toBeTruthy();
+  });
+  it("should match the manufacturer with a wildcard", () => {
+    expect(
+      testMatcher(
+        { type: HomeAssistantMatcherType.Manufacturer, value: "*onof*" },
+        deviceRegistryWithManufacturer,
+        registry,
+      ),
+    ).toBeTruthy();
+  });
+  it("should match default_manufacturer if manufacturer is not set", () => {
+    expect(
+      testMatcher(
+        { type: HomeAssistantMatcherType.Manufacturer, value: "Generic" },
+        deviceRegistryWithDefaultManufacturer,
+        registry,
+      ),
+    ).toBeTruthy();
+  });
+  it("should not match a different manufacturer", () => {
+    expect(
+      testMatcher(
+        { type: HomeAssistantMatcherType.Manufacturer, value: "Philips" },
+        deviceRegistryWithManufacturer,
+        registry,
+      ),
+    ).toBeFalsy();
+  });
+  it("should not match manufacturer if device has none", () => {
+    expect(
+      testMatcher(
+        { type: HomeAssistantMatcherType.Manufacturer, value: "Sonoff" },
+        deviceRegistry,
+        registry,
+      ),
+    ).toBeFalsy();
+  });
+
+  it("should return false for null matcher value", () => {
+    expect(
+      testMatcher(
+        {
+          type: HomeAssistantMatcherType.Pattern,
+          value: null as unknown as string,
+        },
+        undefined,
         registry,
       ),
     ).toBeFalsy();

@@ -1,8 +1,12 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { type Environment, StorageService } from "@matter/main";
-import { LoggerService } from "./logger.js";
+import {
+  type DataNamespace,
+  type Environment,
+  StorageService,
+  VariableService,
+} from "@matter/main";
 import { CustomStorage } from "./storage/custom-storage.js";
 
 export interface StorageOptions {
@@ -10,13 +14,19 @@ export interface StorageOptions {
 }
 
 export function storage(environment: Environment, options: StorageOptions) {
-  const logger = environment.get(LoggerService).get("CustomStorage");
   const location = resolveStorageLocation(options.location);
   fs.mkdirSync(location, { recursive: true });
+  environment.get(VariableService).set("storage.path", location);
   const storageService = environment.get(StorageService);
-  storageService.location = location;
-  storageService.factory = (ns) =>
-    new CustomStorage(logger, path.resolve(location, ns));
+  storageService.registerDriver({
+    id: CustomStorage.driverId,
+    async create(namespace: DataNamespace) {
+      const driver = new CustomStorage(namespace);
+      await driver.initialize();
+      return driver;
+    },
+  });
+  storageService.defaultDriver = CustomStorage.driverId;
 }
 
 function resolveStorageLocation(storageLocation: string | undefined) {

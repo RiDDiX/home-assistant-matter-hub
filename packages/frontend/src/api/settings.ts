@@ -1,3 +1,5 @@
+import { assertOk, parseJsonResponse } from "./fetch-utils.js";
+
 export interface SettingsAuthResponse {
   enabled: boolean;
   username?: string;
@@ -6,10 +8,8 @@ export interface SettingsAuthResponse {
 
 export async function fetchAuthSettings(): Promise<SettingsAuthResponse> {
   const response = await fetch("api/settings/auth");
-  if (!response.ok) {
-    throw new Error(`Failed to fetch auth settings: ${response.statusText}`);
-  }
-  return response.json();
+  await assertOk(response, "Failed to fetch auth settings");
+  return parseJsonResponse(response);
 }
 
 export async function updateAuthSettings(
@@ -21,24 +21,37 @@ export async function updateAuthSettings(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ username, password }),
   });
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({}));
-    throw new Error(
-      error.error || `Failed to update auth settings: ${response.statusText}`,
-    );
-  }
-  return response.json();
+  await assertOk(response, "Failed to update auth settings");
+  return parseJsonResponse(response);
 }
 
 export async function deleteAuthSettings(): Promise<SettingsAuthResponse> {
   const response = await fetch("api/settings/auth", {
     method: "DELETE",
   });
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({}));
-    throw new Error(
-      error.error || `Failed to delete auth settings: ${response.statusText}`,
-    );
-  }
-  return response.json();
+  await assertOk(response, "Failed to delete auth settings");
+  return parseJsonResponse(response);
+}
+
+export interface RecoverySettingsResponse {
+  autoRecoveryEnabled: boolean;
+  recoveryIntervalMs: number;
+}
+
+export async function fetchRecoverySettings(): Promise<RecoverySettingsResponse> {
+  const response = await fetch("api/settings/recovery");
+  await assertOk(response, "Failed to fetch recovery settings");
+  return parseJsonResponse(response);
+}
+
+export async function updateRecoverySettings(
+  settings: Partial<RecoverySettingsResponse>,
+): Promise<RecoverySettingsResponse> {
+  const response = await fetch("api/settings/recovery", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(settings),
+  });
+  await assertOk(response, "Failed to update recovery settings");
+  return parseJsonResponse(response);
 }

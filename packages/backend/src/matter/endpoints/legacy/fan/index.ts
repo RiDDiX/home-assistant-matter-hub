@@ -3,46 +3,22 @@ import {
   FanDeviceFeature,
 } from "@home-assistant-matter-hub/common";
 import type { EndpointType } from "@matter/main";
+import { GroupsServer, ScenesManagementServer } from "@matter/main/behaviors";
 import type { FanControl } from "@matter/main/clusters";
 import {
   FanDevice as Device,
   OnOffPlugInUnitDevice,
 } from "@matter/main/devices";
-import { EntityStateProvider } from "../../../../services/bridges/entity-state-provider.js";
+import { autoPresetName } from "../../../../utils/converters/fan-mode.js";
 import type { FeatureSelection } from "../../../../utils/feature-selection.js";
 import { testBit } from "../../../../utils/test-bit.js";
 import { BasicInformationServer } from "../../../behaviors/basic-information-server.js";
+import { FanSpeedMemoryBehavior } from "../../../behaviors/fan-speed-memory.js";
 import { HomeAssistantEntityBehavior } from "../../../behaviors/home-assistant-entity-behavior.js";
 import { IdentifyServer } from "../../../behaviors/identify-server.js";
-import { PowerSourceServer } from "../../../behaviors/power-source-server.js";
+import { DefaultPowerSourceServer } from "../../../behaviors/power-source-server.js";
 import { FanFanControlServer } from "./behaviors/fan-fan-control-server.js";
 import { FanOnOffServer } from "./behaviors/fan-on-off-server.js";
-
-const FanPowerSourceServer = PowerSourceServer({
-  getBatteryPercent: (entity, agent) => {
-    // First check for battery entity from mapping (auto-assigned or manual)
-    const homeAssistant = agent.get(HomeAssistantEntityBehavior);
-    const batteryEntity = homeAssistant.state.mapping?.batteryEntity;
-    if (batteryEntity) {
-      const stateProvider = agent.env.get(EntityStateProvider);
-      const battery = stateProvider.getNumericState(batteryEntity);
-      if (battery != null) {
-        return Math.max(0, Math.min(100, battery));
-      }
-    }
-
-    // Fallback to entity's own battery attribute
-    const attrs = entity.attributes as {
-      battery?: number;
-      battery_level?: number;
-    };
-    const level = attrs.battery_level ?? attrs.battery;
-    if (level == null || Number.isNaN(Number(level))) {
-      return null;
-    }
-    return Number(level);
-  },
-});
 
 export function FanDevice(
   homeAssistantEntity: HomeAssistantEntityBehavior.State,
@@ -76,19 +52,23 @@ export function FanDevice(
           IdentifyServer,
           BasicInformationServer,
           HomeAssistantEntityBehavior,
+          GroupsServer,
+          ScenesManagementServer,
           FanOnOffServer,
-          FanPowerSourceServer,
+          DefaultPowerSourceServer,
         )
       : OnOffPlugInUnitDevice.with(
           IdentifyServer,
           BasicInformationServer,
           HomeAssistantEntityBehavior,
+          GroupsServer,
+          ScenesManagementServer,
           FanOnOffServer,
         );
     return onOffDevice.set({ homeAssistantEntity });
   }
 
-  const features: FeatureSelection<FanControl.Cluster> = new Set();
+  const features: FeatureSelection<typeof FanControl.Cluster> = new Set();
 
   // Enable MultiSpeed and Step for fans with percentage control OR preset modes
   // For preset-only fans, speeds are mapped to preset modes (Low/Medium/High etc.)
@@ -97,8 +77,8 @@ export function FanDevice(
     features.add("Step");
   }
 
-  // Enable Auto if fan supports preset modes (including "Auto" preset)
-  if (hasPresetMode) {
+  // Auto only if a preset really is "auto", else HA rejects the "Auto" we send (#387).
+  if (hasPresetMode && autoPresetName(presetModes) !== undefined) {
     features.add("Auto");
   }
   if (testBit(supportedFeatures, FanDeviceFeature.DIRECTION)) {
@@ -108,12 +88,16 @@ export function FanDevice(
   if (testBit(supportedFeatures, FanDeviceFeature.OSCILLATE)) {
     features.add("Rocking");
   }
-  // Enable Wind mode if fan has natural/sleep preset modes
+  // Enable Wind mode if fan has english natural/sleep presets, or localized
+  // ones the user mapped via fanWindPresets (#387).
+  const windPresets = homeAssistantEntity.mapping?.fanWindPresets;
   const hasWindModes = presetModes.some(
     (m) =>
       m.toLowerCase() === "natural" ||
       m.toLowerCase() === "nature" ||
-      m.toLowerCase() === "sleep",
+      m.toLowerCase() === "sleep" ||
+      !!windPresets?.natural?.includes(m) ||
+      !!windPresets?.sleep?.includes(m),
   );
   if (hasWindModes) {
     features.add("Wind");
@@ -124,16 +108,20 @@ export function FanDevice(
         IdentifyServer,
         BasicInformationServer,
         HomeAssistantEntityBehavior,
+        GroupsServer,
         FanOnOffServer,
         FanFanControlServer.with(...features),
-        FanPowerSourceServer,
+        FanSpeedMemoryBehavior,
+        DefaultPowerSourceServer,
       )
     : Device.with(
         IdentifyServer,
         BasicInformationServer,
         HomeAssistantEntityBehavior,
+        GroupsServer,
         FanOnOffServer,
         FanFanControlServer.with(...features),
+        FanSpeedMemoryBehavior,
       );
   return device.set({ homeAssistantEntity });
 }

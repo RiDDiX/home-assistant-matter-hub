@@ -1,0 +1,262 @@
+import type {
+  EntityMappingConfig,
+  HomeAssistantDomain,
+  MappingProfile,
+  MappingProfileEntry,
+  MappingProfileImportMatch,
+  MappingProfileImportPreview,
+  MappingProfileImportResult,
+} from "@home-assistant-matter-hub/common";
+import express from "express";
+import type { EntityMappingStorage } from "../services/storage/entity-mapping-storage.js";
+
+function configToProfileEntry(
+  config: EntityMappingConfig,
+): MappingProfileEntry {
+  const domain = config.entityId.split(".")[0] as HomeAssistantDomain;
+  return {
+    domain,
+    entityIdPattern: config.entityId,
+    matterDeviceType: config.matterDeviceType,
+    customName: config.customName,
+    disabled: config.disabled,
+    filterLifeEntity: config.filterLifeEntity,
+    cleaningModeEntity: config.cleaningModeEntity,
+    temperatureEntity: config.temperatureEntity,
+    humidityEntity: config.humidityEntity,
+    pressureEntity: config.pressureEntity,
+    batteryEntity: config.batteryEntity,
+    disableBatteryMapping: config.disableBatteryMapping,
+    roomEntities: config.roomEntities,
+    disableLockPin: config.disableLockPin,
+    lockUsercodeService: config.lockUsercodeService,
+    lockUsercodeSlot: config.lockUsercodeSlot,
+    lockPinMinLength: config.lockPinMinLength,
+    lockPinMaxLength: config.lockPinMaxLength,
+    powerEntity: config.powerEntity,
+    energyEntity: config.energyEntity,
+    meterSerialNumber: config.meterSerialNumber,
+    pointOfDelivery: config.pointOfDelivery,
+    voltageEntity: config.voltageEntity,
+    currentEntity: config.currentEntity,
+    batteryPowerEntity: config.batteryPowerEntity,
+    batteryEnergyEntity: config.batteryEnergyEntity,
+    chargingSwitchEntity: config.chargingSwitchEntity,
+    currentLimitEntity: config.currentLimitEntity,
+    suctionLevelEntity: config.suctionLevelEntity,
+    mopIntensityEntity: config.mopIntensityEntity,
+    customServiceAreas: config.customServiceAreas,
+    customFanSpeedTags: config.customFanSpeedTags,
+    fanWindPresets: config.fanWindPresets,
+    fanRestoreSpeedOnPowerOn: config.fanRestoreSpeedOnPowerOn,
+    valetudoIdentifier: config.valetudoIdentifier,
+    coverSwapOpenClose: config.coverSwapOpenClose,
+    coverSliderDebounceMs: config.coverSliderDebounceMs,
+    disableClimateOnOff: config.disableClimateOnOff,
+    disableClimateFanControl: config.disableClimateFanControl,
+    climateKeepModeOnIdle: config.climateKeepModeOnIdle,
+    climateExposeFan: config.climateExposeFan,
+    climateAutoMode: config.climateAutoMode,
+    disableMomentaryFlip: config.disableMomentaryFlip,
+    vacuumAscendingRoomOrder: config.vacuumAscendingRoomOrder,
+  };
+}
+
+export function mappingProfileApi(
+  mappingStorage: EntityMappingStorage,
+): express.Router {
+  const router = express.Router();
+
+  router.get("/export/:bridgeId", (req, res) => {
+    const { bridgeId } = req.params;
+    const profileName = (req.query.name as string) || "Unnamed Profile";
+    const entityIdsParam = req.query.entityIds as string | undefined;
+    let mappings = mappingStorage.getMappingsForBridge(bridgeId);
+
+    if (entityIdsParam) {
+      const selectedIds = new Set(entityIdsParam.split(","));
+      mappings = mappings.filter((m) => selectedIds.has(m.entityId));
+    }
+
+    if (mappings.length === 0) {
+      res.status(404).json({ error: "No mappings found for this bridge" });
+      return;
+    }
+
+    const entries = mappings.map(configToProfileEntry);
+    const domains = [...new Set(entries.map((e) => e.domain))];
+
+    const profile: MappingProfile = {
+      version: 1,
+      name: profileName,
+      createdAt: new Date().toISOString(),
+      domains,
+      entryCount: entries.length,
+      entries,
+    };
+
+    res.json(profile);
+  });
+
+  router.post("/import/preview/:bridgeId", (req, res) => {
+    const { bridgeId } = req.params;
+    const { profile, availableEntityIds } = req.body as {
+      profile: MappingProfile;
+      availableEntityIds: string[];
+    };
+
+    if (!profile?.entries || !Array.isArray(profile.entries)) {
+      res.status(400).json({ error: "Invalid mapping profile format" });
+      return;
+    }
+
+    if (!availableEntityIds || !Array.isArray(availableEntityIds)) {
+      res.status(400).json({ error: "Missing availableEntityIds" });
+      return;
+    }
+
+    const existingMappings = mappingStorage.getMappingsForBridge(bridgeId);
+    const existingMap = new Map(existingMappings.map((m) => [m.entityId, m]));
+
+    const matches: MappingProfileImportMatch[] = [];
+    const unmatchedEntries: MappingProfileEntry[] = [];
+
+    for (const entry of profile.entries) {
+      let matched = false;
+
+      if (
+        entry.entityIdPattern &&
+        availableEntityIds.includes(entry.entityIdPattern)
+      ) {
+        matches.push({
+          entry,
+          matchedEntityId: entry.entityIdPattern,
+          matchType: "exact",
+          existingMapping: existingMap.get(entry.entityIdPattern),
+        });
+        matched = true;
+      }
+
+      if (!matched) {
+        const domainEntities = availableEntityIds.filter(
+          (id: string) => id.split(".")[0] === entry.domain,
+        );
+        if (domainEntities.length === 1) {
+          matches.push({
+            entry,
+            matchedEntityId: domainEntities[0],
+            matchType: "domain",
+            existingMapping: existingMap.get(domainEntities[0]),
+          });
+          matched = true;
+        }
+      }
+
+      if (!matched) {
+        unmatchedEntries.push(entry);
+      }
+    }
+
+    const preview: MappingProfileImportPreview = {
+      profileName: profile.name,
+      totalEntries: profile.entries.length,
+      matches,
+      unmatchedEntries,
+    };
+
+    res.json(preview);
+  });
+
+  router.post("/import/apply/:bridgeId", async (req, res) => {
+    const { bridgeId } = req.params;
+    const { profile, selectedEntityIds } = req.body as {
+      profile: MappingProfile;
+      selectedEntityIds: string[];
+    };
+
+    if (!profile?.entries || !selectedEntityIds) {
+      res.status(400).json({ error: "Missing profile or selectedEntityIds" });
+      return;
+    }
+
+    const selectedSet = new Set(selectedEntityIds);
+
+    let applied = 0;
+    let skipped = 0;
+    const errors: Array<{ entityId: string; error: string }> = [];
+
+    for (const entry of profile.entries) {
+      const targetEntityId = entry.entityIdPattern;
+
+      if (!targetEntityId || !selectedSet.has(targetEntityId)) {
+        skipped++;
+        continue;
+      }
+
+      try {
+        await mappingStorage.setMapping({
+          bridgeId,
+          entityId: targetEntityId,
+          matterDeviceType: entry.matterDeviceType,
+          customName: entry.customName,
+          disabled: entry.disabled,
+          filterLifeEntity: entry.filterLifeEntity,
+          cleaningModeEntity: entry.cleaningModeEntity,
+          temperatureEntity: entry.temperatureEntity,
+          humidityEntity: entry.humidityEntity,
+          pressureEntity: entry.pressureEntity,
+          batteryEntity: entry.batteryEntity,
+          disableBatteryMapping: entry.disableBatteryMapping,
+          roomEntities: entry.roomEntities,
+          disableLockPin: entry.disableLockPin,
+          lockUsercodeService: entry.lockUsercodeService,
+          lockUsercodeSlot: entry.lockUsercodeSlot,
+          lockPinMinLength: entry.lockPinMinLength,
+          lockPinMaxLength: entry.lockPinMaxLength,
+          powerEntity: entry.powerEntity,
+          energyEntity: entry.energyEntity,
+          meterSerialNumber: entry.meterSerialNumber,
+          pointOfDelivery: entry.pointOfDelivery,
+          voltageEntity: entry.voltageEntity,
+          currentEntity: entry.currentEntity,
+          batteryPowerEntity: entry.batteryPowerEntity,
+          batteryEnergyEntity: entry.batteryEnergyEntity,
+          chargingSwitchEntity: entry.chargingSwitchEntity,
+          currentLimitEntity: entry.currentLimitEntity,
+          suctionLevelEntity: entry.suctionLevelEntity,
+          mopIntensityEntity: entry.mopIntensityEntity,
+          customServiceAreas: entry.customServiceAreas,
+          customFanSpeedTags: entry.customFanSpeedTags,
+          fanWindPresets: entry.fanWindPresets,
+          fanRestoreSpeedOnPowerOn: entry.fanRestoreSpeedOnPowerOn,
+          valetudoIdentifier: entry.valetudoIdentifier,
+          coverSwapOpenClose: entry.coverSwapOpenClose,
+          coverSliderDebounceMs: entry.coverSliderDebounceMs,
+          disableClimateOnOff: entry.disableClimateOnOff,
+          disableClimateFanControl: entry.disableClimateFanControl,
+          climateKeepModeOnIdle: entry.climateKeepModeOnIdle,
+          climateExposeFan: entry.climateExposeFan,
+          climateAutoMode: entry.climateAutoMode,
+          disableMomentaryFlip: entry.disableMomentaryFlip,
+          vacuumAscendingRoomOrder: entry.vacuumAscendingRoomOrder,
+        });
+        applied++;
+      } catch (e) {
+        errors.push({
+          entityId: targetEntityId,
+          error: e instanceof Error ? e.message : "Unknown error",
+        });
+      }
+    }
+
+    const result: MappingProfileImportResult = {
+      applied,
+      skipped,
+      errors,
+    };
+
+    res.json(result);
+  });
+
+  return router;
+}

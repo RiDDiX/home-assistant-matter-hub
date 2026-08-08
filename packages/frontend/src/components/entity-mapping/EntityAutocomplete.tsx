@@ -54,7 +54,7 @@ export function EntityAutocomplete({
           setOptions(data.entities ?? []);
         }
       } catch {
-        // silently fail — user can still type manually
+        // silently fail, user can still type manually
       } finally {
         setLoading(false);
       }
@@ -68,14 +68,16 @@ export function EntityAutocomplete({
   }, [fetchEntities]);
 
   const handleInputChange = useCallback(
-    (_: unknown, newInput: string) => {
+    (_: unknown, newInput: string, reason: string) => {
       setInputValue(newInput);
+      // bind free text as the user types; selection/clear go via handleChange
+      if (reason === "input") onChange(newInput);
       if (debounceRef.current) clearTimeout(debounceRef.current);
       debounceRef.current = setTimeout(() => {
         fetchEntities(newInput);
       }, 300);
     },
-    [fetchEntities],
+    [fetchEntities, onChange],
   );
 
   const handleChange = useCallback(

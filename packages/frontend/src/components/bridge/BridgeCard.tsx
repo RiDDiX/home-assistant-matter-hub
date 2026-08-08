@@ -10,6 +10,7 @@ import CardContent from "@mui/material/CardContent";
 import Chip from "@mui/material/Chip";
 import Stack from "@mui/material/Stack";
 import Typography from "@mui/material/Typography";
+import { useTranslation } from "react-i18next";
 import { Link as RouterLink } from "react-router";
 import { navigation } from "../../routes.tsx";
 import { BridgeStatusIcon } from "./BridgeStatusIcon.tsx";
@@ -20,6 +21,7 @@ export interface BridgeCardProps {
 }
 
 export const BridgeCard = ({ bridge }: BridgeCardProps) => {
+  const { t } = useTranslation();
   const fabricCount = bridge.commissioning?.fabrics.length ?? 0;
   const BridgeIcon = getBridgeIcon(bridge);
   const bridgeColor = getBridgeIconColor(bridge);
@@ -59,18 +61,18 @@ export const BridgeCard = ({ bridge }: BridgeCardProps) => {
                 color="text.secondary"
                 sx={{ mb: 1.5 }}
               >
-                Port {bridge.port}
+                {t("common.port")} {bridge.port}
               </Typography>
               <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
                 <Chip
                   icon={<Devices fontSize="small" />}
-                  label={`${bridge.deviceCount} Devices`}
+                  label={`${bridge.deviceCount} ${t("common.devices")}`}
                   size="small"
                   variant="outlined"
                 />
                 <Chip
                   icon={<DeviceHub fontSize="small" />}
-                  label={`${fabricCount} Fabric${fabricCount !== 1 ? "s" : ""}`}
+                  label={`${fabricCount} ${t("common.fabrics")}`}
                   size="small"
                   variant="outlined"
                   color={fabricCount > 0 ? "success" : "default"}
@@ -80,7 +82,7 @@ export const BridgeCard = ({ bridge }: BridgeCardProps) => {
                 ) && (
                   <Chip
                     icon={<Language fontSize="small" />}
-                    label="Google"
+                    label={t("bridge.google")}
                     size="small"
                     color="primary"
                     variant="filled"
@@ -91,7 +93,7 @@ export const BridgeCard = ({ bridge }: BridgeCardProps) => {
                 ) && (
                   <Chip
                     icon={<Language fontSize="small" />}
-                    label="Alexa"
+                    label={t("bridge.alexa")}
                     size="small"
                     color="secondary"
                     variant="filled"

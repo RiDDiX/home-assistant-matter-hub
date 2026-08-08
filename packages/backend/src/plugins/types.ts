@@ -1,4 +1,9 @@
 import type { Logger } from "@matter/general";
+import type { EndpointType } from "@matter/main";
+
+// Stands in for a stored secret on the wire: the listing sends it instead of
+// the real value, and a save carrying it back keeps the stored value.
+export const SECRET_UNCHANGED = "__unchanged__";
 
 /**
  * Configuration schema for plugin settings UI.
@@ -15,6 +20,8 @@ export interface PluginConfigSchema {
       description?: string;
       default?: unknown;
       required?: boolean;
+      // Never serve the stored value to the browser, see SECRET_UNCHANGED.
+      secret?: boolean;
       options?: Array<{ label: string; value: string }>;
     }
   >;
@@ -38,13 +45,24 @@ export interface PluginDevice {
   id: string;
   /** Display name */
   name: string;
-  /** Matter device type (e.g., "on_off_light", "thermostat", "temperature_sensor") */
-  deviceType: string;
+  /**
+   * Matter device type from the built-in supported list (e.g. "on_off_light",
+   * "thermostat"). Provide this OR `endpointType`, not both.
+   */
+  deviceType?: string;
+  /**
+   * A matter.js EndpointType the plugin built itself, e.g.
+   * `OnOffLightDevice.with(MyCustomBehavior)`. Use this to expose device types
+   * or clusters HAMH does not ship, including ones with custom command
+   * handlers (your own Behavior subclass). When set, `deviceType` is ignored.
+   *
+   * The plugin MUST depend on the same @matter/* version HAMH is pinned to
+   * (declare them as peerDependencies), otherwise the EndpointType belongs to a
+   * different matter.js instance and will be rejected.
+   */
+  endpointType?: EndpointType;
   /** Initial cluster configuration */
   clusters: PluginClusterConfig[];
-
-  /** Called when a Matter controller sends a command to this device */
-  onCommand?(clusterId: string, command: string, args: unknown): Promise<void>;
 
   /** Called when a Matter controller writes an attribute on this device */
   onAttributeWrite?(
@@ -65,6 +83,20 @@ export interface PluginStorage {
 }
 
 /**
+ * A domain-to-device-type mapping registered by a plugin.
+ * Allows plugins to tell HAMH how to handle HA domains that
+ * are not natively supported, or to override existing mappings.
+ */
+export interface PluginDomainMapping {
+  /** Home Assistant domain (e.g., "number", "timer") */
+  domain: string;
+  /** Matter device type key (must be in the supported device types list) */
+  matterDeviceType: string;
+  /** Default cluster state for newly created endpoints */
+  defaultClusters?: PluginClusterConfig[];
+}
+
+/**
  * Context provided to plugins during their lifecycle.
  * This is the primary API surface for plugin authors.
  */
@@ -80,19 +112,27 @@ export interface PluginContext {
     attributes: Record<string, unknown>,
   ): void;
 
+  /**
+   * Register a domain mapping so HAMH maps HA entities of the given
+   * domain to the specified Matter device type. This is checked before
+   * the built-in domain mapping table.
+   */
+  registerDomainMapping(mapping: PluginDomainMapping): void;
+
   /** Persistent storage scoped to this plugin */
   storage: PluginStorage;
   /** Logger scoped to this plugin */
   log: Logger;
   /** ID of the bridge this plugin is attached to */
   bridgeId: string;
+  /** The bridge's HA connection, so plugins don't need their own */
+  homeAssistant?: { url: string; accessToken: string };
 }
 
 /**
  * The interface that all plugins must implement.
- * Lifecycle is inspired by Matterbridge's MatterbridgeDynamicPlatform.
  *
- * A plugin is a "device provider" — it discovers/creates devices and
+ * A plugin is a "device provider", it discovers/creates devices and
  * registers them with the bridge via the PluginContext.
  */
 export interface MatterHubPlugin {
@@ -122,6 +162,13 @@ export interface MatterHubPlugin {
 
   /** Optional: JSON schema for plugin config UI */
   getConfigSchema?(): PluginConfigSchema;
+
+  /**
+   * Optional: the config the plugin currently runs with. Plugins that merge
+   * persisted config during onStart report it here so the plugin listing
+   * shows the effective values, not the registration seed.
+   */
+  getCurrentConfig?(): Record<string, unknown>;
 
   /** Called when the user updates plugin config via the UI */
   onConfigChanged?(config: Record<string, unknown>): Promise<void>;

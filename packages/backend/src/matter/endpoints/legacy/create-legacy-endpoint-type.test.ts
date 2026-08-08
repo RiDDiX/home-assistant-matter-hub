@@ -12,6 +12,7 @@ import {
   type HomeAssistantEntityRegistry,
   type HomeAssistantEntityState,
   type HumidiferDeviceAttributes,
+  type LawnMowerDeviceAttributes,
   type LightDeviceAttributes,
   LightDeviceColorMode,
   MediaPlayerDeviceFeature,
@@ -19,6 +20,7 @@ import {
   SensorDeviceClass,
   type VacuumDeviceAttributes,
   type WaterHeaterDeviceAttributes,
+  type WeatherEntityAttributes,
 } from "@home-assistant-matter-hub/common";
 import { Endpoint, type EndpointType } from "@matter/main";
 import { uniq } from "lodash-es";
@@ -138,6 +140,45 @@ const testEntities: Record<
     createEntity<SensorDeviceAttributes>("sensor.s6", "50", {
       device_class: SensorDeviceClass.aqi,
     }),
+    createEntity<SensorDeviceAttributes>("sensor.s7", "400", {
+      device_class: SensorDeviceClass.carbon_dioxide,
+    }),
+    createEntity<SensorDeviceAttributes>("sensor.s8", "5", {
+      device_class: SensorDeviceClass.carbon_monoxide,
+    }),
+    createEntity<SensorDeviceAttributes>("sensor.s9", "40", {
+      device_class: SensorDeviceClass.nitrogen_dioxide,
+    }),
+    createEntity<SensorDeviceAttributes>("sensor.s10", "60", {
+      device_class: SensorDeviceClass.ozone,
+    }),
+    createEntity<SensorDeviceAttributes>("sensor.s11", "15", {
+      device_class: SensorDeviceClass.pm1,
+    }),
+    createEntity<SensorDeviceAttributes>("sensor.s12", "25", {
+      device_class: SensorDeviceClass.pm25,
+    }),
+    createEntity<SensorDeviceAttributes>("sensor.s13", "50", {
+      device_class: SensorDeviceClass.pm10,
+    }),
+    createEntity<SensorDeviceAttributes>("sensor.s14", "100", {
+      device_class: SensorDeviceClass.volatile_organic_compounds,
+    }),
+    createEntity<SensorDeviceAttributes>("sensor.s15", "1500", {
+      device_class: SensorDeviceClass.power,
+    }),
+    createEntity<SensorDeviceAttributes>("sensor.s16", "12.5", {
+      device_class: SensorDeviceClass.energy,
+    }),
+    createEntity<SensorDeviceAttributes>("sensor.s17", "230", {
+      device_class: SensorDeviceClass.voltage,
+    }),
+    createEntity<SensorDeviceAttributes>("sensor.s18", "6.5", {
+      device_class: SensorDeviceClass.current,
+    }),
+    createEntity<SensorDeviceAttributes>("sensor.s19", "75", {
+      device_class: SensorDeviceClass.battery,
+    }),
   ],
   [HomeAssistantDomain.switch]: [createEntity("switch.sw1", "on")],
   [HomeAssistantDomain.automation]: [
@@ -170,6 +211,12 @@ const testEntities: Record<
       event_type: "press",
     }),
   ],
+  [HomeAssistantDomain.lawn_mower]: [
+    createEntity<LawnMowerDeviceAttributes>("lawn_mower.lm1", "docked", {
+      supported_features: 7, // START_MOWING + PAUSE + DOCK
+      battery_level: 80,
+    }),
+  ],
   [HomeAssistantDomain.valve]: [createEntity("valve.v1", "open")],
   [HomeAssistantDomain.alarm_control_panel]: [
     createEntity("alarm_control_panel.a1", "armed_away", {
@@ -177,6 +224,7 @@ const testEntities: Record<
     }),
   ],
   [HomeAssistantDomain.remote]: [createEntity("remote.r1", "on")],
+  [HomeAssistantDomain.siren]: [createEntity("siren.s1", "off")],
   [HomeAssistantDomain.select]: [
     createEntity("select.mode1", "option_a", {
       options: ["option_a", "option_b", "option_c"],
@@ -197,20 +245,71 @@ const testEntities: Record<
       operation_list: ["off", "eco", "electric"],
     }),
   ],
+  [HomeAssistantDomain.weather]: [
+    createEntity<WeatherEntityAttributes>("weather.home", "sunny", {
+      temperature: 21,
+      temperature_unit: "°C",
+      humidity: 55,
+      pressure: 1013,
+      pressure_unit: "hPa",
+    }),
+  ],
 };
 
 describe("createLegacyEndpointType", () => {
   it("should not use any unknown clusterId", () => {
     const entities = Object.values(testEntities).flat();
     const devices = entities.map((entity) => createLegacyEndpointType(entity));
+    // A mapped battery upgrades to the BatteryStorage ESS type, a second
+    // powerTopology mount alongside the meter default.
+    devices.push(
+      createLegacyEndpointType(
+        createEntity<SensorDeviceAttributes>("sensor.batt_ess", "80", {
+          device_class: SensorDeviceClass.battery,
+        }),
+        {
+          entityId: "sensor.batt_ess",
+          batteryPowerEntity: "sensor.batt_power",
+        },
+      ),
+    );
     const endpoints = devices
       .filter((d): d is EndpointType => d != null)
       .map((endpointType) => new Endpoint(endpointType));
     const actual = uniq(endpoints.flatMap((d) => Object.keys(d.state)))
       .filter((key) => !/^\d+$/.test(key))
       .sort();
-    const expected = Object.keys(ClusterId).sort();
+    // fanSpeedMemory stays out of ClusterId on purpose: CustomStorage skips
+    // loading ClusterId-suffixed contexts, and the speed memory must persist.
+    const expected = [...Object.keys(ClusterId), "fanSpeedMemory"].sort();
     expect(actual).toEqual(expected);
+  });
+});
+
+describe("explicit matterDeviceType battery (#408)", () => {
+  const entity = createEntity<BinarySensorDeviceAttributes>(
+    "binary_sensor.occ",
+    "on",
+    { device_class: BinarySensorDeviceClass.Occupancy },
+  );
+
+  it("adds a power source when a battery entity is mapped", () => {
+    const type = createLegacyEndpointType(entity, {
+      entityId: "binary_sensor.occ",
+      matterDeviceType: "occupancy_sensor",
+      batteryEntity: "sensor.battery",
+    });
+    expect(type).toBeDefined();
+    expect(type!.behaviors).toHaveProperty("powerSource");
+  });
+
+  it("has no power source without a battery entity", () => {
+    const type = createLegacyEndpointType(entity, {
+      entityId: "binary_sensor.occ",
+      matterDeviceType: "occupancy_sensor",
+    });
+    expect(type).toBeDefined();
+    expect(type!.behaviors).not.toHaveProperty("powerSource");
   });
 });
 

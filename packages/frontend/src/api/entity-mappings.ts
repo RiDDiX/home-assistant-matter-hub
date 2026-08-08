@@ -3,15 +3,14 @@ import type {
   EntityMappingRequest,
   EntityMappingResponse,
 } from "@home-assistant-matter-hub/common";
+import { assertOk, parseJsonResponse } from "./fetch-utils.js";
 
 export async function fetchEntityMappings(
   bridgeId: string,
 ): Promise<EntityMappingResponse> {
   const response = await fetch(`api/entity-mappings/${bridgeId}`);
-  if (!response.ok) {
-    throw new Error(`Failed to fetch entity mappings: ${response.statusText}`);
-  }
-  return response.json();
+  await assertOk(response, "Failed to fetch entity mappings");
+  return parseJsonResponse(response);
 }
 
 export async function updateEntityMapping(
@@ -27,10 +26,8 @@ export async function updateEntityMapping(
       body: JSON.stringify(config),
     },
   );
-  if (!response.ok) {
-    throw new Error(`Failed to update entity mapping: ${response.statusText}`);
-  }
-  return response.json();
+  await assertOk(response, "Failed to update entity mapping");
+  return parseJsonResponse(response);
 }
 
 export async function deleteEntityMapping(

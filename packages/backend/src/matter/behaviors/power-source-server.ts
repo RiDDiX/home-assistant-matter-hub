@@ -5,6 +5,7 @@ import type {
 import { Logger } from "@matter/general";
 import { PowerSourceServer as Base } from "@matter/main/behaviors";
 import { PowerSource } from "@matter/main/clusters";
+import { EntityStateProvider } from "../../services/bridges/entity-state-provider.js";
 import { applyPatchState } from "../../utils/apply-patch-state.js";
 import { HomeAssistantEntityBehavior } from "./home-assistant-entity-behavior.js";
 import type { ValueGetter } from "./utils/cluster-config.js";
@@ -20,6 +21,11 @@ export interface PowerSourceConfig {
    * Get charging state from entity state
    */
   isCharging?: ValueGetter<boolean>;
+  /**
+   * Optional: drive batChargeState directly from a dedicated sensor, bypassing
+   * the isCharging + battery-percent inference. Return null to keep inferring.
+   */
+  getChargeState?: ValueGetter<PowerSource.BatChargeState | null>;
 }
 
 const FeaturedBase = Base.with("Battery", "Rechargeable");
@@ -60,15 +66,11 @@ class PowerSourceServerBase extends FeaturedBase {
     }
 
     this.update(homeAssistant.entity);
-    if (homeAssistant.state.managedByEndpoint) {
-      homeAssistant.registerUpdate(this.callback(this.update));
-    } else {
-      this.reactTo(homeAssistant.onChange, this.update);
-    }
+    this.reactTo(homeAssistant.onChange, this.update, { offline: true });
   }
 
-  public update(entity: HomeAssistantEntityInformation) {
-    if (!entity.state) {
+  private update(entity: HomeAssistantEntityInformation) {
+    if (!entity.state || !entity.state.attributes) {
       return;
     }
     const config = this.state.config;
@@ -98,6 +100,15 @@ class PowerSourceServerBase extends FeaturedBase {
           : PowerSource.BatChargeState.IsCharging;
     } else if (isCharging === false) {
       batChargeState = PowerSource.BatChargeState.IsNotCharging;
+    }
+
+    // A dedicated charging sensor wins over the inference when configured (#377).
+    const explicitChargeState = config.getChargeState?.(
+      entity.state,
+      this.agent,
+    );
+    if (explicitChargeState != null) {
+      batChargeState = explicitChargeState;
     }
 
     applyPatchState(this.state, {
@@ -144,3 +155,44 @@ export function PowerSourceServer(config: PowerSourceConfig) {
     order: PowerSource.Cluster.id,
   });
 }
+
+/**
+ * Default battery config shared by all domain endpoints.
+ * Checks for a mapped battery entity first (via EntityStateProvider),
+ * then falls back to the entity's own battery/battery_level attribute.
+ */
+export const defaultBatteryConfig: PowerSourceConfig = {
+  getBatteryPercent: (entity, agent) => {
+    const homeAssistant = agent.get(HomeAssistantEntityBehavior);
+    // No battery info for this entity when the flag is set, at init and on every
+    // update. Runtime updates restore the entity's own battery attribute, so the
+    // reader has to honor the flag directly (#427).
+    if (homeAssistant.state.mapping?.disableBatteryMapping) {
+      return null;
+    }
+    const batteryEntity = homeAssistant.state.mapping?.batteryEntity;
+    if (batteryEntity) {
+      const stateProvider = agent.env.get(EntityStateProvider);
+      const battery = stateProvider.getBatteryPercent(batteryEntity);
+      if (battery != null) {
+        return Math.max(0, Math.min(100, battery));
+      }
+    }
+
+    const attrs = entity.attributes as {
+      battery?: number;
+      battery_level?: number;
+    };
+    const level = attrs.battery_level ?? attrs.battery;
+    if (level == null || Number.isNaN(Number(level))) {
+      return null;
+    }
+    return Number(level);
+  },
+};
+
+/**
+ * Pre-configured PowerSourceServer using the default battery config.
+ * Use this instead of duplicating the battery getter in every domain endpoint.
+ */
+export const DefaultPowerSourceServer = PowerSourceServer(defaultBatteryConfig);

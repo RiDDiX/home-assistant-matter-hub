@@ -36,6 +36,7 @@ export enum VacuumDeviceFeature {
   MAP = 2048,
   STATE = 4096,
   START = 8192,
+  CLEAN_AREA = 16384,
 }
 
 export enum VacuumFanSpeed {
@@ -104,6 +105,20 @@ export type VacuumRoomsData =
   | DreameRoomRecord
   | null
   | undefined;
+
+/**
+ * Represents an HA area mapped to vacuum segments via the HA 2026.3
+ * "Map vacuum segments to areas" feature. Used when the vacuum supports
+ * VacuumEntityFeature.CLEAN_AREA.
+ */
+export interface CleanAreaRoom {
+  /** Matter ServiceArea areaId (uint32, derived from HA area_id hash) */
+  areaId: number;
+  /** HA area_id string (used in vacuum.clean_area action) */
+  haAreaId: string;
+  /** Human-readable area name from HA area registry */
+  name: string;
+}
 
 export interface VacuumDeviceAttributes {
   supported_features?: number;

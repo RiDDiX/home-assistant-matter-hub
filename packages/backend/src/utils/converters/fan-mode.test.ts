@@ -1,6 +1,6 @@
 import { FanControl } from "@matter/main/clusters";
 import { describe, expect, it } from "vitest";
-import { FanMode } from "./fan-mode.js";
+import { autoPresetName, FanMode } from "./fan-mode.js";
 
 import MFanMode = FanControl.FanMode;
 import FanModeSequence = FanControl.FanModeSequence;
@@ -40,5 +40,23 @@ describe("FanMode", () => {
           .mode,
       ).toEqual(expected);
     });
+  });
+});
+
+describe("autoPresetName", () => {
+  it("finds the auto preset case-insensitively", () => {
+    expect(autoPresetName(["low", "AUTO", "high"])).toBe("AUTO");
+    expect(autoPresetName(["auto"])).toBe("auto");
+  });
+
+  it("does not match substrings like Auto Comfort or Automatic", () => {
+    // A preset like "Automatic" cannot be commanded by sending "auto", so it
+    // must not count as Auto support.
+    expect(autoPresetName(["Auto Comfort", "Automatic"])).toBeUndefined();
+  });
+
+  it("handles empty and missing lists", () => {
+    expect(autoPresetName([])).toBeUndefined();
+    expect(autoPresetName(undefined)).toBeUndefined();
   });
 });

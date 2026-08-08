@@ -8,8 +8,8 @@ export enum FanDeviceFeature {
   OSCILLATE = 2,
   DIRECTION = 4,
   PRESET_MODE = 8,
-  TURN_OFF = 16,
-  TURN_ON = 32,
+  TURN_ON = 16,
+  TURN_OFF = 32,
 }
 
 export interface FanDeviceAttributes {

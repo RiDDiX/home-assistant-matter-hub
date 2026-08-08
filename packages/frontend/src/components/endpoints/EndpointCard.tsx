@@ -18,9 +18,11 @@ import Collapse from "@mui/material/Collapse";
 import Divider from "@mui/material/Divider";
 import IconButton from "@mui/material/IconButton";
 import Stack from "@mui/material/Stack";
+import { useTheme } from "@mui/material/styles";
 import Tooltip from "@mui/material/Tooltip";
 import Typography from "@mui/material/Typography";
 import { useCallback, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import type { DeviceImageInfo } from "../../api/device-images";
 import {
   deleteDeviceImage,
@@ -104,20 +106,34 @@ const getDeviceIcon = (deviceType: string): string => {
   return "📱";
 };
 
-const getDeviceColor = (deviceType: string): string => {
+const getDeviceColor = (deviceType: string, isDark: boolean): string => {
   const type = deviceType.toLowerCase();
-  if (type.includes("light")) return "#FFD700";
-  if (type.includes("switch") || type.includes("plugin")) return "#4CAF50";
-  if (type.includes("lock")) return "#2196F3";
-  if (type.includes("thermostat")) return "#FF5722";
-  if (type.includes("temperature")) return "#FF5722";
-  if (type.includes("humidity")) return "#03A9F4";
-  if (type.includes("sensor")) return "#9C27B0";
-  if (type.includes("fan")) return "#00BCD4";
-  if (type.includes("cover") || type.includes("window")) return "#795548";
-  if (type.includes("contact")) return "#607D8B";
-  if (type.includes("occupancy")) return "#E91E63";
-  return "#757575";
+  if (isDark) {
+    if (type.includes("light")) return "#FFE082";
+    if (type.includes("switch") || type.includes("plugin")) return "#81C784";
+    if (type.includes("lock")) return "#64B5F6";
+    if (type.includes("thermostat")) return "#FF8A65";
+    if (type.includes("temperature")) return "#FF8A65";
+    if (type.includes("humidity")) return "#4FC3F7";
+    if (type.includes("sensor")) return "#CE93D8";
+    if (type.includes("fan")) return "#4DD0E1";
+    if (type.includes("cover") || type.includes("window")) return "#A1887F";
+    if (type.includes("contact")) return "#90A4AE";
+    if (type.includes("occupancy")) return "#F48FB1";
+    return "#BDBDBD";
+  }
+  if (type.includes("light")) return "#F9A825";
+  if (type.includes("switch") || type.includes("plugin")) return "#388E3C";
+  if (type.includes("lock")) return "#1976D2";
+  if (type.includes("thermostat")) return "#E64A19";
+  if (type.includes("temperature")) return "#E64A19";
+  if (type.includes("humidity")) return "#0288D1";
+  if (type.includes("sensor")) return "#7B1FA2";
+  if (type.includes("fan")) return "#00838F";
+  if (type.includes("cover") || type.includes("window")) return "#5D4037";
+  if (type.includes("contact")) return "#455A64";
+  if (type.includes("occupancy")) return "#C2185B";
+  return "#616161";
 };
 
 interface HomeAssistantEntityState {
@@ -133,6 +149,12 @@ interface HomeAssistantEntityState {
     pressureEntity?: string;
     powerEntity?: string;
     energyEntity?: string;
+    voltageEntity?: string;
+    currentEntity?: string;
+    batteryPowerEntity?: string;
+    batteryEnergyEntity?: string;
+    chargingSwitchEntity?: string;
+    currentLimitEntity?: string;
   };
 }
 
@@ -177,6 +199,9 @@ export const EndpointCard = ({
   imageInfo,
   onImageChanged,
 }: EndpointCardProps) => {
+  const { t } = useTranslation();
+  const theme = useTheme();
+  const isDark = theme.palette.mode === "dark";
   const name = getEndpointName(endpoint.state) ?? endpoint.id.local;
   const deviceType = endpoint.type.name;
 
@@ -218,7 +243,51 @@ export const EndpointCard = ({
     if (mapping?.energyEntity) {
       mappings.push({ label: "Energy", entity: mapping.energyEntity });
     }
+    if (mapping?.voltageEntity) {
+      mappings.push({ label: "Voltage", entity: mapping.voltageEntity });
+    }
+    if (mapping?.currentEntity) {
+      mappings.push({ label: "Current", entity: mapping.currentEntity });
+    }
+    if (mapping?.batteryPowerEntity) {
+      mappings.push({
+        label: "Battery Power",
+        entity: mapping.batteryPowerEntity,
+      });
+    }
+    if (mapping?.batteryEnergyEntity) {
+      mappings.push({
+        label: "Battery Energy",
+        entity: mapping.batteryEnergyEntity,
+      });
+    }
+    if (mapping?.chargingSwitchEntity) {
+      mappings.push({
+        label: "Charging Switch",
+        entity: mapping.chargingSwitchEntity,
+      });
+    }
+    if (mapping?.currentLimitEntity) {
+      mappings.push({
+        label: "Current Limit",
+        entity: mapping.currentLimitEntity,
+      });
+    }
     return mappings;
+  }, [mapping]);
+
+  const autoMappedClusters = useMemo(() => {
+    const set = new Set<string>();
+    if (mapping?.batteryEntity) set.add("powerSource");
+    if (mapping?.humidityEntity) set.add("relativeHumidityMeasurement");
+    if (mapping?.pressureEntity) set.add("pressureMeasurement");
+    if (mapping?.powerEntity) set.add("electricalPowerMeasurement");
+    if (mapping?.energyEntity) set.add("electricalEnergyMeasurement");
+    if (mapping?.voltageEntity) set.add("electricalPowerMeasurement");
+    if (mapping?.currentEntity) set.add("electricalPowerMeasurement");
+    if (mapping?.batteryPowerEntity) set.add("electricalPowerMeasurement");
+    if (mapping?.batteryEnergyEntity) set.add("electricalEnergyMeasurement");
+    return set;
   }, [mapping]);
 
   const powerSource = useMemo(() => {
@@ -436,8 +505,8 @@ export const EndpointCard = ({
     // Boolean state (contact sensors, etc.)
     if (boolean?.stateValue !== undefined && onOff?.onOff === undefined) {
       chips.push({
-        label: boolean.stateValue ? "Open" : "Closed",
-        color: boolean.stateValue ? "warning" : "success",
+        label: boolean.stateValue ? "Closed" : "Open",
+        color: boolean.stateValue ? "success" : "warning",
       });
     }
 
@@ -471,7 +540,7 @@ export const EndpointCard = ({
               width: 56,
               height: 56,
               borderRadius: 2,
-              backgroundColor: `${getDeviceColor(deviceType)}20`,
+              backgroundColor: `${getDeviceColor(deviceType, isDark)}20`,
               overflow: "hidden",
               flexShrink: 0,
             }}
@@ -506,21 +575,23 @@ export const EndpointCard = ({
                     accept="image/png,image/jpeg,image/gif,image/webp,image/svg+xml"
                     style={{ display: "none" }}
                   />
-                  <Tooltip title="Upload device image">
+                  <Tooltip title={t("endpoints.uploadImage")}>
                     <IconButton
                       size="small"
                       onClick={handleUploadClick}
                       sx={{ ml: 0.5 }}
+                      aria-label={`Upload image for ${name}`}
                     >
                       <CameraAltIcon fontSize="small" />
                     </IconButton>
                   </Tooltip>
                   {imageInfo?.source === "custom" && (
-                    <Tooltip title="Remove custom image">
+                    <Tooltip title={t("endpoints.removeImage")}>
                       <IconButton
                         size="small"
                         onClick={handleDeleteImage}
                         sx={{ ml: -0.5 }}
+                        aria-label={`Remove image for ${name}`}
                       >
                         <DeleteIcon fontSize="small" />
                       </IconButton>
@@ -529,7 +600,7 @@ export const EndpointCard = ({
                 </>
               )}
               {onEditMapping && entityId && bridgeId && (
-                <Tooltip title="Edit Entity Mapping">
+                <Tooltip title={t("endpoints.editMapping")}>
                   <IconButton
                     size="small"
                     onClick={(e) => {
@@ -537,6 +608,7 @@ export const EndpointCard = ({
                       onEditMapping(entityId, bridgeId);
                     }}
                     sx={{ ml: 0.5 }}
+                    aria-label={`Edit mapping for ${name}`}
                   >
                     <EditIcon fontSize="small" />
                   </IconButton>
@@ -547,7 +619,9 @@ export const EndpointCard = ({
                   <WarningAmberIcon color="warning" fontSize="small" />
                 </Tooltip>
               ) : (
-                <Tooltip title={isReachable ? "Online" : "Offline"}>
+                <Tooltip
+                  title={isReachable ? t("common.online") : t("common.offline")}
+                >
                   {isReachable ? (
                     <CheckCircleIcon color="success" fontSize="small" />
                   ) : (
@@ -576,15 +650,17 @@ export const EndpointCard = ({
               spacing={0.5}
               sx={{ mt: 1, flexWrap: "wrap", gap: 0.5 }}
             >
-              <Chip
-                label={deviceType}
-                size="small"
-                sx={{
-                  backgroundColor: `${getDeviceColor(deviceType)}20`,
-                  color: getDeviceColor(deviceType),
-                  fontWeight: 500,
-                }}
-              />
+              <Tooltip title={`Device Type ID: ${endpoint.type.id}`}>
+                <Chip
+                  label={`${deviceType} (${endpoint.type.id})`}
+                  size="small"
+                  sx={{
+                    backgroundColor: `${getDeviceColor(deviceType, isDark)}20`,
+                    color: getDeviceColor(deviceType, isDark),
+                    fontWeight: 500,
+                  }}
+                />
+              </Tooltip>
               {stateChips.map((chip) => (
                 <Chip
                   key={chip.label}
@@ -664,7 +740,7 @@ export const EndpointCard = ({
               color="text.secondary"
               sx={{ flexGrow: 1 }}
             >
-              Clusters ({clusters.length})
+              {t("endpoints.clusters")} ({clusters.length})
             </Typography>
             <ExpandMoreIcon
               sx={{
@@ -680,18 +756,31 @@ export const EndpointCard = ({
             spacing={0.5}
             sx={{ flexWrap: "wrap", gap: 0.5, mt: 0.5 }}
           >
-            {clusters.slice(0, expanded ? undefined : 5).map((cluster) => (
-              <Chip
-                key={cluster}
-                label={cluster}
-                size="small"
-                variant="outlined"
-                sx={{ fontSize: "0.7rem", height: 22 }}
-              />
-            ))}
+            {clusters.slice(0, expanded ? undefined : 5).map((cluster) => {
+              const isAutoMapped = autoMappedClusters.has(cluster);
+              return (
+                <Tooltip
+                  key={cluster}
+                  title={
+                    isAutoMapped
+                      ? `Auto-mapped from linked entity`
+                      : `Device cluster`
+                  }
+                >
+                  <Chip
+                    icon={isAutoMapped ? <LinkIcon /> : undefined}
+                    label={cluster}
+                    size="small"
+                    variant="outlined"
+                    color={isAutoMapped ? "info" : "default"}
+                    sx={{ fontSize: "0.7rem", height: 22 }}
+                  />
+                </Tooltip>
+              );
+            })}
             {!expanded && clusters.length > 5 && (
               <Chip
-                label={`+${clusters.length - 5} more`}
+                label={`+${clusters.length - 5}`}
                 size="small"
                 variant="outlined"
                 sx={{ fontSize: "0.7rem", height: 22 }}
@@ -712,14 +801,14 @@ export const EndpointCard = ({
                 color="text.secondary"
                 sx={{ display: "block", mb: 0.5 }}
               >
-                Home Assistant Entity
+                {t("endpoints.homeAssistantEntity")}
               </Typography>
               <Typography
                 variant="body2"
                 fontFamily="monospace"
                 fontSize="0.75rem"
               >
-                State: {haState ?? "unknown"}
+                {t("endpoints.haState")}: {haState ?? t("common.unknown")}
               </Typography>
               <Typography
                 variant="body2"

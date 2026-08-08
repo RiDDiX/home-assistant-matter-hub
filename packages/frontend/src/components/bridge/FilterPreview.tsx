@@ -55,6 +55,10 @@ const domainToMatterType: Record<string, string> = {
   remote: "On/Off",
   water_heater: "Water Heater",
   input_boolean: "On/Off Plug-in Unit",
+  select: "Mode Select",
+  input_select: "Mode Select",
+  siren: "On/Off Plug-in Unit",
+  weather: "Sensor",
 };
 
 const tryParseJson = (text: string): unknown => {
@@ -145,7 +149,7 @@ export function FilterPreview({ filter }: FilterPreviewProps) {
     const hasVacuum = result.entities.some((e) => e.domain === "vacuum");
     if (hasVacuum) {
       warnings.push(
-        "This filter includes a vacuum. Consider using Server Mode (single device per bridge) for Apple Home/Alexa compatibility.",
+        "This filter includes a vacuum. Consider using Server Mode (standalone device node) for Apple Home/Alexa compatibility.",
       );
     }
     if (result.total > 50) {

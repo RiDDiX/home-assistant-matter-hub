@@ -1,12 +1,14 @@
-import type {
-  BridgeBasicInformation,
-  BridgeData,
-  BridgeFeatureFlags,
-  BridgeIconType,
-  BridgeStatus,
-  FailedEntity,
-  HomeAssistantFilter,
-  UpdateBridgeRequest,
+import {
+  type BridgeBasicInformation,
+  type BridgeData,
+  type BridgeFeatureFlags,
+  type BridgeIconType,
+  type BridgeStatus,
+  controllerWarningsForFabrics,
+  type ExposedDeviceType,
+  type FailedEntity,
+  type HomeAssistantFilter,
+  type UpdateBridgeRequest,
 } from "@home-assistant-matter-hub/common";
 import type { ServerNode } from "@matter/main/node";
 import { values } from "lodash-es";
@@ -55,6 +57,15 @@ export class BridgeDataProvider extends Service implements BridgeData {
   get priority(): number | undefined {
     return this.data.priority;
   }
+  get serialNumberSuffix(): string | undefined {
+    return this.data.serialNumberSuffix;
+  }
+  get uniqueIdSuffix(): string | undefined {
+    return this.data.uniqueIdSuffix;
+  }
+  get sessionMaxAgeHours(): number | undefined {
+    return this.data.sessionMaxAgeHours;
+  }
 
   /************************************************
    * Functions
@@ -74,8 +85,14 @@ export class BridgeDataProvider extends Service implements BridgeData {
     serverNode: ServerNode,
     deviceCount: number,
     failedEntities: FailedEntity[] = [],
+    exposedDeviceTypes: ExposedDeviceType[] = [],
   ) {
     const commissioning = serverNode.state.commissioning;
+    const fabrics = commissioning ? values(commissioning.fabrics) : [];
+    const controllerWarnings = controllerWarningsForFabrics(
+      fabrics,
+      exposedDeviceTypes,
+    );
     return {
       id: this.id,
       name: this.name,
@@ -86,6 +103,9 @@ export class BridgeDataProvider extends Service implements BridgeData {
       countryCode: this.countryCode,
       icon: this.icon,
       priority: this.priority,
+      serialNumberSuffix: this.serialNumberSuffix,
+      uniqueIdSuffix: this.uniqueIdSuffix,
+      sessionMaxAgeHours: this.sessionMaxAgeHours,
       status: status.code,
       statusReason: status.reason,
       commissioning: commissioning
@@ -95,7 +115,7 @@ export class BridgeDataProvider extends Service implements BridgeData {
             discriminator: commissioning.discriminator,
             manualPairingCode: commissioning.pairingCodes.manualPairingCode,
             qrPairingCode: commissioning.pairingCodes.qrPairingCode,
-            fabrics: values(commissioning.fabrics).map((fabric) => ({
+            fabrics: fabrics.map((fabric) => ({
               fabricIndex: fabric.fabricIndex,
               fabricId: Number(fabric.fabricId),
               nodeId: Number(fabric.nodeId),
@@ -107,6 +127,8 @@ export class BridgeDataProvider extends Service implements BridgeData {
         : undefined,
       deviceCount,
       failedEntities: failedEntities.length > 0 ? failedEntities : undefined,
+      controllerWarnings:
+        controllerWarnings.length > 0 ? controllerWarnings : undefined,
     };
   }
 }

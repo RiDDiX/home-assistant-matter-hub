@@ -8,44 +8,24 @@ import {
   RoomAirConditionerDevice,
   ThermostatDevice,
 } from "@matter/main/devices";
-import { EntityStateProvider } from "../../../../services/bridges/entity-state-provider.js";
 import { InvalidDeviceError } from "../../../../utils/errors/invalid-device-error.js";
 import { testBit } from "../../../../utils/test-bit.js";
 import { BasicInformationServer } from "../../../behaviors/basic-information-server.js";
 import { HomeAssistantEntityBehavior } from "../../../behaviors/home-assistant-entity-behavior.js";
 import { IdentifyServer } from "../../../behaviors/identify-server.js";
-import { PowerSourceServer } from "../../../behaviors/power-source-server.js";
+import { DefaultPowerSourceServer } from "../../../behaviors/power-source-server.js";
 import { ThermostatUiConfigServer } from "../../../behaviors/thermostat-ui-config-server.js";
-import { ClimateFanControlServer } from "./behaviors/climate-fan-control-server.js";
+import {
+  ClimateFanControlServer,
+  climateSupportsAutoFanMode,
+  swingModesToRockSupport,
+} from "./behaviors/climate-fan-control-server.js";
 import { ClimateHumidityMeasurementServer } from "./behaviors/climate-humidity-measurement-server.js";
 import { ClimateOnOffServer } from "./behaviors/climate-on-off-server.js";
-import { ClimateThermostatServer } from "./behaviors/climate-thermostat-server.js";
-
-const ClimatePowerSourceServer = PowerSourceServer({
-  getBatteryPercent: (entity, agent) => {
-    // First check for battery entity from mapping (auto-assigned or manual)
-    const homeAssistant = agent.get(HomeAssistantEntityBehavior);
-    const batteryEntity = homeAssistant.state.mapping?.batteryEntity;
-    if (batteryEntity) {
-      const stateProvider = agent.env.get(EntityStateProvider);
-      const battery = stateProvider.getNumericState(batteryEntity);
-      if (battery != null) {
-        return Math.max(0, Math.min(100, battery));
-      }
-    }
-
-    // Fallback to entity's own battery attribute
-    const attrs = entity.attributes as {
-      battery?: number;
-      battery_level?: number;
-    };
-    const level = attrs.battery_level ?? attrs.battery;
-    if (level == null || Number.isNaN(Number(level))) {
-      return null;
-    }
-    return Number(level);
-  },
-});
+import {
+  ClimateThermostatServer,
+  isTemperatureRangeActive,
+} from "./behaviors/climate-thermostat-server.js";
 
 /**
  * Initial thermostat state extracted from Home Assistant entity.
@@ -65,9 +45,14 @@ const ClimateDeviceType = (
   supportsOnOff: boolean,
   supportsHumidity: boolean,
   supportsFanMode: boolean,
+  supportsAutoFanMode: boolean,
+  rockSupport:
+    | { rockLeftRight?: boolean; rockUpDown?: boolean; rockRound?: boolean }
+    | undefined,
   hasBattery: boolean,
   features: { heating: boolean; cooling: boolean; autoMode?: boolean },
   initialState: InitialThermostatState = {},
+  includeBasicInformation = true,
 ) => {
   const additionalClusters: ClusterBehavior.Type[] = [];
 
@@ -78,34 +63,41 @@ const ClimateDeviceType = (
     additionalClusters.push(ClimateHumidityMeasurementServer);
   }
   if (hasBattery) {
-    additionalClusters.push(ClimatePowerSourceServer);
+    additionalClusters.push(DefaultPowerSourceServer);
   }
 
   // Use feature-specific thermostat server so controllers like Alexa
   // see only the features the device actually supports (#136).
   // Pass initialState directly so the behavior class has correct limits
-  // from the start — critical for negative temperatures (refrigerators).
+  // from the start, critical for negative temperatures (refrigerators).
   const thermostatServer = ClimateThermostatServer(initialState, features);
+
+  // BasicInformationServer is dropped when this type is used as a composed
+  // sub-endpoint; the BridgedNode parent carries the basic info instead, the
+  // same way the composed sensor and air purifier sub-endpoints are built.
+  const basicInfo: ClusterBehavior.Type[] = includeBasicInformation
+    ? [BasicInformationServer]
+    : [];
 
   if (supportsFanMode) {
     return RoomAirConditionerDevice.with(
-      BasicInformationServer,
       IdentifyServer,
       HomeAssistantEntityBehavior,
       thermostatServer,
       ThermostatUiConfigServer,
-      ClimateFanControlServer,
+      ClimateFanControlServer(rockSupport, supportsAutoFanMode),
       ...additionalClusters,
+      ...basicInfo,
     );
   }
 
   return ThermostatDevice.with(
-    BasicInformationServer,
     IdentifyServer,
     HomeAssistantEntityBehavior,
     thermostatServer,
     ThermostatUiConfigServer,
     ...additionalClusters,
+    ...basicInfo,
   );
 };
 
@@ -140,6 +132,7 @@ function toMatterTemp(
 
 export function ClimateDevice(
   homeAssistantEntity: HomeAssistantEntityBehavior.State,
+  includeBasicInformation = true,
 ): EndpointType {
   const attributes = homeAssistantEntity.entity.state
     .attributes as ClimateDeviceAttributes & {
@@ -163,14 +156,14 @@ export function ClimateDevice(
     attributes.hvac_modes.includes(mode),
   );
   // Treat auto-only thermostats (no heat/cool/heat_cool) as heating devices
-  // This allows simple thermostats that only have "auto" mode to work
+  // so simple "auto"-only thermostats still map onto a Matter mode.
   const isAutoOnly =
     !hasExplicitHeating &&
     !supportsCooling &&
     autoOnlyMode.some((mode) => attributes.hvac_modes.includes(mode));
-  // Treat ventilation-only devices (fan_only/dry, no heat/cool/auto) as heating
-  // devices. This allows CMVs like Ambientika (#130) to be exposed as Matter
-  // thermostats. The actual mode control works via SystemMode.FanOnly/Dry.
+  // Treat ventilation-only devices (fan_only/dry, no heat/cool/auto) as
+  // heating devices so CMVs like Ambientika (#130) still surface as Matter
+  // thermostats. The actual mode control runs through SystemMode.FanOnly/Dry.
   const isVentilationOnly =
     !hasExplicitHeating &&
     !supportsCooling &&
@@ -191,12 +184,60 @@ export function ClimateDevice(
   const supportsHumidity =
     attributes.current_humidity != null ||
     testBit(supportedFeatures, ClimateDeviceFeature.TARGET_HUMIDITY);
+  // Per-entity opt-out: skip OnOff so room-level "off" voice commands don't
+  // turn the thermostat off alongside the lights.
   const supportsOnOff =
     testBit(supportedFeatures, ClimateDeviceFeature.TURN_ON) &&
-    testBit(supportedFeatures, ClimateDeviceFeature.TURN_OFF);
-  const supportsFanMode = testBit(
+    testBit(supportedFeatures, ClimateDeviceFeature.TURN_OFF) &&
+    homeAssistantEntity.mapping?.disableClimateOnOff !== true;
+  // Per-entity opt-out: skip FanControl + RoomAirConditionerDevice and fall
+  // back to ThermostatDevice. Workaround for controllers (e.g. Aqara) that
+  // don't recognise device type 0x0072 and drop the endpoint (#318).
+  const supportsFanMode =
+    testBit(supportedFeatures, ClimateDeviceFeature.FAN_MODE) &&
+    homeAssistantEntity.mapping?.disableClimateFanControl !== true;
+  const supportsAutoFanMode = climateSupportsAutoFanMode(attributes.fan_modes);
+  const supportsVerticalSwing = testBit(
     supportedFeatures,
-    ClimateDeviceFeature.FAN_MODE,
+    ClimateDeviceFeature.SWING_MODE,
+  );
+  const supportsHorizontalSwing = testBit(
+    supportedFeatures,
+    ClimateDeviceFeature.SWING_HORIZONTAL_MODE,
+  );
+  const swingModesRockSupport = swingModesToRockSupport(attributes.swing_modes);
+  const rockSupport =
+    supportsVerticalSwing ||
+    supportsHorizontalSwing ||
+    swingModesRockSupport.rockLeftRight ||
+    swingModesRockSupport.rockUpDown
+      ? {
+          rockLeftRight:
+            swingModesRockSupport.rockLeftRight ||
+            supportsHorizontalSwing ||
+            undefined,
+          rockUpDown:
+            swingModesRockSupport.rockUpDown ||
+            supportsVerticalSwing ||
+            undefined,
+        }
+      : undefined;
+
+  // Matter requires min <= max (and absMin <= min <= max <= absMax). HA can
+  // report min_temp > max_temp (or mixed units), so order the pair before Matter
+  // sees it, otherwise the Thermostat fails to initialize (code 135), the whole
+  // endpoint crashes, and Google Home spawns a duplicate device (#375).
+  const rawMinLimit = toMatterTemp(attributes.min_temp) ?? 0;
+  const rawMaxLimit = toMatterTemp(attributes.max_temp) ?? 5000;
+  const minLimit = Math.min(rawMinLimit, rawMaxLimit);
+  const maxLimit = Math.max(rawMinLimit, rawMaxLimit);
+
+  // Same gate as the runtime getters: outside heat_cool/auto the range
+  // attributes can hold a parked stale value (#435). An entity that starts
+  // unavailable keeps this registration state until its first available
+  // update, so the ordering matters here too.
+  const rangeActive = isTemperatureRangeActive(
+    homeAssistantEntity.entity.state,
   );
 
   // Extract initial thermostat state from HA entity attributes.
@@ -207,26 +248,33 @@ export function ClimateDevice(
     // If unavailable (null/undefined), update() will fall back to the
     // target setpoint so controllers don't display 0°C.
     localTemperature: toMatterTemp(attributes.current_temperature),
-    occupiedHeatingSetpoint:
-      toMatterTemp(attributes.target_temp_low) ??
-      toMatterTemp(attributes.temperature) ??
-      2000,
-    occupiedCoolingSetpoint:
-      toMatterTemp(attributes.target_temp_high) ??
-      toMatterTemp(attributes.temperature) ??
-      2400,
-    // Use HA's actual min/max limits, fall back to wide range (0-50°C) if not provided
-    minHeatSetpointLimit: toMatterTemp(attributes.min_temp) ?? 0,
-    maxHeatSetpointLimit: toMatterTemp(attributes.max_temp) ?? 5000,
-    minCoolSetpointLimit: toMatterTemp(attributes.min_temp) ?? 0,
-    maxCoolSetpointLimit: toMatterTemp(attributes.max_temp) ?? 5000,
+    occupiedHeatingSetpoint: rangeActive
+      ? (toMatterTemp(attributes.target_temp_low) ??
+        toMatterTemp(attributes.temperature) ??
+        2000)
+      : (toMatterTemp(attributes.temperature) ??
+        toMatterTemp(attributes.target_temp_low) ??
+        2000),
+    occupiedCoolingSetpoint: rangeActive
+      ? (toMatterTemp(attributes.target_temp_high) ??
+        toMatterTemp(attributes.temperature) ??
+        2400)
+      : (toMatterTemp(attributes.temperature) ??
+        toMatterTemp(attributes.target_temp_high) ??
+        2400),
+    // Use HA's actual min/max limits, fall back to wide range (0-50°C) if not
+    // provided. Ordered above so min <= max always holds.
+    minHeatSetpointLimit: minLimit,
+    maxHeatSetpointLimit: maxLimit,
+    minCoolSetpointLimit: minLimit,
+    maxCoolSetpointLimit: maxLimit,
   };
 
-  // AutoMode only when device supports heat_cool (dual setpoint) AND has
-  // explicit heat or cool modes. Devices with only 'auto' (single-setpoint)
-  // must NOT get AutoMode — Apple Home would show Auto and expect dual
-  // setpoints, causing mode flipping. heat_cool-only zones are also excluded
-  // since they lack explicit heat/cool modes (#207).
+  // AutoMode is only safe when the device truly supports dual-setpoint
+  // operation (HA heat_cool). For HA's single-setpoint 'auto' the Auto tile
+  // in Apple Home doesn't write SystemMode.Auto, it writes Cool/Heat based
+  // on its own heuristics, so HA ends up in cool/heat instead of auto (#309).
+  // Without AutoMode, getSystemMode maps HA auto to Cool/Heat dynamically.
   const autoMode =
     supportsHeating &&
     supportsCooling &&
@@ -234,13 +282,15 @@ export function ClimateDevice(
     (attributes.hvac_modes.includes(ClimateHvacMode.heat) ||
       attributes.hvac_modes.includes(ClimateHvacMode.cool));
 
-  // Pass thermostat state at the endpoint type level using the behavior ID.
-  // This ensures Matter.js's internal validation sees the values.
+  // Pass thermostat state at the endpoint type level using the behavior ID,
+  // so matter.js's internal validation sees the values before initialize.
   // Only include attributes for the features the device actually supports.
   return ClimateDeviceType(
     supportsOnOff,
     supportsHumidity,
     supportsFanMode,
+    supportsAutoFanMode,
+    rockSupport,
     hasBattery,
     {
       heating: supportsHeating,
@@ -248,6 +298,7 @@ export function ClimateDevice(
       autoMode,
     },
     initialState,
+    includeBasicInformation,
   ).set({
     homeAssistantEntity,
     thermostat: {

@@ -25,14 +25,10 @@ class Pm10AirQualityServer extends Pm10AirQualityServerBase {
     await super.initialize();
     const homeAssistant = await this.agent.load(HomeAssistantEntityBehavior);
     this.update(homeAssistant.entity);
-    if (homeAssistant.state.managedByEndpoint) {
-      homeAssistant.registerUpdate(this.callback(this.update));
-    } else {
-      this.reactTo(homeAssistant.onChange, this.update);
-    }
+    this.reactTo(homeAssistant.onChange, this.update, { offline: true });
   }
 
-  public update(entity: HomeAssistantEntityInformation) {
+  private update(entity: HomeAssistantEntityInformation) {
     const state = entity.state.state;
     let airQuality: AirQuality.AirQualityEnum =
       AirQuality.AirQualityEnum.Unknown;

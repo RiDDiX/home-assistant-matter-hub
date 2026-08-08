@@ -12,8 +12,12 @@ import {
   resolveMopIntensityList,
 } from "./behaviors/vacuum-rvc-clean-mode-server.js";
 import { VacuumRvcOperationalStateServer } from "./behaviors/vacuum-rvc-operational-state-server.js";
-import { createVacuumRvcRunModeServer } from "./behaviors/vacuum-rvc-run-mode-server.js";
 import {
+  createCleanAreaRvcRunModeServer,
+  createVacuumRvcRunModeServer,
+} from "./behaviors/vacuum-rvc-run-mode-server.js";
+import {
+  createCleanAreaServiceAreaServer,
   createCustomServiceAreaServer,
   createDefaultServiceAreaServer,
   createVacuumServiceAreaServer,
@@ -52,7 +56,6 @@ const ServerModeVacuumEndpointType = RoboticVacuumCleanerDevice.with(
 export function ServerModeVacuumDevice(
   homeAssistantEntity: HomeAssistantEntityBehavior.State,
   includeOnOff = false,
-  minimalClusters = false,
   cleaningModeOptions?: string[],
 ): EndpointType | undefined {
   if (homeAssistantEntity.entity.state === undefined) {
@@ -63,8 +66,17 @@ export function ServerModeVacuumDevice(
     .attributes as VacuumDeviceAttributes;
 
   // Add RvcRunModeServer with initial supportedModes (including room modes if available)
+  const cleanAreaRooms = homeAssistantEntity.mapping?.cleanAreaRooms;
+  const customAreas = homeAssistantEntity.mapping?.customServiceAreas;
   let device = ServerModeVacuumEndpointType.with(
-    createVacuumRvcRunModeServer(attributes),
+    cleanAreaRooms && cleanAreaRooms.length > 0
+      ? createCleanAreaRvcRunModeServer(cleanAreaRooms)
+      : createVacuumRvcRunModeServer(
+          attributes,
+          false,
+          customAreas && customAreas.length > 0 ? customAreas : undefined,
+          homeAssistantEntity.mapping?.disableCustomAreaRoomModes,
+        ),
   ).set({ homeAssistantEntity });
 
   // OnOff is NOT part of the RoboticVacuumCleaner device type spec.
@@ -75,28 +87,25 @@ export function ServerModeVacuumDevice(
     device = device.with(VacuumOnOffServer);
   }
 
-  // PowerSource — adds device type 0x0011 to the descriptor alongside 0x0074.
-  // When minimalClusters is enabled, skip it to match working Alexa RVC setups.
-  if (!minimalClusters) {
-    device = device.with(VacuumPowerSourceServer);
-  }
+  // PowerSource, adds device type 0x0011 to the descriptor alongside 0x0074.
+  device = device.with(VacuumPowerSourceServer);
 
-  // ServiceArea — included when rooms/custom areas are configured.
-  // When minimalClusters is enabled, skip the default placeholder area.
-  const customAreas = homeAssistantEntity.mapping?.customServiceAreas;
+  // ServiceArea, included when rooms/custom areas are configured.
   const roomEntities = homeAssistantEntity.mapping?.roomEntities;
   const rooms = parseVacuumRooms(attributes);
-  if (customAreas && customAreas.length > 0) {
+  if (cleanAreaRooms && cleanAreaRooms.length > 0) {
+    device = device.with(createCleanAreaServiceAreaServer(cleanAreaRooms));
+  } else if (customAreas && customAreas.length > 0) {
     device = device.with(createCustomServiceAreaServer(customAreas));
   } else if (rooms.length > 0 || (roomEntities && roomEntities.length > 0)) {
     device = device.with(
       createVacuumServiceAreaServer(attributes, roomEntities),
     );
-  } else if (!minimalClusters) {
+  } else {
     device = device.with(createDefaultServiceAreaServer());
   }
 
-  // RvcCleanMode — always included.
+  // RvcCleanMode, always included.
   // Alexa probes for cluster 0x55 during discovery and may refuse the device without it.
   const fanSpeedList = resolveFanSpeedList(
     attributes,

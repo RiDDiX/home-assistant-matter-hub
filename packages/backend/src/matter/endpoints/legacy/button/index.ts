@@ -9,8 +9,10 @@ import { IdentifyServer } from "../../../behaviors/identify-server.js";
 /**
  * Button-specific OnOffServer that auto-resets to OFF after press.
  * This prevents buttons from appearing "stuck on" in controllers like Google Home.
+ * No Lighting feature: like automation and input button, Alexa rejects a
+ * non-light OnOffPlugInUnit that advertises it (#182).
  */
-class ButtonOnOffServerBase extends Base.with("Lighting") {
+class ButtonOnOffServerBase extends Base {
   override async initialize() {
     await super.initialize();
     // Buttons are always "off" - they're momentary actions
@@ -20,6 +22,11 @@ class ButtonOnOffServerBase extends Base.with("Lighting") {
   override on() {
     const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);
     homeAssistant.callAction({ action: "button.press" });
+    // disableMomentaryFlip (#423): the reset never toggles onOff (this class
+    // never sets it true), so skipping it just avoids a dead timer.
+    if (homeAssistant.state.mapping?.disableMomentaryFlip) {
+      return;
+    }
     // Auto-reset to OFF after 1 second so button doesn't stay "on"
     setTimeout(this.callback(this.resetToOff), 1000);
   }

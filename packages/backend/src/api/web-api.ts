@@ -5,12 +5,14 @@ import AccessControl from "express-ip-access-control";
 import nocache from "nocache";
 import type { BetterLogger, LoggerService } from "../core/app/logger.js";
 import { Service } from "../core/ioc/service.js";
+import type { BackupService } from "../services/backup/backup-service.js";
 import type { BridgeService } from "../services/bridges/bridge-service.js";
 import { DiagnosticService } from "../services/diagnostics/diagnostic-service.js";
 import type { HomeAssistantClient } from "../services/home-assistant/home-assistant-client.js";
 import type { HomeAssistantRegistry } from "../services/home-assistant/home-assistant-registry.js";
 import type { AppSettingsStorage } from "../services/storage/app-settings-storage.js";
 import type { BridgeStorage } from "../services/storage/bridge-storage.js";
+import type { EntityIdentityStorage } from "../services/storage/entity-identity-storage.js";
 import type { EntityMappingStorage } from "../services/storage/entity-mapping-storage.js";
 import type { LockCredentialStorage } from "../services/storage/lock-credential-storage.js";
 import { accessLogger } from "./access-log.js";
@@ -24,8 +26,10 @@ import { healthApi } from "./health-api.js";
 import { homeAssistantApi } from "./home-assistant-api.js";
 import { lockCredentialApi } from "./lock-credential-api.js";
 import { logsApi } from "./logs-api.js";
+import { mappingProfileApi } from "./mapping-profile-api.js";
 import { matterApi } from "./matter-api.js";
 import { metricsApi } from "./metrics-api.js";
+import { networkDiagnosticApi } from "./network-diagnostic-api.js";
 import { pluginApi } from "./plugin-api.js";
 import { supportIngress, supportProxyLocation } from "./proxy-support.js";
 import { settingsApi } from "./settings-api.js";
@@ -44,6 +48,8 @@ export interface WebApiProps {
     username: string;
     password: string;
   };
+  readonly mdnsInterface?: string;
+  readonly mdnsIpv4?: boolean;
 }
 
 export class WebApi extends Service {
@@ -63,8 +69,10 @@ export class WebApi extends Service {
     private readonly haRegistry: HomeAssistantRegistry,
     private readonly bridgeStorage: BridgeStorage,
     private readonly mappingStorage: EntityMappingStorage,
+    private readonly identityStorage: EntityIdentityStorage,
     private readonly lockCredentialStorage: LockCredentialStorage,
     private readonly settingsStorage: AppSettingsStorage,
+    private readonly backupService: BackupService,
     private readonly props: WebApiProps,
   ) {
     super("WebApi");
@@ -88,7 +96,15 @@ export class WebApi extends Service {
     api
       .use(express.json())
       .use(nocache())
-      .use("/matter", matterApi(this.bridgeService, this.haRegistry))
+      .use(
+        "/matter",
+        matterApi(
+          this.bridgeService,
+          this.haRegistry,
+          this.identityStorage,
+          this.mappingStorage,
+        ),
+      )
       .use(
         "/health",
         healthApi(
@@ -104,15 +120,24 @@ export class WebApi extends Service {
         "/device-images",
         deviceImageApi(this.props.storageLocation, this.haRegistry),
       )
-      .use("/entity-mappings", entityMappingApi(this.mappingStorage))
+      .use(
+        "/entity-mappings",
+        entityMappingApi(this.mappingStorage, this.identityStorage),
+      )
+      .use("/mapping-profiles", mappingProfileApi(this.mappingStorage))
       .use("/lock-credentials", lockCredentialApi(this.lockCredentialStorage))
-      .use("/settings", settingsApi(this.settingsStorage, this.props.auth))
+      .use(
+        "/settings",
+        settingsApi(this.settingsStorage, this.bridgeService, this.props.auth),
+      )
       .use(
         "/backup",
         backupApi(
           this.bridgeStorage,
           this.mappingStorage,
           this.props.storageLocation,
+          this.backupService,
+          this.settingsStorage,
         ),
       )
       .use("/home-assistant", homeAssistantApi(this.haRegistry, this.haClient))
@@ -140,6 +165,13 @@ export class WebApi extends Service {
       .use(
         "/plugins",
         pluginApi(this.bridgeService, this.props.storageLocation),
+      )
+      .use(
+        "/network",
+        networkDiagnosticApi(
+          this.props.mdnsInterface,
+          this.props.mdnsIpv4 ?? true,
+        ),
       );
 
     const middlewares: express.Handler[] = [
@@ -197,16 +229,31 @@ export class WebApi extends Service {
   }
 
   private createDynamicAuthMiddleware(): express.RequestHandler {
+    const envAuth = this.props.auth;
+    const envMiddleware = envAuth
+      ? basicAuth({
+          users: { [envAuth.username]: envAuth.password },
+          challenge: true,
+          realm: "Home Assistant Matter Hub",
+        })
+      : undefined;
+    const storageMiddleware = basicAuth({
+      authorizer: (username: string, password: string) =>
+        this.settingsStorage.verifyAuth(username, password),
+      challenge: true,
+      realm: "Home Assistant Matter Hub",
+    });
     return (req, res, next) => {
-      const auth = this.props.auth ?? this.settingsStorage.auth;
-      if (!auth) {
+      if (req.path === "/api/health/live" || req.path === "/api/health/ready") {
         return next();
       }
-      return basicAuth({
-        users: { [auth.username]: auth.password },
-        challenge: true,
-        realm: "Home Assistant Matter Hub",
-      })(req, res, next);
+      if (envMiddleware) {
+        return envMiddleware(req, res, next);
+      }
+      if (!this.settingsStorage.auth) {
+        return next();
+      }
+      return storageMiddleware(req, res, next);
     };
   }
 
@@ -214,12 +261,19 @@ export class WebApi extends Service {
     if (this.server) {
       return;
     }
-    this.server = await new Promise((resolve) => {
+    this.server = await new Promise((resolve, reject) => {
       const server = this.app.listen(this.props.port, () => {
         this.log.info(
           `HTTP server (API ${this.props.webUiDist ? "& Web App" : "only"}) listening on port ${this.props.port}`,
         );
         resolve(server);
+      });
+      server.on("error", (err: NodeJS.ErrnoException) => {
+        reject(
+          err.code === "EADDRINUSE"
+            ? new Error(`Port ${this.props.port} already in use`)
+            : err,
+        );
       });
     });
     this.wsApi.attach(this.server, this.props.basePath);

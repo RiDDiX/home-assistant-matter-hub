@@ -10,6 +10,11 @@ on:
   push:
     branches:
       - main
+      - testing
+    paths-ignore:
+      - '*.md'
+      - 'docs-site/**'
+      - '.github/workflows/docs.yml'
 
 permissions:
   contents: read
@@ -86,24 +91,10 @@ jobs:
           cat "$GITHUB_OUTPUT"
 
       - name: Package Artifact
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: package.tgz
           path: apps/home-assistant-matter-hub/package.tgz
-
-      - name: Build Documentation
-        if: steps.release.outputs.release-version != '' && steps.release.outputs.release-channel == 'latest'
-        env:
-          BASE_URL: /home-assistant-matter-hub
-        run: |
-          pnpm --filter @home-assistant-matter-hub/documentation run build
-          cp docs/.nojekyll docs/_build/html/.nojekyll
-
-      - name: Upload Documentation
-        if: steps.release.outputs.release-version != '' && steps.release.outputs.release-channel == 'latest'
-        uses: actions/upload-pages-artifact@v4
-        with:
-          path: "./docs/_build/html"
 
   prepare-docker:
     name: "Prepare Docker"
@@ -133,14 +124,14 @@ jobs:
         uses: ./.github/actions/setup-docker
 
       - name: Login to GitHub Container Registry
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Package Artifact
-        uses: actions/download-artifact@v6
+        uses: actions/download-artifact@v7
         with:
           name: package.tgz
           path: apps/home-assistant-matter-hub/
@@ -168,7 +159,7 @@ jobs:
         uses: ./.github/actions/setup-node
 
       - name: Download Package
-        uses: actions/download-artifact@v6
+        uses: actions/download-artifact@v7
         with:
           name: package.tgz
           path: apps/home-assistant-matter-hub/
@@ -192,22 +183,6 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: pnpm publish apps/home-assistant-matter-hub/package-npm.tgz --provenance --no-git-checks --access public --tag ${{ needs.release.outputs.release-channel }}
-
-  publish-pages:
-    name: "Publish Documentation"
-    runs-on: ubuntu-latest
-    needs: [release]
-    if: needs.release.outputs.release-version != '' && needs.release.outputs.release-channel == 'latest'
-    permissions:
-      id-token: write
-      pages: write
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - name: Deploy documentation to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
 
   dispatch-addon:
     name: "Dispatch Addon Repository"

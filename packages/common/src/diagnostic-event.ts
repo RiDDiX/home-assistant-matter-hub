@@ -6,7 +6,8 @@ export type DiagnosticEventType =
   | "session_closed"
   | "subscription_changed"
   | "bridge_started"
-  | "bridge_stopped";
+  | "bridge_stopped"
+  | "entity_warning";
 
 export interface DiagnosticEvent {
   readonly id: string;

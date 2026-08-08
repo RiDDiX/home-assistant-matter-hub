@@ -50,6 +50,21 @@ describe("DebounceContext", () => {
     ]);
   });
 
+  it("should clear all pending debouncers on unregisterAll", async () => {
+    const callback = vi.fn((_: string, __: string[]) => {});
+    const context = new DebounceContext<string>(callback);
+
+    const fnOne = context.get("one-key", 50);
+    const fnTwo = context.get("two-key", 50);
+    fnOne("a");
+    fnTwo("b");
+
+    context.unregisterAll();
+
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(callback).not.toHaveBeenCalled();
+  });
+
   it("should call a debouncer twice", async () => {
     const times: number[] = [];
     const callback = vi.fn((_key: string, _payload: string[]) => {

@@ -4,21 +4,28 @@ import type {
   HomeAssistantEntityRegistry,
 } from "@home-assistant-matter-hub/common";
 import type { Connection } from "home-assistant-js-websocket";
+import { sendHaMessage } from "../../../utils/send-ha-message.js";
 
 export async function getRegistry(
   connection: Connection,
+  timeoutMs?: number,
 ): Promise<HomeAssistantEntityRegistry[]> {
-  return await connection.sendMessagePromise<HomeAssistantEntityRegistry[]>({
-    type: "config/entity_registry/list",
-  });
+  return sendHaMessage<HomeAssistantEntityRegistry[]>(
+    connection,
+    { type: "config/entity_registry/list" },
+    timeoutMs,
+  );
 }
 
 export async function getDeviceRegistry(
   connection: Connection,
+  timeoutMs?: number,
 ): Promise<HomeAssistantDeviceRegistry[]> {
-  return connection.sendMessagePromise<HomeAssistantDeviceRegistry[]>({
-    type: "config/device_registry/list",
-  });
+  return sendHaMessage<HomeAssistantDeviceRegistry[]>(
+    connection,
+    { type: "config/device_registry/list" },
+    timeoutMs,
+  );
 }
 
 export interface HomeAssistantLabel {
@@ -30,16 +37,22 @@ export interface HomeAssistantLabel {
 
 export async function getLabelRegistry(
   connection: Connection,
+  timeoutMs?: number,
 ): Promise<HomeAssistantLabel[]> {
-  return connection.sendMessagePromise<HomeAssistantLabel[]>({
-    type: "config/label_registry/list",
-  });
+  return sendHaMessage<HomeAssistantLabel[]>(
+    connection,
+    { type: "config/label_registry/list" },
+    timeoutMs,
+  );
 }
 
 export async function getAreaRegistry(
   connection: Connection,
+  timeoutMs?: number,
 ): Promise<HomeAssistantAreaRegistry[]> {
-  return connection.sendMessagePromise<HomeAssistantAreaRegistry[]>({
-    type: "config/area_registry/list",
-  });
+  return sendHaMessage<HomeAssistantAreaRegistry[]>(
+    connection,
+    { type: "config/area_registry/list" },
+    timeoutMs,
+  );
 }

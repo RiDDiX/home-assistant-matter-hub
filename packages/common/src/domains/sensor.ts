@@ -36,6 +36,7 @@ export enum SensorDeviceClass {
   precipitation = "precipitation",
   precipitation_intensity = "precipitation_intensity",
   pressure = "pressure",
+  radon = "radon",
   reactive_power = "reactive_power",
   signal_strength = "signal_strength",
   sound_pressure = "sound_pressure",
