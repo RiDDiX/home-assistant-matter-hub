@@ -57,7 +57,8 @@
       "@babel/core@<7.29.6": "^7.29.6"
     },
     "patchedDependencies": {
-      "@matter/node@0.17.9": "patches/@matter__node@0.17.9.patch"
+      "@matter/node@0.18.0-alpha.0-20260807-335c3291b": "patches/@matter__node@0.18.0-alpha.0-20260807-335c3291b.patch",
+      "@matter/model@0.18.0-alpha.0-20260807-335c3291b": "patches/@matter__model@0.18.0-alpha.0-20260807-335c3291b.patch"
     }
   },
   "devDependencies": {

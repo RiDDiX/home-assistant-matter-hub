@@ -3,7 +3,7 @@ import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
 
-// #287: the local @matter/node patch (patches/@matter__node@0.17.9.patch)
+// #287: the local @matter/node patch (patches/@matter__node@0.18.*.patch)
 // routes subscription keepalives onto the subscription's own session, and when
 // that session is gone it skips the keepalive instead of misrouting it onto
 // another session of the peer. These assertions fail loudly when an install
@@ -12,8 +12,10 @@ import { describe, expect, it } from "vitest";
 const require = createRequire(import.meta.url);
 
 function serverSubscriptionPath(dist: "esm" | "cjs"): string {
-  // resolve("@matter/node") lands on dist/cjs/index.js, walk to the pkg root
-  const entry = require.resolve("@matter/node");
+  // @matter/node is not a direct dependency; hop through @matter/main, then
+  // resolve() lands on dist/cjs/index.js and we walk to the pkg root
+  const requireFromMain = createRequire(require.resolve("@matter/main"));
+  const entry = requireFromMain.resolve("@matter/node");
   const packageRoot = join(dirname(entry), "..", "..");
   return join(
     packageRoot,

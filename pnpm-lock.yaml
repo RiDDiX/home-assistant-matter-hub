@@ -27,9 +27,12 @@ overrides:
   '@babel/core@<7.29.6': ^7.29.6
 
 patchedDependencies:
-  '@matter/node@0.17.9':
+  '@matter/model@0.18.0-alpha.0-20260807-335c3291b':
+    hash: b3d65d5de263085c617b0282545801c4206244163d5aa7c61b3dd0acb52fdae9
+    path: patches/@matter__model@0.18.0-alpha.0-20260807-335c3291b.patch
+  '@matter/node@0.18.0-alpha.0-20260807-335c3291b':
     hash: e3376f1c2fdd0a0df09b8d04625a4d7af65b47d7277cc88cdb80baf7fb32bd0d
-    path: patches/@matter__node@0.17.9.patch
+    path: patches/@matter__node@0.18.0-alpha.0-20260807-335c3291b.patch
 
 importers:
 
@@ -100,25 +103,25 @@ importers:
         version: 8.0.16(@types/node@25.3.0)(esbuild@0.28.1)(tsx@4.21.0)(yaml@2.8.3)
       vitest:
         specifier: ^4.1.4
-        version: 4.1.4(@types/node@25.3.0)(jsdom@29.0.2(@noble/hashes@2.2.0))(vite@8.0.16(@types/node@25.3.0)(esbuild@0.28.1)(tsx@4.21.0)(yaml@2.8.3))
+        version: 4.1.4(@types/node@25.3.0)(jsdom@29.0.2(@noble/hashes@2.3.0))(vite@8.0.16(@types/node@25.3.0)(esbuild@0.28.1)(tsx@4.21.0)(yaml@2.8.3))
 
   apps/home-assistant-matter-hub:
     dependencies:
       '@matter/general':
-        specifier: 0.17.9
-        version: 0.17.9
+        specifier: 0.18.0-alpha.0-20260807-335c3291b
+        version: 0.18.0-alpha.0-20260807-335c3291b
       '@matter/main':
-        specifier: 0.17.9
-        version: 0.17.9
+        specifier: 0.18.0-alpha.0-20260807-335c3291b
+        version: 0.18.0-alpha.0-20260807-335c3291b
       '@matter/nodejs':
-        specifier: 0.17.9
-        version: 0.17.9
+        specifier: 0.18.0-alpha.0-20260807-335c3291b
+        version: 0.18.0-alpha.0-20260807-335c3291b
       '@matter/protocol':
-        specifier: 0.17.9
-        version: 0.17.9
+        specifier: 0.18.0-alpha.0-20260807-335c3291b
+        version: 0.18.0-alpha.0-20260807-335c3291b
       '@matter/types':
-        specifier: 0.17.9
-        version: 0.17.9
+        specifier: 0.18.0-alpha.0-20260807-335c3291b
+        version: 0.18.0-alpha.0-20260807-335c3291b
       ajv:
         specifier: 8.18.0
         version: 8.18.0
@@ -184,20 +187,20 @@ importers:
         specifier: workspace:*
         version: link:../common
       '@matter/general':
-        specifier: 0.17.9
-        version: 0.17.9
+        specifier: 0.18.0-alpha.0-20260807-335c3291b
+        version: 0.18.0-alpha.0-20260807-335c3291b
       '@matter/main':
-        specifier: 0.17.9
-        version: 0.17.9
+        specifier: 0.18.0-alpha.0-20260807-335c3291b
+        version: 0.18.0-alpha.0-20260807-335c3291b
       '@matter/nodejs':
-        specifier: 0.17.9
-        version: 0.17.9
+        specifier: 0.18.0-alpha.0-20260807-335c3291b
+        version: 0.18.0-alpha.0-20260807-335c3291b
       '@matter/protocol':
-        specifier: 0.17.9
-        version: 0.17.9
+        specifier: 0.18.0-alpha.0-20260807-335c3291b
+        version: 0.18.0-alpha.0-20260807-335c3291b
       '@matter/types':
-        specifier: 0.17.9
-        version: 0.17.9
+        specifier: 0.18.0-alpha.0-20260807-335c3291b
+        version: 0.18.0-alpha.0-20260807-335c3291b
       ajv:
         specifier: 8.18.0
         version: 8.18.0
@@ -419,7 +422,7 @@ importers:
         version: 4.3.0(@swc/helpers@0.5.21)(vite@8.0.16(@types/node@25.3.0)(esbuild@0.28.1)(tsx@4.21.0)(yaml@2.8.3))
       jsdom:
         specifier: ^29.0.2
-        version: 29.0.2(@noble/hashes@2.2.0)
+        version: 29.0.2(@noble/hashes@2.3.0)
       vite-plugin-svgr:
         specifier: ^5.2.0
         version: 5.2.0(typescript@6.0.3)(vite@8.0.16(@types/node@25.3.0)(esbuild@0.28.1)(tsx@4.21.0)(yaml@2.8.3))
@@ -983,27 +986,27 @@ packages:
   '@marijn/find-cluster-break@1.0.2':
     resolution: {integrity: sha512-l0h88YhZFyKdXIFNfSWpyjStDjGHwZ/U7iobcK1cQQD8sejsONdQtTVU+1wVN1PBw40PiiHB1vA5S7VTfQiP9g==}
 
-  '@matter/general@0.17.9':
-    resolution: {integrity: sha512-NMAhD/EKpfTb1e0UllUJLdWgViw+Jp41PoY6s4yVGAiuo0sot6CYSdQauXelQPldhonrn2bLSKAa2mQUKWdhLQ==}
+  '@matter/general@0.18.0-alpha.0-20260807-335c3291b':
+    resolution: {integrity: sha512-/x8Xl9b1fSXmyyF0W0sGDIapFLNZWp7tq/IySctGNYN1LmdqEy31gfWBpfQ9foEjHayMMEDoc+XfvJ+iLvsJsA==}
 
-  '@matter/main@0.17.9':
-    resolution: {integrity: sha512-YFBpU1AquN6sLC466xcOslAaERtlBnofHfuvDyY9B8UHZZJwFUfsDT7gMWVYkU5J/S9vc7lslL9TMvvns8Biaw==}
+  '@matter/main@0.18.0-alpha.0-20260807-335c3291b':
+    resolution: {integrity: sha512-Rhp61pVPqlSzq6QNgJUTJmDZ6a65SrOmUkd+VkVoNKk4Q77ZvjG8UV6lx6sa9qPPV7GWfnhOkqIJJGGn9vhrdw==}
 
-  '@matter/model@0.17.9':
-    resolution: {integrity: sha512-NICGlK8ubD2an1eKIhEX2osZRl5JjnZE3Z8CJGnWItyVU5MbX1ta/EdCx/eBGy8WQPTxpYu93keW3L6qTUMOlg==}
+  '@matter/model@0.18.0-alpha.0-20260807-335c3291b':
+    resolution: {integrity: sha512-eJ+0GgkWtYQEjUgpzmRo+VAfthpCHP9P+9JB0S8lvGUQHrSyXWnBcnhnbPtIX6W1iVby6+p29PwXv/dap8jyHA==}
 
-  '@matter/node@0.17.9':
-    resolution: {integrity: sha512-5AT6NYfIlLaILHAgVQoNZkuobff+CR7Ewkdj14YkENx77rRlujgDlDpXRiJkAHc+EUvRkwr5zA9ZL70XkwHkEw==}
+  '@matter/node@0.18.0-alpha.0-20260807-335c3291b':
+    resolution: {integrity: sha512-1IIU5giuHSDug9SDzWHxPuZV6uauZtqfRc5NiMLCPYpinvRXt3QfNkdwZrBgw1m4TWSUkpyVuejrD6BxVDSmsg==}
 
-  '@matter/nodejs@0.17.9':
-    resolution: {integrity: sha512-2C3J89qeLyknLtbe/ls46dmjs/eN8LmMSKpGl90mC2ut8471z4rkpFYNE+MTJLFg8yzC+R86yi35Y3lBzioEwA==}
-    engines: {node: '>=20.19.0 <22.0.0 || >=22.13.0'}
+  '@matter/nodejs@0.18.0-alpha.0-20260807-335c3291b':
+    resolution: {integrity: sha512-pXXymXiEzbmv9IGzFXVdK4vp3bcLaDxYWz87nsDKBbCf3NVMDSz/HEWzuf747/eBzOt/R/O4r3DbOFd3cjgtHg==}
+    engines: {node: '>=20.19.0 <21.0.0 || >=22.13.0'}
 
-  '@matter/protocol@0.17.9':
-    resolution: {integrity: sha512-BZg1BWwm3rHsFxyQm17VjpTNO3kwd+AIjI9dtfnPFkH5CeS7r6Ebd/9j8L0zxeVPotciMcSW8H5W+3kCcuB2HQ==}
+  '@matter/protocol@0.18.0-alpha.0-20260807-335c3291b':
+    resolution: {integrity: sha512-P6OlSXTRaScIZ0FlT3w2srUubgc+ymPm64CHixnk/wjlZyfzDlsBV1vSpbCL3dZ7pQ2k0L12LrxljSGR6ww24Q==}
 
-  '@matter/types@0.17.9':
-    resolution: {integrity: sha512-Tdb08WzfM2Ma962NTtNrHTA3S26eBGCj5/kpnpl9LS5Twpw78Rgk/jogOIM/HDVCbu/M/ZSQPmdBN/q3vWEXAw==}
+  '@matter/types@0.18.0-alpha.0-20260807-335c3291b':
+    resolution: {integrity: sha512-6th3hTsRBz0Y03it3Z6LiXtBLc7Cn1/hfGwaS1BgA4kXN/vwDwfseW0x+Uu703wLRJ5yqm/Nlgk13z1d0RYhRQ==}
 
   '@minhducsun2002/leb128@1.0.0':
     resolution: {integrity: sha512-eFrYUPDVHeuwWHluTG1kwNQUEUcFjVKYwPkU8z9DR1JH3AW7JtJsG9cRVGmwz809kKtGfwGJj58juCZxEvnI/g==}
@@ -1202,16 +1205,16 @@ packages:
     resolution: {integrity: sha512-gbKGcRUYIjA3/zCCNaWDciTMFI0dCkvou3TL8Zmy5Nc7sJ47a0jtOeZoTaMxkuqRo9cRhjOdZJXegxYE5FN/xw==}
     engines: {node: ^14.21.3 || >=16}
 
-  '@noble/curves@2.2.0':
-    resolution: {integrity: sha512-T/BoHgFXirb0ENSPBquzX0rcjXeM6Lo892a2jlYJkqk83LqZx0l1Of7DzlKJ6jkpvMrkHSnAcgb5JegL8SeIkQ==}
+  '@noble/curves@2.3.0':
+    resolution: {integrity: sha512-v7cY+4oWYPQszRj6ZFGzTVL7uP2TaLo1xMhWHzYC5wj0ZhOXQ5x+sBre8rF3hi8cAoi0bh1qXoovoOkdFtvqEg==}
     engines: {node: '>= 20.19.0'}
 
   '@noble/hashes@1.8.0':
     resolution: {integrity: sha512-jCs9ldd7NwzpgXDIf6P3+NrHh9/sD6CQdxHyjQI+h/6rDNo88ypBxxz45UDuZHz9r3tNz7N/VInSVoVdtXEI4A==}
     engines: {node: ^14.21.3 || >=16}
 
-  '@noble/hashes@2.2.0':
-    resolution: {integrity: sha512-IYqDGiTXab6FniAgnSdZwgWbomxpy9FtYvLKs7wCUs2a8RkITG+DFGO1DM9cr+E3/RgADRpFjrKVaJ1z6sjtEg==}
+  '@noble/hashes@2.3.0':
+    resolution: {integrity: sha512-oN+QwyX7VSHotibwubG3kpzbwKrfnyR6OOO+3Nk/53ADL7FmgHHz4TgrbaYKvvOw09u6QTx0oiH1cNCIOuN0CQ==}
     engines: {node: '>= 20.19.0'}
 
   '@octokit/auth-token@6.0.0':
@@ -5698,9 +5701,9 @@ snapshots:
   '@esbuild/win32-x64@0.28.1':
     optional: true
 
-  '@exodus/bytes@1.15.0(@noble/hashes@2.2.0)':
+  '@exodus/bytes@1.15.0(@noble/hashes@2.3.0)':
     optionalDependencies:
-      '@noble/hashes': 2.2.0
+      '@noble/hashes': 2.3.0
 
   '@fidm/asn1@1.0.4': {}
 
@@ -5768,48 +5771,48 @@ snapshots:
 
   '@marijn/find-cluster-break@1.0.2': {}
 
-  '@matter/general@0.17.9':
+  '@matter/general@0.18.0-alpha.0-20260807-335c3291b':
     dependencies:
-      '@noble/curves': 2.2.0
+      '@noble/curves': 2.3.0
 
-  '@matter/main@0.17.9':
+  '@matter/main@0.18.0-alpha.0-20260807-335c3291b':
     dependencies:
-      '@matter/general': 0.17.9
-      '@matter/model': 0.17.9
-      '@matter/node': 0.17.9(patch_hash=e3376f1c2fdd0a0df09b8d04625a4d7af65b47d7277cc88cdb80baf7fb32bd0d)
-      '@matter/protocol': 0.17.9
-      '@matter/types': 0.17.9
+      '@matter/general': 0.18.0-alpha.0-20260807-335c3291b
+      '@matter/model': 0.18.0-alpha.0-20260807-335c3291b(patch_hash=b3d65d5de263085c617b0282545801c4206244163d5aa7c61b3dd0acb52fdae9)
+      '@matter/node': 0.18.0-alpha.0-20260807-335c3291b(patch_hash=e3376f1c2fdd0a0df09b8d04625a4d7af65b47d7277cc88cdb80baf7fb32bd0d)
+      '@matter/protocol': 0.18.0-alpha.0-20260807-335c3291b
+      '@matter/types': 0.18.0-alpha.0-20260807-335c3291b
     optionalDependencies:
-      '@matter/nodejs': 0.17.9
+      '@matter/nodejs': 0.18.0-alpha.0-20260807-335c3291b
 
-  '@matter/model@0.17.9':
+  '@matter/model@0.18.0-alpha.0-20260807-335c3291b(patch_hash=b3d65d5de263085c617b0282545801c4206244163d5aa7c61b3dd0acb52fdae9)':
     dependencies:
-      '@matter/general': 0.17.9
+      '@matter/general': 0.18.0-alpha.0-20260807-335c3291b
 
-  '@matter/node@0.17.9(patch_hash=e3376f1c2fdd0a0df09b8d04625a4d7af65b47d7277cc88cdb80baf7fb32bd0d)':
+  '@matter/node@0.18.0-alpha.0-20260807-335c3291b(patch_hash=e3376f1c2fdd0a0df09b8d04625a4d7af65b47d7277cc88cdb80baf7fb32bd0d)':
     dependencies:
-      '@matter/general': 0.17.9
-      '@matter/model': 0.17.9
-      '@matter/protocol': 0.17.9
-      '@matter/types': 0.17.9
+      '@matter/general': 0.18.0-alpha.0-20260807-335c3291b
+      '@matter/model': 0.18.0-alpha.0-20260807-335c3291b(patch_hash=b3d65d5de263085c617b0282545801c4206244163d5aa7c61b3dd0acb52fdae9)
+      '@matter/protocol': 0.18.0-alpha.0-20260807-335c3291b
+      '@matter/types': 0.18.0-alpha.0-20260807-335c3291b
 
-  '@matter/nodejs@0.17.9':
+  '@matter/nodejs@0.18.0-alpha.0-20260807-335c3291b':
     dependencies:
-      '@matter/general': 0.17.9
-      '@matter/node': 0.17.9(patch_hash=e3376f1c2fdd0a0df09b8d04625a4d7af65b47d7277cc88cdb80baf7fb32bd0d)
-      '@matter/protocol': 0.17.9
-      '@matter/types': 0.17.9
+      '@matter/general': 0.18.0-alpha.0-20260807-335c3291b
+      '@matter/node': 0.18.0-alpha.0-20260807-335c3291b(patch_hash=e3376f1c2fdd0a0df09b8d04625a4d7af65b47d7277cc88cdb80baf7fb32bd0d)
+      '@matter/protocol': 0.18.0-alpha.0-20260807-335c3291b
+      '@matter/types': 0.18.0-alpha.0-20260807-335c3291b
 
-  '@matter/protocol@0.17.9':
+  '@matter/protocol@0.18.0-alpha.0-20260807-335c3291b':
     dependencies:
-      '@matter/general': 0.17.9
-      '@matter/model': 0.17.9
-      '@matter/types': 0.17.9
+      '@matter/general': 0.18.0-alpha.0-20260807-335c3291b
+      '@matter/model': 0.18.0-alpha.0-20260807-335c3291b(patch_hash=b3d65d5de263085c617b0282545801c4206244163d5aa7c61b3dd0acb52fdae9)
+      '@matter/types': 0.18.0-alpha.0-20260807-335c3291b
 
-  '@matter/types@0.17.9':
+  '@matter/types@0.18.0-alpha.0-20260807-335c3291b':
     dependencies:
-      '@matter/general': 0.17.9
-      '@matter/model': 0.17.9
+      '@matter/general': 0.18.0-alpha.0-20260807-335c3291b
+      '@matter/model': 0.18.0-alpha.0-20260807-335c3291b(patch_hash=b3d65d5de263085c617b0282545801c4206244163d5aa7c61b3dd0acb52fdae9)
 
   '@minhducsun2002/leb128@1.0.0': {}
 
@@ -6011,13 +6014,13 @@ snapshots:
     dependencies:
       '@noble/hashes': 1.8.0
 
-  '@noble/curves@2.2.0':
+  '@noble/curves@2.3.0':
     dependencies:
-      '@noble/hashes': 2.2.0
+      '@noble/hashes': 2.3.0
 
   '@noble/hashes@1.8.0': {}
 
-  '@noble/hashes@2.2.0': {}
+  '@noble/hashes@2.3.0': {}
 
   '@octokit/auth-token@6.0.0': {}
 
@@ -7538,10 +7541,10 @@ snapshots:
       d3-selection: 3.0.0
       d3-transition: 3.0.1(d3-selection@3.0.0)
 
-  data-urls@7.0.0(@noble/hashes@2.2.0):
+  data-urls@7.0.0(@noble/hashes@2.3.0):
     dependencies:
       whatwg-mimetype: 5.0.0
-      whatwg-url: 16.0.1(@noble/hashes@2.2.0)
+      whatwg-url: 16.0.1(@noble/hashes@2.3.0)
     transitivePeerDependencies:
       - '@noble/hashes'
 
@@ -8087,9 +8090,9 @@ snapshots:
     dependencies:
       lru-cache: 11.3.5
 
-  html-encoding-sniffer@6.0.0(@noble/hashes@2.2.0):
+  html-encoding-sniffer@6.0.0(@noble/hashes@2.3.0):
     dependencies:
-      '@exodus/bytes': 1.15.0(@noble/hashes@2.2.0)
+      '@exodus/bytes': 1.15.0(@noble/hashes@2.3.0)
     transitivePeerDependencies:
       - '@noble/hashes'
 
@@ -8287,17 +8290,17 @@ snapshots:
     dependencies:
       argparse: 2.0.1
 
-  jsdom@29.0.2(@noble/hashes@2.2.0):
+  jsdom@29.0.2(@noble/hashes@2.3.0):
     dependencies:
       '@asamuzakjp/css-color': 5.1.11
       '@asamuzakjp/dom-selector': 7.1.1
       '@bramus/specificity': 2.4.2
       '@csstools/css-syntax-patches-for-csstree': 1.1.3(css-tree@3.2.1)
-      '@exodus/bytes': 1.15.0(@noble/hashes@2.2.0)
+      '@exodus/bytes': 1.15.0(@noble/hashes@2.3.0)
       css-tree: 3.2.1
-      data-urls: 7.0.0(@noble/hashes@2.2.0)
+      data-urls: 7.0.0(@noble/hashes@2.3.0)
       decimal.js: 10.6.0
-      html-encoding-sniffer: 6.0.0(@noble/hashes@2.2.0)
+      html-encoding-sniffer: 6.0.0(@noble/hashes@2.3.0)
       is-potential-custom-element-name: 1.0.1
       lru-cache: 11.3.5
       parse5: 8.0.0
@@ -8308,7 +8311,7 @@ snapshots:
       w3c-xmlserializer: 5.0.0
       webidl-conversions: 8.0.1
       whatwg-mimetype: 5.0.0
-      whatwg-url: 16.0.1(@noble/hashes@2.2.0)
+      whatwg-url: 16.0.1(@noble/hashes@2.3.0)
       xml-name-validator: 5.0.0
     transitivePeerDependencies:
       - '@noble/hashes'
@@ -10089,7 +10092,7 @@ snapshots:
       tsx: 4.21.0
       yaml: 2.8.3
 
-  vitest@4.1.4(@types/node@25.3.0)(jsdom@29.0.2(@noble/hashes@2.2.0))(vite@8.0.16(@types/node@25.3.0)(esbuild@0.28.1)(tsx@4.21.0)(yaml@2.8.3)):
+  vitest@4.1.4(@types/node@25.3.0)(jsdom@29.0.2(@noble/hashes@2.3.0))(vite@8.0.16(@types/node@25.3.0)(esbuild@0.28.1)(tsx@4.21.0)(yaml@2.8.3)):
     dependencies:
       '@vitest/expect': 4.1.4
       '@vitest/mocker': 4.1.4(vite@8.0.16(@types/node@25.3.0)(esbuild@0.28.1)(tsx@4.21.0)(yaml@2.8.3))
@@ -10113,7 +10116,7 @@ snapshots:
       why-is-node-running: 2.3.0
     optionalDependencies:
       '@types/node': 25.3.0
-      jsdom: 29.0.2(@noble/hashes@2.2.0)
+      jsdom: 29.0.2(@noble/hashes@2.3.0)
     transitivePeerDependencies:
       - msw
 
@@ -10204,9 +10207,9 @@ snapshots:
 
   whatwg-mimetype@5.0.0: {}
 
-  whatwg-url@16.0.1(@noble/hashes@2.2.0):
+  whatwg-url@16.0.1(@noble/hashes@2.3.0):
     dependencies:
-      '@exodus/bytes': 1.15.0(@noble/hashes@2.2.0)
+      '@exodus/bytes': 1.15.0(@noble/hashes@2.3.0)
       tr46: 6.0.0
       webidl-conversions: 8.0.1
     transitivePeerDependencies:

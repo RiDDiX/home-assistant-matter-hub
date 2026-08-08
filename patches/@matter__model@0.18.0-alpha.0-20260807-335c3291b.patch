@@ -1,0 +1,32 @@
+diff --git a/dist/cjs/logic/cluster-variance/IllegalFeatureCombinations.js b/dist/cjs/logic/cluster-variance/IllegalFeatureCombinations.js
+index a64f0c7978ff633707438e883b7918111c45df04..f1a19a6d9927e9344a45835f566843b660562287 100644
+--- a/dist/cjs/logic/cluster-variance/IllegalFeatureCombinations.js
++++ b/dist/cjs/logic/cluster-variance/IllegalFeatureCombinations.js
+@@ -138,7 +138,10 @@ function addFeatureNode(feature, node, add, choices) {
+           break;
+         case import_aspects.Conformance.OR: {
+           const flags = (0, import_FeatureBitmap.FeatureBitmap)({ [feature.name]: true });
+-          addExclusivityRequirement(flags, node.param);
++          const disjuncts = extractDisjunctFeatures(node.param);
++          for (const name in disjuncts) {
++            flags[name] = !disjuncts[name];
++          }
+           add(flags);
+           break;
+         }
+diff --git a/dist/esm/logic/cluster-variance/IllegalFeatureCombinations.js b/dist/esm/logic/cluster-variance/IllegalFeatureCombinations.js
+index dbf0425f3d9ed0d65d8630d439437640bb6eec29..db093d409f83d8061e9effbc29ea9e670bf56421 100644
+--- a/dist/esm/logic/cluster-variance/IllegalFeatureCombinations.js
++++ b/dist/esm/logic/cluster-variance/IllegalFeatureCombinations.js
+@@ -115,7 +115,10 @@ function addFeatureNode(feature, node, add, choices) {
+           break;
+         case Conformance.OR: {
+           const flags = FeatureBitmap({ [feature.name]: true });
+-          addExclusivityRequirement(flags, node.param);
++          const disjuncts = extractDisjunctFeatures(node.param);
++          for (const name in disjuncts) {
++            flags[name] = !disjuncts[name];
++          }
+           add(flags);
+           break;
+         }
