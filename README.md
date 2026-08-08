@@ -19,9 +19,9 @@
 ---
 
 > [!NOTE]
-> 🔀 **Community Fork** - This is a fork of the original [t0bst4r/home-assistant-matter-hub](https://github.com/t0bst4r/home-assistant-matter-hub), which was discontinued in January 2026. We continue active development with bug fixes, new features, and community support. Thank you **[@t0bst4r](https://github.com/t0bst4r)** for the original work! ❤️
+> 🔀 **Community Fork** - This is the actively maintained fork and successor of the original [t0bst4r/home-assistant-matter-hub](https://github.com/t0bst4r/home-assistant-matter-hub), which was discontinued in January 2026 and has since been archived. We continue active development with bug fixes, new features, and community support. Thank you **[@t0bst4r](https://github.com/t0bst4r)** for the original work! ❤️
 >
-> **📦 Migrating?** See [Migration Guide](#migration-from-t0bst4r) - your paired devices will continue to work!
+> **📦 Migrating?** See [Migration Guide](#migration-from-t0bst4r) - your paired devices will continue to work! For a side-by-side feature list, see the [fork comparison](https://riddix.github.io/home-assistant-matter-hub/getting-started/fork-comparison). The add-on slugs are `hamh` (stable), `hamh-alpha` and `hamh-testing`.
 
 ---
 

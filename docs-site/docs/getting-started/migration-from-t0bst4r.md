@@ -1,6 +1,6 @@
 # Migration from t0bst4r to RiDDiX Fork
 
-This guide explains how to migrate from the original `t0bst4r/home-assistant-matter-hub` to the `riddix/home-assistant-matter-hub` fork **without losing your Matter fabric connections**.
+This guide explains how to migrate from the original `t0bst4r/home-assistant-matter-hub` to the `riddix/home-assistant-matter-hub` fork **without losing your Matter fabric connections**. Not sure whether to switch? See the [fork comparison](./fork-comparison.md).
 
 :::warning
 The storage format is fully compatible between both versions. Your Matter fabric data (connections to Apple Home, Google Home, Alexa, etc.) will be preserved.
@@ -171,7 +171,7 @@ The RiDDiX fork is fully backwards-compatible with t0bst4r configuration. New fe
 | Structured JSON Logging | ❌ | ✅ |
 | Improved UI | ❌ | ✅ |
 
-See the [README](https://github.com/riddix/home-assistant-matter-hub#releases) for the full changelog.
+This table only lists a few highlights. See the [fork comparison](./fork-comparison.md) for the full side-by-side list and the [README](https://github.com/riddix/home-assistant-matter-hub#releases) for the changelog.
 
 ---
 

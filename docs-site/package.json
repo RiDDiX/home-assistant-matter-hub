@@ -49,6 +49,9 @@
     "launch-editor": "^2.14.1",
     "@babel/core": "^7.29.6",
     "js-yaml": "^4.3.0",
+    "gray-matter": {
+      "js-yaml": "^3.14.1"
+    },
     "websocket-driver": "^0.7.5",
     "svgo": "^3.3.4"
   },

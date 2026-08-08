@@ -11,6 +11,7 @@ const sidebars: SidebarsConfig = {
         "getting-started/bridge-configuration",
         "getting-started/standalone-devices",
         "getting-started/migration-from-t0bst4r",
+        "getting-started/fork-comparison",
       ],
     },
     {

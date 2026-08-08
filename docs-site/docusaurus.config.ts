@@ -59,6 +59,7 @@ const config: Config = {
             from: "/migration-from-t0bst4r",
             to: "/getting-started/migration-from-t0bst4r",
           },
+          { from: "/fork-comparison", to: "/getting-started/fork-comparison" },
           { from: "/connectivity-issues", to: "/guides/connectivity-issues" },
           {
             from: "/connect-multiple-fabrics",
@@ -92,6 +93,18 @@ const config: Config = {
 
   themeConfig: {
     image: "img/hamh-logo-large.png",
+    metadata: [
+      {
+        name: "description",
+        content:
+          "Actively maintained fork and successor of t0bst4r/home-assistant-matter-hub. Expose Home Assistant devices to Matter controllers like Apple Home, Google Home, and Alexa.",
+      },
+      {
+        name: "keywords",
+        content:
+          "home assistant, matter, bridge, t0bst4r, fork, successor, hamh, apple home, google home, alexa",
+      },
+    ],
     navbar: {
       title: "Home Assistant Matter Hub",
       logo: {

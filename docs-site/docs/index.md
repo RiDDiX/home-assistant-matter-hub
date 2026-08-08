@@ -1,12 +1,23 @@
+---
+description: Actively maintained fork and successor of t0bst4r/home-assistant-matter-hub. Expose Home Assistant devices to Matter controllers like Apple Home, Google Home, and Alexa.
+keywords:
+  - home-assistant-matter-hub
+  - t0bst4r
+  - fork
+  - successor
+  - matter bridge
+  - hamh
+---
+
 # Home-Assistant-Matter-Hub
 
 !["Home-Assistant-Matter-Hub"](/img/hamh-logo-small.png)
 
 ---
 
-> **Community Fork** - This is a fork of the original [t0bst4r/home-assistant-matter-hub](https://github.com/t0bst4r/home-assistant-matter-hub), which was discontinued in January 2026. We continue active development with bug fixes, new features, and community support.
+> **Community Fork** - This is the actively maintained fork and successor of [t0bst4r/home-assistant-matter-hub](https://github.com/t0bst4r/home-assistant-matter-hub), which was discontinued in January 2026 and has since been archived. We continue active development with bug fixes, new features, and community support. The Home Assistant add-on slugs are `hamh` (stable), `hamh-alpha` and `hamh-testing`.
 >
-> We actively work on fixing old issues from the original project and welcome new feature requests. This is a living project maintained by the community!
+> We actively work on fixing old issues from the original project and welcome new feature requests. This is a living project maintained by the community! Coming from the original? See the [fork comparison](./getting-started/fork-comparison.md) and the [migration guide](./getting-started/migration-from-t0bst4r.md).
 
 ---
 
