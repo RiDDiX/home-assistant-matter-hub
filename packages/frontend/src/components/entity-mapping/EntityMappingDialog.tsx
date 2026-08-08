@@ -149,6 +149,8 @@ export function EntityMappingDialog({
   const [lockPinMaxLength, setLockPinMaxLength] = useState("");
   const [powerEntity, setPowerEntity] = useState("");
   const [energyEntity, setEnergyEntity] = useState("");
+  const [meterSerialNumber, setMeterSerialNumber] = useState("");
+  const [pointOfDelivery, setPointOfDelivery] = useState("");
   const [voltageEntity, setVoltageEntity] = useState("");
   const [currentEntity, setCurrentEntity] = useState("");
   const [batteryPowerEntity, setBatteryPowerEntity] = useState("");
@@ -256,6 +258,8 @@ export function EntityMappingDialog({
       );
       setPowerEntity(currentMapping?.powerEntity || "");
       setEnergyEntity(currentMapping?.energyEntity || "");
+      setMeterSerialNumber(currentMapping?.meterSerialNumber || "");
+      setPointOfDelivery(currentMapping?.pointOfDelivery || "");
       setVoltageEntity(currentMapping?.voltageEntity || "");
       setCurrentEntity(currentMapping?.currentEntity || "");
       setBatteryPowerEntity(currentMapping?.batteryPowerEntity || "");
@@ -409,6 +413,16 @@ export function EntityMappingDialog({
       lockPinMaxLength: parsePinLength(lockPinMaxLength),
       powerEntity: powerEntity.trim() || undefined,
       energyEntity: energyEntity.trim() || undefined,
+      // Only meaningful on the utility meter type; sending them for other
+      // types would keep stale values alive in storage and exports.
+      meterSerialNumber:
+        matterDeviceType === "electrical_utility_meter"
+          ? meterSerialNumber.trim() || undefined
+          : undefined,
+      pointOfDelivery:
+        matterDeviceType === "electrical_utility_meter"
+          ? pointOfDelivery.trim() || undefined
+          : undefined,
       voltageEntity: voltageEntity.trim() || undefined,
       currentEntity: currentEntity.trim() || undefined,
       batteryPowerEntity: batteryPowerEntity.trim() || undefined,
@@ -477,6 +491,8 @@ export function EntityMappingDialog({
     lockPinMaxLength,
     powerEntity,
     energyEntity,
+    meterSerialNumber,
+    pointOfDelivery,
     voltageEntity,
     currentEntity,
     batteryPowerEntity,
@@ -565,6 +581,7 @@ export function EntityMappingDialog({
     matterDeviceType !== "electrical_meter" &&
     matterDeviceType !== "solar_power" &&
     matterDeviceType !== "electrical_sensor" &&
+    matterDeviceType !== "electrical_utility_meter" &&
     // EVSE renders its own charging switch / current limit / power / energy
     // group below, so don't double up the power/energy fields for it (#419).
     matterDeviceType !== "evse" &&
@@ -578,7 +595,12 @@ export function EntityMappingDialog({
   const showElectricalMeterFields =
     matterDeviceType === "electrical_meter" ||
     matterDeviceType === "solar_power" ||
-    matterDeviceType === "electrical_sensor";
+    matterDeviceType === "electrical_sensor" ||
+    matterDeviceType === "electrical_utility_meter";
+
+  // Show the MeterIdentification fields for the Matter 1.4 utility meter.
+  const showUtilityMeterFields =
+    matterDeviceType === "electrical_utility_meter";
 
   // Show battery power/energy fields to expose a home battery as an ESS.
   const showBatteryEnergyFields = matterDeviceType === "battery_storage";
@@ -1168,6 +1190,29 @@ export function EntityMappingDialog({
               placeholder="sensor.grid_current"
               helperText="Sensor with device_class: current (A), folded into this meter"
               domain="sensor"
+            />
+          </>
+        )}
+
+        {showUtilityMeterFields && (
+          <>
+            <TextField
+              fullWidth
+              margin="normal"
+              label="Meter Serial Number (optional)"
+              placeholder="1EMH0001234567"
+              value={meterSerialNumber}
+              onChange={(e) => setMeterSerialNumber(e.target.value)}
+              helperText="Serial number reported via MeterIdentification. Empty reports null."
+            />
+            <TextField
+              fullWidth
+              margin="normal"
+              label="Point of Delivery (optional)"
+              placeholder="DE0001234567890123456789012345678"
+              value={pointOfDelivery}
+              onChange={(e) => setPointOfDelivery(e.target.value)}
+              helperText="Metering point id reported via MeterIdentification. Empty reports null."
             />
           </>
         )}

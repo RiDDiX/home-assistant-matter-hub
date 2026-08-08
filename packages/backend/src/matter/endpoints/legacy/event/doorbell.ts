@@ -1,6 +1,6 @@
 import type { EventDeviceAttributes } from "@home-assistant-matter-hub/common";
 import type { EndpointType } from "@matter/main";
-import { GenericSwitchDevice } from "@matter/main/devices";
+import { DoorbellDevice as Base } from "@matter/main/devices";
 import { BasicInformationServer } from "../../../behaviors/basic-information-server.js";
 import {
   HaGenericSwitchServer,
@@ -8,50 +8,40 @@ import {
 } from "../../../behaviors/generic-switch-server.js";
 import { HomeAssistantEntityBehavior } from "../../../behaviors/home-assistant-entity-behavior.js";
 import { IdentifyServer } from "../../../behaviors/identify-server.js";
+import { detectMultiPressMax } from "./index.js";
 
-const EventEndpointTypeMulti = GenericSwitchDevice.with(
+// Doorbell (0x148) ships only Identify by default; the mandatory Switch with
+// MomentarySwitch comes from the Ha switch servers. The spec also mandates a
+// Chime CLIENT cluster, but matter.js only instantiates servers, so the
+// endpoint goes without it.
+
+const DoorbellEndpointTypeMulti = Base.with(
   BasicInformationServer,
   IdentifyServer,
   HomeAssistantEntityBehavior,
   HaGenericSwitchServer,
 );
 
-const EventEndpointTypeSimple = GenericSwitchDevice.with(
+const DoorbellEndpointTypeSimple = Base.with(
   BasicInformationServer,
   IdentifyServer,
   HomeAssistantEntityBehavior,
   HaGenericSwitchServerSimple,
 );
 
-const multiPressPatterns: [RegExp, number][] = [
-  [/triple|3_press|three/, 3],
-  [/double|2_press|two|multi/, 2],
-];
-
-export function detectMultiPressMax(eventTypes: string[]): number {
-  let max = 1;
-  for (const et of eventTypes) {
-    const lower = et.toLowerCase();
-    for (const [pattern, count] of multiPressPatterns) {
-      if (pattern.test(lower) && count > max) max = count;
-    }
-  }
-  return max;
-}
-
-export function EventDevice(
+export function DoorbellDevice(
   homeAssistantEntity: HomeAssistantEntityBehavior.State,
 ): EndpointType {
   const attrs = homeAssistantEntity.entity.state
     .attributes as EventDeviceAttributes;
   const multiPressMax = detectMultiPressMax(attrs.event_types ?? []);
   if (multiPressMax >= 2) {
-    return EventEndpointTypeMulti.set({
+    return DoorbellEndpointTypeMulti.set({
       homeAssistantEntity,
       switch: { multiPressMax },
     });
   }
-  return EventEndpointTypeSimple.set({
+  return DoorbellEndpointTypeSimple.set({
     homeAssistantEntity,
   });
 }

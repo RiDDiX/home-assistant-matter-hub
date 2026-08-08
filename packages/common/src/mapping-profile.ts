@@ -28,6 +28,8 @@ export interface MappingProfileEntry {
   readonly lockPinMaxLength?: number;
   readonly powerEntity?: string;
   readonly energyEntity?: string;
+  readonly meterSerialNumber?: string;
+  readonly pointOfDelivery?: string;
   readonly voltageEntity?: string;
   readonly currentEntity?: string;
   readonly batteryPowerEntity?: string;

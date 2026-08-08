@@ -363,6 +363,9 @@ Mapped to **GenericSwitch** device.
 - Events from HA `event.*` entities are forwarded as Matter GenericSwitch position changes
 - Controllers can react to button press events
 
+**Doorbell Override (experimental):**
+An `event` entity (typically `device_class: doorbell`) can be switched to the Matter **Doorbell** type (0x148) via the Entity Mapping UI. It carries the same momentary Switch cluster, only the device type changes. Only SmartThings renders 0x148 as a doorbell today; other controllers don't know the type and fall back to the Switch cluster, if they show the device at all. The default stays GenericSwitch, and switching an already-paired entity needs a re-pair.
+
 ---
 
 ### Buttons (`button`, `input_button`)
@@ -600,6 +603,7 @@ You can override the default device type mapping per entity using the Entity Map
 - WaterHeaterManagement — "Water Heater with Boost (Matter 1.4)", the 0x050F device type with the WaterHeaterManagement (Boost / CancelBoost), WaterHeaterMode and heating Thermostat clusters. Opt-in: it is aimed at energy-management controllers, no mainstream controller renders 0x050F yet, and switching an already-paired entity to it needs a re-pair
 - Dishwasher
 - GenericSwitch
+- Doorbell (experimental 0x148 for `event` entities. Only SmartThings renders it as a doorbell; other controllers don't know the type yet and fall back to the momentary Switch cluster the endpoint also carries. Switching an already-paired entity needs a re-pair)
 - SmokeCO Alarm, Water Leak Detector, Water Freeze Detector
 
 **Use Cases:**

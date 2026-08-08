@@ -30,6 +30,7 @@ Rows flagged with a footnote number link to the vendor source that establishes t
 | `sensor` | AirQualitySensor | ✅ | ✅ [¹](#sources) | ✅ [²](#sources) | ✅ [⁴](#sources) | ❓ |
 | `sensor` | ElectricalMeter | ❌ | ✅ | ❌ | ❓ | ✅ |
 | `sensor` (override) | SolarPower | ❌ | ❌ | ❓ | ❓ | ✅ |
+| `sensor` (override) | ElectricalUtilityMeter | ❌ | ❌ | ❌ | ❓ | ✅ |
 | `sensor` (override) | BatteryStorage | ❌ | ❌ | ❌ | ✅ | ❓ |
 | `sensor` (override) | EnergyEvse | ❌ | ❌ | ❌ | ✅ | ❓ |
 | `binary_sensor` | ContactSensor | ✅ | ✅ [¹](#sources) | ✅ [²](#sources) | ✅ [⁴](#sources) | ✅ |
@@ -46,9 +47,14 @@ Rows flagged with a footnote number link to the vendor source that establishes t
 | `alarm_control_panel` | ModeSelect | ❌ [⁵](#sources) | ❓ | ❌** | ❓ | ❓ |
 | `select` | ModeSelect | ❌ [⁵](#sources) | ❌*** | ❌** | ❓ | ❓ |
 | `event` | GenericSwitch | ✅ [⁵](#sources) | ❓ | ✅ [²](#sources) | ❓ | ❓ |
+| `event` (override) | Doorbell | ❌ | ❌ | ❌ | ❌ | ✅ |
 | `humidifier` | Fan | ✅ | ✅ [¹](#sources) | ✅ [²](#sources) | ✅ [⁴](#sources) | ❓ |
 | `dishwasher` (override) | Dishwasher | ❌ [³](#sources) | ✅ [¹](#sources) | ✅ [²](#sources) | ❓ | ✅ |
 | `weather` | TemperatureSensor (+Humidity, +Pressure) | ⚠️**** | ⚠️**** | ⚠️**** | ❓ | ❓ |
+
+:::note ElectricalUtilityMeter is opt-in
+ElectricalUtilityMeter (0x0511, Matter 1.4) is only used when you set the Matter device type to "Electrical Utility Meter (Meter Identification)" by hand. It adds the MeterIdentification cluster (meter serial number and point of delivery from the mapping, null when unset) on top of the same power/energy measurements as ElectricalMeter. SmartThings renders energy devices; the other mainstream controllers don't know the type yet. Consumption sensors keep defaulting to ElectricalMeter (0x0514), so existing pairings are untouched. See [mapping blueprints](./mapping-blueprints.md#electrical-utility-meter).
+:::
 
 :::note EnergyEvse is opt-in and bridge-sensitive
 EnergyEvse (0x050C) is only used when you set the Matter device type to "EV Charger (EVSE)" by hand. Home Assistant and Aqara Home render it; SmartThings announced support but it is unconfirmed here. A bridged EVSE has been reported to break Alexa device recognition, so keep it off any bridge that Alexa pairs with. See [mapping blueprints](./mapping-blueprints.md#ev-charger-evse).
@@ -62,6 +68,10 @@ and Thermostat clusters, which adds the Boost and CancelBoost commands for energ
 controllers. No
 mainstream controller renders 0x050F today, and changing the type on an already-paired entity
 requires re-pairing it. See [mapping blueprints](./mapping-blueprints.md).
+:::
+
+:::note The Doorbell type is opt-in
+By default an `event` entity is exposed as a GenericSwitch, which keeps existing pairings intact. Setting the Matter device type to "Doorbell (experimental)" by hand swaps the endpoint to Doorbell (0x148) with the same momentary Switch cluster. Only SmartThings renders 0x148 as a doorbell today; Apple, Google, Alexa and Aqara don't know the type yet and fall back to the plain Switch cluster, if they show the device at all. Switching an already-paired entity needs a re-pair.
 :::
 
 :::note Leak and freeze detectors are opt-in

@@ -55,6 +55,8 @@ export function entityMappingApi(
       lockPinMaxLength: body.lockPinMaxLength,
       powerEntity: body.powerEntity,
       energyEntity: body.energyEntity,
+      meterSerialNumber: body.meterSerialNumber,
+      pointOfDelivery: body.pointOfDelivery,
       voltageEntity: body.voltageEntity,
       currentEntity: body.currentEntity,
       batteryPowerEntity: body.batteryPowerEntity,

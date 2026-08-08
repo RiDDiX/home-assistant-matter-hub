@@ -12,8 +12,10 @@ export type MatterDeviceType =
   | "dimmable_light"
   | "dimmable_plugin_unit"
   | "door_lock"
+  | "doorbell"
   | "electrical_meter"
   | "electrical_sensor"
+  | "electrical_utility_meter"
   | "evse"
   | "extended_color_light"
   | "fan"
@@ -206,6 +208,19 @@ export interface EntityMappingConfig {
    * Example: "sensor.smart_plug_energy"
    */
   readonly energyEntity?: string;
+  /**
+   * Optional: Serial number reported via the MeterIdentification cluster of an
+   * Electrical Utility Meter (0x0511). Unset reports null (unavailable).
+   * Example: "1EMH0001234567"
+   */
+  readonly meterSerialNumber?: string;
+  /**
+   * Optional: Point of delivery (metering point id) reported via the
+   * MeterIdentification cluster of an Electrical Utility Meter (0x0511).
+   * Unset reports null (unavailable).
+   * Example: "DE0001234567890123456789012345678"
+   */
+  readonly pointOfDelivery?: string;
   /**
    * Optional: Entity ID of a voltage sensor (device_class: voltage, unit: V).
    * Folds voltage into the ElectricalPowerMeasurement cluster of this device.
@@ -462,6 +477,8 @@ export interface EntityMappingRequest {
   readonly lockPinMaxLength?: number;
   readonly powerEntity?: string;
   readonly energyEntity?: string;
+  readonly meterSerialNumber?: string;
+  readonly pointOfDelivery?: string;
   readonly voltageEntity?: string;
   readonly currentEntity?: string;
   readonly batteryPowerEntity?: string;
@@ -514,8 +531,10 @@ export const matterDeviceTypeLabels: Record<MatterDeviceType, string> = {
   dimmable_light: "Dimmable Light",
   dimmable_plugin_unit: "Dimmable Plug-in Unit",
   door_lock: "Door Lock",
+  doorbell: "Doorbell (experimental)",
   electrical_meter: "Electrical Meter (Power/Energy/Voltage/Current)",
   electrical_sensor: "Electrical Sensor (Solar Power, legacy)",
+  electrical_utility_meter: "Electrical Utility Meter (Meter Identification)",
   evse: "EV Charger (EVSE)",
   extended_color_light: "Extended Color Light",
   fan: "Fan",
@@ -739,6 +758,13 @@ export const matterDeviceTypeControllerSupport: Record<
     aqara: "unknown",
     note: "Legacy SolarPower (0x0017) alias. Google does not list it; pick Electrical Meter for consumption.",
   },
+  electrical_utility_meter: {
+    apple: "no",
+    google: "no",
+    alexa: "no",
+    aqara: "unknown",
+    note: "Matter 1.4 ElectricalUtilityMeter (0x0511) with MeterIdentification, plus the same measurement clusters as Electrical Meter. SmartThings renders energy devices; the other mainstream controllers don't know the type yet.",
+  },
   solar_power: {
     apple: "no",
     google: "no",
@@ -819,6 +845,13 @@ export const matterDeviceTypeControllerSupport: Record<
     aqara: "unknown",
     note: "Best for stateless buttons.",
   },
+  doorbell: {
+    apple: "no",
+    google: "no",
+    alexa: "no",
+    aqara: "no",
+    note: "Experimental Matter 1.4 Doorbell (0x148). Only SmartThings renders it as a doorbell today; other controllers don't know the type and fall back to the plain Switch cluster, if they show it at all.",
+  },
   smoke_co_alarm: {
     apple: "yes",
     google: "no",
@@ -867,7 +900,7 @@ export const domainToDefaultMatterTypes: Partial<
   button: ["generic_switch"],
   climate: ["thermostat"],
   cover: ["window_covering"],
-  event: ["generic_switch"],
+  event: ["generic_switch", "doorbell"],
   fan: ["air_purifier", "fan"],
   humidifier: ["humidifier_dehumidifier"],
   input_boolean: [
@@ -894,6 +927,7 @@ export const domainToDefaultMatterTypes: Partial<
     "carbon_monoxide_sensor",
     "electrical_meter",
     "electrical_sensor",
+    "electrical_utility_meter",
     "evse",
     "formaldehyde_sensor",
     "humidity_sensor",

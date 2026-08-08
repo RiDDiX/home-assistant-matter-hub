@@ -173,6 +173,8 @@ export class EntityMappingStorage extends Service {
       lockPinMaxLength: pinLengths.max,
       powerEntity: request.powerEntity?.trim() || undefined,
       energyEntity: request.energyEntity?.trim() || undefined,
+      meterSerialNumber: request.meterSerialNumber?.trim() || undefined,
+      pointOfDelivery: request.pointOfDelivery?.trim() || undefined,
       voltageEntity: request.voltageEntity?.trim() || undefined,
       currentEntity: request.currentEntity?.trim() || undefined,
       batteryPowerEntity: request.batteryPowerEntity?.trim() || undefined,
@@ -246,6 +248,8 @@ export class EntityMappingStorage extends Service {
       config.lockPinMaxLength === undefined &&
       !config.powerEntity &&
       !config.energyEntity &&
+      !config.meterSerialNumber &&
+      !config.pointOfDelivery &&
       !config.voltageEntity &&
       !config.currentEntity &&
       !config.batteryPowerEntity &&

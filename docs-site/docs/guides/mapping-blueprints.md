@@ -137,6 +137,27 @@ A battery `sensor` (`device_class: battery`) is exposed as a Matter Battery Stor
 
 ---
 
+## Electrical Utility Meter
+
+An energy `sensor` (`device_class: energy`, kWh) can opt in to the Matter 1.4 ElectricalUtilityMeter (0x0511) instead of the default ElectricalMeter. Set the Matter device type to **Electrical Utility Meter (Meter Identification)**. The endpoint carries the same power/energy measurement clusters (companion `powerEntity`, `voltageEntity`, `currentEntity` sensors fold in as usual) plus a MeterIdentification cluster.
+
+- `meterSerialNumber`: the meter's serial number, reported as-is. Unset reports null.
+- `pointOfDelivery`: the metering point id used for billing. Unset reports null.
+
+```json
+{
+  "entityId": "sensor.grid_meter_energy",
+  "matterDeviceType": "electrical_utility_meter",
+  "meterSerialNumber": "1EMH0001234567",
+  "pointOfDelivery": "DE0001234567890123456789012345678",
+  "powerEntity": "sensor.grid_meter_power"
+}
+```
+
+Only pick this on a controller that knows the type (SmartThings renders energy devices, mainstream controllers don't surface 0x0511 yet), and re-pair the entity after changing the type.
+
+---
+
 ## EV Charger (EVSE)
 
 Home Assistant has no charger convention, so an EVSE is mapped by hand. Set the Matter device type to **EV Charger (EVSE)** on the charger's **status** entity (a `sensor` or `switch` whose state reads like `charging`, `connected`, `not connected`, `error`, ...). The status keyword drives the Matter EnergyEvse state:

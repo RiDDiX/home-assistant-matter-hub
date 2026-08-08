@@ -28,6 +28,7 @@ import { ButtonDevice } from "./button/index.js";
 import { ClimateDevice } from "./climate/index.js";
 import { CoverDevice } from "./cover/index.js";
 import { DishwasherEndpoint } from "./dishwasher/index.js";
+import { DoorbellDevice } from "./event/doorbell.js";
 import { EventDevice } from "./event/index.js";
 import { FanDevice } from "./fan/index.js";
 import { HumidifierDevice } from "./humidifier/index.js";
@@ -55,6 +56,7 @@ import { batteryStorageEssType } from "./sensor/devices/battery-storage-ess.js";
 import { CarbonMonoxideSensorType } from "./sensor/devices/carbon-monoxide-sensor.js";
 import { ElectricalMeterType } from "./sensor/devices/electrical-meter.js";
 import { ElectricalSensorType } from "./sensor/devices/electrical-sensor.js";
+import { ElectricalUtilityMeterType } from "./sensor/devices/electrical-utility-meter.js";
 import { energyEvseType } from "./sensor/devices/energy-evse.js";
 import { FlowSensorType } from "./sensor/devices/flow-sensor.js";
 import { FormaldehydeSensorType } from "./sensor/devices/formaldehyde-sensor.js";
@@ -350,6 +352,9 @@ const matterDeviceTypeFactories: Partial<
   electrical_sensor: (ha) =>
     ElectricalSensorType.set({ homeAssistantEntity: ha }),
   solar_power: (ha) => ElectricalSensorType.set({ homeAssistantEntity: ha }),
+  // Matter 1.4 utility meter (0x0511), opt-in so existing pairings keep 0x0514.
+  electrical_utility_meter: (ha) =>
+    ElectricalUtilityMeterType.set({ homeAssistantEntity: ha }),
   evse: (ha) => energyEvseType().set({ homeAssistantEntity: ha }),
   contact_sensor: (ha) => ContactSensorType.set({ homeAssistantEntity: ha }),
   motion_sensor: (ha) => MotionSensorType.set({ homeAssistantEntity: ha }),
@@ -362,6 +367,7 @@ const matterDeviceTypeFactories: Partial<
   water_heater: WaterHeaterDevice,
   water_heater_management: WaterHeaterManagementDevice,
   generic_switch: EventDevice,
+  doorbell: DoorbellDevice,
   smoke_co_alarm: (ha) => SmokeAlarmType.set({ homeAssistantEntity: ha }),
   water_freeze_detector: (ha) =>
     WaterFreezeDetectorType.set({ homeAssistantEntity: ha }),
