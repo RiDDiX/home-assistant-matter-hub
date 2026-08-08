@@ -28,6 +28,13 @@ export interface SessionInfo {
   // if none was seen. Unlike lastActiveMsAgo this does not advance on MRP acks,
   // so it tells a healthy session from one wedged on "Updating".
   lastImRequestMsAgo: number | null;
+  // #365 v2 shadow: ms since the last command-class request (Read/Write/
+  // Invoke/Timed), subscribe and delivery give-up churn over the last 30min,
+  // and what the shadow rule would decide right now.
+  lastCommandImRequestMsAgo: number | null;
+  subscribesLast30Min: number;
+  giveUpsLast30Min: number;
+  wedgeV2WouldRotate: boolean;
   isPeerActive: boolean;
   ageMsFromOpen: number | null;
 }

@@ -13,6 +13,7 @@ import {
   type Fabric,
   FabricManager,
   MdnsService,
+  MessageType,
   SessionManager,
 } from "@matter/main/protocol";
 import { FilteredNetwork } from "../../core/app/filtered-network.js";
@@ -49,12 +50,28 @@ import {
   type SubscriptionSummary,
   summarizeSubscriptions,
 } from "./subscription-summary.js";
-import { decideWedgeRotation } from "./wedge-watchdog.js";
+import {
+  countRecent,
+  decideWedgeRotation,
+  decideWedgeRotationV2,
+  WEDGE_GIVE_UP_QUIET_MS,
+  WEDGE_RING_SIZE,
+} from "./wedge-watchdog.js";
 
 // Marks an InteractionServer whose onNewExchange we already wrapped so re-wiring
 // never stacks wrappers. A restart mints a fresh InteractionServer without the
 // marker, so it gets wrapped again.
 const imWrapMarker = Symbol("hamh.wedgeImWrap");
+
+// First initiator messages that reach onNewExchange and mean the controller is
+// actually consuming, not just re-subscribing. TimedRequest follow-ups ride
+// the same exchange, so each type here is stamped exactly once per exchange.
+const commandMessageTypes: number[] = [
+  MessageType.ReadRequest,
+  MessageType.WriteRequest,
+  MessageType.InvokeRequest,
+  MessageType.TimedRequest,
+];
 
 // Auto Force Sync interval in milliseconds (90 seconds).
 // When autoForceSync is enabled, this pushes changed entity states to
@@ -103,6 +120,14 @@ export class Bridge {
   private lastImRequestAt = new WeakMap<object, number>();
   private wedgeLastRotatedAt = new WeakMap<object, number>();
   private wedgeWatchdogTimer: ReturnType<typeof setInterval> | null = null;
+
+  // V2 shadow signals (#365): last command-class request per session, plus
+  // rings of subscribe and delivery give-up times (newest WEDGE_RING_SIZE).
+  private lastCommandImAt = new WeakMap<object, number>();
+  private subscribeTimesMs = new WeakMap<object, number[]>();
+  private giveUpTimesMs = new WeakMap<object, number[]>();
+  // Sessions whose subscriptions.deleted we already hooked for give-ups.
+  private wedgeHookedSessions = new WeakSet<object>();
 
   // Watches the advertised interface addresses so a dynamic ISP IPv6 prefix
   // change forces a fresh operational announcement (#415).
@@ -158,6 +183,10 @@ export class Bridge {
       lastActiveMsAgo: number | null;
       lastAnyActivityMsAgo: number | null;
       lastImRequestMsAgo: number | null;
+      lastCommandImRequestMsAgo: number | null;
+      subscribesLast30Min: number;
+      giveUpsLast30Min: number;
+      wedgeV2WouldRotate: boolean;
       isPeerActive: boolean;
       ageMsFromOpen: number | null;
     }>;
@@ -209,6 +238,24 @@ export class Bridge {
         const lastImAt = this.lastImRequestAt.get(s);
         const lastImRequestMsAgo = lastImAt != null ? nowMs - lastImAt : null;
         const startedAt = this.sessionStartedAt.get(s.id);
+        // V2 shadow signals (#365): command silence, subscribe/give-up churn
+        // and what the v2 rule would decide right now.
+        const lastCmdAt = this.lastCommandImAt.get(s);
+        const lastCommandImRequestMsAgo =
+          lastCmdAt != null ? nowMs - lastCmdAt : null;
+        const subscribeTimes = this.subscribeTimesMs.get(s) ?? [];
+        const giveUpTimes = this.giveUpTimesMs.get(s) ?? [];
+        const lastRotatedAt = this.wedgeLastRotatedAt.get(s);
+        const wedgeV2WouldRotate = decideWedgeRotationV2({
+          subscriptionCount: subCount,
+          sessionAgeMs: startedAt != null ? nowMs - startedAt : 0,
+          commandSilenceMs: lastCommandImRequestMsAgo,
+          subscribeTimesMs: subscribeTimes,
+          giveUpTimesMs: giveUpTimes,
+          nowMs,
+          lastRotatedMsAgo:
+            lastRotatedAt != null ? nowMs - lastRotatedAt : null,
+        });
         return {
           id: s.id,
           peerNodeId: String(s.peerNodeId),
@@ -218,6 +265,10 @@ export class Bridge {
           lastActiveMsAgo,
           lastAnyActivityMsAgo,
           lastImRequestMsAgo,
+          lastCommandImRequestMsAgo,
+          subscribesLast30Min: countRecent(subscribeTimes, nowMs),
+          giveUpsLast30Min: countRecent(giveUpTimes, nowMs),
+          wedgeV2WouldRotate,
           isPeerActive: Boolean(s.isPeerActive),
           ageMsFromOpen: startedAt != null ? nowMs - startedAt : null,
         };
@@ -520,6 +571,25 @@ export class Bridge {
     try {
       const sessionManager = this.server.env.get(SessionManager);
       seedExistingSessionStarts(this.sessionStartedAt, sessionManager.sessions);
+      const hookGiveUpsWithPeers = (sess: {
+        peerNodeId?: unknown;
+        fabric?: { fabricIndex?: unknown };
+        subscriptions?: {
+          deleted?: { on?: (fn: (sub: unknown) => void) => void };
+        };
+      }) =>
+        this.hookSubscriptionGiveUps(sess, () =>
+          [...sessionManager.sessions].filter(
+            (s) =>
+              s.peerNodeId === sess.peerNodeId &&
+              s.fabric?.fabricIndex === sess.fabric?.fabricIndex,
+          ),
+        );
+      // Sessions alive before the wire (controller connected during startup)
+      // must be watched too, the added event already fired without us.
+      for (const sess of sessionManager.sessions) {
+        hookGiveUpsWithPeers(sess);
+      }
       this.sessionDiagHandler = (session: {
         id: number;
         peerNodeId: unknown;
@@ -599,8 +669,12 @@ export class Bridge {
         id: number;
         peerNodeId: unknown;
         fabric?: { fabricIndex: unknown };
+        subscriptions?: {
+          deleted?: { on?: (fn: (sub: unknown) => void) => void };
+        };
       }) => {
         this.sessionStartedAt.set(newSession.id, Date.now());
+        hookGiveUpsWithPeers(newSession);
         this.log.info(
           `Session opened: id=${newSession.id} peer=${newSession.peerNodeId}`,
         );
@@ -713,7 +787,14 @@ export class Bridge {
       is.onNewExchange = (exchange, message) => {
         const session = exchange.session;
         if (session) {
-          this.lastImRequestAt.set(session, Date.now());
+          const now = Date.now();
+          this.lastImRequestAt.set(session, now);
+          const type = message?.payloadHeader?.messageType;
+          if (type === MessageType.SubscribeRequest) {
+            this.pushWedgeRing(this.subscribeTimesMs, session, now);
+          } else if (type != null && commandMessageTypes.includes(type)) {
+            this.lastCommandImAt.set(session, now);
+          }
         }
         return original(exchange, message);
       };
@@ -721,6 +802,72 @@ export class Bridge {
     } catch {
       // InteractionServer not yet available
     }
+  }
+
+  // Keep only the newest WEDGE_RING_SIZE timestamps per session.
+  private pushWedgeRing(
+    ring: WeakMap<object, number[]>,
+    session: object,
+    now: number,
+  ) {
+    const times = ring.get(session) ?? [];
+    times.push(now);
+    if (times.length > WEDGE_RING_SIZE) {
+      times.splice(0, times.length - WEDGE_RING_SIZE);
+    }
+    ring.set(session, times);
+  }
+
+  // Watch this session's subscriptions for server-side delivery give-ups
+  // (#365 v2 shadow). isTerminated true fires both on a peer cancel and on
+  // the 3-strikes delivery give-up; only the give-up arrives without a
+  // coincident inbound IM request, so that is the discriminator.
+  private hookSubscriptionGiveUps(
+    session: {
+      subscriptions?: {
+        deleted?: { on?: (fn: (sub: unknown) => void) => void };
+      };
+    },
+    peerSessions?: () => Iterable<object>,
+  ) {
+    const key = session as object;
+    if (this.wedgeHookedSessions.has(key)) {
+      return;
+    }
+    const deleted = session.subscriptions?.deleted;
+    if (typeof deleted?.on !== "function") {
+      return;
+    }
+    this.wedgeHookedSessions.add(key);
+    deleted.on((sub) => {
+      if ((sub as { isTerminated?: boolean })?.isTerminated !== true) {
+        return;
+      }
+      const now = Date.now();
+      const fresh = (s: object) => {
+        const at = this.lastImRequestAt.get(s);
+        return at != null && now - at <= WEDGE_GIVE_UP_QUIET_MS;
+      };
+      // Fresh inbound alongside the termination: a peer cancel, not a
+      // give-up. keepSubscriptions=false on a sibling session cancels this
+      // session's subs too and stamps only the sibling, so the whole peer
+      // has to be quiet before this counts.
+      if (fresh(key)) {
+        return;
+      }
+      for (const s of peerSessions?.() ?? []) {
+        if (s !== key && fresh(s)) {
+          return;
+        }
+      }
+      this.pushWedgeRing(this.giveUpTimesMs, key, now);
+      // Cross-checkable against matter.js "Giving up on subscription" notices:
+      // a recorded give-up WITHOUT that notice was an InvalidSubscription or
+      // Failure answer from a live controller, not a delivery give-up.
+      this.log.debug(
+        `wedge v2 give-up recorded sub=${(sub as { subscriptionId?: number })?.subscriptionId}`,
+      );
+    });
   }
 
   private closeStaleSession(sessionId: number) {
@@ -1026,16 +1173,40 @@ export class Bridge {
         const lastRotatedAt = this.wedgeLastRotatedAt.get(s);
         const lastRotatedMsAgo =
           lastRotatedAt != null ? now - lastRotatedAt : null;
-        if (
-          !decideWedgeRotation({
-            subscriptionCount: s.subscriptions.size,
-            sessionAgeMs,
-            lastImRequestMsAgo,
-            lastRotatedMsAgo,
-          })
-        ) {
+        const v1 = decideWedgeRotation({
+          subscriptionCount: s.subscriptions.size,
+          sessionAgeMs,
+          lastImRequestMsAgo,
+          lastRotatedMsAgo,
+        });
+        // V2 shadow (#365): evaluate and log only, so the soak can compare
+        // both rules before v2 is allowed to close anything.
+        const lastCmdAt = this.lastCommandImAt.get(s);
+        const commandSilenceMs = lastCmdAt != null ? now - lastCmdAt : null;
+        const subscribeTimes = this.subscribeTimesMs.get(s) ?? [];
+        const giveUpTimes = this.giveUpTimesMs.get(s) ?? [];
+        const v2 = decideWedgeRotationV2({
+          subscriptionCount: s.subscriptions.size,
+          sessionAgeMs,
+          commandSilenceMs,
+          subscribeTimesMs: subscribeTimes,
+          giveUpTimesMs: giveUpTimes,
+          nowMs: now,
+          lastRotatedMsAgo,
+        });
+        const cmdSilenceMin = Math.round(
+          (commandSilenceMs ?? sessionAgeMs) / 60_000,
+        );
+        const v2Stats = `cmdSilenceMin=${cmdSilenceMin} subscribes30m=${countRecent(subscribeTimes, now)} giveUps30m=${countRecent(giveUpTimes, now)}`;
+        if (v2 && !v1) {
+          this.log.info(`wedge v2 would rotate session ${s.id}: ${v2Stats}`);
+        }
+        if (!v1) {
           continue;
         }
+        this.log.info(
+          `wedge v2 session ${s.id}: v1 rotated, v2 agree=${v2} ${v2Stats}`,
+        );
         const silenceMin = Math.round(
           (lastImRequestMsAgo ?? sessionAgeMs) / 60_000,
         );

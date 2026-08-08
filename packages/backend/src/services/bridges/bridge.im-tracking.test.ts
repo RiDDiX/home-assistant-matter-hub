@@ -1,4 +1,5 @@
 import { InteractionServer } from "@matter/main/node";
+import { MessageType } from "@matter/main/protocol";
 import { describe, expect, it } from "vitest";
 import { Bridge } from "./bridge.js";
 
@@ -46,7 +47,13 @@ function makeBridge(sessions: FakeSession[] = []) {
   const bridge = Object.create(Bridge.prototype) as Bridge;
   Object.assign(bridge as unknown as Record<string, unknown>, {
     server,
+    log: { debug() {}, info() {}, warn() {}, error() {} },
     lastImRequestAt: new WeakMap<object, number>(),
+    lastCommandImAt: new WeakMap<object, number>(),
+    subscribeTimesMs: new WeakMap<object, number[]>(),
+    giveUpTimesMs: new WeakMap<object, number[]>(),
+    wedgeHookedSessions: new WeakSet<object>(),
+    wedgeLastRotatedAt: new WeakMap<object, number>(),
     sessionStartedAt: new Map<number, number>(),
   });
   const wire = () =>
@@ -96,5 +103,164 @@ describe("Bridge inbound IM request tracking", () => {
     expect(
       bridge.getSessionInfo().sessions[0].lastImRequestMsAgo,
     ).not.toBeNull();
+  });
+});
+
+function makeSession(over: Partial<FakeSession> = {}): FakeSession {
+  return {
+    id: 1,
+    peerNodeId: 10n,
+    fabric: { fabricIndex: 1 },
+    subscriptions: { size: 1 },
+    activeTimestamp: Date.now(),
+    timestamp: Date.now(),
+    isPeerActive: true,
+    ...over,
+  };
+}
+
+describe("Bridge IM message type split (#365 v2)", () => {
+  it("stamps command and any-request time for an InvokeRequest", async () => {
+    const sess = makeSession();
+    const { bridge, fakeIs, wire } = makeBridge([sess]);
+    wire();
+
+    await fakeIs.onNewExchange(
+      { session: sess },
+      { payloadHeader: { messageType: MessageType.InvokeRequest } },
+    );
+
+    const info = bridge.getSessionInfo().sessions[0];
+    expect(info.lastImRequestMsAgo).not.toBeNull();
+    expect(info.lastCommandImRequestMsAgo).not.toBeNull();
+    expect(info.subscribesLast30Min).toBe(0);
+  });
+
+  it("stamps the subscribe ring, not the command stamp, for a SubscribeRequest", async () => {
+    const sess = makeSession();
+    const { bridge, fakeIs, wire } = makeBridge([sess]);
+    wire();
+
+    await fakeIs.onNewExchange(
+      { session: sess },
+      { payloadHeader: { messageType: MessageType.SubscribeRequest } },
+    );
+
+    const info = bridge.getSessionInfo().sessions[0];
+    expect(info.lastImRequestMsAgo).not.toBeNull();
+    expect(info.lastCommandImRequestMsAgo).toBeNull();
+    expect(info.subscribesLast30Min).toBe(1);
+  });
+
+  it("stamps only the any-request time when the payload header is missing", async () => {
+    const sess = makeSession();
+    const { bridge, fakeIs, wire } = makeBridge([sess]);
+    wire();
+
+    await fakeIs.onNewExchange({ session: sess }, {});
+
+    const info = bridge.getSessionInfo().sessions[0];
+    expect(info.lastImRequestMsAgo).not.toBeNull();
+    expect(info.lastCommandImRequestMsAgo).toBeNull();
+    expect(info.subscribesLast30Min).toBe(0);
+  });
+});
+
+// Give-up hook: subscriptions.deleted with isTerminated true means either a
+// server delivery give-up (no coincident inbound) or a peer cancel (arrives
+// with a fresh inbound IM stamp). Only the former lands in the ring.
+function makeDeletedObservable() {
+  const fns: Array<(sub: unknown) => void> = [];
+  return {
+    on: (fn: (sub: unknown) => void) => fns.push(fn),
+    emit: (sub: unknown) => {
+      for (const fn of fns) fn(sub);
+    },
+  };
+}
+
+describe("Bridge subscription give-up tracking (#365 v2)", () => {
+  function makeGiveUpSetup() {
+    const deleted = makeDeletedObservable();
+    const sess = makeSession({
+      subscriptions: Object.assign([], { size: 1, deleted }) as never,
+    });
+    const { bridge } = makeBridge([sess]);
+    const hook = (peerSessions?: () => Iterable<object>) =>
+      (
+        bridge as unknown as {
+          hookSubscriptionGiveUps(
+            session: object,
+            peerSessions?: () => Iterable<object>,
+          ): void;
+        }
+      ).hookSubscriptionGiveUps(sess, peerSessions);
+    const stampInbound = (msAgo: number) =>
+      (
+        bridge as unknown as { lastImRequestAt: WeakMap<object, number> }
+      ).lastImRequestAt.set(sess, Date.now() - msAgo);
+    const giveUps = () => bridge.getSessionInfo().sessions[0].giveUpsLast30Min;
+    return { deleted, hook, stampInbound, giveUps, bridgeRef: bridge, sess };
+  }
+
+  it("records a terminated sub with a stale inbound stamp", () => {
+    const { deleted, hook, stampInbound, giveUps } = makeGiveUpSetup();
+    hook();
+    stampInbound(10_000);
+    deleted.emit({ subscriptionId: 5, isTerminated: true });
+    expect(giveUps()).toBe(1);
+  });
+
+  it("records a terminated sub when no inbound was ever stamped", () => {
+    const { deleted, hook, giveUps } = makeGiveUpSetup();
+    hook();
+    deleted.emit({ subscriptionId: 5, isTerminated: true });
+    expect(giveUps()).toBe(1);
+  });
+
+  it("skips a terminated sub coinciding with fresh inbound (peer cancel)", () => {
+    const { deleted, hook, stampInbound, giveUps } = makeGiveUpSetup();
+    hook();
+    stampInbound(0);
+    deleted.emit({ subscriptionId: 5, isTerminated: true });
+    expect(giveUps()).toBe(0);
+  });
+
+  it("skips a termination when a sibling session of the peer took the inbound", () => {
+    // keepSubscriptions=false on session B cancels A's subs too; the stamp
+    // sits on B, so a per-session check would count a phantom give-up on A.
+    const { deleted, hook, giveUps, bridgeRef, sess } = makeGiveUpSetup();
+    const sibling = { fresh: true };
+    (
+      bridgeRef as unknown as { lastImRequestAt: WeakMap<object, number> }
+    ).lastImRequestAt.set(sibling, Date.now());
+    hook(() => [sess, sibling]);
+    deleted.emit({ subscriptionId: 5, isTerminated: true });
+    expect(giveUps()).toBe(0);
+  });
+
+  it("still counts a give-up when every peer session is quiet", () => {
+    const { deleted, hook, giveUps, sess } = makeGiveUpSetup();
+    const sibling = { quiet: true };
+    hook(() => [sess, sibling]);
+    deleted.emit({ subscriptionId: 5, isTerminated: true });
+    expect(giveUps()).toBe(1);
+  });
+
+  it("skips a sub removed by session teardown (isTerminated false)", () => {
+    const { deleted, hook, stampInbound, giveUps } = makeGiveUpSetup();
+    hook();
+    stampInbound(10_000);
+    deleted.emit({ subscriptionId: 5, isTerminated: false });
+    expect(giveUps()).toBe(0);
+  });
+
+  it("hooks a session only once", () => {
+    const { deleted, hook, stampInbound, giveUps } = makeGiveUpSetup();
+    hook();
+    hook();
+    stampInbound(10_000);
+    deleted.emit({ subscriptionId: 5, isTerminated: true });
+    expect(giveUps()).toBe(1);
   });
 });

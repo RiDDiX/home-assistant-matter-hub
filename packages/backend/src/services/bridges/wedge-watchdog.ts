@@ -39,3 +39,62 @@ export function decideWedgeRotation(input: WedgeInput): boolean {
       lastRotatedMsAgo > WEDGE_MIN_ROTATE_INTERVAL_MS)
   );
 }
+
+// V2 (#365, shadow): the v1 rule fires on any IM silence, but a controller
+// that only polls sensors is legitimately command-silent. V2 instead demands
+// the full wedge signature: no command-class request for a long time while the
+// controller keeps re-subscribing and the server keeps giving up on report
+// delivery afterwards.
+export const WEDGE_V2_COMMAND_SILENCE_MS = 45 * 60 * 1000;
+export const WEDGE_V2_WINDOW_MS = 30 * 60 * 1000;
+export const WEDGE_V2_MIN_SUBSCRIBES = 3;
+export const WEDGE_V2_MIN_GIVE_UPS = 2;
+
+// Ring size for the per-session subscribe and give-up timestamp rings.
+export const WEDGE_RING_SIZE = 10;
+
+// A peer cancel lands with an inbound IM stamp within milliseconds; a server
+// delivery give-up has no coincident inbound. Anything stamped within this
+// window before the sub termination counts as a peer cancel, not a give-up.
+export const WEDGE_GIVE_UP_QUIET_MS = 5_000;
+
+export interface WedgeInputV2 {
+  subscriptionCount: number;
+  sessionAgeMs: number;
+  // ms since the last inbound Read/Write/Invoke/Timed request, or null when
+  // one was never seen.
+  commandSilenceMs: number | null;
+  // Inbound SubscribeRequest times (epoch ms).
+  subscribeTimesMs: number[];
+  // Server-side subscription give-up times (epoch ms).
+  giveUpTimesMs: number[];
+  nowMs: number;
+  lastRotatedMsAgo: number | null;
+}
+
+// Timestamps still inside the activity window, edge inclusive.
+function inWindow(timesMs: number[], nowMs: number): number[] {
+  return timesMs.filter((t) => nowMs - t <= WEDGE_V2_WINDOW_MS);
+}
+
+export function countRecent(timesMs: number[], nowMs: number): number {
+  return inWindow(timesMs, nowMs).length;
+}
+
+export function decideWedgeRotationV2(input: WedgeInputV2): boolean {
+  const silenceMs = input.commandSilenceMs ?? input.sessionAgeMs;
+  if (input.subscriptionCount <= 0) return false;
+  if (input.sessionAgeMs <= WEDGE_WARMUP_MS) return false;
+  if (silenceMs <= WEDGE_V2_COMMAND_SILENCE_MS) return false;
+  const subscribes = inWindow(input.subscribeTimesMs, input.nowMs);
+  const giveUps = inWindow(input.giveUpTimesMs, input.nowMs);
+  if (subscribes.length < WEDGE_V2_MIN_SUBSCRIBES) return false;
+  if (giveUps.length < WEDGE_V2_MIN_GIVE_UPS) return false;
+  // Delivery must still be failing after the controller's latest retry: the
+  // newest give-up has to postdate at least one in-window subscribe.
+  if (Math.max(...giveUps) <= Math.min(...subscribes)) return false;
+  return (
+    input.lastRotatedMsAgo == null ||
+    input.lastRotatedMsAgo > WEDGE_MIN_ROTATE_INTERVAL_MS
+  );
+}
