@@ -176,6 +176,31 @@ Live view answers now travel back to the controller: after the camera computes i
 
 Experimental: the media path is delivered but not yet verified end to end on real hardware, and as of 2026 only SmartThings renders Matter cameras.
 
+**Security** is experimental and turns the bridge into a small alarm system for setups that have no alarm integration. It registers four exclusive mode switches (Home, Away, Night, Vacation) and an Alarm contact sensor. Arming is turning a mode switch on, from any controller or by voice: "Alexa, turn on Away". Turning the active switch off disarms, and all switches off means disarmed; the plugin turns the other three off whenever one goes on. The Alarm sensor opens while the alarm is tripped, so controller automations can react to it. There is no PIN: anything that can flip the mode switches can also disarm, so expose them only to controllers you trust.
+
+Arming waits out the exit delay, then the mode's setters are invoked (each entity gets its domain's `turn_on`, so scripts and scenes run and switches turn on). While armed, `door`/`window`/`garage_door`/`opening` binary sensors get the entry delay; every other trigger class trips instantly. A trip turns on the mode's alerts plus the Always list and opens the Alarm sensor. After the trigger time the alarm returns to the state it was tripped from (the armed mode, or disarmed for a 24h trip while disarmed) and siren/switch/light alerts get a `turn_off` (scripts and scenes do not); a trigger time of 0 keeps it tripped until disarm. A 24h trip while disarmed with a trigger time of 0 has no single Matter-side clear: arm any mode and disarm again to reset it. The armed state is persisted, so a restart mid-armed comes back armed. Trigger events during a Home Assistant connection gap are lost; the connection resubscribes on its own once HA is back. A silence or a mode's setters that hit such a gap are not lost: due `turn_off` calls are persisted until Home Assistant confirms them, and held setters are replayed on reconnect if that mode is still armed.
+
+Every entity field is a comma-separated list, deduplicated on parse. Alert lists accept only `siren`, `switch` and `light` (turned off again when the alarm clears) plus `script` and `scene` (fire-only); entities from any other domain are dropped with a warning.
+
+| Setting | Description |
+|---------|-------------|
+| `exitDelaySeconds` | Delay before an armed mode takes effect. Default 60, 0 disables. |
+| `entryDelaySeconds` | Delay for perimeter (door/window/garage door/opening) sensors while armed. Default 60, 0 disables. |
+| `triggerTimeSeconds` | How long the alarm stays tripped before returning to the state it was tripped from. Default 120, 0 keeps it tripped until disarm. |
+| `homeSetters` / `awaySetters` / `nightSetters` | Entities invoked when that mode is reached, comma-separated. |
+| `offSetters` | Entities invoked on disarm. |
+| `homeTriggers` / `awayTriggers` / `nightTriggers` | Sensors that trip the alarm in that mode. |
+| `homeAlerts` / `awayAlerts` / `nightAlerts` | Entities turned on when the alarm trips in that mode. Siren/switch/light and script/scene only. |
+| `vacationSetters` / `vacationTriggers` / `vacationAlerts` | Independent lists; left empty they use the Away lists. |
+| `triggers24h` | Trip the alarm in every state including disarmed, never with entry delay. Smoke, gas, water leak. |
+| `alerts24h` | Entities turned on when a 24h trigger trips. Same domains as the mode alerts. |
+| `alwaysAlerts` | Master alert list, fired on every trip in addition to the tier's alerts. |
+| `haUrl` / `haToken` | Optional. Set both to point the plugin at a different Home Assistant; one without the other is ignored with a warning. Left empty the plugin dials its own socket with the bridge's credentials (the bridge connection itself is not reused). |
+
+Known limits: changing `haUrl`/`haToken` while silences or setters are still pending can replay them against the new Home Assistant, and a silence that keeps failing is retried on every reconnect without a cap. Both are on the list for the next revision.
+
+If you already run Alarmo or another alarm integration, keep using it and bridge its `alarm_control_panel` entity instead. This plugin runs its own state machine, so pointing both at the same sensors gives you two independent alarms that do not know about each other. The first version targets users without an alarm integration.
+
 ### Cluster IDs
 
 Use Matter.js behavior key names as cluster IDs. Common ones:

@@ -80,6 +80,11 @@ export interface PluginStorage {
   set<T>(key: string, value: T): Promise<void>;
   delete(key: string): Promise<void>;
   keys(): Promise<string[]>;
+  /**
+   * Write buffered changes to the backing store now instead of waiting for
+   * the debounce. Implementations that persist immediately can omit it.
+   */
+  flush?(): void | Promise<void>;
 }
 
 /**
