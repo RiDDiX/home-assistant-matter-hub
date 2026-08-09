@@ -1,6 +1,7 @@
 import {
   type CleanAreaRoom,
   type CustomServiceArea,
+  type EntityMappingConfig,
   type VacuumDeviceAttributes,
   VacuumDeviceFeature,
   VacuumState,
@@ -9,6 +10,7 @@ import { Logger } from "@matter/general";
 import type { Agent } from "@matter/main";
 import { ServiceAreaBehavior } from "@matter/main/behaviors";
 import { RvcRunMode } from "@matter/main/clusters";
+import type { HomeAssistantAction } from "../../../../../services/home-assistant/home-assistant-actions.js";
 import { testBit } from "../../../../../utils/test-bit.js";
 import { HomeAssistantEntityBehavior } from "../../../../behaviors/home-assistant-entity-behavior.js";
 import {
@@ -27,7 +29,10 @@ import {
   parseVacuumRooms,
   ROOM_MODE_BASE,
 } from "../utils/parse-vacuum-rooms.js";
-import { toAreaId } from "./vacuum-service-area-server.js";
+import {
+  toAreaId,
+  type VacuumEffectiveConfig,
+} from "./vacuum-service-area-server.js";
 
 const logger = Logger.get("VacuumRvcRunModeServer");
 
@@ -318,6 +323,194 @@ export function vacuumIsCleaning(state: string | undefined): boolean {
   return state != null && cleaningStates.includes(state);
 }
 
+/** A place to fire side-effect actions (the Dreame floor pre-select) without
+ *  reaching into a matter.js agent, so dispatchRoomClean stays pure. */
+export interface RoomCleanSeam {
+  callAction(action: HomeAssistantAction): void;
+}
+
+export interface RoomCleanResult {
+  action: HomeAssistantAction;
+  pending: { areaId: number; action: HomeAssistantAction }[];
+}
+
+/**
+ * Resolve a set of selected Matter ServiceArea ids to the Home Assistant action
+ * that starts cleaning them, per integration. Pure: it reads the vacuum
+ * attributes + mapping only, returns the first action plus any per-area actions
+ * to fire one at a time (Roborock/custom sequential), and performs the Dreame
+ * multi-floor pre-select through the seam. Shared by the RvcRunMode start path
+ * and the per-area room switches (#355) so both dispatch identically.
+ *
+ * Assumes selectedAreas is non-empty; returns vacuum.start when nothing matches.
+ */
+export function dispatchRoomClean(
+  attributes: VacuumDeviceAttributes,
+  mapping: EntityMappingConfig | undefined,
+  entityId: string,
+  selectedAreas: number[],
+  seam: RoomCleanSeam,
+): RoomCleanResult {
+  // Custom service areas first (lawn mowers, generic zone robots).
+  const customAreas = mapping?.customServiceAreas;
+  if (customAreas && customAreas.length > 0) {
+    const ephemeral: CleaningSession = {
+      completedAreas: new Set(),
+      lastCurrentArea: null,
+      activeAreas: [],
+      loggedShortCircuits: new Set(),
+      observedCleaning: false,
+      pendingDispatches: [],
+      cleanedAreaBaseline: null,
+    };
+    const action = handleCustomServiceAreas(
+      selectedAreas,
+      customAreas,
+      ephemeral,
+    );
+    return { action, pending: ephemeral.pendingDispatches };
+  }
+
+  // HA 2026.3 CLEAN_AREA: resolve selected ServiceArea ids to HA area ids.
+  const cleanAreaRooms = mapping?.cleanAreaRooms;
+  if (cleanAreaRooms && cleanAreaRooms.length > 0) {
+    const haAreaIds = resolveCleanAreaIds(selectedAreas, cleanAreaRooms);
+    if (haAreaIds.length > 0) {
+      logger.info(`CLEAN_AREA: cleaning HA areas: ${haAreaIds.join(", ")}`);
+      return {
+        action: {
+          action: "vacuum.clean_area",
+          data: { cleaning_area_id: haAreaIds },
+        },
+        pending: [],
+      };
+    }
+  }
+
+  // Roborock button entities: each press triggers app_segment_clean for one
+  // segment, so they need the same one-at-a-time dispatch.
+  const roomEntities = mapping?.roomEntities;
+  if (roomEntities && roomEntities.length > 0) {
+    const matched: { areaId: number; entityId: string }[] = [];
+    for (const areaId of selectedAreas) {
+      const buttonId = roomEntities.find((id) => toAreaId(id) === areaId);
+      if (buttonId) {
+        matched.push({ areaId, entityId: buttonId });
+      }
+    }
+
+    if (matched.length > 0) {
+      logger.info(
+        `Roborock: ${matched.length} room button(s) queued: ${matched.map((m) => m.entityId).join(", ")}`,
+      );
+      return {
+        action: { action: "button.press", target: matched[0].entityId },
+        pending: matched.slice(1).map(({ areaId, entityId: buttonId }) => ({
+          areaId,
+          action: { action: "button.press", target: buttonId },
+        })),
+      };
+    }
+  }
+
+  // Valetudo vacuums: rooms come from sensor.*_map_segments (injected at
+  // creation time), not from the vacuum entity's live attributes.
+  // parseVacuumRooms() would return [] at runtime. Use selectedAreas directly
+  // as segment IDs since toAreaId(numericId) === numericId.
+  if (entityId.startsWith("vacuum.valetudo_")) {
+    return {
+      action: buildValetudoSegmentAction(
+        entityId,
+        selectedAreas,
+        mapping?.valetudoIdentifier,
+      ),
+      pending: [],
+    };
+  }
+
+  // Fallback: find rooms from vacuum attributes (Dreame, Xiaomi Miot).
+  const rooms = parseVacuumRooms(attributes);
+
+  // Convert area IDs back to room IDs. Use originalId if available (Dreame
+  // multi-floor: id is deduplicated, originalId is per-floor).
+  const roomIds: (string | number)[] = [];
+  let targetMapName: string | undefined;
+  for (const areaId of selectedAreas) {
+    const room = rooms.find((r) => toAreaId(r.id) === areaId);
+    if (room) {
+      roomIds.push(room.originalId ?? room.id);
+      if (room.mapName && !targetMapName) {
+        targetMapName = room.mapName;
+      }
+    }
+  }
+
+  if (roomIds.length > 0) {
+    logger.info(`Starting cleaning with selected areas: ${roomIds.join(", ")}`);
+
+    // Dreame vacuums use their own service.
+    if (isDreameVacuum(attributes)) {
+      // Switch to correct floor before cleaning (multi-floor Dreame).
+      if (targetMapName) {
+        const vacName = entityId.replace("vacuum.", "");
+        const selectedMapEntity = `select.${vacName}_selected_map`;
+        logger.info(
+          `Dreame multi-floor: switching to map "${targetMapName}" via ${selectedMapEntity}`,
+        );
+        seam.callAction({
+          action: "select.select_option",
+          target: selectedMapEntity,
+          data: { option: targetMapName },
+        });
+      }
+      return {
+        action: {
+          action: "dreame_vacuum.vacuum_clean_segment",
+          data: { segments: roomIds.length === 1 ? roomIds[0] : roomIds },
+        },
+        pending: [],
+      };
+    }
+
+    // Roborock/Xiaomi Miot vacuums use vacuum.send_command with app_segment_clean.
+    if (isRoborockVacuum(attributes) || isXiaomiMiotVacuum(attributes)) {
+      return {
+        action: {
+          action: "vacuum.send_command",
+          data: { command: "app_segment_clean", params: roomIds },
+        },
+        pending: [],
+      };
+    }
+
+    // Ecovacs/Deebot vacuums use vacuum.send_command with spot_area. Params
+    // must be a dict (not a list) with comma-separated room IDs as a string.
+    if (isEcovacsVacuum(attributes)) {
+      const roomIdStr = roomIds.join(",");
+      logger.info(`Ecovacs vacuum: Using spot_area for rooms: ${roomIdStr}`);
+      return {
+        action: {
+          action: "vacuum.send_command",
+          data: {
+            command: "spot_area",
+            params: { mapID: 0, cleanings: 1, rooms: roomIdStr },
+          },
+        },
+        pending: [],
+      };
+    }
+
+    // Unknown vacuum type - fall back to regular start. app_segment_clean is
+    // Roborock-specific and will fail on other integrations (e.g. Ecovacs/Deebot
+    // rejects list params).
+    logger.warn(
+      `Room cleaning via send_command not supported for this vacuum type. Rooms: ${roomIds.join(", ")}. Falling back to vacuum.start`,
+    );
+  }
+
+  return { action: { action: "vacuum.start" }, pending: [] };
+}
+
 const vacuumRvcRunModeConfig = {
   getCurrentMode: (entity: { state: string }) => {
     const isCleaning = vacuumIsCleaning(entity.state);
@@ -351,158 +544,30 @@ const vacuumRvcRunModeConfig = {
 
       if (selectedAreas.length > 0) {
         const homeAssistant = agent.get(HomeAssistantEntityBehavior);
-        const entity = homeAssistant.entity;
-        const attributes = entity.state.attributes as VacuumDeviceAttributes;
+        // The ServiceArea cluster was built from the endpoint's effective
+        // snapshot; live state loses injected rooms on the first raw HA
+        // update, so dispatch from the snapshot when the endpoint has one.
+        const effective = (
+          homeAssistant.endpoint as unknown as {
+            vacuumEffective?: VacuumEffectiveConfig;
+          }
+        ).vacuumEffective;
+        const attributes = (effective?.state ?? homeAssistant.entity.state)
+          .attributes as VacuumDeviceAttributes;
+        const mapping = effective
+          ? effective.mapping
+          : homeAssistant.state.mapping;
         const session = getSession(homeAssistant.endpoint);
 
-        // Check for user-defined custom service areas first (lawn mowers, generic zone robots)
-        const customAreas = homeAssistant.state.mapping?.customServiceAreas;
-        if (customAreas && customAreas.length > 0) {
-          return handleCustomServiceAreas(selectedAreas, customAreas, session);
-        }
-
-        // HA 2026.3 CLEAN_AREA: resolve selected ServiceArea IDs to HA area IDs
-        const cleanAreaRooms = homeAssistant.state.mapping?.cleanAreaRooms;
-        if (cleanAreaRooms && cleanAreaRooms.length > 0) {
-          const haAreaIds = resolveCleanAreaIds(selectedAreas, cleanAreaRooms);
-          if (haAreaIds.length > 0) {
-            logger.info(
-              `CLEAN_AREA: cleaning HA areas: ${haAreaIds.join(", ")}`,
-            );
-            return {
-              action: "vacuum.clean_area",
-              data: { cleaning_area_id: haAreaIds },
-            };
-          }
-        }
-
-        // Roborock button entities: each press triggers app_segment_clean
-        // for one segment, so they need the same one-at-a-time dispatch.
-        const roomEntities = homeAssistant.state.mapping?.roomEntities;
-        if (roomEntities && roomEntities.length > 0) {
-          const matched: { areaId: number; entityId: string }[] = [];
-          for (const areaId of selectedAreas) {
-            const entityId = roomEntities.find((id) => toAreaId(id) === areaId);
-            if (entityId) {
-              matched.push({ areaId, entityId });
-            }
-          }
-
-          if (matched.length > 0) {
-            logger.info(
-              `Roborock: ${matched.length} room button(s) queued: ${matched.map((m) => m.entityId).join(", ")}`,
-            );
-
-            session.pendingDispatches = matched
-              .slice(1)
-              .map(({ areaId, entityId }) => ({
-                areaId,
-                action: { action: "button.press", target: entityId },
-              }));
-
-            return {
-              action: "button.press",
-              target: matched[0].entityId,
-            };
-          }
-        }
-
-        // Valetudo vacuums: rooms come from sensor.*_map_segments (injected
-        // at creation time), not from the vacuum entity's live attributes.
-        // parseVacuumRooms() would return [] at runtime. Use selectedAreas
-        // directly as segment IDs since toAreaId(numericId) === numericId.
-        const vacuumEntityId = homeAssistant.entityId;
-        if (vacuumEntityId.startsWith("vacuum.valetudo_")) {
-          return buildValetudoSegmentAction(
-            vacuumEntityId,
-            selectedAreas,
-            homeAssistant.state.mapping?.valetudoIdentifier,
-          );
-        }
-
-        // Fallback: Try to find rooms from vacuum attributes (Dreame, Xiaomi Miot)
-        const rooms = parseVacuumRooms(attributes);
-
-        // Convert area IDs back to room IDs
-        // Use originalId if available (Dreame multi-floor: id is deduplicated, originalId is per-floor)
-        const roomIds: (string | number)[] = [];
-        let targetMapName: string | undefined;
-        for (const areaId of selectedAreas) {
-          const room = rooms.find((r) => toAreaId(r.id) === areaId);
-          if (room) {
-            roomIds.push(room.originalId ?? room.id);
-            if (room.mapName && !targetMapName) {
-              targetMapName = room.mapName;
-            }
-          }
-        }
-
-        if (roomIds.length > 0) {
-          logger.info(
-            `Starting cleaning with selected areas: ${roomIds.join(", ")}`,
-          );
-
-          // Dreame vacuums use their own service
-          if (isDreameVacuum(attributes)) {
-            // Switch to correct floor before cleaning (multi-floor Dreame)
-            if (targetMapName) {
-              const vacName = vacuumEntityId.replace("vacuum.", "");
-              const selectedMapEntity = `select.${vacName}_selected_map`;
-              logger.info(
-                `Dreame multi-floor: switching to map "${targetMapName}" via ${selectedMapEntity}`,
-              );
-              homeAssistant.callAction({
-                action: "select.select_option",
-                target: selectedMapEntity,
-                data: { option: targetMapName },
-              });
-            }
-            return {
-              action: "dreame_vacuum.vacuum_clean_segment",
-              data: {
-                segments: roomIds.length === 1 ? roomIds[0] : roomIds,
-              },
-            };
-          }
-
-          // Roborock/Xiaomi Miot vacuums use vacuum.send_command with app_segment_clean
-          if (isRoborockVacuum(attributes) || isXiaomiMiotVacuum(attributes)) {
-            return {
-              action: "vacuum.send_command",
-              data: {
-                command: "app_segment_clean",
-                params: roomIds,
-              },
-            };
-          }
-
-          // Ecovacs/Deebot vacuums use vacuum.send_command with spot_area
-          // Params must be a dict (not a list) with comma-separated room IDs as string
-          if (isEcovacsVacuum(attributes)) {
-            const roomIdStr = roomIds.join(",");
-            logger.info(
-              `Ecovacs vacuum: Using spot_area for rooms: ${roomIdStr}`,
-            );
-            return {
-              action: "vacuum.send_command",
-              data: {
-                command: "spot_area",
-                params: {
-                  mapID: 0,
-                  cleanings: 1,
-                  rooms: roomIdStr,
-                },
-              },
-            };
-          }
-
-          // Unknown vacuum type - fall back to regular start.
-          // app_segment_clean is Roborock-specific and will fail on other
-          // integrations (e.g. Ecovacs/Deebot rejects list params).
-          logger.warn(
-            `Room cleaning via send_command not supported for this vacuum type. Rooms: ${roomIds.join(", ")}. Falling back to vacuum.start`,
-          );
-        }
+        const result = dispatchRoomClean(
+          attributes,
+          mapping,
+          homeAssistant.entityId,
+          selectedAreas,
+          { callAction: (a) => homeAssistant.callAction(a) },
+        );
+        session.pendingDispatches = result.pending;
+        return result.action;
       }
     } catch {
       // ServiceArea not available, fall through to regular start

@@ -31,6 +31,7 @@ import { UserComposedEndpoint } from "../composed/user-composed-endpoint.js";
 import { asStandaloneEndpointType } from "../standalone-endpoint-type.js";
 import { createLegacyEndpointType } from "./create-legacy-endpoint-type.js";
 import { supportsCleaningModes } from "./vacuum/behaviors/vacuum-rvc-clean-mode-server.js";
+import type { VacuumEffectiveConfig } from "./vacuum/behaviors/vacuum-service-area-server.js";
 
 const logger = Logger.get("LegacyEndpoint");
 
@@ -582,6 +583,12 @@ export class LegacyEndpoint extends EntityEndpoint {
     }
     const customName = effectiveMapping?.customName;
     const mappedIds = getMappedEntityIds(effectiveMapping);
+    // Snapshot what the vacuum clusters were built from, so the room switches
+    // (#355) enumerate and dispatch against the same mapping/state. A fresh
+    // object per create doubles as the recreation marker for the switches.
+    const vacuumEffective = entityId.startsWith("vacuum.")
+      ? { mapping: effectiveMapping, state }
+      : undefined;
     return new LegacyEndpoint(
       type,
       entityId,
@@ -589,6 +596,7 @@ export class LegacyEndpoint extends EntityEndpoint {
       mappedIds,
       effectiveMapping?.updateThrottleMs,
       endpointId,
+      vacuumEffective,
     );
   }
 
@@ -599,6 +607,7 @@ export class LegacyEndpoint extends EntityEndpoint {
     mappedEntityIds?: string[],
     throttleMs?: number,
     endpointId?: string,
+    readonly vacuumEffective?: VacuumEffectiveConfig,
   ) {
     super(type, entityId, customName, mappedEntityIds, endpointId);
     // Batch rapid HA updates into a single Matter transaction. Home Assistant

@@ -1,6 +1,8 @@
 import type {
   CleanAreaRoom,
   CustomServiceArea,
+  EntityMappingConfig,
+  HomeAssistantEntityState,
   VacuumDeviceAttributes,
   VacuumRoom,
 } from "@home-assistant-matter-hub/common";
@@ -290,6 +292,66 @@ export function createCleanAreaServiceAreaServer(
     selectedAreas: [],
     currentArea: null,
   });
+}
+
+/** A single service area exposed to Matter: its numeric id and display name. */
+export interface VacuumArea {
+  areaId: number;
+  name: string;
+}
+
+/**
+ * The mapping and state a vacuum endpoint actually built its clusters from,
+ * after auto-resolution (CLEAN_AREA, Valetudo/Roborock room injection). The
+ * room switches (#355) must consume exactly this, never the raw storage, or
+ * they drift into a different area id space than the ServiceArea cluster.
+ */
+export interface VacuumEffectiveConfig {
+  mapping?: EntityMappingConfig;
+  state: HomeAssistantEntityState;
+}
+
+/**
+ * Single source of truth for the service areas a vacuum exposes. Reproduces the
+ * exact branch order and area ids/names used to build the ServiceArea cluster in
+ * vacuum/index.ts, so the room switches (#355) cannot drift from the cluster.
+ *
+ * Returns [] for the default single "Home" area (no per-area switches there) and
+ * whenever no rooms are configured.
+ */
+export function getVacuumServiceAreas(
+  attributes: VacuumDeviceAttributes,
+  mapping?: EntityMappingConfig,
+): VacuumArea[] {
+  const cleanAreaRooms = mapping?.cleanAreaRooms;
+  if (cleanAreaRooms && cleanAreaRooms.length > 0) {
+    return cleanAreaRooms.map((room) => ({
+      areaId: room.areaId,
+      name: room.name,
+    }));
+  }
+
+  const customAreas = mapping?.customServiceAreas;
+  if (customAreas && customAreas.length > 0) {
+    return customAreas.map((area, index) => ({
+      areaId: index + 1,
+      name: area.name,
+    }));
+  }
+
+  const roomEntities = mapping?.roomEntities;
+  const rooms =
+    roomEntities && roomEntities.length > 0
+      ? buttonEntitiesToRooms(roomEntities, attributes)
+      : parseVacuumRooms(attributes);
+  if (rooms.length > 0) {
+    return roomsToAreas(rooms).map((area) => ({
+      areaId: area.areaId,
+      name: area.areaInfo.locationInfo?.locationName ?? "",
+    }));
+  }
+
+  return [];
 }
 
 /**
