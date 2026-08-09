@@ -253,8 +253,19 @@ export class BridgeEndpointManager extends Service {
       if (behaviorId === "pluginDevice") continue;
       const behaviorEvents = allEvents[behaviorId];
       if (!behaviorEvents || typeof behaviorEvents !== "object") continue;
-      for (const eventName of Object.keys(behaviorEvents)) {
-        if (!eventName.endsWith("$Changed")) continue;
+      // The $Changed emitters are non-enumerable getters spread over the
+      // events prototype chain, Object.keys sees none of them.
+      const eventNames = new Set<string>();
+      for (
+        let proto = behaviorEvents;
+        proto && proto !== Object.prototype;
+        proto = Object.getPrototypeOf(proto)
+      ) {
+        for (const name of Object.getOwnPropertyNames(proto)) {
+          if (name.endsWith("$Changed")) eventNames.add(name);
+        }
+      }
+      for (const eventName of eventNames) {
         const observable = behaviorEvents[eventName];
         if (!observable || typeof observable.on !== "function") continue;
         const attrName = eventName.slice(0, -"$Changed".length);
