@@ -203,6 +203,7 @@ export class EntityMappingStorage extends Service {
       currentRoomEntity: request.currentRoomEntity?.trim() || undefined,
       cleanedAreaEntity: request.cleanedAreaEntity?.trim() || undefined,
       vacuumAscendingRoomOrder: request.vacuumAscendingRoomOrder || undefined,
+      vacuumRoomSwitches: request.vacuumRoomSwitches || undefined,
       disableCustomAreaRoomModes:
         request.disableCustomAreaRoomModes || undefined,
       valetudoIdentifier: request.valetudoIdentifier?.trim() || undefined,
@@ -269,6 +270,7 @@ export class EntityMappingStorage extends Service {
       !config.currentRoomEntity &&
       !config.cleanedAreaEntity &&
       !config.vacuumAscendingRoomOrder &&
+      !config.vacuumRoomSwitches &&
       !config.disableCustomAreaRoomModes &&
       !config.valetudoIdentifier &&
       !config.coverSwapOpenClose &&

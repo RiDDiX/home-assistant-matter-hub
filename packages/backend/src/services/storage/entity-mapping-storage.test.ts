@@ -62,6 +62,40 @@ describe("EntityMappingStorage orphan tombstone", () => {
     expect(storage.getMapping("b", "nope")).toBeUndefined();
   });
 
+  it("persists a mapping holding only vacuumRoomSwitches and round-trips it", async () => {
+    const storage = new EntityMappingStorage(appStorage);
+    await storage.construction;
+    await storage.setMapping({
+      bridgeId: "b",
+      entityId: "vacuum.robot",
+      vacuumRoomSwitches: true,
+    });
+    expect(storage.getMapping("b", "vacuum.robot")?.vacuumRoomSwitches).toBe(
+      true,
+    );
+
+    await storage.flush();
+    const reloaded = new EntityMappingStorage(appStorage);
+    await reloaded.construction;
+    expect(reloaded.getMapping("b", "vacuum.robot")?.vacuumRoomSwitches).toBe(
+      true,
+    );
+  });
+
+  it("keeps vacuumRoomSwitches when saved alongside another field", async () => {
+    const storage = new EntityMappingStorage(appStorage);
+    await storage.construction;
+    await storage.setMapping({
+      bridgeId: "b",
+      entityId: "vacuum.robot",
+      customName: "Robo",
+      vacuumRoomSwitches: true,
+    });
+    const loaded = storage.getMapping("b", "vacuum.robot");
+    expect(loaded?.customName).toBe("Robo");
+    expect(loaded?.vacuumRoomSwitches).toBe(true);
+  });
+
   it("loads an old mapping that predates the missingSince field", async () => {
     const ctx = appStorage.createContext("entity-mappings");
     await ctx.set("data", {

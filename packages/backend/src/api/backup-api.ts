@@ -255,6 +255,7 @@ export function backupApi(
                     composedEntities: config.composedEntities,
                     disableMomentaryFlip: config.disableMomentaryFlip,
                     vacuumAscendingRoomOrder: config.vacuumAscendingRoomOrder,
+                    vacuumRoomSwitches: config.vacuumRoomSwitches,
                   });
                   mappingsRestored++;
                 }
@@ -456,6 +457,7 @@ export function backupApi(
                   composedEntities: config.composedEntities,
                   disableMomentaryFlip: config.disableMomentaryFlip,
                   vacuumAscendingRoomOrder: config.vacuumAscendingRoomOrder,
+                  vacuumRoomSwitches: config.vacuumRoomSwitches,
                 });
                 mappingsRestored++;
               }

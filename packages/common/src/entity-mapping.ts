@@ -319,6 +319,12 @@ export interface EntityMappingConfig {
    */
   readonly vacuumAscendingRoomOrder?: boolean;
   /**
+   * Opt-in: expose one momentary switch per configured service area, sibling to
+   * the vacuum, so platforms that can't render array commands (SmartThings
+   * routines) can start cleaning one area by turning a switch on (#355).
+   */
+  readonly vacuumRoomSwitches?: boolean;
+  /**
    * Optional: Don't expose custom service areas as per-room RvcRunMode modes,
    * so Apple Home uses the ServiceArea multi-room picker instead of cleaning a
    * single room. Keep off for Google Home / Alexa, which use the modes (#367).
@@ -496,6 +502,7 @@ export interface EntityMappingRequest {
   readonly currentRoomEntity?: string;
   readonly cleanedAreaEntity?: string;
   readonly vacuumAscendingRoomOrder?: boolean;
+  readonly vacuumRoomSwitches?: boolean;
   readonly disableCustomAreaRoomModes?: boolean;
   readonly valetudoIdentifier?: string;
   readonly coverSwapOpenClose?: boolean;

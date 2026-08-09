@@ -1,6 +1,7 @@
 import type {
   EntityMappingConfig,
   FailedEntity,
+  VacuumDeviceAttributes,
 } from "@home-assistant-matter-hub/common";
 import type { Logger } from "@matter/general";
 import { Endpoint, type MutableEndpoint } from "@matter/main";
@@ -11,6 +12,8 @@ import {
   type EntityEndpoint,
 } from "../../matter/endpoints/entity-endpoint.js";
 import { LegacyEndpoint } from "../../matter/endpoints/legacy/legacy-endpoint.js";
+import { getVacuumServiceAreas } from "../../matter/endpoints/legacy/vacuum/behaviors/vacuum-service-area-server.js";
+import { VacuumAreaSwitchEndpoint } from "../../matter/endpoints/legacy/vacuum/vacuum-area-switch.js";
 import { validateEndpointType } from "../../matter/endpoints/validate-endpoint-type.js";
 import { BUILTIN_PLUGINS } from "../../plugins/builtin/index.js";
 import { createPluginEndpointType } from "../../plugins/plugin-device-factory.js";
@@ -415,9 +418,14 @@ export class BridgeEndpointManager extends Service {
    */
   async isolateEntity(entityName: string): Promise<void> {
     const endpoints = this.root.parts.map((p) => p as EntityEndpoint);
-    const endpoint = endpoints.find(
-      (e) => e.id === entityName || e.entityId === entityName,
-    );
+    // The room switches share the vacuum's entity_id, so an entity_id match
+    // must land on the vacuum. A switch is only isolated via its own part id.
+    const endpoint =
+      endpoints.find(
+        (e) =>
+          !(e instanceof VacuumAreaSwitchEndpoint) &&
+          (e.id === entityName || e.entityId === entityName),
+      ) ?? endpoints.find((e) => e.id === entityName);
 
     if (endpoint) {
       this.log.warn(
@@ -430,6 +438,18 @@ export class BridgeEndpointManager extends Service {
       }
       this.pendingRemovals.delete(endpoint.entityId);
       this.mappingFingerprints.delete(endpoint.entityId);
+      if (!(endpoint instanceof VacuumAreaSwitchEndpoint)) {
+        // An isolated vacuum takes its room switches along.
+        for (const sw of endpoints) {
+          if (!(sw instanceof VacuumAreaSwitchEndpoint)) continue;
+          if (sw.vacuumEndpointId !== endpoint.id) continue;
+          try {
+            await sw.delete();
+          } catch (e) {
+            this.log.warn(`Failed to remove area switch ${sw.id}:`, e);
+          }
+        }
+      }
     }
   }
 
@@ -534,7 +554,12 @@ export class BridgeEndpointManager extends Service {
     this.registry.refresh();
     this._failedEntities = [];
 
-    const endpoints = this.root.parts.map((p) => p as EntityEndpoint);
+    // Area switches (#355) share the vacuum's entity_id but ride their own
+    // reconcile pass keyed off the surviving vacuum endpoint, so they must never
+    // enter the entity reconcile below (it would collide on entity_id).
+    const endpoints = this.root.parts
+      .map((p) => p as EntityEndpoint)
+      .filter((p) => !(p instanceof VacuumAreaSwitchEndpoint));
     this.entityIds = this.registry.entityIds;
 
     // Pre-calculate composed sub-entities so they get skipped
@@ -631,6 +656,22 @@ export class BridgeEndpointManager extends Service {
       this.bridgeId,
       buildPresentEntityIds(fullEntities),
     );
+
+    // A current entity can claim a switch's derived id; the entity wins, so
+    // drop the switch before the create loop trips over the taken id (#355).
+    for (const part of [...this.root.parts]) {
+      if (!(part instanceof VacuumAreaSwitchEndpoint)) continue;
+      const claimant = endpointIdToEntity.get(part.id);
+      if (claimant == null) continue;
+      this.log.info(
+        `Area switch ${part.id} collides with entity ${claimant}, removing the switch`,
+      );
+      try {
+        await part.delete();
+      } catch (e) {
+        this.log.warn(`Failed to remove colliding area switch ${part.id}:`, e);
+      }
+    }
 
     const existingEndpoints: EntityEndpoint[] = [];
     const now = Date.now();
@@ -842,8 +883,137 @@ export class BridgeEndpointManager extends Service {
       }
     }
 
+    await this.reconcileAreaSwitches();
+
     if (this.unsubscribe) {
       this.startObserving();
+    }
+  }
+
+  // Opt-in per-area room switches (#355). One momentary OnOffPlugInUnit sibling
+  // per configured service area, mounted alongside its vacuum with a stable
+  // derived id. Areas and mapping come from the parent's vacuumEffective, the
+  // exact config its ServiceArea cluster was built from, never from raw storage
+  // (raw can be a different id space: injected Valetudo/Roborock rooms,
+  // auto-resolved CLEAN_AREA). The vacuum's own endpoint is never touched here.
+  // Switches are kept while their parent endpoint survives with the flag on
+  // (the parent's removal grace is mirrored for free), rebuilt via close() when
+  // the parent was recreated for a mapping change so numbers survive, and
+  // deleted when the flag goes off, the area is gone, or the parent is gone.
+  private async reconcileAreaSwitches(): Promise<void> {
+    const parts = this.root.parts.map((p) => p as EntityEndpoint);
+    const switches = parts.filter(
+      (p): p is VacuumAreaSwitchEndpoint =>
+        p instanceof VacuumAreaSwitchEndpoint,
+    );
+    const vacuumById = new Map<string, EntityEndpoint>();
+    for (const part of parts) {
+      if (part instanceof VacuumAreaSwitchEndpoint) continue;
+      vacuumById.set(part.id, part);
+    }
+
+    // Isolated records key on the part id the error path named, or on the
+    // entity id. A vacuum in there must not carry switches (#355).
+    const isolated = new Set(
+      EntityIsolationService.getIsolatedEntities(this.bridgeId).map(
+        (f) => f.entityId,
+      ),
+    );
+    const parentIsolated = (parent: EntityEndpoint) =>
+      isolated.has(parent.id) ||
+      (parent.entityId != null && isolated.has(parent.entityId));
+
+    const kept = new Set<string>();
+    for (const sw of switches) {
+      const parent = vacuumById.get(sw.vacuumEndpointId);
+      const mapping = parent
+        ? this.getEntityMapping(parent.entityId)
+        : undefined;
+      const effective =
+        parent instanceof LegacyEndpoint ? parent.vacuumEffective : undefined;
+      let keep = false;
+      let rebuild = false;
+      if (
+        parent &&
+        !parentIsolated(parent) &&
+        mapping?.vacuumRoomSwitches &&
+        effective
+      ) {
+        const areas = getVacuumServiceAreas(
+          effective.state.attributes as VacuumDeviceAttributes,
+          effective.mapping,
+        );
+        if (areas.some((a) => a.areaId === sw.areaId)) {
+          if (sw.parentEffective === effective) {
+            keep = true;
+          } else {
+            // Parent was recreated, its effective config is a fresh object.
+            rebuild = true;
+          }
+        }
+      }
+      if (keep) {
+        kept.add(sw.id);
+        continue;
+      }
+      try {
+        if (rebuild) {
+          // close keeps the persisted number for the recreate below
+          await sw.close();
+        } else {
+          await sw.delete();
+        }
+      } catch (e) {
+        this.log.warn(`Failed to remove area switch ${sw.id}:`, e);
+      }
+    }
+
+    // Add missing switches for every present vacuum that opted in.
+    for (const part of vacuumById.values()) {
+      const entityId = part.entityId;
+      if (!entityId?.startsWith("vacuum.")) continue;
+      if (parentIsolated(part)) continue;
+      const mapping = this.getEntityMapping(entityId);
+      if (!mapping?.vacuumRoomSwitches) continue;
+      const effective =
+        part instanceof LegacyEndpoint ? part.vacuumEffective : undefined;
+      if (!effective) continue;
+      const areas = getVacuumServiceAreas(
+        effective.state.attributes as VacuumDeviceAttributes,
+        effective.mapping,
+      );
+      const entity = {
+        entity_id: entityId,
+        state: effective.state,
+        registry: this.registry.entity(entityId),
+        deviceRegistry: this.registry.deviceOf(entityId),
+      };
+      for (const area of areas) {
+        const switchId = `${part.id}_roomsw_${area.areaId}`;
+        if (kept.has(switchId)) continue;
+        const holder = vacuumById.get(switchId);
+        if (holder) {
+          this.log.warn(
+            `Skipping area switch ${switchId} for ${entityId}: id taken by entity ${holder.entityId}`,
+          );
+          continue;
+        }
+        try {
+          const endpoint = VacuumAreaSwitchEndpoint.create({
+            vacuumEndpointId: part.id,
+            entity,
+            mapping: effective.mapping,
+            area,
+            parentEffective: effective,
+          });
+          await this.root.add(endpoint);
+        } catch (e) {
+          this.log.warn(
+            `Failed to add area switch ${switchId} for ${entityId}:`,
+            e,
+          );
+        }
+      }
     }
   }
 

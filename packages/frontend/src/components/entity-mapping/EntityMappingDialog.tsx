@@ -166,6 +166,7 @@ export function EntityMappingDialog({
     useState(false);
   const [disableCustomAreaRoomModes, setDisableCustomAreaRoomModes] =
     useState(false);
+  const [vacuumRoomSwitches, setVacuumRoomSwitches] = useState(false);
   const [customServiceAreas, setCustomServiceAreas] = useState<
     CustomServiceArea[]
   >([]);
@@ -277,6 +278,7 @@ export function EntityMappingDialog({
       setDisableCustomAreaRoomModes(
         currentMapping?.disableCustomAreaRoomModes || false,
       );
+      setVacuumRoomSwitches(currentMapping?.vacuumRoomSwitches || false);
       setCustomServiceAreas(currentMapping?.customServiceAreas || []);
       setAreaDataDrafts(
         (currentMapping?.customServiceAreas || []).map((a) =>
@@ -436,6 +438,7 @@ export function EntityMappingDialog({
       cleanedAreaEntity: cleanedAreaEntity.trim() || undefined,
       vacuumAscendingRoomOrder: vacuumAscendingRoomOrder || undefined,
       disableCustomAreaRoomModes: disableCustomAreaRoomModes || undefined,
+      vacuumRoomSwitches: vacuumRoomSwitches || undefined,
       customFanSpeedTags:
         Object.keys(customFanSpeedTags).length > 0
           ? customFanSpeedTags
@@ -506,6 +509,7 @@ export function EntityMappingDialog({
     cleanedAreaEntity,
     vacuumAscendingRoomOrder,
     disableCustomAreaRoomModes,
+    vacuumRoomSwitches,
     customServiceAreas,
     customFanSpeedTagsList,
     fanNaturalPresets,
@@ -906,6 +910,16 @@ export function EntityMappingDialog({
                 />
               }
               label="Don't expose custom areas as per-room cleaning modes (forces Apple Home to use the multi-room area picker). Keep off for Google Home / Alexa, which rely on the modes."
+              sx={{ mt: 1, display: "block" }}
+            />
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={vacuumRoomSwitches}
+                  onChange={(e) => setVacuumRoomSwitches(e.target.checked)}
+                />
+              }
+              label="Expose one momentary switch per area next to the vacuum, so platforms that can't send multi-room commands (e.g. SmartThings routines) can start cleaning a single area by turning its switch on."
               sx={{ mt: 1, display: "block" }}
             />
             {showValetudoIdentifierField && (

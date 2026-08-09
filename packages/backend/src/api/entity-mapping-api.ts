@@ -72,6 +72,7 @@ export function entityMappingApi(
       currentRoomEntity: body.currentRoomEntity,
       cleanedAreaEntity: body.cleanedAreaEntity,
       vacuumAscendingRoomOrder: body.vacuumAscendingRoomOrder,
+      vacuumRoomSwitches: body.vacuumRoomSwitches,
       disableCustomAreaRoomModes: body.disableCustomAreaRoomModes,
       valetudoIdentifier: body.valetudoIdentifier,
       coverSwapOpenClose: body.coverSwapOpenClose,
