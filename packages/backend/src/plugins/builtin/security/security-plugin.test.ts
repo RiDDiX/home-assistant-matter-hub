@@ -79,7 +79,7 @@ afterEach(() => {
 describe("SecurityPlugin", () => {
   it("registers the four mode switches and the alarm sensor", async () => {
     const { ctx } = createMockContext();
-    const plugin = new SecurityPlugin();
+    const plugin = new SecurityPlugin({ homeTriggers: "binary_sensor.door" });
     await plugin.onStart(ctx);
 
     expect(ctx.registerDevice).toHaveBeenCalledTimes(5);
@@ -99,6 +99,53 @@ describe("SecurityPlugin", () => {
       },
       { id: "alarm", name: "Alarm", deviceType: "contact_sensor" },
     ]);
+    await plugin.onShutdown();
+  });
+
+  it("registers nothing while no trigger list is configured (#439)", async () => {
+    const { ctx } = createMockContext();
+    const plugin = new SecurityPlugin();
+    await plugin.onStart(ctx);
+
+    expect(ctx.registerDevice).not.toHaveBeenCalled();
+    await plugin.onShutdown();
+  });
+
+  it("mounts the devices live when a config change adds a trigger (#439)", async () => {
+    const { ctx, devices } = createMockContext();
+    const plugin = new SecurityPlugin();
+    await plugin.onStart(ctx);
+    expect(ctx.registerDevice).not.toHaveBeenCalled();
+
+    await plugin.onConfigChanged({
+      exitDelaySeconds: 0,
+      entryDelaySeconds: 0,
+      homeTriggers: "binary_sensor.door",
+    });
+    expect(devices.size).toBe(5);
+
+    // The freshly mounted switches drive the machine.
+    await armVia(devices, "mode_home");
+    plugin.handleTriggerEvent("binary_sensor.door", "on", "door");
+    expect(ctx.updateDeviceState).toHaveBeenCalledWith(
+      "alarm",
+      "booleanState",
+      { stateValue: false },
+    );
+    await plugin.onShutdown();
+  });
+
+  it("removes the devices when a config change empties the triggers (#439)", async () => {
+    const { ctx, devices } = createMockContext();
+    const plugin = new SecurityPlugin({
+      exitDelaySeconds: 0,
+      homeTriggers: "binary_sensor.door",
+    });
+    await plugin.onStart(ctx);
+    expect(devices.size).toBe(5);
+
+    await plugin.onConfigChanged({ exitDelaySeconds: 0 });
+    expect(devices.size).toBe(0);
     await plugin.onShutdown();
   });
 
@@ -164,6 +211,7 @@ describe("SecurityPlugin", () => {
     const plugin = new SecurityPlugin(
       {
         exitDelaySeconds: 0,
+        homeTriggers: "binary_sensor.motion",
         homeSetters: "scene.arm_home,script.notify,switch.led",
       },
       { connect: async () => conn as unknown as Connection },
@@ -322,7 +370,7 @@ describe("SecurityPlugin", () => {
     const connect = vi.fn(async () => conn as unknown as Connection);
     const { ctx } = createMockContext({ homeAssistant: ha });
     const plugin = new SecurityPlugin(
-      { haUrl: "http://elsewhere:8123" },
+      { haUrl: "http://elsewhere:8123", homeTriggers: "binary_sensor.motion" },
       { connect },
     );
     const warn = vi.fn();
@@ -351,6 +399,7 @@ describe("SecurityPlugin", () => {
     const plugin = new SecurityPlugin(
       {
         triggerTimeSeconds: 120,
+        awayTriggers: "binary_sensor.door",
         awayAlerts: "siren.horn",
         homeAlerts: "script.wake",
       },
@@ -478,7 +527,11 @@ describe("SecurityPlugin", () => {
     );
     const { ctx, devices } = createMockContext({ homeAssistant: ha });
     const plugin = new SecurityPlugin(
-      { exitDelaySeconds: 0, homeSetters: "scene.arm_home" },
+      {
+        exitDelaySeconds: 0,
+        homeTriggers: "binary_sensor.motion",
+        homeSetters: "scene.arm_home",
+      },
       { connect },
     );
     await plugin.onStart(ctx);
@@ -508,7 +561,11 @@ describe("SecurityPlugin", () => {
     );
     const { ctx, devices } = createMockContext({ homeAssistant: ha });
     const plugin = new SecurityPlugin(
-      { exitDelaySeconds: 0, homeSetters: "scene.arm_home" },
+      {
+        exitDelaySeconds: 0,
+        homeTriggers: "binary_sensor.motion",
+        homeSetters: "scene.arm_home",
+      },
       { connect },
     );
     await plugin.onStart(ctx);
@@ -530,6 +587,7 @@ describe("SecurityPlugin", () => {
     const plugin = new SecurityPlugin(
       {
         exitDelaySeconds: 0,
+        awayTriggers: "binary_sensor.door",
         awaySetters: "scene.away_on",
         vacationSetters: "",
       },
@@ -553,7 +611,11 @@ describe("SecurityPlugin", () => {
     const conn = fakeConnection();
     const { ctx, devices } = createMockContext({ homeAssistant: ha });
     const plugin = new SecurityPlugin(
-      { exitDelaySeconds: 0, homeSetters: "script.a,script.a" },
+      {
+        exitDelaySeconds: 0,
+        homeTriggers: "binary_sensor.motion",
+        homeSetters: "script.a,script.a",
+      },
       { connect: async () => conn as unknown as Connection },
     );
     await plugin.onStart(ctx);
@@ -582,7 +644,10 @@ describe("SecurityPlugin", () => {
     });
     const connect = vi.fn(async () => conn as unknown as Connection);
     const { ctx } = createMockContext({ homeAssistant: ha });
-    const plugin = new SecurityPlugin({}, { connect });
+    const plugin = new SecurityPlugin(
+      { homeTriggers: "binary_sensor.motion" },
+      { connect },
+    );
     await plugin.onStart(ctx);
     await vi.advanceTimersByTimeAsync(0);
     // The half-open socket is closed before the retry timer even schedules
@@ -611,7 +676,7 @@ describe("SecurityPlugin", () => {
     });
     const { ctx } = createMockContext({ homeAssistant: ha });
     const plugin = new SecurityPlugin(
-      {},
+      { homeTriggers: "binary_sensor.motion" },
       { connect: async () => conn as unknown as Connection },
     );
     await plugin.onStart(ctx);
@@ -630,7 +695,7 @@ describe("SecurityPlugin", () => {
       homeAssistant: ha,
     });
     const plugin = new SecurityPlugin(
-      { nightSetters: "scene.night" },
+      { nightTriggers: "binary_sensor.motion", nightSetters: "scene.night" },
       { connect: async () => conn as unknown as Connection },
     );
     await plugin.onStart(ctx);
@@ -666,6 +731,7 @@ describe("SecurityPlugin", () => {
       {
         exitDelaySeconds: 0,
         triggerTimeSeconds: 0,
+        awayTriggers: "binary_sensor.door",
         awayAlerts: "siren.away_horn",
         homeAlerts: "script.wake",
       },
@@ -700,10 +766,17 @@ describe("SecurityPlugin", () => {
       )
       .mockResolvedValue(conn2 as unknown as Connection);
     const { ctx } = createMockContext({ homeAssistant: ha });
-    const plugin = new SecurityPlugin({}, { connect });
+    const plugin = new SecurityPlugin(
+      { homeTriggers: "binary_sensor.motion" },
+      { connect },
+    );
     await plugin.onStart(ctx);
 
-    await plugin.onConfigChanged({ haUrl: "http://other:8123", haToken: "t2" });
+    await plugin.onConfigChanged({
+      haUrl: "http://other:8123",
+      haToken: "t2",
+      homeTriggers: "binary_sensor.motion",
+    });
     await vi.waitFor(() => expect(conn2.subscribeEvents).toHaveBeenCalled());
 
     // The old dial comes back only now, with the old credentials.
@@ -728,10 +801,17 @@ describe("SecurityPlugin", () => {
       )
       .mockResolvedValue(conn2 as unknown as Connection);
     const { ctx } = createMockContext({ homeAssistant: ha });
-    const plugin = new SecurityPlugin({}, { connect });
+    const plugin = new SecurityPlugin(
+      { homeTriggers: "binary_sensor.motion" },
+      { connect },
+    );
     await plugin.onStart(ctx);
 
-    await plugin.onConfigChanged({ haUrl: "http://other:8123", haToken: "t2" });
+    await plugin.onConfigChanged({
+      haUrl: "http://other:8123",
+      haToken: "t2",
+      homeTriggers: "binary_sensor.motion",
+    });
     expect(connect).toHaveBeenCalledTimes(2);
 
     // The old dial fails after the config change: no retry of the old target.
@@ -746,7 +826,10 @@ describe("SecurityPlugin", () => {
     const { ctx, devices } = createMockContext({
       storage: storage as unknown as PluginStorage,
     });
-    const plugin = new SecurityPlugin({ exitDelaySeconds: 0 });
+    const plugin = new SecurityPlugin({
+      exitDelaySeconds: 0,
+      nightTriggers: "binary_sensor.motion",
+    });
     await plugin.onStart(ctx);
     await armVia(devices, "mode_night");
     expect(storage.data.get("state")).toMatchObject({
@@ -759,7 +842,10 @@ describe("SecurityPlugin", () => {
     const { ctx: ctx2 } = createMockContext({
       storage: storage as unknown as PluginStorage,
     });
-    const plugin2 = new SecurityPlugin({ exitDelaySeconds: 0 });
+    const plugin2 = new SecurityPlugin({
+      exitDelaySeconds: 0,
+      nightTriggers: "binary_sensor.motion",
+    });
     await plugin2.onStart(ctx2);
     expect(ctx2.updateDeviceState).toHaveBeenCalledWith("mode_night", "onOff", {
       onOff: true,
@@ -779,7 +865,7 @@ describe("SecurityPlugin", () => {
     const { ctx } = createMockContext({
       storage: storage as unknown as PluginStorage,
     });
-    const plugin = new SecurityPlugin();
+    const plugin = new SecurityPlugin({ awayTriggers: "binary_sensor.door" });
     await plugin.onStart(ctx);
     // The resolution is persisted so a second restart replays nothing.
     expect(storage.data.get("state")).toMatchObject({
@@ -826,7 +912,10 @@ describe("SecurityPlugin", () => {
       .mockRejectedValueOnce(new Error("down"))
       .mockResolvedValue(conn as unknown as Connection);
     const { ctx } = createMockContext({ homeAssistant: ha });
-    const plugin = new SecurityPlugin({}, { connect });
+    const plugin = new SecurityPlugin(
+      { homeTriggers: "binary_sensor.motion" },
+      { connect },
+    );
     await plugin.onStart(ctx);
     expect(connect).toHaveBeenCalledTimes(1);
     await vi.advanceTimersByTimeAsync(1000);
@@ -897,7 +986,11 @@ describe("SecurityPlugin", () => {
       homeAssistant: ha,
     });
     const plugin = new SecurityPlugin(
-      { exitDelaySeconds: 0, homeSetters: "scene.arm_home" },
+      {
+        exitDelaySeconds: 0,
+        homeTriggers: "binary_sensor.motion",
+        homeSetters: "scene.arm_home",
+      },
       { connect: async () => conn as unknown as Connection },
     );
     await plugin.onStart(ctx);
@@ -941,7 +1034,11 @@ describe("SecurityPlugin", () => {
       homeAssistant: ha,
     });
     const plugin = new SecurityPlugin(
-      { exitDelaySeconds: 0, homeSetters: "scene.arm_home" },
+      {
+        exitDelaySeconds: 0,
+        homeTriggers: "binary_sensor.motion",
+        homeSetters: "scene.arm_home",
+      },
       { connect: async () => conn as unknown as Connection },
     );
     await plugin.onStart(ctx);
@@ -1004,6 +1101,7 @@ describe("SecurityPlugin", () => {
     const plugin = new SecurityPlugin(
       {
         exitDelaySeconds: 0,
+        homeTriggers: "binary_sensor.motion",
         homeSetters: "scene.h",
         awaySetters: "scene.a",
         offSetters: "scene.off",
@@ -1040,7 +1138,12 @@ describe("SecurityPlugin", () => {
     });
     // siren.old was removed from the config while the alarm stood tripped.
     const plugin = new SecurityPlugin(
-      { exitDelaySeconds: 0, triggerTimeSeconds: 0, awayAlerts: "siren.new" },
+      {
+        exitDelaySeconds: 0,
+        triggerTimeSeconds: 0,
+        awayTriggers: "binary_sensor.door",
+        awayAlerts: "siren.new",
+      },
       { connect: async () => conn as unknown as Connection },
     );
     await plugin.onStart(ctx);
@@ -1055,12 +1158,66 @@ describe("SecurityPlugin", () => {
     await plugin.onShutdown();
   });
 
+  it("drops queued effect tasks on teardown so a re-enable does not replay them (#439 review)", async () => {
+    const conn = fakeConnection();
+    let release!: () => void;
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    const seen: ServiceMessage[] = [];
+    conn.sendMessagePromise = vi.fn(async (msg: ServiceMessage) => {
+      seen.push(msg);
+      if (msg.target?.entity_id === "scene.h") {
+        await gate;
+      }
+      return {};
+    });
+    const { ctx, devices } = createMockContext({ homeAssistant: ha });
+    const plugin = new SecurityPlugin(
+      {
+        exitDelaySeconds: 0,
+        homeTriggers: "binary_sensor.motion",
+        homeSetters: "scene.h",
+        awaySetters: "scene.a",
+      },
+      { connect: async () => conn as unknown as Connection },
+    );
+    await plugin.onStart(ctx);
+    await vi.waitFor(() => expect(conn.subscribeEvents).toHaveBeenCalled());
+    await armVia(devices, "mode_home");
+    await vi.waitFor(() =>
+      expect(seen.some((m) => m.target?.entity_id === "scene.h")).toBe(true),
+    );
+    // The away setters queue behind the hung home call.
+    await armVia(devices, "mode_away");
+
+    await plugin.onShutdown();
+    await plugin.onStart(ctx);
+    await vi.waitFor(() =>
+      expect(conn.subscribeEvents).toHaveBeenCalledTimes(2),
+    );
+    release();
+    await new Promise((r) => setTimeout(r, 30));
+
+    // The queued away batch belonged to the closed generation; firing it now
+    // would replay a stale setter against the new connection.
+    const staleOn = seen.filter(
+      (m) => m.service === "turn_on" && m.target?.entity_id === "scene.a",
+    );
+    expect(staleOn).toEqual([]);
+    await plugin.onShutdown();
+  });
+
   it("rewires triggers on config change and keeps the arm state", async () => {
     const conn = fakeConnection();
     const connect = vi.fn(async () => conn as unknown as Connection);
     const { ctx, devices } = createMockContext({ homeAssistant: ha });
     const plugin = new SecurityPlugin(
-      { exitDelaySeconds: 0, triggerTimeSeconds: 0 },
+      {
+        exitDelaySeconds: 0,
+        triggerTimeSeconds: 0,
+        homeTriggers: "binary_sensor.old",
+      },
       { connect },
     );
     await plugin.onStart(ctx);

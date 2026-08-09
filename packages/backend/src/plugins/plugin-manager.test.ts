@@ -350,11 +350,407 @@ describe("PluginManager", () => {
       const pm = new PluginManager("bridge-1", storageDir);
       await pm.registerBuiltIn(createMockPlugin());
 
-      pm.disablePlugin("test-plugin");
+      await pm.disablePlugin("test-plugin");
       expect(pm.getMetadata()[0].enabled).toBe(false);
 
-      pm.enablePlugin("test-plugin");
+      await pm.enablePlugin("test-plugin");
       expect(pm.getMetadata()[0].enabled).toBe(true);
+    });
+  });
+
+  describe("enabled persistence (#439)", () => {
+    function makeDevicePlugin() {
+      const onStart = vi.fn(async (ctx: PluginContext) => {
+        await ctx.registerDevice({
+          id: "dev-1",
+          name: "Device",
+          deviceType: "on_off_light",
+          clusters: [{ clusterId: "onOff", attributes: { onOff: false } }],
+        });
+      });
+      return {
+        plugin: createMockPlugin({ name: "persist-plugin", onStart }),
+        onStart,
+      };
+    }
+
+    it("keeps a disabled plugin disabled for the next manager on the same storage", async () => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), "hamh-test-disable-"));
+      try {
+        const first = makeDevicePlugin();
+        const pm1 = new PluginManager("bridge-p", dir);
+        await pm1.registerBuiltIn(first.plugin);
+        await pm1.startAll();
+        expect(pm1.getDevices("persist-plugin")).toHaveLength(1);
+        await pm1.disablePlugin("persist-plugin");
+
+        // The restart: a new manager over the same storage dir.
+        const second = makeDevicePlugin();
+        const pm2 = new PluginManager("bridge-p", dir);
+        await pm2.registerBuiltIn(second.plugin);
+        await pm2.startAll();
+        expect(pm2.getMetadata()[0].enabled).toBe(false);
+        expect(second.onStart).not.toHaveBeenCalled();
+        expect(pm2.getDevices("persist-plugin")).toHaveLength(0);
+      } finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it("persists a re-enable the same way", async () => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), "hamh-test-enable-"));
+      try {
+        const first = makeDevicePlugin();
+        const pm1 = new PluginManager("bridge-p", dir);
+        await pm1.registerBuiltIn(first.plugin);
+        await pm1.startAll();
+        await pm1.disablePlugin("persist-plugin");
+        await pm1.enablePlugin("persist-plugin");
+
+        const second = makeDevicePlugin();
+        const pm2 = new PluginManager("bridge-p", dir);
+        await pm2.registerBuiltIn(second.plugin);
+        await pm2.startAll();
+        expect(pm2.getMetadata()[0].enabled).toBe(true);
+        expect(pm2.getDevices("persist-plugin")).toHaveLength(1);
+      } finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it("unregisters the devices on disable and registers them again on enable", async () => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), "hamh-test-toggle-"));
+      try {
+        const { plugin } = makeDevicePlugin();
+        const pm = new PluginManager("bridge-p", dir);
+        const unregistered: string[] = [];
+        pm.onDeviceUnregistered = async (_name, deviceId) => {
+          unregistered.push(deviceId);
+        };
+        await pm.registerBuiltIn(plugin);
+        await pm.startAll();
+        expect(pm.getDevices("persist-plugin")).toHaveLength(1);
+
+        await pm.disablePlugin("persist-plugin");
+        expect(unregistered).toEqual(["dev-1"]);
+        expect(pm.getDevices("persist-plugin")).toHaveLength(0);
+
+        await pm.enablePlugin("persist-plugin");
+        expect(pm.getDevices("persist-plugin")).toHaveLength(1);
+      } finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it("holds a config save while disabled and applies it on enable", async () => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), "hamh-test-pending-"));
+      try {
+        const onConfigChanged = vi.fn(async () => {});
+        const { onStart } = makeDevicePlugin();
+        const plugin = createMockPlugin({
+          name: "persist-plugin",
+          onStart,
+          onConfigChanged,
+        });
+        const pm = new PluginManager("bridge-p", dir);
+        await pm.registerBuiltIn(plugin);
+        await pm.startAll();
+        await pm.disablePlugin("persist-plugin");
+
+        await pm.updateConfig("persist-plugin", { interval: 7 });
+        // A save on a disabled plugin must not reach it and remount devices.
+        expect(onConfigChanged).not.toHaveBeenCalled();
+        expect(pm.getDevices("persist-plugin")).toHaveLength(0);
+
+        await pm.enablePlugin("persist-plugin");
+        // The parked save lands in storage before the start, so onStart
+        // reads it as the persisted config; no separate callback fires.
+        expect(onConfigChanged).not.toHaveBeenCalled();
+        const file = path.join(dir, "plugin-bridge-p-persist-plugin.json");
+        expect(JSON.parse(fs.readFileSync(file, "utf-8")).config).toEqual({
+          interval: 7,
+        });
+        expect(pm.getMetadata()[0].config).toEqual({ interval: 7 });
+      } finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+      }
+    });
+  });
+
+  describe("disable with the breaker open (#439 review)", () => {
+    function breakerPlugin() {
+      const onShutdown = vi.fn(async () => {});
+      const onConfigChanged = vi.fn(async () => {
+        throw new Error("boom");
+      });
+      return {
+        plugin: createMockPlugin({ onShutdown, onConfigChanged }),
+        onShutdown,
+      };
+    }
+
+    async function openBreaker(pm: PluginManager) {
+      for (let i = 0; i < 3; i++) {
+        await pm.updateConfig("test-plugin", { attempt: i });
+      }
+      expect(pm.getCircuitBreakerStates().get("test-plugin")?.disabled).toBe(
+        true,
+      );
+    }
+
+    it("still runs onShutdown on disablePlugin", async () => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), "hamh-test-breaker-"));
+      try {
+        const { plugin, onShutdown } = breakerPlugin();
+        const pm = new PluginManager("bridge-b", dir);
+        await pm.registerBuiltIn(plugin);
+        await pm.startAll();
+        await openBreaker(pm);
+
+        await pm.disablePlugin("test-plugin");
+        expect(onShutdown).toHaveBeenCalledTimes(1);
+      } finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it("still runs onShutdown on shutdownAll", async () => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), "hamh-test-breaker2-"));
+      try {
+        const { plugin, onShutdown } = breakerPlugin();
+        const pm = new PluginManager("bridge-b", dir);
+        await pm.registerBuiltIn(plugin);
+        await pm.startAll();
+        await openBreaker(pm);
+
+        await pm.shutdownAll("stop");
+        expect(onShutdown).toHaveBeenCalledWith("stop");
+      } finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+      }
+    });
+  });
+
+  describe("transition serialization (#439 review)", () => {
+    const lightDevice = (id: string) => ({
+      id,
+      name: "Device",
+      deviceType: "on_off_light",
+      clusters: [{ clusterId: "onOff", attributes: { onOff: false } }],
+    });
+
+    it("a disable during a hung start leaves no devices mounted", async () => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), "hamh-test-serial-"));
+      try {
+        let release!: () => void;
+        const gate = new Promise<void>((r) => {
+          release = r;
+        });
+        const pm = new PluginManager("bridge-q", dir);
+        await pm.registerBuiltIn(
+          createMockPlugin({
+            onStart: async (ctx: PluginContext) => {
+              await gate;
+              await ctx.registerDevice(lightDevice("late-1"));
+            },
+          }),
+        );
+
+        const start = pm.startAll();
+        const disable = pm.disablePlugin("test-plugin");
+        // Give the disable room to run ahead of the hung start.
+        await new Promise((r) => setTimeout(r, 20));
+        release();
+        await Promise.all([start, disable]);
+
+        expect(pm.getDevices("test-plugin")).toHaveLength(0);
+        expect(pm.getMetadata()[0].enabled).toBe(false);
+      } finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it("drops a device registration arriving after a disable", async () => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), "hamh-test-gate-"));
+      try {
+        let saved!: PluginContext;
+        const registered: string[] = [];
+        const pm = new PluginManager("bridge-q", dir);
+        pm.onDeviceRegistered = async (_n, d) => {
+          registered.push(d.id);
+        };
+        await pm.registerBuiltIn(
+          createMockPlugin({
+            onStart: async (ctx: PluginContext) => {
+              saved = ctx;
+            },
+          }),
+        );
+        await pm.startAll();
+        await pm.disablePlugin("test-plugin");
+
+        // A late async callback inside the plugin fires after the disable.
+        await saved.registerDevice(lightDevice("zombie-1"));
+
+        expect(pm.getDevices("test-plugin")).toHaveLength(0);
+        expect(registered).toEqual([]);
+      } finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it("drops a registration from a superseded start after re-enable", async () => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), "hamh-test-epoch-"));
+      try {
+        const ctxs: PluginContext[] = [];
+        const pm = new PluginManager("bridge-q", dir);
+        await pm.registerBuiltIn(
+          createMockPlugin({
+            onStart: async (ctx: PluginContext) => {
+              ctxs.push(ctx);
+            },
+          }),
+        );
+        await pm.startAll();
+        await pm.disablePlugin("test-plugin");
+        await pm.enablePlugin("test-plugin");
+        expect(ctxs).toHaveLength(2);
+
+        await ctxs[0].registerDevice(lightDevice("stale-1"));
+        expect(pm.getDevices("test-plugin")).toHaveLength(0);
+
+        await ctxs[1].registerDevice(lightDevice("fresh-1"));
+        expect(pm.getDevices("test-plugin").map((d) => d.id)).toEqual([
+          "fresh-1",
+        ]);
+      } finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+      }
+    });
+  });
+
+  describe("parked config on enable (#439 review)", () => {
+    it("persists the parked config before onStart so the start reads it", async () => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), "hamh-test-parked-"));
+      try {
+        const seen: unknown[] = [];
+        const pm = new PluginManager("bridge-p", dir);
+        await pm.registerBuiltIn(
+          createMockPlugin({
+            name: "persist-plugin",
+            onStart: async (ctx: PluginContext) => {
+              seen.push(await ctx.storage.get("config"));
+            },
+            onConfigChanged: async () => {},
+          }),
+        );
+        await pm.startAll();
+        await pm.disablePlugin("persist-plugin");
+        await pm.updateConfig("persist-plugin", { interval: 9 });
+        await pm.enablePlugin("persist-plugin");
+
+        expect(seen).toHaveLength(2);
+        expect(seen[1]).toEqual({ interval: 9 });
+      } finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it("keeps the parked config durable when the enable start fails", async () => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), "hamh-test-durable-"));
+      try {
+        const pm = new PluginManager("bridge-p", dir);
+        await pm.registerBuiltIn(
+          createMockPlugin({
+            name: "persist-plugin",
+            onStart: async () => {
+              throw new Error("start crash");
+            },
+            onConfigChanged: async () => {},
+          }),
+        );
+        await pm.startAll();
+        await pm.disablePlugin("persist-plugin");
+        await pm.updateConfig("persist-plugin", { mode: "x" });
+        await pm.enablePlugin("persist-plugin");
+
+        const file = path.join(dir, "plugin-bridge-p-persist-plugin.json");
+        expect(JSON.parse(fs.readFileSync(file, "utf-8")).config).toEqual({
+          mode: "x",
+        });
+      } finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+      }
+    });
+  });
+
+  describe("plugin-owned __enabled key (#439 review)", () => {
+    it("leaves a plugin's own __enabled value untouched across toggles", async () => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), "hamh-test-own-"));
+      try {
+        const file = path.join(dir, "plugin-bridge-p-persist-plugin.json");
+        fs.writeFileSync(file, JSON.stringify({ __enabled: "plugin-owned" }));
+        const pm = new PluginManager("bridge-p", dir);
+        await pm.registerBuiltIn(createMockPlugin({ name: "persist-plugin" }));
+        await pm.startAll();
+        // A non-boolean value is plugin data, not the manager's flag.
+        expect(pm.getMetadata()[0].enabled).toBe(true);
+
+        await pm.disablePlugin("persist-plugin");
+        await pm.enablePlugin("persist-plugin");
+        expect(JSON.parse(fs.readFileSync(file, "utf-8")).__enabled).toBe(
+          "plugin-owned",
+        );
+      } finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it("migrates a legacy boolean __enabled into the manager state file", async () => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), "hamh-test-migrate-"));
+      try {
+        const file = path.join(dir, "plugin-bridge-p-persist-plugin.json");
+        fs.writeFileSync(file, JSON.stringify({ __enabled: false, own: 1 }));
+        const pm1 = new PluginManager("bridge-p", dir);
+        await pm1.registerBuiltIn(createMockPlugin({ name: "persist-plugin" }));
+        expect(pm1.getMetadata()[0].enabled).toBe(false);
+
+        // The key goes back to the plugin, the choice moves to the manager.
+        const migrated = JSON.parse(fs.readFileSync(file, "utf-8"));
+        expect(migrated.__enabled).toBeUndefined();
+        expect(migrated.own).toBe(1);
+
+        const onStart = vi.fn(async () => {});
+        const pm2 = new PluginManager("bridge-p", dir);
+        await pm2.registerBuiltIn(
+          createMockPlugin({ name: "persist-plugin", onStart }),
+        );
+        await pm2.startAll();
+        expect(pm2.getMetadata()[0].enabled).toBe(false);
+        expect(onStart).not.toHaveBeenCalled();
+      } finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+      }
+    });
+  });
+
+  describe("enable/disable results (#439 review)", () => {
+    it("returns the resulting metadata and undefined for unknown names", async () => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), "hamh-test-result-"));
+      try {
+        const pm = new PluginManager("bridge-1", dir);
+        await pm.registerBuiltIn(createMockPlugin());
+
+        const off = await pm.disablePlugin("test-plugin");
+        expect(off?.enabled).toBe(false);
+        const on = await pm.enablePlugin("test-plugin");
+        expect(on?.enabled).toBe(true);
+
+        expect(await pm.disablePlugin("missing")).toBeUndefined();
+        expect(await pm.enablePlugin("missing")).toBeUndefined();
+      } finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+      }
     });
   });
 

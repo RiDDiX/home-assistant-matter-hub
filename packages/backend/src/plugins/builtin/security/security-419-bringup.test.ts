@@ -181,6 +181,42 @@ describe("security plugin bring-up (#419)", () => {
     await manager.shutdownAll();
   });
 
+  it("unmounts the endpoints on disable and remounts them on enable (#439)", async () => {
+    const { manager, bem } = await bringUp();
+    expect([...bem.root.parts].length).toBe(5);
+
+    await bem.disablePlugin("security");
+    expect([...bem.root.parts].length).toBe(0);
+    expect(manager.getMetadata()[0].enabled).toBe(false);
+
+    await bem.enablePlugin("security");
+    expect([...bem.root.parts].length).toBe(5);
+    expect(manager.getMetadata()[0].enabled).toBe(true);
+
+    await manager.shutdownAll();
+  });
+
+  it("keeps the endpoint numbers across a disable and enable cycle (#439 review)", async () => {
+    const { manager, bem } = await bringUp();
+    const numbersOf = () => {
+      const map = new Map<string, number | undefined>();
+      for (const part of bem.root.parts) {
+        map.set(part.id, (part as Endpoint).number);
+      }
+      return map;
+    };
+    const before = numbersOf();
+    expect(before.size).toBe(5);
+
+    await bem.disablePlugin("security");
+    await bem.enablePlugin("security");
+
+    // Controllers keep names and rooms only while the numbers hold still.
+    expect(numbersOf()).toEqual(before);
+
+    await manager.shutdownAll();
+  });
+
   it("keeps a controller write during an internal update on another switch", async () => {
     const { manager, bem, plugin, endpoints } = await bringUp();
     // Hold Home's internal-update window open, exactly as a slow setStateOf

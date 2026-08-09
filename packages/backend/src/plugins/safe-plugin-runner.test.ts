@@ -122,4 +122,40 @@ describe("SafePluginRunner", () => {
       expect(runner.isDisabled("sync-bad")).toBe(true);
     });
   });
+
+  describe("runCleanup (#439 review)", () => {
+    it("runs the callback with the breaker open", async () => {
+      const runner = new SafePluginRunner();
+      for (let i = 0; i < 3; i++) {
+        await runner.run("p", "onStart", () => {
+          throw new Error("fail");
+        });
+      }
+      expect(runner.isDisabled("p")).toBe(true);
+
+      let ran = false;
+      await runner.runCleanup("p", "onShutdown", () => {
+        ran = true;
+      });
+      expect(ran).toBe(true);
+    });
+
+    it("never feeds a cleanup failure into the breaker", async () => {
+      const runner = new SafePluginRunner();
+      await runner.runCleanup("p", "onShutdown", () => {
+        throw new Error("cleanup crash");
+      });
+      expect(runner.getState("p").failures).toBe(0);
+      expect(runner.isDisabled("p")).toBe(false);
+    });
+
+    it("keeps the breaker state untouched on cleanup success", async () => {
+      const runner = new SafePluginRunner();
+      await runner.run("p", "op", () => {
+        throw new Error("one failure");
+      });
+      await runner.runCleanup("p", "onShutdown", () => {});
+      expect(runner.getState("p").failures).toBe(1);
+    });
+  });
 });

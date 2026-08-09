@@ -11,6 +11,8 @@ const logger = Logger.get("PluginStorage");
  */
 const SAVE_DEBOUNCE_MS = 500;
 
+const safe = (s: string) => s.replace(/[^a-zA-Z0-9_-]/g, "_");
+
 // Path of the JSON file backing one bridge+plugin pair. Shared so #419 can
 // read a bridge's camera config without instantiating the storage.
 export function pluginStorageFilePath(
@@ -18,11 +20,19 @@ export function pluginStorageFilePath(
   bridgeId: string,
   pluginName: string,
 ): string {
-  const safe = (s: string) => s.replace(/[^a-zA-Z0-9_-]/g, "_");
   return path.join(
     storageDir,
     `plugin-${safe(bridgeId)}-${safe(pluginName)}.json`,
   );
+}
+
+// The manager's per-bridge state file (enabled flags). Kept apart from the
+// plugin files so a plugin-owned key can never collide with it (#439).
+export function pluginStateFilePath(
+  storageDir: string,
+  bridgeId: string,
+): string {
+  return path.join(storageDir, `plugin-state-${safe(bridgeId)}.json`);
 }
 
 export class FilePluginStorage implements PluginStorage {

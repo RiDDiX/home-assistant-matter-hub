@@ -204,6 +204,90 @@ describe("secret config values in the listing", () => {
   });
 });
 
+// #439 review: the enable/disable routes answered {enabled:true/false} no
+// matter what happened. The response has to carry the manager's resulting
+// state, and an unknown plugin name is a 404, not a fake success.
+describe("enable/disable route honesty (#439 review)", () => {
+  // enablePlugin reports enabled:false, the shape of a start that failed and
+  // was re-disabled by the breaker.
+  const meta = (enabled: boolean) => ({
+    name: "camera",
+    version: "1.0.0",
+    source: "builtin",
+    enabled,
+    config: {},
+  });
+  const togglingBridge = {
+    id: "b1",
+    data: { name: "Bridge One" },
+    pluginInfo: { metadata: [meta(true)], circuitBreakers: {}, devices: [] },
+    enablePlugin: async (name: string) =>
+      name === "camera" ? meta(false) : undefined,
+    disablePlugin: async (name: string) =>
+      name === "camera" ? meta(false) : undefined,
+  };
+
+  it("404s an unknown plugin name on enable", async () => {
+    await withRouter(
+      async (base) => {
+        const res = await fetch(`${base}/plugins/b1/nope/enable`, {
+          method: "POST",
+        });
+        expect(res.status).toBe(404);
+      },
+      [togglingBridge],
+    );
+  });
+
+  it("404s an unknown plugin name on disable", async () => {
+    await withRouter(
+      async (base) => {
+        const res = await fetch(`${base}/plugins/b1/nope/disable`, {
+          method: "POST",
+        });
+        expect(res.status).toBe(404);
+      },
+      [togglingBridge],
+    );
+  });
+
+  it("reports the resulting state when an enable did not stick", async () => {
+    await withRouter(
+      async (base) => {
+        const res = await fetch(`${base}/plugins/b1/camera/enable`, {
+          method: "POST",
+        });
+        expect(res.status).toBe(200);
+        const body = (await res.json()) as {
+          enabled: boolean;
+          success: boolean;
+        };
+        expect(body.enabled).toBe(false);
+        expect(body.success).toBe(false);
+      },
+      [togglingBridge],
+    );
+  });
+
+  it("reports the resulting state on disable", async () => {
+    await withRouter(
+      async (base) => {
+        const res = await fetch(`${base}/plugins/b1/camera/disable`, {
+          method: "POST",
+        });
+        expect(res.status).toBe(200);
+        const body = (await res.json()) as {
+          enabled: boolean;
+          success: boolean;
+        };
+        expect(body.enabled).toBe(false);
+        expect(body.success).toBe(true);
+      },
+      [togglingBridge],
+    );
+  });
+});
+
 // #432: the reporter typed "camera", the name of a built-in plugin, into the
 // npm install dialog and npm pulled an unrelated public package.
 function install(base: string, packageName: string): Promise<Response> {

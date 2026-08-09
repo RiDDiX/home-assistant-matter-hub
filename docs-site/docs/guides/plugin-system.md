@@ -160,6 +160,8 @@ Some device types need a live matter.js `EndpointType` (custom clusters and comm
 
 Plugins run on standard bridges only. A bridge with Server Mode enabled hosts no plugins at all, including the built-in camera; the Plugins page lists it with a note saying so. If every bridge you have is in Server Mode, create a standard bridge and put the camera there. Apple Home does not render Matter cameras; as of 2026 SmartThings is the only controller that does.
 
+A built-in plugin registers no devices until it is actually configured: the camera waits for camera entity ids, the security plugin for at least one trigger list. Until then nothing appears on your controllers, and once you save a real config the devices mount without a bridge restart. Disabling a plugin removes its mounted devices right away and the choice is stored per bridge, so a disabled plugin stays disabled across restarts until you enable it again.
+
 **Camera** exposes a Home Assistant camera as a Matter Camera (0x0142). It implements the Matter `WebRtcTransportProvider` flow and bridges HA's WebRTC. To configure it, open the Plugins page and click the camera plugin (or its gear icon). A settings dialog opens; fill in the cameras and save:
 
 | Setting | Description |

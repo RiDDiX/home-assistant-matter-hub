@@ -108,6 +108,36 @@ export class SafePluginRunner {
   }
 
   /**
+   * Run a shutdown-class hook with timeout only. An open breaker never blocks
+   * it and its failures never count toward the breaker: cleanup has to run
+   * exactly when a plugin is at its most broken, or timers and sockets leak.
+   */
+  async runCleanup<T>(
+    pluginName: string,
+    operation: string,
+    fn: () => Promise<T> | T,
+    timeoutMs: number = DEFAULT_TIMEOUT_MS,
+  ): Promise<T | undefined> {
+    const timeout = this.createTimeout<T>(pluginName, operation, timeoutMs);
+    try {
+      const result = await Promise.race([
+        Promise.resolve().then(fn),
+        timeout.promise,
+      ]);
+      timeout.clear();
+      return result;
+    } catch (error) {
+      timeout.clear();
+      logger.error(
+        `Plugin "${pluginName}" failed during ${operation}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      return undefined;
+    }
+  }
+
+  /**
    * Run a synchronous plugin function with try/catch + circuit breaker.
    */
   runSync<T>(

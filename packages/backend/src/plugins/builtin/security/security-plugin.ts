@@ -98,11 +98,14 @@ interface StoredSecurityState extends SecuritySnapshot {
   activeAlerts?: string[];
 }
 
-type EffectTask =
+// gen is stamped at enqueue time; the drain drops tasks left over from
+// before a teardown instead of firing them against the next connection.
+type EffectTask = (
   | { kind: "setters"; mode: ArmMode | "off" }
   | { kind: "alerts"; entities: string[] }
   | { kind: "silence"; entities: string[] }
-  | { kind: "reconnect" };
+  | { kind: "reconnect" }
+) & { gen?: number };
 
 // A small alarm system: four exclusive mode switches (Home/Away/Night/
 // Vacation) plus an Alarm contact sensor. All switches off means disarmed.
@@ -128,6 +131,9 @@ export class SecurityPlugin implements MatterHubPlugin {
   // coalesced per entity so a hung call cannot pile up work behind it.
   private tasks: EffectTask[] = [];
   private draining = false;
+  // Bumped on every teardown and bring-up; queued tasks from an older
+  // generation never dispatch.
+  private effectGeneration = 0;
 
   private connection?: Connection;
   private unsubscribeEvents?: () => Promise<void> | void;
@@ -150,6 +156,25 @@ export class SecurityPlugin implements MatterHubPlugin {
     const stored = await context.storage.get<SecurityConfig>(CONFIG_KEY);
     this.config = { ...this.config, ...(stored ?? {}) };
     this.applyLists();
+    // Without a single trigger the alarm can never trip, so an untouched
+    // install must not spill five endpoints onto the bridge (#439).
+    if (!this.isConfigured()) {
+      this.log.info(
+        "no trigger entities configured, the security devices stay unregistered",
+      );
+      return;
+    }
+    await this.bringUp();
+  }
+
+  private isConfigured(): boolean {
+    return this.watched.size > 0;
+  }
+
+  private async bringUp(): Promise<void> {
+    const context = this.context;
+    if (!context) return;
+    this.effectGeneration++;
     this.machine = new SecurityStateMachine(
       this.machineConfig(),
       this.effects(),
@@ -182,24 +207,45 @@ export class SecurityPlugin implements MatterHubPlugin {
     this.startConnection();
   }
 
+  private async tearDown(): Promise<void> {
+    this.machine?.shutdown();
+    this.machine = undefined;
+    // Queued effects belong to the closed connection and its config; the
+    // next bring-up must not replay them (#439 review).
+    this.tasks = [];
+    this.effectGeneration++;
+    await this.stopConnection();
+    for (const id of [...Object.values(MODE_DEVICE_IDS), ALARM_DEVICE_ID]) {
+      await this.context?.unregisterDevice(id).catch(() => {});
+    }
+  }
+
   async onConfigChanged(config: Record<string, unknown>): Promise<void> {
     this.config = config as SecurityConfig;
     await this.context?.storage.set(CONFIG_KEY, this.config);
     this.applyLists();
+    if (!this.isConfigured()) {
+      if (this.machine) {
+        this.log.info("trigger lists emptied, removing the security devices");
+        await this.tearDown();
+      }
+      return;
+    }
+    if (!this.machine) {
+      // First real config: the devices mount now, no bridge restart needed.
+      await this.bringUp();
+      return;
+    }
     // Rewire triggers live, the arm state survives. Between the teardown and
     // the new subscribe there is a short monitoring gap; trigger events in it
     // are lost.
-    this.machine?.setConfig(this.machineConfig());
+    this.machine.setConfig(this.machineConfig());
     await this.stopConnection();
     this.startConnection();
   }
 
   async onShutdown(): Promise<void> {
-    this.machine?.shutdown();
-    await this.stopConnection();
-    for (const id of [...Object.values(MODE_DEVICE_IDS), ALARM_DEVICE_ID]) {
-      await this.context?.unregisterDevice(id).catch(() => {});
-    }
+    await this.tearDown();
   }
 
   getCurrentConfig(): Record<string, unknown> {
@@ -472,6 +518,7 @@ export class SecurityPlugin implements MatterHubPlugin {
   }
 
   private pushTask(task: EffectTask): void {
+    task.gen = this.effectGeneration;
     this.tasks.push(task);
     // Start the drain a microtask late so the persist that follows the same
     // machine transition lands in storage before any flush barrier runs.
@@ -531,6 +578,7 @@ export class SecurityPlugin implements MatterHubPlugin {
       for (;;) {
         const task = this.tasks.shift();
         if (!task) return;
+        if (task.gen !== this.effectGeneration) continue;
         try {
           await this.runTask(task);
         } catch (e) {

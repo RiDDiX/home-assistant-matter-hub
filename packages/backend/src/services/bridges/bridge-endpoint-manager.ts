@@ -188,6 +188,7 @@ export class BridgeEndpointManager extends Service {
     this.pluginManager.onDeviceUnregistered = async (
       pluginName: string,
       deviceId: string,
+      options?: { keepIdentity?: boolean },
     ) => {
       const listeners = this.pluginListeners.get(deviceId);
       if (listeners) {
@@ -203,7 +204,14 @@ export class BridgeEndpointManager extends Service {
       const endpoint = this.pluginEndpoints.get(deviceId);
       if (endpoint) {
         try {
-          await endpoint.delete();
+          if (options?.keepIdentity) {
+            // A reversible stop: close keeps the persisted endpoint number,
+            // so a re-enable mounts under the same identity. delete would
+            // free the number and renumber every device on the next enable.
+            await endpoint.close();
+          } else {
+            await endpoint.delete();
+          }
         } catch (e) {
           this.log.warn(
             `Plugin "${pluginName}": failed to remove device "${deviceId}":`,
@@ -387,12 +395,12 @@ export class BridgeEndpointManager extends Service {
     };
   }
 
-  enablePlugin(pluginName: string): void {
-    this.pluginManager?.enablePlugin(pluginName);
+  async enablePlugin(pluginName: string): Promise<PluginMetadata | undefined> {
+    return await this.pluginManager?.enablePlugin(pluginName);
   }
 
-  disablePlugin(pluginName: string): void {
-    this.pluginManager?.disablePlugin(pluginName);
+  async disablePlugin(pluginName: string): Promise<PluginMetadata | undefined> {
+    return await this.pluginManager?.disablePlugin(pluginName);
   }
 
   resetPlugin(pluginName: string): void {

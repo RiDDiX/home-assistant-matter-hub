@@ -3,7 +3,7 @@ import * as path from "node:path";
 import { Logger } from "@matter/general";
 import { getSupportedPluginDeviceTypes } from "./plugin-device-factory.js";
 import type { PluginRegistry } from "./plugin-registry.js";
-import { FilePluginStorage } from "./plugin-storage.js";
+import { FilePluginStorage, pluginStateFilePath } from "./plugin-storage.js";
 import {
   type CircuitBreakerState,
   SafePluginRunner,
@@ -24,6 +24,14 @@ const logger = Logger.get("PluginManager");
 export const PLUGIN_API_VERSION = 1;
 
 const MAX_PLUGIN_DEVICE_ID_LENGTH = 100;
+
+// Older builds kept the enable choice inside the plugin's own storage file,
+// where a plugin-owned key of the same name collides. Migrated on first read.
+const LEGACY_ENABLED_KEY = "__enabled";
+
+// The storage key plugins read their persisted config from in onStart. A
+// parked save has to land there before the enable start runs (#439).
+const PLUGIN_CONFIG_KEY = "config";
 
 function validatePluginDevice(device: unknown): string | undefined {
   if (!device || typeof device !== "object") return "device must be an object";
@@ -62,6 +70,20 @@ interface PluginInstance {
   metadata: PluginMetadata;
   devices: Map<string, PluginDevice>;
   started: boolean;
+  // Config saved while the plugin was disabled, applied on enable so the
+  // save cannot remount devices behind the disable.
+  pendingConfig?: Record<string, unknown>;
+  // Transitions chain here so they run one at a time per plugin: a disable
+  // arriving during a slow start waits for the start to settle.
+  queue: Promise<unknown>;
+  // Bumped on disable and on every start. A registration carrying an older
+  // epoch comes from a superseded start and is dropped.
+  epoch: number;
+  // Fresh context per start so late registrations carry their start's epoch.
+  contextAt: (epoch: number) => PluginContext;
+  // True while a reversible stop (disable, bridge shutdown) unmounts the
+  // devices, so the endpoints keep their persisted numbers.
+  suspending: boolean;
 }
 
 /**
@@ -76,6 +98,7 @@ export class PluginManager {
   private readonly domainMappingOwners = new Map<string, string>();
   private readonly storageDir: string;
   private readonly bridgeId: string;
+  private readonly stateFile: string;
   private readonly homeAssistant?: { url: string; accessToken: string };
   private readonly runner = new SafePluginRunner();
   private registry?: PluginRegistry;
@@ -86,10 +109,14 @@ export class PluginManager {
     device: PluginDevice,
   ) => Promise<void>;
 
-  /** Callback invoked when a plugin removes a device */
+  /**
+   * Callback invoked when a plugin removes a device. keepIdentity marks a
+   * reversible stop: the endpoint closes but keeps its persisted number.
+   */
   onDeviceUnregistered?: (
     pluginName: string,
     deviceId: string,
+    options?: { keepIdentity?: boolean },
   ) => Promise<void>;
 
   /** Callback invoked when a plugin updates device state */
@@ -107,6 +134,7 @@ export class PluginManager {
   ) {
     this.bridgeId = bridgeId;
     this.storageDir = storageDir;
+    this.stateFile = pluginStateFilePath(storageDir, bridgeId);
     this.homeAssistant = homeAssistant;
   }
 
@@ -216,16 +244,35 @@ export class PluginManager {
       this.bridgeId,
       plugin.name,
     );
+    // A disable from a previous run survives the restart (#439). The choice
+    // lives in the manager's own state file; a boolean under the legacy key
+    // in the plugin's storage is honored once and handed back to the plugin.
+    let enabled = this.readEnabledState()[plugin.name];
+    const legacy = await storage.get<unknown>(LEGACY_ENABLED_KEY);
+    if (typeof legacy === "boolean") {
+      if (enabled === undefined) {
+        enabled = legacy;
+        this.persistEnabled(plugin.name, legacy);
+      }
+      await storage.delete(LEGACY_ENABLED_KEY);
+      storage.flush();
+    }
+    if (enabled === false) {
+      metadata.enabled = false;
+      logger.info(`Plugin "${plugin.name}" stays disabled (persisted)`);
+    }
     const devices = new Map<string, PluginDevice>();
     const pluginLogger = Logger.get(`Plugin:${plugin.name}`);
 
-    const context: PluginContext = {
-      bridgeId: this.bridgeId,
-      storage,
-      log: pluginLogger,
-      homeAssistant: this.homeAssistant,
-
-      registerDevice: async (device: PluginDevice) => {
+    const registerDeviceAt =
+      (epoch: number) => async (device: PluginDevice) => {
+        const live = this.instances.get(plugin.name);
+        if (!live || !live.metadata.enabled || live.epoch !== epoch) {
+          pluginLogger.warn(
+            `Dropped a device registration from a disabled or superseded start of "${plugin.name}"`,
+          );
+          return;
+        }
         const validationError = validatePluginDevice(device);
         if (validationError) {
           pluginLogger.warn(`Rejected device registration: ${validationError}`);
@@ -239,7 +286,15 @@ export class PluginManager {
         devices.set(device.id, device);
         await this.onDeviceRegistered?.(plugin.name, device);
         pluginLogger.debug(`Registered device: ${device.name} (${device.id})`);
-      },
+      };
+
+    const context: PluginContext = {
+      bridgeId: this.bridgeId,
+      storage,
+      log: pluginLogger,
+      homeAssistant: this.homeAssistant,
+
+      registerDevice: registerDeviceAt(0),
 
       unregisterDevice: async (deviceId: string) => {
         if (!devices.has(deviceId)) {
@@ -247,7 +302,9 @@ export class PluginManager {
           return;
         }
         devices.delete(deviceId);
-        await this.onDeviceUnregistered?.(plugin.name, deviceId);
+        await this.onDeviceUnregistered?.(plugin.name, deviceId, {
+          keepIdentity: this.instances.get(plugin.name)?.suspending === true,
+        });
         pluginLogger.debug(`Unregistered device: ${deviceId}`);
       },
 
@@ -299,6 +356,13 @@ export class PluginManager {
       metadata,
       devices,
       started: false,
+      queue: Promise.resolve(),
+      epoch: 0,
+      contextAt: (epoch) => ({
+        ...context,
+        registerDevice: registerDeviceAt(epoch),
+      }),
+      suspending: false,
     });
     logger.info(
       `Registered plugin: ${plugin.name} v${plugin.version} (${metadata.source})`,
@@ -310,27 +374,49 @@ export class PluginManager {
    */
   async startAll(): Promise<void> {
     for (const [name, instance] of this.instances) {
-      if (!instance.metadata.enabled) continue;
-      if (this.runner.isDisabled(name)) {
-        logger.warn(
-          `Plugin "${name}" is disabled (circuit breaker), skipping start`,
-        );
-        instance.metadata.enabled = false;
-        continue;
-      }
-      logger.info(`Starting plugin: ${name}`);
-      await this.runner.run(name, "onStart", () =>
-        instance.plugin.onStart(instance.context),
+      await this.inTransition(instance, () => this.startPlugin(name, instance));
+    }
+  }
+
+  // One transition at a time per plugin: a disable during a slow start waits
+  // for the start to settle instead of interleaving with it.
+  private inTransition<T>(
+    instance: PluginInstance,
+    fn: () => Promise<T>,
+  ): Promise<T> {
+    const run = instance.queue.then(fn, fn);
+    instance.queue = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    return run;
+  }
+
+  private async startPlugin(
+    name: string,
+    instance: PluginInstance,
+  ): Promise<void> {
+    if (!instance.metadata.enabled) return;
+    if (this.runner.isDisabled(name)) {
+      logger.warn(
+        `Plugin "${name}" is disabled (circuit breaker), skipping start`,
       );
-      if (this.runner.isDisabled(name)) {
-        instance.metadata.enabled = false;
-      } else if (this.runner.getState(name).failures === 0) {
-        instance.started = true;
-      }
-      // onStart may merge persisted config, keep the listing in sync
-      if (instance.plugin.getCurrentConfig) {
-        instance.metadata.config = instance.plugin.getCurrentConfig();
-      }
+      instance.metadata.enabled = false;
+      return;
+    }
+    logger.info(`Starting plugin: ${name}`);
+    const epoch = ++instance.epoch;
+    await this.runner.run(name, "onStart", () =>
+      instance.plugin.onStart(instance.contextAt(epoch)),
+    );
+    if (this.runner.isDisabled(name)) {
+      instance.metadata.enabled = false;
+    } else if (this.runner.getState(name).failures === 0) {
+      instance.started = true;
+    }
+    // onStart may merge persisted config, keep the listing in sync
+    if (instance.plugin.getCurrentConfig) {
+      instance.metadata.config = instance.plugin.getCurrentConfig();
     }
   }
 
@@ -352,21 +438,30 @@ export class PluginManager {
   }
 
   /**
-   * Shut down all plugins via SafePluginRunner.
+   * Shut down all plugins. Runs outside the circuit breaker: cleanup must
+   * happen even for a plugin the breaker took down.
    */
   async shutdownAll(reason?: string): Promise<void> {
     for (const [name, instance] of this.instances) {
-      if (instance.started && instance.plugin.onShutdown) {
-        await this.runner.run(name, "onShutdown", () =>
-          instance.plugin.onShutdown!(reason),
-        );
-      }
-      const storage = instance.context.storage;
-      if (storage instanceof FilePluginStorage) {
-        storage.flush();
-      }
-      instance.started = false;
-      logger.info(`Plugin "${name}" shut down`);
+      await this.inTransition(instance, async () => {
+        instance.epoch++;
+        instance.suspending = true;
+        try {
+          if (instance.started && instance.plugin.onShutdown) {
+            await this.runner.runCleanup(name, "onShutdown", () =>
+              instance.plugin.onShutdown!(reason),
+            );
+          }
+        } finally {
+          instance.suspending = false;
+        }
+        const storage = instance.context.storage;
+        if (storage instanceof FilePluginStorage) {
+          storage.flush();
+        }
+        instance.started = false;
+        logger.info(`Plugin "${name}" shut down`);
+      });
     }
     this.instances.clear();
   }
@@ -406,24 +501,124 @@ export class PluginManager {
     }
   }
 
-  disablePlugin(pluginName: string): void {
+  /**
+   * Disable a plugin: stop it, unmount its devices, and persist the choice so
+   * a bridge restart does not bring it back (#439). The shutdown runs outside
+   * the circuit breaker, a broken plugin still has to release its resources.
+   * Returns the resulting metadata, or undefined for an unknown name.
+   */
+  async disablePlugin(pluginName: string): Promise<PluginMetadata | undefined> {
     const instance = this.instances.get(pluginName);
-    if (instance) {
+    if (!instance) return undefined;
+    return this.inTransition(instance, async () => {
       instance.metadata.enabled = false;
-    }
-    for (const [domain, owner] of this.domainMappingOwners) {
-      if (owner === pluginName) {
-        this.domainMappings.delete(domain);
-        this.domainMappingOwners.delete(domain);
+      instance.epoch++;
+      this.persistEnabled(pluginName, false);
+      instance.suspending = true;
+      try {
+        if (instance.started && instance.plugin.onShutdown) {
+          await this.runner.runCleanup(pluginName, "onShutdown", () =>
+            instance.plugin.onShutdown!("Plugin disabled"),
+          );
+        }
+        instance.started = false;
+        // Sweep whatever the shutdown left mounted.
+        for (const deviceId of [...instance.devices.keys()]) {
+          instance.devices.delete(deviceId);
+          await this.onDeviceUnregistered?.(pluginName, deviceId, {
+            keepIdentity: true,
+          });
+        }
+      } finally {
+        instance.suspending = false;
       }
-    }
+      for (const [domain, owner] of this.domainMappingOwners) {
+        if (owner === pluginName) {
+          this.domainMappings.delete(domain);
+          this.domainMappingOwners.delete(domain);
+        }
+      }
+      return instance.metadata;
+    });
   }
 
-  enablePlugin(pluginName: string): void {
-    this.runner.resetCircuitBreaker(pluginName);
+  /**
+   * Enable a plugin, persist the choice, and start it right away so its
+   * devices come back without a bridge restart. Returns the resulting
+   * metadata, or undefined for an unknown name.
+   */
+  async enablePlugin(pluginName: string): Promise<PluginMetadata | undefined> {
     const instance = this.instances.get(pluginName);
-    if (instance) {
+    if (!instance) return undefined;
+    return this.inTransition(instance, async () => {
+      this.runner.resetCircuitBreaker(pluginName);
       instance.metadata.enabled = true;
+      this.persistEnabled(pluginName, true);
+      if (instance.started) return instance.metadata;
+      // A save parked during the disable becomes the config this start
+      // reads, or the old config would mount first and the parked one
+      // remount everything right behind it. Cleared only once persisted, so
+      // a failed start cannot lose it.
+      const pending = instance.pendingConfig;
+      if (pending) {
+        try {
+          await instance.context.storage.set(PLUGIN_CONFIG_KEY, pending);
+          await instance.context.storage.flush?.();
+          instance.metadata.config = pending;
+          instance.pendingConfig = undefined;
+        } catch (e) {
+          logger.warn(
+            `Failed to persist the parked config for "${pluginName}", it stays parked:`,
+            e,
+          );
+        }
+      }
+      logger.info(`Starting plugin: ${pluginName}`);
+      const epoch = ++instance.epoch;
+      await this.runner.run(pluginName, "onStart", () =>
+        instance.plugin.onStart(instance.contextAt(epoch)),
+      );
+      if (this.runner.isDisabled(pluginName)) {
+        instance.metadata.enabled = false;
+        return instance.metadata;
+      }
+      if (this.runner.getState(pluginName).failures === 0) {
+        instance.started = true;
+      }
+      if (instance.plugin.getCurrentConfig) {
+        instance.metadata.config = instance.plugin.getCurrentConfig();
+      }
+      if (instance.started && instance.plugin.onConfigure) {
+        await this.runner.run(pluginName, "onConfigure", () =>
+          instance.plugin.onConfigure!(),
+        );
+      }
+      return instance.metadata;
+    });
+  }
+
+  private readEnabledState(): Record<string, boolean> {
+    try {
+      if (fs.existsSync(this.stateFile)) {
+        return JSON.parse(fs.readFileSync(this.stateFile, "utf-8"));
+      }
+    } catch (e) {
+      logger.warn(`Failed to read the plugin state file:`, e);
+    }
+    return {};
+  }
+
+  private persistEnabled(pluginName: string, enabled: boolean): void {
+    try {
+      const state = this.readEnabledState();
+      state[pluginName] = enabled;
+      fs.mkdirSync(path.dirname(this.stateFile), { recursive: true });
+      fs.writeFileSync(this.stateFile, JSON.stringify(state, null, 2));
+    } catch (e) {
+      logger.warn(
+        `Failed to persist enabled=${enabled} for "${pluginName}":`,
+        e,
+      );
     }
   }
 
@@ -443,26 +638,36 @@ export class PluginManager {
   ): Promise<boolean> {
     const instance = this.instances.get(pluginName);
     if (!instance) return false;
-    config = { ...config };
-    // The listing redacts secret fields to the placeholder; a save carrying
-    // it back means "keep what is stored", never store the placeholder itself.
-    const schema = instance.plugin.getConfigSchema?.();
-    if (schema) {
-      for (const [key, prop] of Object.entries(schema.properties)) {
-        if (prop.secret && config[key] === SECRET_UNCHANGED) {
-          const stored = instance.metadata.config[key];
-          if (stored == null) delete config[key];
-          else config[key] = stored;
+    return this.inTransition(instance, async () => {
+      config = { ...config };
+      // The listing redacts secret fields to the placeholder; a save carrying
+      // it back means "keep what is stored", never store the placeholder
+      // itself.
+      const schema = instance.plugin.getConfigSchema?.();
+      if (schema) {
+        for (const [key, prop] of Object.entries(schema.properties)) {
+          if (prop.secret && config[key] === SECRET_UNCHANGED) {
+            const stored = instance.metadata.config[key];
+            if (stored == null) delete config[key];
+            else config[key] = stored;
+          }
         }
       }
-    }
-    instance.metadata.config = config;
-    this.registry?.updateConfig(pluginName, config);
-    if (instance.plugin.onConfigChanged) {
-      await this.runner.run(pluginName, "onConfigChanged", () =>
-        instance.plugin.onConfigChanged!(config),
-      );
-    }
-    return true;
+      instance.metadata.config = config;
+      this.registry?.updateConfig(pluginName, config);
+      if (instance.plugin.onConfigChanged) {
+        if (!instance.metadata.enabled) {
+          instance.pendingConfig = config;
+          logger.info(
+            `Plugin "${pluginName}" is disabled, the config applies on enable`,
+          );
+        } else {
+          await this.runner.run(pluginName, "onConfigChanged", () =>
+            instance.plugin.onConfigChanged!(config),
+          );
+        }
+      }
+      return true;
+    });
   }
 }

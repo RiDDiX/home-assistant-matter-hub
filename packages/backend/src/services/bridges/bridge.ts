@@ -27,7 +27,10 @@ import {
   CAMERA_TCP_CONFIG,
   parseCameraList,
 } from "../../plugins/builtin/camera/camera-tcp-requirement.js";
-import type { PluginConfigSchema } from "../../plugins/types.js";
+import type {
+  PluginConfigSchema,
+  PluginMetadata,
+} from "../../plugins/types.js";
 import { ensureCommissioningConfig } from "../../utils/ensure-commissioning-config.js";
 import { isHeapUnderPressure, logMemoryUsage } from "../../utils/log-memory.js";
 import { diagnosticEventBus } from "../diagnostics/diagnostic-event-bus.js";
@@ -326,12 +329,12 @@ export class Bridge {
     return this.endpointManager.getPluginInfo();
   }
 
-  enablePlugin(pluginName: string): void {
-    this.endpointManager.enablePlugin(pluginName);
+  async enablePlugin(pluginName: string): Promise<PluginMetadata | undefined> {
+    return await this.endpointManager.enablePlugin(pluginName);
   }
 
-  disablePlugin(pluginName: string): void {
-    this.endpointManager.disablePlugin(pluginName);
+  async disablePlugin(pluginName: string): Promise<PluginMetadata | undefined> {
+    return await this.endpointManager.disablePlugin(pluginName);
   }
 
   resetPlugin(pluginName: string): void {

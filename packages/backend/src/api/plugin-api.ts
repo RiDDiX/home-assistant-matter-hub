@@ -142,23 +142,41 @@ export function pluginApi(
     return bridge;
   }
 
-  router.post("/:bridgeId/:pluginName/enable", (req, res) => {
+  router.post("/:bridgeId/:pluginName/enable", async (req, res) => {
     const bridge = pluginBridge(req.params.bridgeId, res);
     if (!bridge) return;
     const { pluginName } = req.params;
-    bridge.enablePlugin(pluginName);
-    res.json({ success: true, pluginName, enabled: true });
+    const metadata = await bridge.enablePlugin(pluginName);
+    if (!metadata) {
+      res.status(404).json({ error: "Plugin not found" });
+      return;
+    }
+    // The manager's resulting state, not the wish: a start the breaker
+    // re-disabled reports enabled false here.
+    res.json({
+      success: metadata.enabled === true,
+      pluginName,
+      enabled: metadata.enabled,
+    });
   });
 
   /**
    * POST /api/plugins/:bridgeId/:pluginName/disable
    */
-  router.post("/:bridgeId/:pluginName/disable", (req, res) => {
+  router.post("/:bridgeId/:pluginName/disable", async (req, res) => {
     const bridge = pluginBridge(req.params.bridgeId, res);
     if (!bridge) return;
     const { pluginName } = req.params;
-    bridge.disablePlugin(pluginName);
-    res.json({ success: true, pluginName, enabled: false });
+    const metadata = await bridge.disablePlugin(pluginName);
+    if (!metadata) {
+      res.status(404).json({ error: "Plugin not found" });
+      return;
+    }
+    res.json({
+      success: metadata.enabled === false,
+      pluginName,
+      enabled: metadata.enabled,
+    });
   });
 
   /**
