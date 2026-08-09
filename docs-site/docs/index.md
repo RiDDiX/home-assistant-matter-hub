@@ -64,9 +64,14 @@ Home, ...) are not placed in the same network segment. Please make sure to revie
 ## What's New
 
 <details>
-<summary><strong>📦 Stable (v2.0.53) - Current</strong></summary>
+<summary><strong>📦 Stable (v2.0.54) - Current</strong></summary>
 
-**New in v2.0.53:**
+**New in v2.0.54 (hotfix release):**
+- 🔌 Plugin disable now sticks across restarts, for the security and camera plugins alike
+- 👻 An unconfigured security plugin exposes no devices anymore; updating removes the ghost plugs
+- 🔁 Disabling a plugin removes its devices immediately, re-enabling keeps their identity
+
+**Previously in v2.0.53:**
 
 - 🛡️ **Security plugin (experimental)**: the bridge becomes a small alarm system with Home/Away/Night/Vacation switches you arm from any controller or by voice, entry/exit delays, trigger and alert lists; for setups without an alarm integration
 - 🤖 **Vacuum room switches**: opt-in per-room switches that controller routines can flip, an opt-in ascending room order for batch cleaning, and auto-resolved rooms survive state updates ([#355](https://github.com/RiDDiX/home-assistant-matter-hub/issues/355), [#368](https://github.com/RiDDiX/home-assistant-matter-hub/issues/368))
@@ -286,7 +291,7 @@ Home, ...) are not placed in the same network segment. Please make sure to revie
 <details>
 <summary><strong>🧪 Alpha (v2.1.0-alpha.x)</strong></summary>
 
-**Alpha is currently level with Stable (v2.0.53).** All alpha work up to the latest pre-release has been promoted into v2.0.53. New alpha work continues from the next pre-release tag onward and will appear here as development progresses. See the [Alpha Features Guide](./guides/alpha-features.md) for installation instructions.
+**Alpha is currently level with Stable (v2.0.54).** All alpha work up to the latest pre-release has been promoted into v2.0.54. New alpha work continues from the next pre-release tag onward and will appear here as development progresses. See the [Alpha Features Guide](./guides/alpha-features.md) for installation instructions.
 
 </details>
 

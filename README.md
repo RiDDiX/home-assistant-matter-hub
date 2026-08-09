@@ -37,7 +37,7 @@ of port forwarding etc.
 
 | Channel | Branch | Current Version | Description |
 |---------|--------|-----------------|-------------|
-| **Stable** | `main` | v2.0.53 | Production-ready, recommended for most users |
+| **Stable** | `main` | v2.0.54 | Production-ready, recommended for most users |
 | **Alpha** | `alpha` | v2.1.0-alpha.x | Currently level with Stable; next pre-release lands here first |
 | **Testing** | `testing` | v4.1.0-testing.x | ⚠️ **Highly unstable!** Experimental features, may break |
 
@@ -61,9 +61,14 @@ Re-assign the affected devices to their rooms after they reconnect. See the [doc
 ## 🎉 What's New
 
 <details>
-<summary><strong>📦 Stable Features (v2.0.53)</strong> - Click to expand</summary>
+<summary><strong>📦 Stable Features (v2.0.54)</strong> - Click to expand</summary>
 
-**New in v2.0.53:**
+**New in v2.0.54 (hotfix release):**
+- 🔌 Plugin disable now sticks across restarts, for the security and camera plugins alike
+- 👻 An unconfigured security plugin exposes no devices anymore; updating removes the ghost plugs
+- 🔁 Disabling a plugin removes its devices immediately, re-enabling keeps their identity
+
+**Previously in v2.0.53:**
 
 - 🛡️ **Security plugin (experimental)**: the bridge becomes a small alarm system with Home/Away/Night/Vacation switches you arm from any controller or by voice, entry/exit delays, trigger and alert lists; for setups without an alarm integration
 - 🤖 **Vacuum room switches**: opt-in per-room switches that controller routines can flip, an opt-in ascending room order for batch cleaning, and auto-resolved rooms survive state updates ([#355](https://github.com/RiDDiX/home-assistant-matter-hub/issues/355), [#368](https://github.com/RiDDiX/home-assistant-matter-hub/issues/368))
@@ -286,7 +291,7 @@ Re-assign the affected devices to their rooms after they reconnect. See the [doc
 <details>
 <summary><strong>🧪 Alpha Features (v2.1.0-alpha.x)</strong> - Click to expand</summary>
 
-**Alpha is currently level with Stable (v2.0.53).** All alpha work up to the latest pre-release has been promoted into v2.0.53. New alpha work continues from the next pre-release tag onward and will appear here as development progresses.
+**Alpha is currently level with Stable (v2.0.54).** All alpha work up to the latest pre-release has been promoted into v2.0.54. New alpha work continues from the next pre-release tag onward and will appear here as development progresses.
 
 </details>
 
