@@ -13,6 +13,7 @@ import {
   setRequestorInvokeForTests,
   unregisterAllRequestors,
   unregisterRequestor,
+  unregisterRequestorsByOwner,
 } from "./requestor-client.js";
 
 // Unit tests for the WebRtcTransportRequestor client. The matter.js exchange
@@ -165,6 +166,34 @@ describe("deferred answer delivery", () => {
     expect(cap.invocations).toHaveLength(1);
     expect(cap.invocations[0].request.fields.sdp).toBe("fresh-sdp");
     unregisterRequestor(73);
+  });
+
+  it("unregisterRequestorsByOwner drops only that owner's sessions (#439 review)", async () => {
+    const cap = capturing(true);
+    setRequestorInvokeForTests(cap.fn);
+    const mine = {};
+    const other = {};
+    registerRequestor(track(74), {
+      session: session(false),
+      requestorEndpoint: EndpointNumber(1),
+      env,
+      owner: mine,
+    });
+    registerRequestor(track(75), {
+      session: session(false),
+      requestorEndpoint: EndpointNumber(1),
+      env,
+      owner: other,
+    });
+    deliverAnswerDeferred(74, "sdp", async () => {});
+
+    unregisterRequestorsByOwner(mine);
+
+    await delay(60);
+    // 74's pending delivery was cancelled with its registration.
+    expect(cap.invocations).toHaveLength(0);
+    expect(await sendAnswer(74, "sdp")).toBe(false);
+    expect(await sendAnswer(75, "sdp")).toBe(true);
   });
 
   it("unregisterAllRequestors clears registrations and pending deliveries", async () => {

@@ -2,6 +2,12 @@ import { Logger } from "@matter/general";
 import { describe, expect, it, vi } from "vitest";
 import type { PluginContext, PluginStorage } from "../../types.js";
 import { CameraPlugin } from "./camera-plugin.js";
+import {
+  registerRequestor,
+  sendAnswer,
+  setRequestorInvokeForTests,
+  unregisterRequestor,
+} from "./requestor-client.js";
 
 function makeStorage(stored?: unknown): PluginStorage {
   return {
@@ -52,5 +58,28 @@ describe("CameraPlugin", () => {
     await plugin.onStart(ctx);
 
     expect(ctx.registerDevice).not.toHaveBeenCalled();
+  });
+
+  it("leaves another bridge's requestor sessions alone through start and shutdown (#439 review)", async () => {
+    setRequestorInvokeForTests(async () => true);
+    // Registered by a different bridge's camera plugin, must survive this one.
+    registerRequestor(97, {
+      session: { isClosed: false } as never,
+      requestorEndpoint: 1 as never,
+      env: {} as never,
+    });
+    try {
+      const ctx = createMockContext({
+        storage: makeStorage({ cameras: "camera.front" }),
+      });
+      const plugin = new CameraPlugin();
+      await plugin.onStart(ctx);
+      await plugin.onShutdown();
+
+      expect(await sendAnswer(97, "v=0")).toBe(true);
+    } finally {
+      unregisterRequestor(97);
+      setRequestorInvokeForTests(undefined);
+    }
   });
 });

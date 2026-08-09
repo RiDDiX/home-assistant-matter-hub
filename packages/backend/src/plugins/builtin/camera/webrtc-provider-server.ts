@@ -83,6 +83,8 @@ export class CameraWebRtcProviderServer extends WebRtcTransportProviderServer {
         session,
         requestorEndpoint,
         env: this.env,
+        // The bridge instance scopes this session to its camera plugin.
+        owner: this.state.bridge,
       });
     }
     let answerSdp: string;

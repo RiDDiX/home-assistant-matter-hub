@@ -3,6 +3,7 @@ import path from "node:path";
 import type { BridgeData } from "@home-assistant-matter-hub/common";
 import { Logger } from "@matter/general";
 import archiver from "archiver";
+import { pluginStateFilePath } from "../../plugins/plugin-storage.js";
 import type { AppSettingsStorage } from "../storage/app-settings-storage.js";
 import type { BridgeStorage } from "../storage/bridge-storage.js";
 import type { EntityMappingStorage } from "../storage/entity-mapping-storage.js";
@@ -110,6 +111,15 @@ export class BackupService {
         );
         if (fs.existsSync(bridgeStoragePath)) {
           archive.directory(bridgeStoragePath, `identity/${bridge.id}`);
+        }
+        // The manager's plugin state sits at the storage root, outside the
+        // identity directory (#439).
+        const pluginState = pluginStateFilePath(
+          this.props.storageLocation,
+          bridge.id,
+        );
+        if (fs.existsSync(pluginState)) {
+          archive.file(pluginState, { name: `plugin-state/${bridge.id}.json` });
         }
       }
 

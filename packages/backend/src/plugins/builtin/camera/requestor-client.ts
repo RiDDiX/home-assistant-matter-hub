@@ -25,6 +25,11 @@ export interface RequestorRegistration {
   requestorEndpoint: EndpointNumber;
   /** Node environment, source of the ExchangeManager. */
   env: Environment;
+  /**
+   * Owner token, e.g. the WebRtcBridge behind the session. The registry is
+   * process wide, so a plugin teardown unregisters only its own sessions.
+   */
+  owner?: unknown;
 }
 
 export type RequestorCommand = "answer" | "iceCandidates" | "end";
@@ -80,11 +85,22 @@ export function unregisterRequestor(sessionId: number): void {
   }
 }
 
-/** Drop every registration and pending delivery, for plugin teardown. */
+/** Drop every registration and pending delivery, for process-wide teardown. */
 export function unregisterAllRequestors(): void {
   for (const id of [...registry.keys()]) unregisterRequestor(id);
   for (const timer of pendingDeliveries.values()) clearTimeout(timer);
   pendingDeliveries.clear();
+}
+
+/**
+ * Drop the registrations and pending deliveries one owner holds. Sessions of
+ * other bridges' cameras stay live (#439 review).
+ */
+export function unregisterRequestorsByOwner(owner: unknown): void {
+  if (owner == null) return;
+  for (const [id, registration] of [...registry]) {
+    if (registration.owner === owner) unregisterRequestor(id);
+  }
 }
 
 /**

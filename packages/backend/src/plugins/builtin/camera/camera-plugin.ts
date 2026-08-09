@@ -10,7 +10,7 @@ import {
   defaultSensorParams,
 } from "./camera-endpoint.js";
 import { parseCameraList } from "./camera-tcp-requirement.js";
-import { unregisterAllRequestors } from "./requestor-client.js";
+import { unregisterRequestorsByOwner } from "./requestor-client.js";
 import { WebRtcBridge } from "./webrtc-bridge.js";
 
 interface CameraConfig {
@@ -178,9 +178,11 @@ export class CameraPlugin implements MatterHubPlugin {
       await this.context?.unregisterDevice(id).catch(() => {});
     }
     this.deviceIds = [];
-    await this.bridge?.close().catch(() => {});
+    const bridge = this.bridge;
     this.bridge = undefined;
-    // Cancel pending answer deliveries so no timer outlives the endpoints.
-    unregisterAllRequestors();
+    await bridge?.close().catch(() => {});
+    // Cancel this bridge's pending answer deliveries so no timer outlives
+    // the endpoints. Other bridges' cameras keep their sessions.
+    if (bridge) unregisterRequestorsByOwner(bridge);
   }
 }

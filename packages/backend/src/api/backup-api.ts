@@ -9,6 +9,7 @@ import type { Request } from "express";
 import express from "express";
 import multer from "multer";
 import unzipper from "unzipper";
+import { pluginStateFilePath } from "../plugins/plugin-storage.js";
 import type { BackupService } from "../services/backup/backup-service.js";
 import type { BridgeService } from "../services/bridges/bridge-service.js";
 import type { AppSettingsStorage } from "../services/storage/app-settings-storage.js";
@@ -93,6 +94,16 @@ export function backupApi(
         `Home Assistant Matter Hub Backup\nCreated: ${backupData.createdAt}\nBridges: ${bridges.length}\nIncludes Identity: ${includeIdentity}\nIncludes Icons: ${includesIcons}\n\nWARNING: ${includeIdentity ? "This backup contains sensitive Matter identity data (keypairs, fabric credentials). Keep it secure!" : "This backup does NOT include Matter identity data. Bridges will need to be re-commissioned after restore."}\n`,
         { name: "README.txt" },
       );
+
+      // The manager's per-bridge plugin state (enabled flags) lives at the
+      // storage root, outside the identity directory, so it travels
+      // explicitly (#439).
+      for (const bridge of bridges) {
+        const pluginState = pluginStateFilePath(storageLocation, bridge.id);
+        if (fs.existsSync(pluginState)) {
+          archive.file(pluginState, { name: `plugin-state/${bridge.id}.json` });
+        }
+      }
 
       if (includeIdentity) {
         for (const bridge of bridges) {
@@ -287,6 +298,8 @@ export function backupApi(
                 iconsRestored++;
               }
             }
+
+            await restorePluginState(zipDirectory, bridge.id, storageLocation);
           } catch (e) {
             errors.push({
               bridgeId: bridge.id,
@@ -488,6 +501,8 @@ export function backupApi(
               iconsRestored++;
             }
           }
+
+          await restorePluginState(zipDirectory, bridge.id, storageLocation);
         } catch (e) {
           errors.push({
             bridgeId: bridge.id,
@@ -626,6 +641,26 @@ async function restoreIdentityFiles(
     fs.writeFileSync(targetPath, content);
   }
 
+  return true;
+}
+
+// The disabled-plugins choice of a bridge, written back to the manager's
+// per-bridge state file (#439). The target path is sanitized by
+// pluginStateFilePath, the zip entry is matched exactly.
+async function restorePluginState(
+  zipDirectory: unzipper.CentralDirectory,
+  bridgeId: string,
+  storageLocation: string,
+): Promise<boolean> {
+  const entry = zipDirectory.files.find(
+    (f: { path: string; type: string }) =>
+      f.path === `plugin-state/${bridgeId}.json` && f.type === "File",
+  );
+  if (!entry) {
+    return false;
+  }
+  const content = await entry.buffer();
+  fs.writeFileSync(pluginStateFilePath(storageLocation, bridgeId), content);
   return true;
 }
 
