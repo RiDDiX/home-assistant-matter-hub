@@ -64,9 +64,25 @@ Home, ...) are not placed in the same network segment. Please make sure to revie
 ## What's New
 
 <details>
-<summary><strong>📦 Stable (v2.0.52) - Current</strong></summary>
+<summary><strong>📦 Stable (v2.0.53) - Current</strong></summary>
 
-**New in v2.0.52 (hotfix release):**
+**New in v2.0.53:**
+
+- 🛡️ **Security plugin (experimental)**: the bridge becomes a small alarm system with Home/Away/Night/Vacation switches you arm from any controller or by voice, entry/exit delays, trigger and alert lists; for setups without an alarm integration
+- 🤖 **Vacuum room switches**: opt-in per-room switches that controller routines can flip, an opt-in ascending room order for batch cleaning, and auto-resolved rooms survive state updates ([#355](https://github.com/RiDDiX/home-assistant-matter-hub/issues/355), [#368](https://github.com/RiDDiX/home-assistant-matter-hub/issues/368))
+- 🔌 **Plugin settings dialog**: configure plugins right on the Plugins page; config survives restarts, stored secret fields are redacted from the plugin listing, and the page explains server mode instead of failing ([#432](https://github.com/RiDDiX/home-assistant-matter-hub/issues/432))
+- 🔔 **Doorbell and electrical utility meter overrides**: opt-in Matter 1.4 device types for `event` entities and consumption sensors; SmartThings renders them, defaults stay unchanged
+- 🚿 **Water heater management**: opt-in Matter 1.4 Water Heater with Boost/CancelBoost on top of the heating thermostat, for energy-management controllers ([#437](https://github.com/RiDDiX/home-assistant-matter-hub/pull/437))
+- 🌀 **Fan modes follow the entity**: controllers are only offered the speeds and modes the HA fan actually accepts, no more phantom Medium or Auto ([#436](https://github.com/RiDDiX/home-assistant-matter-hub/pull/436))
+- 🌡️ **heat_cool thermostats no longer crash-loop the add-on**: the auto deadband is zeroed, single-mode setpoints ignore the parked range, and an endpoint that still fails is contained instead of exiting ([#435](https://github.com/RiDDiX/home-assistant-matter-hub/issues/435))
+- 🔒 **Lock stops re-adding itself**: a stale flag written by v2.0.7-v2.0.16 failed lock init on every start, so the lock re-paired as a new device each boot; it is cleared on load ([#433](https://github.com/RiDDiX/home-assistant-matter-hub/discussions/433))
+- 💡 **Google room-off no longer relights dimmable lights**: the level Google sends after "turn off" is stored for the next turn-on instead of being applied ([#434](https://github.com/RiDDiX/home-assistant-matter-hub/issues/434))
+- 🪟 **Cover stuck-moving paths closed**: the remaining cases that kept a cover reported as moving are fixed, and resolved cover flags are logged ([#429](https://github.com/RiDDiX/home-assistant-matter-hub/issues/429))
+- 🔌 **Plugin devices receive controller writes again**: a wiring gap dropped attribute writes on the way to plugin devices
+- 🧵 **matter.js 0.17.9**
+- 📊 **Fork comparison page**: the docs compare this fork with the archived t0bst4r upstream, feature by feature
+
+**Previously in v2.0.52 (hotfix release):**
 
 - 🔌 The plugins page no longer fails with a 500 when a server mode bridge exists ([#430](https://github.com/RiDDiX/home-assistant-matter-hub/issues/430))
 
@@ -270,7 +286,7 @@ Home, ...) are not placed in the same network segment. Please make sure to revie
 <details>
 <summary><strong>🧪 Alpha (v2.1.0-alpha.x)</strong></summary>
 
-**Alpha is currently level with Stable (v2.0.52).** All alpha work up to the latest pre-release has been promoted into v2.0.52. New alpha work continues from the next pre-release tag onward and will appear here as development progresses. See the [Alpha Features Guide](./guides/alpha-features.md) for installation instructions.
+**Alpha is currently level with Stable (v2.0.53).** All alpha work up to the latest pre-release has been promoted into v2.0.53. New alpha work continues from the next pre-release tag onward and will appear here as development progresses. See the [Alpha Features Guide](./guides/alpha-features.md) for installation instructions.
 
 </details>
 

@@ -44,8 +44,8 @@ Everything the upstream project supported still works here; the storage format i
 | Manual cleanup of orphaned identity and mapping records | Stable |
 | Plugin system with a settings UI per bridge | Stable |
 | UI translations: 15 locales, including pt-BR | Stable |
-| Doorbell device type | In alpha |
-| Electrical utility meter device type | In alpha |
+| Doorbell device type | Stable |
+| Electrical utility meter device type | Stable |
 
 New device types are opt-in overrides, never a changed default, so an upgrade does not re-compose devices that are already paired.
 

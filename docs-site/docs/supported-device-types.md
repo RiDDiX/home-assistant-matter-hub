@@ -110,7 +110,7 @@ Mapped to **DoorLock** with PIN code support where available.
 
 **Feature Flags:**
 - **PIN Credentials** - Configure PIN codes via Entity Mapping UI
-- **Lock without PIN** - Locking is always allowed, only unlock requires PIN (Alpha)
+- **Lock without PIN** - Locking is always allowed, only unlock requires PIN
 - **Unlatch (Unbolting)** - Automatically enabled when HA lock supports `OPEN` feature. Maps to `lock.open` action. Apple Home shows an "Unlatch" button.
 
 **Controller Notes:**
