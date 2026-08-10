@@ -52,6 +52,20 @@ const MAX_ENTITY_ID_LENGTH = 150;
 // transient HA restart does not erase its persisted number and drop groups.
 const ENDPOINT_REMOVAL_GRACE_MS = 60_000;
 
+// Plugin devices mount as bare Endpoints without any entity fields, keep them
+// out of the entity flows (#445). Composed endpoints only duck-type
+// EntityEndpoint, so instanceof would wrongly drop them.
+function isEntityPart(p: Endpoint): p is EntityEndpoint {
+  return typeof (p as Partial<EntityEndpoint>).updateStates === "function";
+}
+
+// Reconcile and isolation key on entity IDENTITY, not update capability: a
+// future plugin endpoint defining updateStates must still stay out of the
+// removal and isolation flows (it has no entity_id to reconcile against).
+function hasEntityIdentity(p: Endpoint): p is EntityEndpoint {
+  return typeof (p as Partial<EntityEndpoint>).entityId === "string";
+}
+
 // matter.js Observable is dynamically typed per endpoint.
 // biome-ignore lint/suspicious/noExplicitAny: matter.js Observable has no static type
 type PluginObservable = any;
@@ -425,7 +439,7 @@ export class BridgeEndpointManager extends Service {
    * Called by EntityIsolationService when a runtime error is detected.
    */
   async isolateEntity(entityName: string): Promise<void> {
-    const endpoints = this.root.parts.map((p) => p as EntityEndpoint);
+    const endpoints = [...this.root.parts].filter(hasEntityIdentity);
     // The room switches share the vacuum's entity_id, so an entity_id match
     // must land on the vacuum. A switch is only isolated via its own part id.
     const endpoint =
@@ -565,8 +579,8 @@ export class BridgeEndpointManager extends Service {
     // Area switches (#355) share the vacuum's entity_id but ride their own
     // reconcile pass keyed off the surviving vacuum endpoint, so they must never
     // enter the entity reconcile below (it would collide on entity_id).
-    const endpoints = this.root.parts
-      .map((p) => p as EntityEndpoint)
+    const endpoints = [...this.root.parts]
+      .filter(hasEntityIdentity)
       .filter((p) => !(p instanceof VacuumAreaSwitchEndpoint));
     this.entityIds = this.registry.entityIds;
 
@@ -1063,10 +1077,10 @@ export class BridgeEndpointManager extends Service {
       this.pendingStates = undefined;
       this.pendingChanged = undefined;
       if (queued) {
-        void this.updateStates(
+        this.updateStates(
           queued,
           queuedChanged === undefined ? null : queuedChanged,
-        );
+        ).catch((e) => this.log.warn("Queued state update failed:", e));
       }
     });
     return this.updateInFlight;
@@ -1082,7 +1096,7 @@ export class BridgeEndpointManager extends Service {
     // reads fresh values for mapped entities (battery, humidity, etc.)
     this.registry.mergeExternalStates(states);
 
-    const allEndpoints = this.root.parts.map((p) => p as EntityEndpoint);
+    const allEndpoints = [...this.root.parts].filter(isEntityPart);
     // One HA event arrives as the full state map. Hand it only to endpoints
     // whose own entity or a mapped sub-entity actually changed, so a single
     // entity update no longer fans out to every endpoint.
@@ -1092,7 +1106,7 @@ export class BridgeEndpointManager extends Service {
         : allEndpoints.filter(
             (e) =>
               changed.has(e.entityId) ||
-              e.mappedEntityIds.some((id) => changed.has(id)),
+              (e.mappedEntityIds ?? []).some((id) => changed.has(id)),
           );
     if (endpoints.length === 0) return;
     // Process state updates in parallel for faster response times
