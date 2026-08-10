@@ -114,6 +114,7 @@ interface AllBridgeFeatureFlags {
    * that stream slider updates. Per-entity override wins over this. 0 = unset.
    */
   readonly coverSliderDebounceMs: number;
+  readonly fanSliderDebounceMs: number;
   /**
    * Fast Session Recovery: when a controller drops all subscriptions, clean up
    * the dead session and re-announce after 5s instead of 60s (#386). Shortens

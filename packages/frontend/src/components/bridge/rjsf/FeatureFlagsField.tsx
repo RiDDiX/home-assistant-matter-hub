@@ -5,6 +5,7 @@ import CardContent from "@mui/material/CardContent";
 import Chip from "@mui/material/Chip";
 import Grid from "@mui/material/Grid";
 import Switch from "@mui/material/Switch";
+import TextField from "@mui/material/TextField";
 import Typography from "@mui/material/Typography";
 import type { FieldProps } from "@rjsf/utils";
 import type { JSONSchema7 } from "json-schema";
@@ -28,6 +29,22 @@ export function FeatureFlagsField(props: FieldProps) {
     [formData, onChange, fieldPathId],
   );
 
+  // Number flags must never write true/false, the schema rejects it (#443).
+  // An empty input removes the key so the backend default applies.
+  const handleNumberChange = useCallback(
+    (key: string, raw: string) => {
+      const next = { ...formData };
+      const parsed = Number(raw);
+      if (raw.trim() === "" || Number.isNaN(parsed)) {
+        delete next[key];
+      } else {
+        next[key] = parsed;
+      }
+      onChange(next, fieldPathId.path);
+    },
+    [formData, onChange, fieldPathId],
+  );
+
   return (
     <Box>
       <Typography variant="h6" sx={{ mb: 2 }}>
@@ -35,10 +52,64 @@ export function FeatureFlagsField(props: FieldProps) {
       </Typography>
       <Grid container spacing={2}>
         {Object.entries(properties).map(([key, flagSchema]) => {
-          const value = formData[key] ?? flagSchema.default ?? false;
+          const isNumber =
+            flagSchema.type === "number" || flagSchema.type === "integer";
           const isDeprecated =
             flagSchema.title?.toLowerCase().includes("deprecated") ?? false;
 
+          if (isNumber) {
+            const value = formData[key] ?? flagSchema.default ?? "";
+            return (
+              <Grid key={key} size={{ xs: 12, sm: 6, lg: 4 }}>
+                <Card
+                  variant="outlined"
+                  sx={{
+                    height: "100%",
+                    opacity: isDeprecated ? 0.6 : 1,
+                    "&:hover": {
+                      transform: "none",
+                      boxShadow: "none",
+                    },
+                  }}
+                >
+                  <CardContent
+                    sx={{
+                      display: "flex",
+                      flexDirection: "column",
+                      height: "100%",
+                      p: 2,
+                      "&:last-child": { pb: 2 },
+                    }}
+                  >
+                    <TextField
+                      type="number"
+                      size="small"
+                      fullWidth
+                      label={flagSchema.title ?? key}
+                      value={value}
+                      disabled={disabled || readonly}
+                      onChange={(e) => handleNumberChange(key, e.target.value)}
+                      slotProps={{
+                        htmlInput: {
+                          min: flagSchema.minimum,
+                          max: flagSchema.maximum,
+                        },
+                      }}
+                    />
+                    <Typography
+                      variant="caption"
+                      color="text.secondary"
+                      sx={{ mt: 1, lineHeight: 1.4, flex: 1 }}
+                    >
+                      {flagSchema.description}
+                    </Typography>
+                  </CardContent>
+                </Card>
+              </Grid>
+            );
+          }
+
+          const value = formData[key] ?? flagSchema.default ?? false;
           return (
             <Grid key={key} size={{ xs: 12, sm: 6, lg: 4 }}>
               <Card

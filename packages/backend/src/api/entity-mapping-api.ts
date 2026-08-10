@@ -81,6 +81,7 @@ export function entityMappingApi(
       selectSwitchOnOption: body.selectSwitchOnOption,
       selectSwitchOffOption: body.selectSwitchOffOption,
       coverSliderDebounceMs: body.coverSliderDebounceMs,
+      fanSliderDebounceMs: body.fanSliderDebounceMs,
       updateThrottleMs: body.updateThrottleMs,
       disableClimateOnOff: body.disableClimateOnOff,
       disableClimateFanControl: body.disableClimateFanControl,

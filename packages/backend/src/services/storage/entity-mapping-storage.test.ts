@@ -96,6 +96,43 @@ describe("EntityMappingStorage orphan tombstone", () => {
     expect(loaded?.vacuumRoomSwitches).toBe(true);
   });
 
+  // #443: the new per-entity fan debounce field must survive the storage
+  // normalizer and a flushed reload like every other mapping field.
+  it("persists fanSliderDebounceMs and round-trips it through a reload", async () => {
+    const storage = new EntityMappingStorage(appStorage);
+    await storage.construction;
+    await storage.setMapping({
+      bridgeId: "b",
+      entityId: "fan.f",
+      fanSliderDebounceMs: 1200,
+    });
+    expect(storage.getMapping("b", "fan.f")?.fanSliderDebounceMs).toBe(1200);
+
+    await storage.flush();
+    const reloaded = new EntityMappingStorage(appStorage);
+    await reloaded.construction;
+    expect(reloaded.getMapping("b", "fan.f")?.fanSliderDebounceMs).toBe(1200);
+  });
+
+  it("caps fanSliderDebounceMs and drops non-positive values", async () => {
+    const storage = new EntityMappingStorage(appStorage);
+    await storage.construction;
+    await storage.setMapping({
+      bridgeId: "b",
+      entityId: "fan.f",
+      fanSliderDebounceMs: 9999,
+    });
+    expect(storage.getMapping("b", "fan.f")?.fanSliderDebounceMs).toBe(5000);
+
+    // A lone invalid value leaves nothing worth storing.
+    await storage.setMapping({
+      bridgeId: "b",
+      entityId: "fan.f",
+      fanSliderDebounceMs: -5,
+    });
+    expect(storage.getMapping("b", "fan.f")).toBeUndefined();
+  });
+
   it("loads an old mapping that predates the missingSince field", async () => {
     const ctx = appStorage.createContext("entity-mappings");
     await ctx.set("data", {

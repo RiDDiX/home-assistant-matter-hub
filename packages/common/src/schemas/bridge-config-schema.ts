@@ -315,6 +315,23 @@ const featureFlagSchema: JSONSchema7 = {
       default: 0,
     },
 
+    fanSliderDebounceMs: {
+      title: "Fan Slider Debounce (ms)",
+      description:
+        "Wait this long after the last inbound fan-speed write before sending it " +
+        "to Home Assistant. Controllers stream percentSetting while the user is " +
+        "still dragging - one Google Home drag was measured emitting nine writes " +
+        "in eight seconds - and on IR or UART bridged air conditioners every write " +
+        "is a device frame that makes the unit beep. 0 (the default) sends every " +
+        "write immediately, matching previous behaviour. Try 1000-2000 ms for " +
+        "bridged ACs. A per-entity override on a single fan or climate wins over " +
+        "this flag.",
+      type: "number",
+      minimum: 0,
+      maximum: 10000,
+      default: 0,
+    },
+
     fastSessionRecovery: {
       title: "Fast Session Recovery (Google offline workaround)",
       description:

@@ -179,6 +179,7 @@ export function EntityMappingDialog({
   const [selectSwitchOnOption, setSelectSwitchOnOption] = useState("");
   const [selectSwitchOffOption, setSelectSwitchOffOption] = useState("");
   const [coverSliderDebounceMs, setCoverSliderDebounceMs] = useState("");
+  const [fanSliderDebounceMs, setFanSliderDebounceMs] = useState("");
   const [updateThrottleMs, setUpdateThrottleMs] = useState("");
   const [disableClimateOnOff, setDisableClimateOnOff] = useState(false);
   const [disableClimateFanControl, setDisableClimateFanControl] =
@@ -296,6 +297,11 @@ export function EntityMappingDialog({
       setCoverSliderDebounceMs(
         currentMapping?.coverSliderDebounceMs != null
           ? String(currentMapping.coverSliderDebounceMs)
+          : "",
+      );
+      setFanSliderDebounceMs(
+        currentMapping?.fanSliderDebounceMs != null
+          ? String(currentMapping.fanSliderDebounceMs)
           : "",
       );
       setUpdateThrottleMs(
@@ -455,6 +461,7 @@ export function EntityMappingDialog({
         ? selectSwitchOffOption.trim() || undefined
         : undefined,
       coverSliderDebounceMs: parseDebounceMs(coverSliderDebounceMs),
+      fanSliderDebounceMs: parseDebounceMs(fanSliderDebounceMs),
       updateThrottleMs: parseThrottleMs(updateThrottleMs),
       disableClimateOnOff: disableClimateOnOff || undefined,
       disableClimateFanControl: disableClimateFanControl || undefined,
@@ -521,6 +528,7 @@ export function EntityMappingDialog({
     selectSwitchOnOption,
     selectSwitchOffOption,
     coverSliderDebounceMs,
+    fanSliderDebounceMs,
     updateThrottleMs,
     disableClimateOnOff,
     disableClimateFanControl,
@@ -801,6 +809,19 @@ export function EntityMappingDialog({
               />
             }
             label="Restore the last fan speed when turned on (Apple Home's power button injects 100%). Only a 100% or High command while off is treated as power-on; lower speeds set while off are kept, so you cannot start an off fan at full speed."
+            sx={{ mt: 1, display: "block" }}
+          />
+        )}
+
+        {(currentDomain === "fan" || currentDomain === "climate") && (
+          <TextField
+            label="Fan slider debounce (ms)"
+            type="number"
+            size="small"
+            value={fanSliderDebounceMs}
+            onChange={(e) => setFanSliderDebounceMs(e.target.value)}
+            helperText="Wait this long after the last inbound fan-speed write before sending it to Home Assistant. Controllers stream writes while a slider is dragged; on IR or UART bridged ACs every write makes the unit beep. 0 / empty uses the bridge setting (default off). Try 1000-2000. Max 5000."
+            slotProps={{ htmlInput: { min: 0, max: 5000, step: 50 } }}
             sx={{ mt: 1, display: "block" }}
           />
         )}

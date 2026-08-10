@@ -367,6 +367,13 @@ export interface EntityMappingConfig {
    * coverSliderDebounceMs flag. 0 / unset = fall back to bridge / default.
    */
   readonly coverSliderDebounceMs?: number;
+
+  /**
+   * Debounce window in ms for inbound fan speed writes on this entity. Wins over
+   * the bridge fanSliderDebounceMs flag. 0 / unset = no debounce (send every
+   * write immediately, the historic behaviour).
+   */
+  readonly fanSliderDebounceMs?: number;
   /**
    * Optional: throttle Matter updates for this entity to at most one per N ms.
    * Use for chatty sensors (power, energy) that change constantly and otherwise
@@ -511,6 +518,7 @@ export interface EntityMappingRequest {
   readonly selectSwitchOnOption?: string;
   readonly selectSwitchOffOption?: string;
   readonly coverSliderDebounceMs?: number;
+  readonly fanSliderDebounceMs?: number;
   readonly updateThrottleMs?: number;
   readonly disableClimateOnOff?: boolean;
   readonly disableClimateFanControl?: boolean;

@@ -214,6 +214,7 @@ export class EntityMappingStorage extends Service {
       selectSwitchOnOption: request.selectSwitchOnOption || undefined,
       selectSwitchOffOption: request.selectSwitchOffOption || undefined,
       coverSliderDebounceMs: sanitizeDebounceMs(request.coverSliderDebounceMs),
+      fanSliderDebounceMs: sanitizeDebounceMs(request.fanSliderDebounceMs),
       updateThrottleMs: sanitizeThrottleMs(request.updateThrottleMs),
       disableClimateOnOff: request.disableClimateOnOff || undefined,
       disableClimateFanControl: request.disableClimateFanControl || undefined,
@@ -279,6 +280,7 @@ export class EntityMappingStorage extends Service {
       !config.selectSwitchOnOption &&
       !config.selectSwitchOffOption &&
       !config.coverSliderDebounceMs &&
+      !config.fanSliderDebounceMs &&
       !config.updateThrottleMs &&
       !config.disableClimateOnOff &&
       !config.disableClimateFanControl &&

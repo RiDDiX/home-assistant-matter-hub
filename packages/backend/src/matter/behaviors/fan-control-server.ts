@@ -6,6 +6,11 @@ import {
   OnOffBehavior,
 } from "@matter/main/behaviors";
 import { FanControl } from "@matter/main/clusters";
+import { BridgeDataProvider } from "../../services/bridges/bridge-data-provider.js";
+import {
+  type HomeAssistantAction,
+  HomeAssistantActions,
+} from "../../services/home-assistant/home-assistant-actions.js";
 import { applyPatchState } from "../../utils/apply-patch-state.js";
 import {
   FanMode,
@@ -34,6 +39,51 @@ export interface FanControlRockSetting {
   rockLeftRight?: boolean;
   rockUpDown?: boolean;
   rockRound?: boolean;
+}
+
+// Inbound speed-write debounce (#443).
+//
+// Controllers stream percentSetting while the user is still dragging: a single
+// Google Home fan-slider drag was measured emitting nine writes in eight
+// seconds. Every write becomes a Home Assistant service call, and on IR/UART
+// bridged air conditioners every call is a device frame the unit beeps at.
+//
+// Covers already solve this (window-covering-server.ts, coverSliderDebounceMs).
+// This is the fan-domain equivalent, deliberately simpler: one window, and off
+// by default so behaviour is unchanged unless a user opts in.
+//
+// Keyed by the persistent endpoint, not held on the behavior: matter.js runs
+// each command on a throwaway instance, so an instance field would never see
+// the previous write's timer. The pending entry holds plain values only, the
+// agent context expires when the command handler returns (#411).
+interface FanPendingAction {
+  action: HomeAssistantAction;
+  entityId: string;
+  actions: HomeAssistantActions;
+}
+
+interface FanDebounceState {
+  timer: ReturnType<typeof setTimeout> | null;
+  pending: FanPendingAction | null;
+}
+
+const fanDebounce = new WeakMap<object, FanDebounceState>();
+
+function getFanDebounce(endpoint: object): FanDebounceState {
+  let st = fanDebounce.get(endpoint);
+  if (!st) {
+    st = { timer: null, pending: null };
+    fanDebounce.set(endpoint, st);
+  }
+  return st;
+}
+
+function clearFanDebounce(st: FanDebounceState) {
+  if (st.timer) {
+    clearTimeout(st.timer);
+    st.timer = null;
+  }
+  st.pending = null;
 }
 
 // Auto is deliberately NOT part of the shared base. Matter forbids the
@@ -71,6 +121,17 @@ export interface FanControlServerConfig {
   getWindSupport?: ValueGetter<{ naturalWind: boolean; sleepWind: boolean }>;
 
   turnOff: ValueSetter<void>;
+  /**
+   * Whether speed zero should also drive the OnOff cluster off.
+   *
+   * True for a standalone fan: no speed IS off. FALSE for an air conditioner,
+   * whose fan cannot stop independently of the compressor - there, speed zero
+   * means "slowest", and flipping OnOff would tell the controller the whole
+   * unit had powered down while it kept running, so the tile flaps off and
+   * back on. Power belongs to the OnOff cluster's own commands. Defaults to
+   * true.
+   */
+  syncOnOffWithSpeed?: boolean;
   turnOn: ValueSetter<number>;
   setAutoMode: ValueSetter<void>;
   setAirflowDirection: ValueSetter<AirflowDirection>;
@@ -106,6 +167,17 @@ export class FanControlServerBase extends FeaturedBase {
       speed: this.lastNonZeroSpeed,
       auto: this.lastIsAutoMode,
     };
+  }
+
+  override async [Symbol.asyncDispose]() {
+    // this.endpoint is valid on the dispose instance, so this clears the real
+    // timer held in the registry.
+    const st = fanDebounce.get(this.endpoint);
+    if (st) {
+      clearFanDebounce(st);
+      fanDebounce.delete(this.endpoint);
+    }
+    await super[Symbol.asyncDispose]();
   }
 
   override async initialize() {
@@ -342,7 +414,7 @@ export class FanControlServerBase extends FeaturedBase {
     if (!homeAssistant.isAvailable) {
       return;
     }
-    this.syncOnOff(percentSetting !== 0);
+    this.syncOnOffFromSpeed(percentSetting !== 0);
     if (percentSetting === 0) {
       homeAssistant.callAction(this.state.config.turnOff(void 0, this.agent));
     } else {
@@ -404,7 +476,7 @@ export class FanControlServerBase extends FeaturedBase {
       }
       const targetFanMode = FanMode.create(fanMode, this.state.fanModeSequence);
       if (targetFanMode.mode === FanControl.FanMode.Auto) {
-        this.syncOnOff(true);
+        this.syncOnOffFromSpeed(true);
         homeAssistant.callAction(
           this.state.config.setAutoMode(void 0, this.agent),
         );
@@ -428,6 +500,65 @@ export class FanControlServerBase extends FeaturedBase {
     this.agent.asLocalActor(() => {
       this.applyPercentageAction(percentage);
     });
+  }
+
+  // Per-entity override wins over the per-bridge flag; both must be > 0 to
+  // count. Mirrors WindowCoveringServerBase.resolveDebounceOverride.
+  private resolveFanDebounceMs(
+    homeAssistant: HomeAssistantEntityBehavior,
+  ): number | null {
+    const fromEntity = homeAssistant.state.mapping?.fanSliderDebounceMs;
+    if (typeof fromEntity === "number" && fromEntity > 0) {
+      return fromEntity;
+    }
+    const fromBridge =
+      this.env.get(BridgeDataProvider).featureFlags?.fanSliderDebounceMs;
+    if (typeof fromBridge === "number" && fromBridge > 0) {
+      return fromBridge;
+    }
+    return null;
+  }
+
+  // Send a speed-derived action, or park it in the debounce window so only the
+  // last write of a burst reaches HA. Cluster state was already updated per
+  // write, so the controller sees immediate feedback either way. With no
+  // window configured this is a plain callAction, the historic path.
+  private dispatchSpeedAction(
+    homeAssistant: HomeAssistantEntityBehavior,
+    action: HomeAssistantAction,
+  ) {
+    const debounceMs = this.resolveFanDebounceMs(homeAssistant);
+    if (debounceMs == null) {
+      homeAssistant.callAction(action);
+      return;
+    }
+    // Capture plain values now, the deferred dispatch runs outside any
+    // transaction, the same way the cover debounce fires (#411).
+    const entityId = homeAssistant.entityId;
+    const actions = this.env.get(HomeAssistantActions);
+    const st = getFanDebounce(this.endpoint);
+    st.pending = { action, entityId, actions };
+    // The registry lives on the persistent endpoint, so this clears the
+    // previous write's live timer and only the last pending action fires.
+    if (st.timer) {
+      clearTimeout(st.timer);
+    }
+    st.timer = setTimeout(() => {
+      st.timer = null;
+      const pending = st.pending;
+      st.pending = null;
+      if (pending) {
+        pending.actions.call(pending.action, pending.entityId);
+      }
+    }, debounceMs);
+  }
+
+  // Devices whose fan cannot stop (air conditioners) opt out of driving OnOff
+  // from speed: speed zero is a speed change, not a power change (#442).
+  private syncOnOffFromSpeed(on: boolean) {
+    if (this.state.config.syncOnOffWithSpeed !== false) {
+      this.syncOnOff(on);
+    }
   }
 
   private applyPercentageAction(percentage: number) {
@@ -485,9 +616,12 @@ export class FanControlServerBase extends FeaturedBase {
       this.agent,
     );
 
-    this.syncOnOff(percentage !== 0);
+    this.syncOnOffFromSpeed(percentage !== 0);
     if (percentage === 0) {
-      homeAssistant.callAction(config.turnOff(void 0, this.agent));
+      this.dispatchSpeedAction(
+        homeAssistant,
+        config.turnOff(void 0, this.agent),
+      );
     } else if (supportsPercentage) {
       const stepSize = config.getStepSize(
         homeAssistant.entity.state,
@@ -502,7 +636,10 @@ export class FanControlServerBase extends FeaturedBase {
         Math.min(100, roundedPercentage),
       );
 
-      homeAssistant.callAction(config.turnOn(clampedPercentage, this.agent));
+      this.dispatchSpeedAction(
+        homeAssistant,
+        config.turnOn(clampedPercentage, this.agent),
+      );
       this.rememberSpeed(clampedPercentage);
     } else {
       const presetModes =
@@ -517,7 +654,8 @@ export class FanControlServerBase extends FeaturedBase {
           speedPresets.length,
         );
         const targetPreset = speedPresets[presetIndex];
-        homeAssistant.callAction(
+        this.dispatchSpeedAction(
+          homeAssistant,
           config.setPresetMode(targetPreset, this.agent),
         );
         this.rememberSpeed(percentage);
