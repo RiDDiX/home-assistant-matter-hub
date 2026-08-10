@@ -60,6 +60,54 @@ describe("climate fan rocking", () => {
   });
 });
 
+// #442: percentSetting 0 sent the literal fan_mode "off", which almost no
+// climate entity declares, so the slider's bottom position failed silently.
+describe("climate fan speed zero (#442)", () => {
+  it("clamps to the slowest declared speed", () => {
+    const agent = agentFor({ fan_modes: ["High", "Mid", "Low"] });
+    expect(climateFanControlConfig.turnOff(undefined, agent)).toEqual({
+      action: "climate.set_fan_mode",
+      data: { fan_mode: "Low" },
+    });
+  });
+
+  it("prefers an entity-declared off-like mode in its own spelling", () => {
+    const agent = agentFor({ fan_modes: ["Off", "Low", "High"] });
+    expect(climateFanControlConfig.turnOff(undefined, agent)).toEqual({
+      action: "climate.set_fan_mode",
+      data: { fan_mode: "Off" },
+    });
+  });
+
+  it("never clamps to auto", () => {
+    const agent = agentFor({ fan_modes: ["Auto", "Low", "High"] });
+    expect(climateFanControlConfig.turnOff(undefined, agent)).toEqual({
+      action: "climate.set_fan_mode",
+      data: { fan_mode: "Low" },
+    });
+  });
+
+  it("ranks percent-style fan modes to find the slowest", () => {
+    const agent = agentFor({ fan_modes: ["100%", "60%", "20%"] });
+    expect(climateFanControlConfig.turnOff(undefined, agent)).toEqual({
+      action: "climate.set_fan_mode",
+      data: { fan_mode: "20%" },
+    });
+  });
+
+  it("keeps the historic literal for entities without fan modes", () => {
+    const agent = agentFor({});
+    expect(climateFanControlConfig.turnOff(undefined, agent)).toEqual({
+      action: "climate.set_fan_mode",
+      data: { fan_mode: "off" },
+    });
+  });
+
+  it("does not drive OnOff from speed", () => {
+    expect(climateFanControlConfig.syncOnOffWithSpeed).toBe(false);
+  });
+});
+
 // #436 review: the Auto feature gate matches fan modes case-insensitively,
 // but setAutoMode sent the literal "auto". HA fan mode names are
 // case-sensitive, so an entity declaring "AUTO" rejected the call.

@@ -60,6 +60,44 @@ describe("toAscendingSpeedPresets (#309)", () => {
   });
 });
 
+// #442: SmartIR style climates publish fan_modes as percentages ("20%".."100%").
+// The "%" suffix made every token unrankable, so a descending list stayed
+// inverted, the exact failure #309 fixed for keyword lists.
+describe("percentage-style speed lists (#442)", () => {
+  it("ranks a wholly percent list on its numeric scale", () => {
+    expect(toAscendingSpeedPresets(["100%", "60%", "20%"])).toEqual([
+      "20%",
+      "60%",
+      "100%",
+    ]);
+    expect(
+      toAscendingSpeedPresets(["20%", "40%", "60%", "80%", "100%"]),
+    ).toEqual(["20%", "40%", "60%", "80%", "100%"]);
+  });
+
+  it("leaves a mixed percent and keyword list untouched", () => {
+    expect(toAscendingSpeedPresets(["1%", "Silent", "low", "high"])).toEqual([
+      "1%",
+      "Silent",
+      "low",
+      "high",
+    ]);
+  });
+
+  it("leaves a mixed bare-number and keyword list untouched", () => {
+    expect(toAscendingSpeedPresets(["2", "Silent", "low"])).toEqual([
+      "2",
+      "Silent",
+      "low",
+    ]);
+    expect(toAscendingSpeedPresets(["level2", "quiet", "high"])).toEqual([
+      "level2",
+      "quiet",
+      "high",
+    ]);
+  });
+});
+
 describe("percentToPresetIndex (#369)", () => {
   it("maps exact band boundaries to the matching preset (4 presets)", () => {
     // Read reports quiet=25, low=50, medium=75, high=100, so the set must

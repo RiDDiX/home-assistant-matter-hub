@@ -3,6 +3,7 @@ import type {
   HomeAssistantEntityState,
 } from "@home-assistant-matter-hub/common";
 import { autoPresetName } from "../../../../../utils/converters/fan-mode.js";
+import { toAscendingSpeedPresets } from "../../../../../utils/converters/fan-mode-order.js";
 import {
   type FanControlRockSetting,
   FanControlServer,
@@ -53,6 +54,33 @@ export function rockSettingToSwingMode(setting: FanControlRockSetting): string {
   return "off";
 }
 
+/**
+ * The fan mode to send when a controller asks for speed zero.
+ *
+ * Preference order:
+ *   1. an off-like mode the entity actually declares, in its own spelling
+ *   2. the slowest non-auto speed it declares
+ *   3. "off" as a last resort, preserving the historic behaviour for entities
+ *      that declare no fan modes at all
+ *
+ * Exported for tests.
+ */
+export function climateFanOffMode(
+  fanModes: string[] | null | undefined,
+): string {
+  const modes = fanModes ?? [];
+  const declaredOff = modes.find((mode) =>
+    ["off", "none", "stop"].includes(mode.trim().toLowerCase()),
+  );
+  if (declaredOff) {
+    return declaredOff;
+  }
+  const speeds = toAscendingSpeedPresets(
+    modes.filter((mode) => mode.toLowerCase() !== "auto"),
+  );
+  return speeds[0] ?? "off";
+}
+
 // Exported for tests.
 export const climateFanControlConfig: FanControlServerConfig = {
   getPercentage: () => undefined,
@@ -69,6 +97,11 @@ export const climateFanControlConfig: FanControlServerConfig = {
     return attributes(entity).fan_mode ?? undefined;
   },
   supportsPercentage: () => false,
+  // An AC's fan cannot stop while the compressor runs, so speed zero must not
+  // report the unit as powered off. Without this the Matter OnOff cluster flips
+  // false at zero, the controller shows the AC off, HA reports it still on, and
+  // the tile flaps back. Power stays with the OnOff cluster's own commands.
+  syncOnOffWithSpeed: false,
   isOscillating: (entity) =>
     attributes(entity).swing_mode?.toLowerCase() !== "off" &&
     attributes(entity).swing_mode != null,
@@ -80,10 +113,23 @@ export const climateFanControlConfig: FanControlServerConfig = {
   getWindMode: () => undefined,
   supportsWind: () => false,
 
-  turnOff: () => ({
-    action: "climate.set_fan_mode",
-    data: { fan_mode: "off" },
-  }),
+  // A controller writing percentSetting 0 lands here. An air conditioner's fan
+  // cannot stop independently of the compressor, and HA climate entities almost
+  // never declare an "off" fan mode - sending the literal "off" just fails the
+  // service call, so the slider's bottom position silently does nothing.
+  // Clamp to the slowest real speed instead, unless the entity genuinely offers
+  // an off-like mode, in which case use its own spelling (HA fan mode names are
+  // case-sensitive). Power stays with the OnOff cluster, which is where a
+  // controller's actual "off" belongs.
+  turnOff: (_, agent) => {
+    const entityState = agent.get(HomeAssistantEntityBehavior).state.entity
+      .state;
+    const fanMode = climateFanOffMode(attributes(entityState).fan_modes);
+    return {
+      action: "climate.set_fan_mode",
+      data: { fan_mode: fanMode },
+    };
+  },
   turnOn: () => ({
     action: "climate.set_fan_mode",
     data: { fan_mode: "on" },
