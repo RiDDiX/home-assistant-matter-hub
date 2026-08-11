@@ -69,6 +69,8 @@ interface Harness {
     entity: ReturnType<typeof vi.fn>;
     initialState: ReturnType<typeof vi.fn>;
     mergeExternalStates: ReturnType<typeof vi.fn>;
+    // biome-ignore lint/suspicious/noExplicitAny: registry stub
+    fullEntities: Record<string, any>;
   };
   mappingStorage: { getMapping: ReturnType<typeof vi.fn> };
   // biome-ignore lint/suspicious/noExplicitAny: harness data provider stub
@@ -94,8 +96,11 @@ function makeHarness(
   };
   // Full registry keyed by entity_id, carrying entity_id so orphan tombstone
   // stamping can compute identity keys from it.
+  // HA always reports the configured entities, so the full registry is a
+  // superset of entityIds. Seed it so the #438 HA-down guard sees HA as up.
   // biome-ignore lint/suspicious/noExplicitAny: registry stub
   const fullEntities: Record<string, any> = {};
+  for (const id of entityIds) fullEntities[id] = { entity_id: id };
   for (const [id, value] of Object.entries(opts?.entities ?? {})) {
     fullEntities[id] = { entity_id: id, ...value };
   }
@@ -315,6 +320,20 @@ describe("ServerModeEndpointManager (#301)", () => {
     expect(h.serverNode.forgetDevice).toHaveBeenCalledWith(endpointB);
     expect(legacyCreate).not.toHaveBeenCalled();
     expect(h.manager.devices.map((d) => d.entityId)).toEqual(["light.a"]);
+  });
+
+  it("keeps its endpoint when HA reports no entities at all (#438)", async () => {
+    const h = makeHarness(["light.a"]);
+    await h.manager.refreshDevices();
+    const ep = h.serverNode.addDevice.mock.calls[0][0] as EntityEndpoint;
+
+    // HA down: filtered and full registry both empty.
+    h.registry.entityIds = [];
+    for (const k of Object.keys(h.registry.fullEntities))
+      delete h.registry.fullEntities[k];
+    await h.manager.refreshDevices();
+
+    expect(ep.delete).not.toHaveBeenCalled();
   });
 
   it("recreates an endpoint when its mapping fingerprint changes", async () => {

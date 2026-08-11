@@ -206,6 +206,15 @@ export class ServerModeEndpointManager extends Service {
     );
 
     try {
+      // No entities in the whole HA registry means HA is down, not that the
+      // device was removed. Deleting erases the Matter number and controllers
+      // re-add it as new, losing groups (#438). Keep it and wait for HA.
+      if (Object.keys(fullEntities).length === 0 && this.endpoints.size > 0) {
+        this.log.warn(
+          "HA registry has no entities, keeping server mode endpoints (HA down?)",
+        );
+        return;
+      }
       if (this.entityIds.length === 0) {
         this.log.warn("Server mode bridge has no entities configured");
         await this.removeEndpoints([...this.endpoints.keys()]);

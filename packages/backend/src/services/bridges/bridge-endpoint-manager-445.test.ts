@@ -201,7 +201,7 @@ async function buildManager(ha: FakeHa) {
   );
   managers.push(manager);
   await server.add(manager.root);
-  return { manager, registry };
+  return { manager, registry, ha };
 }
 
 // The exact shape onDeviceRegistered mounts: a bare Endpoint, no entityId,
@@ -346,5 +346,83 @@ describe("plugin endpoints in entity flows (#445)", () => {
         expect.any(Error),
       );
     });
+  });
+});
+
+// #438: while HA is restarting its whole registry reads empty, so endpoints
+// got deleted, their Matter numbers erased, and controllers re-added the lot,
+// wiping groups. A removal only counts when HA still reports other entities.
+describe("empty registry removal guard (#438)", () => {
+  // A non-vacuum entity keeps the HA registry non-empty while the vacuum is
+  // gone from the bridge filter, so a real removal can be told from HA down.
+  function addOtherEntity(ha: FakeHa) {
+    ha.entities["light.x"] = { entity_id: "light.x" };
+    ha.states["light.x"] = { ...ha.states[VACUUM], entity_id: "light.x" };
+  }
+
+  it("keeps the endpoint and its number when HA reports no entities", async () => {
+    const ha = makeHa();
+    const { manager } = await buildManager(ha);
+    await manager.refreshDevices();
+    const before = vacuumEndpoint(manager).number;
+
+    // HA down: the whole registry empties.
+    ha.entities = {};
+    ha.states = {};
+    await manager.refreshDevices();
+    const base = Date.now();
+    vi.spyOn(Date, "now").mockImplementation(() => base + 61_000);
+    await manager.refreshDevices();
+
+    expect(vacuumEndpoint(manager).number).toBe(before);
+  });
+
+  it("deletes an entity that is really gone while HA is up", async () => {
+    const ha = makeHa();
+    const { manager } = await buildManager(ha);
+    await manager.refreshDevices();
+    expect(() => vacuumEndpoint(manager)).not.toThrow();
+
+    // The vacuum is removed but HA still has other entities.
+    delete ha.entities[VACUUM];
+    delete ha.states[VACUUM];
+    addOtherEntity(ha);
+    await manager.refreshDevices();
+    const base = Date.now();
+    vi.spyOn(Date, "now").mockImplementation(() => base + 61_000);
+    await manager.refreshDevices();
+
+    const gone = [...manager.root.parts].every(
+      (p) => (p as EntityEndpoint).entityId !== VACUUM,
+    );
+    expect(gone).toBe(true);
+  });
+
+  it("restarts the grace after HA comes back instead of deleting at once", async () => {
+    const ha = makeHa();
+    const { manager } = await buildManager(ha);
+    await manager.refreshDevices();
+    const before = vacuumEndpoint(manager).number;
+
+    // Vacuum gone, HA still up: the grace starts.
+    const base = Date.now();
+    let clock = base;
+    vi.spyOn(Date, "now").mockImplementation(() => clock);
+    delete ha.entities[VACUUM];
+    delete ha.states[VACUUM];
+    addOtherEntity(ha);
+    await manager.refreshDevices();
+
+    // HA drops entirely mid-grace, then returns past the old grace.
+    ha.entities = {};
+    ha.states = {};
+    clock = base + 30_000;
+    await manager.refreshDevices();
+    addOtherEntity(ha);
+    clock = base + 90_000;
+    await manager.refreshDevices();
+
+    // The down window reset the grace, so it survives this refresh.
+    expect(vacuumEndpoint(manager).number).toBe(before);
   });
 });

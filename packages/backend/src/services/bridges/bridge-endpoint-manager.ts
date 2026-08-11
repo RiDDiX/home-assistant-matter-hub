@@ -695,6 +695,21 @@ export class BridgeEndpointManager extends Service {
       }
     }
 
+    // Zero entities in the whole HA registry means HA is down or still
+    // starting, not that every device was removed. Deleting now erases the
+    // Matter numbers and controllers re-add everything, losing groups (#438).
+    // Reset the grace so removals start fresh once HA is back.
+    if (
+      Object.keys(this.registry.fullEntities).length === 0 &&
+      endpoints.length > 0
+    ) {
+      this.pendingRemovals.clear();
+      this.log.warn(
+        `HA registry has no entities, skipping removal of ${endpoints.length} endpoints (HA down?)`,
+      );
+      return;
+    }
+
     const existingEndpoints: EntityEndpoint[] = [];
     const now = Date.now();
     for (const endpoint of endpoints) {
