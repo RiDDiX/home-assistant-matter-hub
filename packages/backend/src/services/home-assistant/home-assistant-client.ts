@@ -9,6 +9,7 @@ import {
 import type { BetterLogger, LoggerService } from "../../core/app/logger.js";
 import { Service } from "../../core/ioc/service.js";
 import { withRetry } from "../../utils/retry.js";
+import { sendHaMessage } from "../../utils/send-ha-message.js";
 
 // Treat DNS / routing / TLS hiccups the same as ERR_CANNOT_CONNECT: log and
 // retry instead of crashing startup. The HA WS library only emits
@@ -46,9 +47,25 @@ export class HomeAssistantClient extends Service {
 
   private _connection!: Connection;
   private readonly log: BetterLogger;
+  private _haRunning = false;
+  private _runningSince = 0;
+  private runningPollGeneration = 0;
 
   get connection(): Connection {
     return this._connection;
+  }
+
+  // False during HA's own startup and after any WS drop, true only once
+  // getConfig reports RUNNING again. Endpoint managers use this to not trust
+  // partial registry snapshots (#438).
+  get haRunning(): boolean {
+    return this._haRunning;
+  }
+
+  // When HA last reached RUNNING. The removal grace has to outlast HA's own
+  // start, so it counts from here, not from wall time (#438).
+  get runningSince(): number {
+    return this._runningSince;
   }
 
   get baseUrl(): string {
@@ -69,10 +86,62 @@ export class HomeAssistantClient extends Service {
 
   protected override async initialize() {
     this._connection = await this.createConnection(this.options);
+    // Listeners first: a drop between the RUNNING check and this line would
+    // otherwise never be seen. connected covers that same window.
+    this.watchRunningState(this._connection);
+    this.setRunning(this._connection.connected ?? true);
+  }
+
+  private setRunning(running: boolean) {
+    if (running && !this._haRunning) {
+      this._runningSince = Date.now();
+    }
+    this._haRunning = running;
   }
 
   override async dispose() {
+    this.runningPollGeneration++;
     this.connection?.close();
+  }
+
+  // The websocket library reconnects on its own after a drop and nothing
+  // re-checks HA's lifecycle state, so a core restart resumed registry reads
+  // mid-boot (#438). Force false on every drop and only flip back once a
+  // fresh getConfig poll sees RUNNING. The generation counter kills stale
+  // polls from an older reconnect.
+  private watchRunningState(connection: Connection) {
+    connection.addEventListener("disconnected", () => {
+      this.runningPollGeneration++;
+      this.setRunning(false);
+    });
+    connection.addEventListener("ready", () => {
+      const generation = ++this.runningPollGeneration;
+      this.setRunning(false);
+      this.confirmRunning(connection, generation).catch((e) => {
+        this.log.warnCtx("HA running state check failed", {
+          reason: e instanceof Error ? e.message : String(e),
+        });
+      });
+    });
+  }
+
+  private async confirmRunning(connection: Connection, generation: number) {
+    while (this.runningPollGeneration === generation) {
+      // Timed out, not raw getConfig: an HA that holds the socket open but
+      // never answers would park this loop and freeze every reconcile.
+      const config = await sendHaMessage<{ state?: string }>(
+        connection,
+        { type: "get_config" },
+        this.options.messageTimeoutMs,
+      ).catch(() => undefined);
+      if (this.runningPollGeneration !== generation) return;
+      if (config?.state === "RUNNING") {
+        this.setRunning(true);
+        this.log.infoCtx("Home Assistant is up and running again", {});
+        return;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 5000));
+    }
   }
 
   private async createConnection(

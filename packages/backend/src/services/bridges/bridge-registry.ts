@@ -75,6 +75,11 @@ export class BridgeRegistry {
     return this.registry.entities;
   }
 
+  // Successful-reload counter, see HomeAssistantRegistry (#438).
+  get snapshotGeneration(): number {
+    return this.registry.snapshotGeneration;
+  }
+
   // composed sub-entities may sit outside the bridge filter (#408), so these
   // fall back to the full HA registry. keep them separate from the strict
   // accessors above, every other caller must stay filtered.

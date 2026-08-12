@@ -48,9 +48,18 @@ import {
 
 const MAX_ENTITY_ID_LENGTH = 150;
 
-// Keep an endpoint this long after its entity leaves the registry, so a
-// transient HA restart does not erase its persisted number and drop groups.
-const ENDPOINT_REMOVAL_GRACE_MS = 60_000;
+// Keep an endpoint this long after its entity leaves the registry. Slow
+// integrations (zwave-js server updates take minutes) drop their entities
+// well past a short grace, and deleting erases the persisted number, so
+// controllers drop groups (#438). Cost: a really removed entity lingers 5min.
+export const ENDPOINT_REMOVAL_GRACE_MS = 300_000;
+
+// First absence stamp: removal also needs a fresh successful HA reload after
+// this, so the 65s recheck can never delete from the same stale snapshot.
+export interface PendingRemoval {
+  since: number;
+  generation: number;
+}
 
 // Plugin devices mount as bare Endpoints without any entity fields, keep them
 // out of the entity flows (#445). Composed endpoints only duck-type
@@ -78,10 +87,11 @@ export class BridgeEndpointManager extends Service {
   readonly root: Endpoint;
   private entityIds: string[] = [];
   private unsubscribe?: () => void;
+  private observingRequested = false;
   private _failedEntities: FailedEntity[] = [];
   private readonly mappingFingerprints = new Map<string, string>();
-  // entityId -> first time it went missing from the registry (grace window)
-  private readonly pendingRemovals = new Map<string, number>();
+  // entityId -> first absence stamp (grace window)
+  private readonly pendingRemovals = new Map<string, PendingRemoval>();
   private removalRecheckTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly pluginEndpoints = new Map<string, Endpoint>();
   private readonly pluginStateUpdating = new Set<string>();
@@ -363,11 +373,13 @@ export class BridgeEndpointManager extends Service {
   async stopPlugins(): Promise<void> {
     if (!this.pluginManager) return;
     await this.pluginManager.shutdownAll("Bridge stopping");
+    // close() keeps the numbers, so plugin devices survive every bridge stop
+    // and restart (#438). Permanent removal goes through onDeviceUnregistered.
     for (const [id, endpoint] of this.pluginEndpoints) {
       try {
-        await endpoint.delete();
+        await endpoint.close();
       } catch (e) {
-        this.log.warn(`Failed to delete plugin endpoint ${id}:`, e);
+        this.log.warn(`Failed to close plugin endpoint ${id}:`, e);
       }
     }
     this.pluginEndpoints.clear();
@@ -453,10 +465,14 @@ export class BridgeEndpointManager extends Service {
       this.log.warn(
         `Isolating entity ${endpoint.entityId} due to runtime error`,
       );
+      // close(), not delete(): the number stays pre-allocated, so when the
+      // next refresh recreates the endpoint it keeps its identity and
+      // controllers keep their groups. A transient matter.js error must not
+      // re-mint the device (#438).
       try {
-        await endpoint.delete();
+        await endpoint.close();
       } catch (e) {
-        this.log.error(`Failed to delete isolated endpoint:`, e);
+        this.log.error(`Failed to close isolated endpoint:`, e);
       }
       this.pendingRemovals.delete(endpoint.entityId);
       this.mappingFingerprints.delete(endpoint.entityId);
@@ -466,7 +482,7 @@ export class BridgeEndpointManager extends Service {
           if (!(sw instanceof VacuumAreaSwitchEndpoint)) continue;
           if (sw.vacuumEndpointId !== endpoint.id) continue;
           try {
-            await sw.delete();
+            await sw.close();
           } catch (e) {
             this.log.warn(`Failed to remove area switch ${sw.id}:`, e);
           }
@@ -486,9 +502,11 @@ export class BridgeEndpointManager extends Service {
     if (this.pendingRemovals.size === 0) return;
     this.removalRecheckTimer = setTimeout(() => {
       this.removalRecheckTimer = null;
-      this.refreshDevices().catch((e) =>
-        this.log.warn("Endpoint removal recheck failed:", e),
-      );
+      this.refreshDevices().catch((e) => {
+        this.log.warn("Endpoint removal recheck failed:", e);
+        // A failed refresh must not strand the held removals with no timer.
+        this.scheduleRemovalRecheck();
+      });
     }, ENDPOINT_REMOVAL_GRACE_MS + 5_000);
   }
 
@@ -539,7 +557,13 @@ export class BridgeEndpointManager extends Service {
   }
 
   async startObserving() {
-    this.stopObserving();
+    // Only the subscription resets here. stopObserving is the lifecycle stop
+    // and would take the removal timer with it (#438).
+    this.clearSubscription();
+    // Wanting to observe and holding a subscription differ: a bridge started
+    // while HA was down has no entities yet, and only this flag gets it
+    // subscribed once the first trusted refresh brings them in.
+    this.observingRequested = true;
 
     if (!this.entityIds.length) {
       return;
@@ -567,14 +591,24 @@ export class BridgeEndpointManager extends Service {
     return [...ids];
   }
 
-  stopObserving() {
+  private clearSubscription() {
     this.unsubscribe?.();
     this.unsubscribe = undefined;
   }
 
+  stopObserving() {
+    this.observingRequested = false;
+    this.clearSubscription();
+    // Bridges stop through this, never through dispose(), so the recheck
+    // timer has to die here or it deletes on a stopped bridge (#438).
+    if (this.removalRecheckTimer) {
+      clearTimeout(this.removalRecheckTimer);
+      this.removalRecheckTimer = null;
+    }
+  }
+
   async refreshDevices() {
     this.registry.refresh();
-    this._failedEntities = [];
 
     // Area switches (#355) share the vacuum's entity_id but ride their own
     // reconcile pass keyed off the surviving vacuum endpoint, so they must never
@@ -582,6 +616,23 @@ export class BridgeEndpointManager extends Service {
     const endpoints = [...this.root.parts]
       .filter(hasEntityIdentity)
       .filter((p) => !(p instanceof VacuumAreaSwitchEndpoint));
+
+    // HA restarting or an empty registry means the snapshot cannot be
+    // trusted, not that every device was removed. Deleting now erases the
+    // Matter numbers and controllers re-add everything, losing groups, and
+    // identity resolution or tombstone stamping from it would corrupt
+    // persisted records (#438). Keep the last good entity list and the
+    // failures the UI shows, reset the grace, and wait for HA.
+    const fullEntities = this.registry.fullEntities;
+    if (!this.client.haRunning || Object.keys(fullEntities).length === 0) {
+      this.pendingRemovals.clear();
+      this.log.warn(
+        `HA not running or registry empty, deferring reconcile of ${endpoints.length} endpoints`,
+      );
+      return;
+    }
+
+    this._failedEntities = [];
     this.entityIds = this.registry.entityIds;
 
     // Pre-calculate composed sub-entities so they get skipped
@@ -664,7 +715,6 @@ export class BridgeEndpointManager extends Service {
     // Reconcile orphan tombstones against the FULL HA registry (keyed by the
     // rename-stable identity key, so a rename, a filter change, or a scope
     // narrowing never reads as a removal). Stamp/clear only, never delete.
-    const fullEntities = this.registry.fullEntities;
     stampIdentityPresence(
       this.identityStorage,
       this.bridgeId,
@@ -693,21 +743,6 @@ export class BridgeEndpointManager extends Service {
       } catch (e) {
         this.log.warn(`Failed to remove colliding area switch ${part.id}:`, e);
       }
-    }
-
-    // Zero entities in the whole HA registry means HA is down or still
-    // starting, not that every device was removed. Deleting now erases the
-    // Matter numbers and controllers re-add everything, losing groups (#438).
-    // Reset the grace so removals start fresh once HA is back.
-    if (
-      Object.keys(this.registry.fullEntities).length === 0 &&
-      endpoints.length > 0
-    ) {
-      this.pendingRemovals.clear();
-      this.log.warn(
-        `HA registry has no entities, skipping removal of ${endpoints.length} endpoints (HA down?)`,
-      );
-      return;
     }
 
     const existingEndpoints: EntityEndpoint[] = [];
@@ -744,14 +779,21 @@ export class BridgeEndpointManager extends Service {
         // An entity can vanish from the registry briefly during an HA restart.
         // delete() erases the persisted endpoint number, so controllers (Alexa)
         // treat the recreated device as new and lose groups. Wait out a grace
-        // window before removing it for good.
-        const since = this.pendingRemovals.get(endpoint.entityId);
-        if (since == null) {
-          this.pendingRemovals.set(endpoint.entityId, now);
+        // window AND a fresh successful HA reload before removing it for good.
+        const entry = this.pendingRemovals.get(endpoint.entityId);
+        if (entry == null) {
+          this.pendingRemovals.set(endpoint.entityId, {
+            since: now,
+            generation: this.registry.snapshotGeneration,
+          });
           existingEndpoints.push(endpoint);
           continue;
         }
-        if (now - since < ENDPOINT_REMOVAL_GRACE_MS) {
+        if (
+          now - entry.since < ENDPOINT_REMOVAL_GRACE_MS ||
+          now - this.client.runningSince < ENDPOINT_REMOVAL_GRACE_MS ||
+          this.registry.snapshotGeneration <= entry.generation
+        ) {
           existingEndpoints.push(endpoint);
           continue;
         }
@@ -772,16 +814,17 @@ export class BridgeEndpointManager extends Service {
         this.registry.isComposedSubEntityUsed(endpoint.entityId)
       ) {
         // Entity was consumed by a composed device (e.g., temp/hum sensor
-        // absorbed into an air purifier). Delete the standalone endpoint so
-        // the composed device is the only representation (#218).
+        // absorbed into an air purifier). Drop the standalone endpoint so the
+        // composed device is the only representation (#218). close(), not
+        // delete(): turning the flag back off must return the same number.
         this.log.info(
-          `Deleting standalone endpoint ${endpoint.entityId}, consumed by composed device`,
+          `Removing standalone endpoint ${endpoint.entityId}, consumed by composed device`,
         );
         try {
-          await endpoint.delete();
+          await endpoint.close();
         } catch (e) {
           this.log.warn(
-            `Failed to delete composed sub-entity endpoint ${endpoint.entityId}:`,
+            `Failed to remove composed sub-entity endpoint ${endpoint.entityId}:`,
             e,
           );
         }
@@ -922,7 +965,7 @@ export class BridgeEndpointManager extends Service {
 
     await this.reconcileAreaSwitches();
 
-    if (this.unsubscribe) {
+    if (this.observingRequested) {
       this.startObserving();
     }
   }

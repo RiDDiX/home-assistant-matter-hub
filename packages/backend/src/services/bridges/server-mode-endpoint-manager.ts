@@ -25,6 +25,10 @@ import {
   stampMappingPresence,
 } from "../storage/orphan-cleanup.js";
 import type { BridgeDataProvider } from "./bridge-data-provider.js";
+import {
+  ENDPOINT_REMOVAL_GRACE_MS,
+  type PendingRemoval,
+} from "./bridge-endpoint-manager.js";
 import type { BridgeRegistry } from "./bridge-registry.js";
 import {
   IdentityResolver,
@@ -50,8 +54,14 @@ interface ManagedEndpoint {
 export class ServerModeEndpointManager extends Service {
   private entityIds: string[] = [];
   private unsubscribe?: () => void;
+  private observingRequested = false;
   private _failedEntities: FailedEntity[] = [];
   private readonly endpoints = new Map<string, ManagedEndpoint>();
+  // Same grace as the aggregator manager: server mode deleted on the FIRST
+  // refresh an entity was absent, so one partial HA snapshot re-minted the
+  // device (#438).
+  private readonly pendingRemovals = new Map<string, PendingRemoval>();
+  private removalRecheckTimer: ReturnType<typeof setTimeout> | null = null;
 
   get failedEntities(): FailedEntity[] {
     return this._failedEntities;
@@ -93,6 +103,11 @@ export class ServerModeEndpointManager extends Service {
 
   override async dispose(): Promise<void> {
     this.stopObserving();
+    if (this.removalRecheckTimer) {
+      clearTimeout(this.removalRecheckTimer);
+      this.removalRecheckTimer = null;
+    }
+    this.pendingRemovals.clear();
 
     // Close endpoints to free memory while preserving stored endpoint
     // numbers. Using delete() here would erase persisted endpoint numbers,
@@ -111,7 +126,13 @@ export class ServerModeEndpointManager extends Service {
   }
 
   async startObserving(): Promise<void> {
-    this.stopObserving();
+    // Only the subscription resets here. stopObserving is the lifecycle stop
+    // and would take the removal timer with it (#438).
+    this.clearSubscription();
+    // Wanting to observe and holding a subscription differ: a node started
+    // while HA was down has no entities yet, and only this flag gets it
+    // subscribed once the first trusted refresh brings them in.
+    this.observingRequested = true;
 
     if (!this.entityIds.length) {
       return;
@@ -135,9 +156,20 @@ export class ServerModeEndpointManager extends Service {
     return [...ids];
   }
 
-  stopObserving(): void {
+  private clearSubscription(): void {
     this.unsubscribe?.();
     this.unsubscribe = undefined;
+  }
+
+  stopObserving(): void {
+    this.observingRequested = false;
+    this.clearSubscription();
+    // Bridges stop through this, never through dispose(), so the recheck
+    // timer has to die here or it refreshes a stopped node.
+    if (this.removalRecheckTimer) {
+      clearTimeout(this.removalRecheckTimer);
+      this.removalRecheckTimer = null;
+    }
   }
 
   /** Primary first (the entity the first include matcher tests true for). */
@@ -166,6 +198,50 @@ export class ServerModeEndpointManager extends Service {
     }
   }
 
+  // Absence-driven removals wait out the grace window AND a fresh successful
+  // HA reload, so restarts and stale snapshots never erase numbers (#438).
+  // Returns the ids whose absence is confirmed, ready for removeEndpoints.
+  private removableAfterGrace(entityIds: string[]): string[] {
+    const now = Date.now();
+    const generation = this.registry.snapshotGeneration;
+    const ready: string[] = [];
+    for (const entityId of entityIds) {
+      const entry = this.pendingRemovals.get(entityId);
+      if (entry == null) {
+        this.pendingRemovals.set(entityId, { since: now, generation });
+        continue;
+      }
+      if (
+        now - entry.since < ENDPOINT_REMOVAL_GRACE_MS ||
+        now - this.client.runningSince < ENDPOINT_REMOVAL_GRACE_MS ||
+        generation <= entry.generation
+      ) {
+        continue;
+      }
+      ready.push(entityId);
+      this.pendingRemovals.delete(entityId);
+    }
+    return ready;
+  }
+
+  // refreshDevices only runs on registry-fingerprint changes, which may not
+  // recur, so drive held removals to completion ourselves after the grace.
+  private scheduleRemovalRecheck() {
+    if (this.removalRecheckTimer) {
+      clearTimeout(this.removalRecheckTimer);
+      this.removalRecheckTimer = null;
+    }
+    if (this.pendingRemovals.size === 0) return;
+    this.removalRecheckTimer = setTimeout(() => {
+      this.removalRecheckTimer = null;
+      this.refreshDevices().catch((e) => {
+        this.log.warn("Endpoint removal recheck failed:", e);
+        // A failed refresh must not strand the held removals with no timer.
+        this.scheduleRemovalRecheck();
+      });
+    }, ENDPOINT_REMOVAL_GRACE_MS + 5_000);
+  }
+
   // Like removeEndpoints but close() keeps the persisted number pre-allocated,
   // so a same-id recreate reuses it. Used on rename and same-id recreates (#404).
   private async closeEndpoint(entityId: string): Promise<void> {
@@ -174,7 +250,10 @@ export class ServerModeEndpointManager extends Service {
     try {
       await entry.endpoint.close();
     } catch (e) {
+      // Still attached, so keep tracking it: dropping it here would hide the
+      // endpoint id from the collision checks and the recreate would clash.
       this.log.warn(`Failed to close endpoint ${entityId}:`, e);
+      return;
     }
     this.serverNode.forgetDevice(entry.endpoint);
     this.endpoints.delete(entityId);
@@ -182,42 +261,49 @@ export class ServerModeEndpointManager extends Service {
 
   async refreshDevices(): Promise<void> {
     this.registry.refresh();
-    this._failedEntities = [];
 
-    this.entityIds = this.registry.entityIds;
-
-    // Reconcile orphan tombstones against the FULL HA registry before any early
-    // return below, so a node whose only entity was removed still tombstones its
-    // stored identity record. Keyed by the rename-stable identity key, so a
-    // rename or a filter change never reads as a removal. Stamp/clear only.
     const fullEntities = this.registry.fullEntities;
-    stampIdentityPresence(
-      this.identityStorage,
-      this.dataProvider.id,
-      buildPresentIdentityKeys(fullEntities),
-    );
-    // Same reconcile for stray custom mappings, keyed by entity_id: it catches a
-    // flag-off rename that left the mapping at the old id and keyless entities
-    // that have no identity record.
-    stampMappingPresence(
-      this.mappingStorage,
-      this.dataProvider.id,
-      buildPresentEntityIds(fullEntities),
-    );
 
     try {
-      // No entities in the whole HA registry means HA is down, not that the
-      // device was removed. Deleting erases the Matter number and controllers
-      // re-add it as new, losing groups (#438). Keep it and wait for HA.
-      if (Object.keys(fullEntities).length === 0 && this.endpoints.size > 0) {
+      // HA restarting or an empty registry means the snapshot cannot be
+      // trusted, not that the device was removed. Deleting erases the Matter
+      // number and controllers re-add it as new, losing groups, and stamping
+      // tombstones from it would mark live entities missing (#438). Keep the
+      // last good entity list and wait for HA.
+      if (!this.client.haRunning || Object.keys(fullEntities).length === 0) {
+        this.pendingRemovals.clear();
         this.log.warn(
-          "HA registry has no entities, keeping server mode endpoints (HA down?)",
+          "HA not running or registry empty, deferring server mode reconcile",
         );
         return;
       }
+
+      this._failedEntities = [];
+      this.entityIds = this.registry.entityIds;
+
+      // Reconcile orphan tombstones against the FULL HA registry before any
+      // early return below, so a node whose only entity was removed still
+      // tombstones its stored identity record. Keyed by the rename-stable
+      // identity key, so a rename or a filter change never reads as a removal.
+      stampIdentityPresence(
+        this.identityStorage,
+        this.dataProvider.id,
+        buildPresentIdentityKeys(fullEntities),
+      );
+      // Same reconcile for stray custom mappings, keyed by entity_id: it
+      // catches a flag-off rename that left the mapping at the old id and
+      // keyless entities that have no identity record.
+      stampMappingPresence(
+        this.mappingStorage,
+        this.dataProvider.id,
+        buildPresentEntityIds(fullEntities),
+      );
+
       if (this.entityIds.length === 0) {
         this.log.warn("Server mode bridge has no entities configured");
-        await this.removeEndpoints([...this.endpoints.keys()]);
+        await this.removeEndpoints(
+          this.removableAfterGrace([...this.endpoints.keys()]),
+        );
         // surface the empty node in the UI instead of running silently
         this._failedEntities.push({
           entityId:
@@ -277,8 +363,10 @@ export class ServerModeEndpointManager extends Service {
       // its endpoint id under a different entity, so close() (keep number)
       // instead of delete() (frees number) for those (#404).
       const keep = new Set(orderedIds);
+      for (const id of keep) {
+        this.pendingRemovals.delete(id);
+      }
       const removed = [...this.endpoints.keys()].filter((id) => !keep.has(id));
-      let structureChanged = removed.length > 0;
       const genuinelyRemoved: string[] = [];
       for (const oldId of removed) {
         const entry = this.endpoints.get(oldId);
@@ -287,11 +375,16 @@ export class ServerModeEndpointManager extends Service {
           : undefined;
         if (entry && claimant != null && claimant !== oldId) {
           await this.closeEndpoint(oldId);
+          // the absence resolved as a rename, drop any pending stamp
+          this.pendingRemovals.delete(oldId);
         } else {
           genuinelyRemoved.push(oldId);
         }
       }
-      await this.removeEndpoints(genuinelyRemoved);
+      const confirmedRemoved = this.removableAfterGrace(genuinelyRemoved);
+      let structureChanged =
+        removed.length > genuinelyRemoved.length || confirmedRemoved.length > 0;
+      await this.removeEndpoints(confirmedRemoved);
 
       for (const entityId of orderedIds) {
         const mapping = this.getEntityMapping(entityId);
@@ -301,7 +394,9 @@ export class ServerModeEndpointManager extends Service {
             `Entity in server mode bridge is disabled: ${entityId}`,
           );
           if (this.endpoints.has(entityId)) {
-            await this.removeEndpoints([entityId]);
+            // Disabling is reversible, so close() keeps the number, the way
+            // plugin disable does (#439, #438).
+            await this.closeEndpoint(entityId);
             structureChanged = true;
           }
           this._failedEntities.push({
@@ -424,8 +519,9 @@ export class ServerModeEndpointManager extends Service {
         }
       }
     } finally {
+      this.scheduleRemovalRecheck();
       // re-subscribe on every path so mapped-entity subscriptions stay fresh
-      if (this.unsubscribe) {
+      if (this.observingRequested) {
         this.startObserving();
       }
     }

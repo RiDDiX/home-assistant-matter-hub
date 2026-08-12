@@ -302,8 +302,12 @@ export class PluginManager {
           return;
         }
         devices.delete(deviceId);
+        // Always keep the number. Plugins unregister to rebuild after a
+        // config edit too, and deleting there re-mints every device, so
+        // controllers drop them from groups (#438). Cost of keeping it: one
+        // parked number per device that never comes back.
         await this.onDeviceUnregistered?.(plugin.name, deviceId, {
-          keepIdentity: this.instances.get(plugin.name)?.suspending === true,
+          keepIdentity: true,
         });
         pluginLogger.debug(`Unregistered device: ${deviceId}`);
       },

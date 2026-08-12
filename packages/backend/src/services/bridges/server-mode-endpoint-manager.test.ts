@@ -1,5 +1,5 @@
 import type { Logger } from "@matter/general";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../../matter/endpoints/legacy/legacy-endpoint.js", () => ({
   LegacyEndpoint: { create: vi.fn() },
@@ -18,6 +18,7 @@ import type { EntityEndpoint } from "../../matter/endpoints/entity-endpoint.js";
 import { LegacyEndpoint } from "../../matter/endpoints/legacy/legacy-endpoint.js";
 import type { ServerModeServerNode } from "../../matter/endpoints/server-mode-server-node.js";
 import { ServerModeVacuumEndpoint } from "../../matter/endpoints/server-mode-vacuum-endpoint.js";
+import { subscribeEntities } from "../home-assistant/api/subscribe-entities.js";
 import type { HomeAssistantClient } from "../home-assistant/home-assistant-client.js";
 import type { EntityIdentityStorage } from "../storage/entity-identity-storage.js";
 import type { EntityMappingStorage } from "../storage/entity-mapping-storage.js";
@@ -71,7 +72,9 @@ interface Harness {
     mergeExternalStates: ReturnType<typeof vi.fn>;
     // biome-ignore lint/suspicious/noExplicitAny: registry stub
     fullEntities: Record<string, any>;
+    snapshotGeneration: number;
   };
+  client: { connection: object; haRunning: boolean; runningSince: number };
   mappingStorage: { getMapping: ReturnType<typeof vi.fn> };
   // biome-ignore lint/suspicious/noExplicitAny: harness data provider stub
   dataProvider: any;
@@ -114,6 +117,7 @@ function makeHarness(
     initialState: vi.fn(() => undefined),
     mergeExternalStates: vi.fn(),
     fullEntities,
+    snapshotGeneration: 1,
   };
   const mappingStorage = {
     getMapping: vi.fn(() => undefined),
@@ -162,22 +166,51 @@ function makeHarness(
       exclude: [],
     },
   };
+  const client = { connection: {}, haRunning: true, runningSince: 0 };
   const manager = new ServerModeEndpointManager(
     serverNode as unknown as ServerModeServerNode,
-    { connection: {} } as unknown as HomeAssistantClient,
+    client as unknown as HomeAssistantClient,
     registry as unknown as BridgeRegistry,
     mappingStorage as unknown as EntityMappingStorage,
     identityStorage as unknown as EntityIdentityStorage,
     dataProvider as unknown as BridgeDataProvider,
     fakeLogger(),
   );
-  return { manager, serverNode, registry, mappingStorage, dataProvider };
+  managers.push(manager);
+  return {
+    manager,
+    serverNode,
+    registry,
+    client,
+    mappingStorage,
+    dataProvider,
+  };
+}
+
+// A refresh that represents a fresh successful HA reload past the grace, the
+// two conditions an absence-driven delete has to meet (#438).
+function passGrace(h: Harness) {
+  const base = Date.now();
+  vi.spyOn(Date, "now").mockImplementation(() => base + 301_000);
+  h.registry.snapshotGeneration++;
 }
 
 const legacyCreate = vi.mocked(LegacyEndpoint.create);
 const vacuumCreate = vi.mocked(ServerModeVacuumEndpoint.create);
 
+const managers: ServerModeEndpointManager[] = [];
+
+afterEach(async () => {
+  // the removal recheck timer must not outlive its test
+  for (const m of managers.splice(0)) {
+    await m.dispose().catch(() => {});
+  }
+  vi.restoreAllMocks();
+  vi.useRealTimers();
+});
+
 beforeEach(() => {
+  vi.mocked(subscribeEntities).mockClear();
   legacyCreate.mockReset();
   vacuumCreate.mockReset();
   legacyCreate.mockImplementation(
@@ -305,7 +338,7 @@ describe("ServerModeEndpointManager (#301)", () => {
     expect(advertised).toBe(0x74);
   });
 
-  it("deletes endpoints whose entity left the filter and keeps the rest", async () => {
+  it("deletes endpoints whose entity left the filter, but only past the grace", async () => {
     const h = makeHarness(["light.a", "light.b"], "light.a");
     await h.manager.refreshDevices();
     const endpointB = h.serverNode.addDevice.mock.calls
@@ -316,10 +349,50 @@ describe("ServerModeEndpointManager (#301)", () => {
     legacyCreate.mockClear();
     await h.manager.refreshDevices();
 
+    // First absence only stamps the grace, nothing is deleted yet (#438).
+    expect(endpointB?.delete).not.toHaveBeenCalled();
+
+    passGrace(h);
+    await h.manager.refreshDevices();
+
     expect(endpointB?.delete).toHaveBeenCalledTimes(1);
     expect(h.serverNode.forgetDevice).toHaveBeenCalledWith(endpointB);
     expect(legacyCreate).not.toHaveBeenCalled();
     expect(h.manager.devices.map((d) => d.entityId)).toEqual(["light.a"]);
+  });
+
+  it("keeps an absent endpoint when no fresh reload confirmed it (#438)", async () => {
+    const h = makeHarness(["light.a", "light.b"], "light.a");
+    await h.manager.refreshDevices();
+    const endpointB = h.serverNode.addDevice.mock.calls
+      .map((c) => c[0] as EntityEndpoint)
+      .find((e) => e.entityId === "light.b");
+
+    h.registry.entityIds = ["light.a"];
+    await h.manager.refreshDevices();
+
+    // Time passes but the snapshot is the same cached one, so the recheck
+    // must not delete from stale data.
+    const base = Date.now();
+    vi.spyOn(Date, "now").mockImplementation(() => base + 301_000);
+    await h.manager.refreshDevices();
+
+    expect(endpointB?.delete).not.toHaveBeenCalled();
+    expect(h.manager.devices.map((d) => d.entityId)).toContain("light.b");
+  });
+
+  it("keeps endpoints while HA is not running (#438)", async () => {
+    const h = makeHarness(["light.a"]);
+    await h.manager.refreshDevices();
+    const ep = h.serverNode.addDevice.mock.calls[0][0] as EntityEndpoint;
+
+    h.client.haRunning = false;
+    h.registry.entityIds = [];
+    await h.manager.refreshDevices();
+    passGrace(h);
+    await h.manager.refreshDevices();
+
+    expect(ep.delete).not.toHaveBeenCalled();
   });
 
   it("keeps its endpoint when HA reports no entities at all (#438)", async () => {
@@ -429,8 +502,210 @@ describe("ServerModeEndpointManager (#301)", () => {
     expect(h.manager.devices.map((d) => d.entityId)).toEqual(["light.new"]);
   });
 
+  it("a rename resolving a pending absence drops the stamp (#438)", async () => {
+    const reg = { unique_id: "U", platform: "hue" };
+    const h = makeHarness(["light.old"], "light.old", {
+      flags: { stableIdentity: true },
+      entities: { "light.old": reg, "light.new": reg },
+    });
+    await h.manager.refreshDevices();
+
+    // gone for one refresh, the grace stamp is set
+    h.registry.entityIds = [];
+    await h.manager.refreshDevices();
+    // biome-ignore lint/suspicious/noExplicitAny: reach the private grace map
+    const pending = (h.manager as any).pendingRemovals as Map<string, unknown>;
+    expect(pending.size).toBe(1);
+
+    // it returns renamed, the close path must clear the stamp too
+    h.registry.entityIds = ["light.new"];
+    h.registry.firstEntityMatching = vi.fn(() => "light.new");
+    await h.manager.refreshDevices();
+    expect(pending.size).toBe(0);
+  });
+
+  it("the recheck timer completes a held removal on its own (#438)", async () => {
+    vi.useFakeTimers();
+    const h = makeHarness(["light.a", "light.b"], "light.a");
+    await h.manager.refreshDevices();
+    const endpointB = h.serverNode.addDevice.mock.calls
+      .map((c) => c[0] as EntityEndpoint)
+      .find((e) => e.entityId === "light.b");
+
+    h.registry.entityIds = ["light.a"];
+    await h.manager.refreshDevices();
+    expect(endpointB?.delete).not.toHaveBeenCalled();
+
+    // A fresh reload lands, then the timer alone must finish the removal.
+    h.registry.snapshotGeneration++;
+    await vi.advanceTimersByTimeAsync(306_000);
+
+    expect(endpointB?.delete).toHaveBeenCalledTimes(1);
+  });
+
+  it("subscribes once HA comes back, even though it started while HA was down (#438)", async () => {
+    const h = makeHarness(["light.a"]);
+    // Bridge starts while HA is down: nothing to subscribe to yet.
+    const entityIds = h.registry.entityIds;
+    h.client.haRunning = false;
+    h.registry.entityIds = [];
+    await h.manager.refreshDevices();
+    await h.manager.startObserving();
+    expect(vi.mocked(subscribeEntities)).not.toHaveBeenCalled();
+
+    // HA returns with its entities: the subscription must come up now.
+    h.client.haRunning = true;
+    h.registry.entityIds = entityIds;
+    await h.manager.refreshDevices();
+
+    expect(vi.mocked(subscribeEntities)).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps subscribing to its last good entities while HA is down (#438)", async () => {
+    const h = makeHarness(["light.a"]);
+    await h.manager.refreshDevices();
+    await h.manager.startObserving();
+    vi.mocked(subscribeEntities).mockClear();
+
+    // HA drops: the filtered list reads empty, but the subscription must
+    // still cover the real entity when it is rebuilt.
+    h.client.haRunning = false;
+    h.registry.entityIds = [];
+    await h.manager.refreshDevices();
+    await h.manager.startObserving();
+
+    expect(vi.mocked(subscribeEntities).mock.calls[0]?.[2]).toEqual([
+      "light.a",
+    ]);
+  });
+
+  it("stopObserving kills the recheck timer, bridges never call dispose (#438)", async () => {
+    vi.useFakeTimers();
+    const h = makeHarness(["light.a", "light.b"], "light.a");
+    await h.manager.refreshDevices();
+    const endpointB = h.serverNode.addDevice.mock.calls
+      .map((c) => c[0] as EntityEndpoint)
+      .find((e) => e.entityId === "light.b");
+
+    h.registry.entityIds = ["light.a"];
+    await h.manager.refreshDevices();
+
+    // Bridge stops the way production does, then time passes.
+    h.manager.stopObserving();
+    h.registry.snapshotGeneration++;
+    await vi.advanceTimersByTimeAsync(306_000);
+
+    expect(endpointB?.delete).not.toHaveBeenCalled();
+  });
+
+  it("disabling an entity keeps its number for the re-enable (#438)", async () => {
+    const h = makeHarness(["light.one"]);
+    await h.manager.refreshDevices();
+    const ep = h.serverNode.addDevice.mock.calls[0][0] as EntityEndpoint;
+
+    h.mappingStorage.getMapping.mockReturnValue({ disabled: true });
+    await h.manager.refreshDevices();
+
+    expect(ep.close).toHaveBeenCalledTimes(1);
+    expect(ep.delete).not.toHaveBeenCalled();
+
+    // Re-enable rebuilds under the same endpoint id, no collision.
+    h.mappingStorage.getMapping.mockReturnValue(undefined);
+    await h.manager.refreshDevices();
+    expect(h.manager.devices.map((d) => d.entityId)).toEqual(["light.one"]);
+    expect(h.manager.failedEntities).toEqual([]);
+  });
+
+  it("an endpoint that fails to close stays tracked so the id cannot clash (#438)", async () => {
+    const h = makeHarness(["light.one"]);
+    await h.manager.refreshDevices();
+    const ep = h.serverNode.addDevice.mock.calls[0][0] as EntityEndpoint;
+    vi.mocked(ep.close).mockRejectedValue(new Error("close failed"));
+
+    h.mappingStorage.getMapping.mockReturnValue({ disabled: true });
+    await h.manager.refreshDevices();
+
+    expect(h.manager.devices.map((d) => d.entityId)).toEqual(["light.one"]);
+    expect(h.serverNode.forgetDevice).not.toHaveBeenCalledWith(ep);
+  });
+
+  it("a bridge restart does not lose a held removal (#438)", async () => {
+    vi.useFakeTimers();
+    const h = makeHarness(["light.a", "light.b"], "light.a");
+    await h.manager.refreshDevices();
+    const endpointB = h.serverNode.addDevice.mock.calls
+      .map((c) => c[0] as EntityEndpoint)
+      .find((e) => e.entityId === "light.b");
+
+    h.registry.entityIds = ["light.a"];
+    await h.manager.refreshDevices();
+    // Production start order: refreshDevices, then startObserving.
+    await h.manager.startObserving();
+
+    h.registry.snapshotGeneration++;
+    await vi.advanceTimersByTimeAsync(306_000);
+
+    expect(endpointB?.delete).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the failed-entity list while HA is down (#438)", async () => {
+    legacyCreate.mockImplementation(async () => undefined);
+    const h = makeHarness(["light.broken"]);
+    await h.manager.refreshDevices();
+    expect(h.manager.failedEntities).toHaveLength(1);
+
+    h.client.haRunning = false;
+    await h.manager.refreshDevices();
+
+    expect(h.manager.failedEntities).toHaveLength(1);
+  });
+
+  it("waits out the grace from when HA came back, not from wall time (#438)", async () => {
+    const h = makeHarness(["light.a", "light.b"], "light.a");
+    await h.manager.refreshDevices();
+    const endpointB = h.serverNode.addDevice.mock.calls
+      .map((c) => c[0] as EntityEndpoint)
+      .find((e) => e.entityId === "light.b");
+
+    h.registry.entityIds = ["light.a"];
+    await h.manager.refreshDevices();
+
+    // Grace elapsed on the wall clock, but HA only just came back, so its
+    // slow integrations have not had their chance yet.
+    const base = Date.now();
+    vi.spyOn(Date, "now").mockImplementation(() => base + 301_000);
+    h.client.runningSince = base + 300_000;
+    h.registry.snapshotGeneration++;
+    await h.manager.refreshDevices();
+    expect(endpointB?.delete).not.toHaveBeenCalled();
+
+    // HA has now been up longer than the grace.
+    h.client.runningSince = base - 10_000;
+    h.registry.snapshotGeneration++;
+    await h.manager.refreshDevices();
+    expect(endpointB?.delete).toHaveBeenCalledTimes(1);
+  });
+
+  it("holds the grace when the filter suddenly matches nothing (#438)", async () => {
+    const h = makeHarness(["light.a"]);
+    await h.manager.refreshDevices();
+    const ep = h.serverNode.addDevice.mock.calls[0][0] as EntityEndpoint;
+
+    // Filter empties while HA still reports entities (partial snapshot).
+    h.registry.entityIds = [];
+    await h.manager.refreshDevices();
+    expect(ep.delete).not.toHaveBeenCalled();
+
+    passGrace(h);
+    await h.manager.refreshDevices();
+    expect(ep.delete).toHaveBeenCalledTimes(1);
+  });
+
   it("keeps the disabled and empty-filter failed-entity semantics", async () => {
-    const empty = makeHarness([]);
+    // HA itself is up with entities, the filter just matches none of them.
+    const empty = makeHarness([], undefined, {
+      entities: { "light.unrelated": {} },
+    });
     await empty.manager.refreshDevices();
     expect(empty.manager.failedEntities[0]?.reason).toContain(
       "No Home Assistant entity matched",

@@ -95,6 +95,7 @@ interface FakeHa {
   devices: Record<string, any>;
   areas: Map<string, string>;
   labels: unknown[];
+  snapshotGeneration: number;
 }
 
 function makeHa(): FakeHa {
@@ -104,6 +105,7 @@ function makeHa(): FakeHa {
     devices: {},
     areas: new Map(),
     labels: [],
+    snapshotGeneration: 1,
   };
   ha.entities[VACUUM] = { entity_id: VACUUM };
   ha.states[VACUUM] = {
@@ -190,9 +192,10 @@ async function buildManager(ha: FakeHa) {
   servers.push(server);
   // biome-ignore lint/suspicious/noExplicitAny: minimal registry stub
   const registry = new BridgeRegistry(ha as any, provider);
+  const client = { connection: {}, haRunning: true, runningSince: 0 };
   const manager = new BridgeEndpointManager(
     // biome-ignore lint/suspicious/noExplicitAny: client only used for observing
-    { connection: {} } as any,
+    client as any,
     registry,
     new FakeMappingStorage() as unknown as EntityMappingStorage,
     new FakeIdentityStorage() as unknown as EntityIdentityStorage,
@@ -201,7 +204,7 @@ async function buildManager(ha: FakeHa) {
   );
   managers.push(manager);
   await server.add(manager.root);
-  return { manager, registry, ha };
+  return { manager, registry, ha, client };
 }
 
 // The exact shape onDeviceRegistered mounts: a bare Endpoint, no entityId,
@@ -371,7 +374,8 @@ describe("empty registry removal guard (#438)", () => {
     ha.states = {};
     await manager.refreshDevices();
     const base = Date.now();
-    vi.spyOn(Date, "now").mockImplementation(() => base + 61_000);
+    vi.spyOn(Date, "now").mockImplementation(() => base + 301_000);
+    ha.snapshotGeneration++;
     await manager.refreshDevices();
 
     expect(vacuumEndpoint(manager).number).toBe(before);
@@ -389,7 +393,8 @@ describe("empty registry removal guard (#438)", () => {
     addOtherEntity(ha);
     await manager.refreshDevices();
     const base = Date.now();
-    vi.spyOn(Date, "now").mockImplementation(() => base + 61_000);
+    vi.spyOn(Date, "now").mockImplementation(() => base + 301_000);
+    ha.snapshotGeneration++;
     await manager.refreshDevices();
 
     const gone = [...manager.root.parts].every(
@@ -416,13 +421,184 @@ describe("empty registry removal guard (#438)", () => {
     // HA drops entirely mid-grace, then returns past the old grace.
     ha.entities = {};
     ha.states = {};
-    clock = base + 30_000;
+    clock = base + 150_000;
+    ha.snapshotGeneration++;
     await manager.refreshDevices();
     addOtherEntity(ha);
-    clock = base + 90_000;
+    clock = base + 450_000;
+    ha.snapshotGeneration++;
     await manager.refreshDevices();
 
     // The down window reset the grace, so it survives this refresh.
     expect(vacuumEndpoint(manager).number).toBe(before);
+  });
+
+  it("keeps everything while HA is not running", async () => {
+    const ha = makeHa();
+    const { manager, client } = await buildManager(ha);
+    await manager.refreshDevices();
+    const before = vacuumEndpoint(manager).number;
+
+    // Reconnect mid-HA-boot: snapshot is partial, vacuum missing, but the
+    // client knows HA has not reached RUNNING again.
+    client.haRunning = false;
+    delete ha.entities[VACUUM];
+    delete ha.states[VACUUM];
+    addOtherEntity(ha);
+    await manager.refreshDevices();
+    const base = Date.now();
+    vi.spyOn(Date, "now").mockImplementation(() => base + 301_000);
+    ha.snapshotGeneration++;
+    await manager.refreshDevices();
+
+    expect(vacuumEndpoint(manager).number).toBe(before);
+  });
+
+  it("needs a fresh reload before deleting, a stale snapshot never confirms", async () => {
+    const ha = makeHa();
+    const { manager } = await buildManager(ha);
+    await manager.refreshDevices();
+    const before = vacuumEndpoint(manager).number;
+
+    delete ha.entities[VACUUM];
+    delete ha.states[VACUUM];
+    addOtherEntity(ha);
+    await manager.refreshDevices();
+
+    // Grace elapsed but no reload succeeded since the stamp: keep.
+    const base = Date.now();
+    vi.spyOn(Date, "now").mockImplementation(() => base + 301_000);
+    await manager.refreshDevices();
+    expect(vacuumEndpoint(manager).number).toBe(before);
+
+    // A fresh reload still shows it gone: now it may go.
+    ha.snapshotGeneration++;
+    await manager.refreshDevices();
+    const gone = [...manager.root.parts].every(
+      (p) => (p as EntityEndpoint).entityId !== VACUUM,
+    );
+    expect(gone).toBe(true);
+  });
+});
+
+describe("reconcile keeps working when a refresh goes wrong (#438)", () => {
+  it("keeps the failed-entity list while HA is down", async () => {
+    const ha = makeHa();
+    const { manager, client } = await buildManager(ha);
+    await manager.refreshDevices();
+    // biome-ignore lint/suspicious/noExplicitAny: reach the private list
+    (manager as any)._failedEntities = [{ entityId: "light.x", reason: "r" }];
+
+    client.haRunning = false;
+    await manager.refreshDevices();
+
+    expect(manager.failedEntities).toHaveLength(1);
+  });
+
+  it("stopObserving kills the recheck timer, bridges never call dispose", async () => {
+    const ha = makeHa();
+    const { manager } = await buildManager(ha);
+    await manager.refreshDevices();
+
+    // The vacuum leaves, so a removal is held and the timer is armed.
+    delete ha.entities[VACUUM];
+    delete ha.states[VACUUM];
+    ha.entities["light.x"] = { entity_id: "light.x" };
+    ha.states["light.x"] = { entity_id: "light.x", state: "on" };
+    await manager.refreshDevices();
+    // biome-ignore lint/suspicious/noExplicitAny: reach the private timer
+    expect((manager as any).removalRecheckTimer).not.toBeNull();
+
+    // A stopped bridge must not keep a timer that deletes endpoints later.
+    manager.stopObserving();
+    // biome-ignore lint/suspicious/noExplicitAny: reach the private timer
+    expect((manager as any).removalRecheckTimer).toBeNull();
+  });
+
+  it("a composed sub-entity is closed, not deleted, so the flag can go back", async () => {
+    const ha = makeHa();
+    const { manager, registry } = await buildManager(ha);
+    await manager.refreshDevices();
+    const before = vacuumEndpoint(manager).number;
+
+    // The entity gets absorbed into a composed device (#218).
+    vi.spyOn(registry, "isAutoComposedDevicesEnabled").mockReturnValue(true);
+    vi.spyOn(registry, "isComposedSubEntityUsed").mockImplementation(
+      (id: string) => id === VACUUM,
+    );
+    await manager.refreshDevices();
+    expect(() => vacuumEndpoint(manager)).toThrow();
+
+    // Flag off again: the same endpoint id must return under its old number.
+    vi.restoreAllMocks();
+    await manager.refreshDevices();
+    expect(vacuumEndpoint(manager).number).toBe(before);
+  });
+
+  it("re-arms the removal recheck when the recheck refresh itself throws", async () => {
+    vi.useFakeTimers();
+    const ha = makeHa();
+    const { manager, registry } = await buildManager(ha);
+    await manager.refreshDevices();
+
+    // The vacuum leaves while HA is up, so a removal is now pending.
+    delete ha.entities[VACUUM];
+    delete ha.states[VACUUM];
+    ha.entities["light.x"] = { entity_id: "light.x" };
+    ha.states["light.x"] = { entity_id: "light.x", state: "on" };
+    await manager.refreshDevices();
+    // biome-ignore lint/suspicious/noExplicitAny: reach the private timer
+    expect((manager as any).removalRecheckTimer).not.toBeNull();
+
+    // The timer fires into a refresh that dies: the pending removal must not
+    // be left with no timer to finish it.
+    vi.spyOn(registry, "refresh").mockImplementationOnce(() => {
+      throw new Error("boom 438");
+    });
+    await vi.advanceTimersByTimeAsync(306_000);
+
+    // biome-ignore lint/suspicious/noExplicitAny: reach the private timer
+    expect((manager as any).removalRecheckTimer).not.toBeNull();
+    vi.useRealTimers();
+  });
+});
+
+// #438 follow-up: transient matter.js errors used to delete() the endpoint,
+// erasing the number, so the auto-recreate re-minted the device. close()
+// keeps the number and the recreate keeps its identity.
+describe("identity survives isolation and plugin stops (#438)", () => {
+  it("an isolated entity comes back under the same number", async () => {
+    const ha = makeHa();
+    const { manager } = await buildManager(ha);
+    await manager.refreshDevices();
+    const before = vacuumEndpoint(manager).number;
+
+    await manager.isolateEntity(VACUUM);
+    expect(
+      [...manager.root.parts].some(
+        (p) => (p as EntityEndpoint).entityId === VACUUM,
+      ),
+    ).toBe(false);
+
+    await manager.refreshDevices();
+    expect(vacuumEndpoint(manager).number).toBe(before);
+  });
+
+  it("plugin endpoints keep their number across stopPlugins", async () => {
+    const ha = makeHa();
+    const { manager } = await buildManager(ha);
+    await manager.refreshDevices();
+    const part = await addPluginPart(manager);
+    const before = part.number;
+
+    // biome-ignore lint/suspicious/noExplicitAny: reach the private plugin state
+    (manager as any).pluginManager = { shutdownAll: async () => {} };
+    // biome-ignore lint/suspicious/noExplicitAny: reach the private plugin state
+    (manager as any).pluginEndpoints.set("x", part);
+    await manager.stopPlugins();
+    expect([...manager.root.parts]).not.toContain(part);
+
+    const again = await addPluginPart(manager);
+    expect(again.number).toBe(before);
   });
 });

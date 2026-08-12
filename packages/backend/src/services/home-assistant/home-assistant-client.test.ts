@@ -97,7 +97,7 @@ describe("HomeAssistantClient connect/retry", () => {
   });
 
   it("retries a transient failure and then connects", async () => {
-    const connection = { close: vi.fn() };
+    const connection = { close: vi.fn(), addEventListener: vi.fn() };
     vi.mocked(createConnection)
       .mockRejectedValueOnce({ code: "ECONNRESET" })
       .mockResolvedValueOnce(connection as never);
@@ -129,5 +129,127 @@ describe("HomeAssistantClient connect/retry", () => {
     await vi.runAllTimersAsync();
     await expectation;
     expect(createConnection).toHaveBeenCalledTimes(60);
+  });
+});
+
+// The websocket library reconnects on its own without re-checking HA's
+// lifecycle, so haRunning must go false on every drop and only return once a
+// fresh getConfig poll sees RUNNING (#438).
+describe("HomeAssistantClient haRunning", () => {
+  let listeners: Record<string, () => void>;
+  // biome-ignore lint/suspicious/noExplicitAny: connection stub
+  let sendMessage: any;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.mocked(createConnection).mockReset();
+    vi.mocked(getConfig).mockReset();
+    vi.mocked(getConfig).mockResolvedValue({ state: "RUNNING" } as never);
+    listeners = {};
+    // The running poll goes through sendHaMessage, so it lands on
+    // sendMessagePromise rather than the library's getConfig helper.
+    sendMessage = vi.fn(async () => ({ state: "RUNNING" }));
+    const connection = {
+      close: vi.fn(),
+      sendMessagePromise: sendMessage,
+      addEventListener: vi.fn((event: string, cb: () => void) => {
+        listeners[event] = cb;
+      }),
+    };
+    vi.mocked(createConnection).mockResolvedValue(connection as never);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  async function connectedClient() {
+    const client = new HomeAssistantClient(fakeLogger(), options);
+    const init = client.construction;
+    await vi.runAllTimersAsync();
+    await init;
+    return client;
+  }
+
+  it("is true after connect and false on disconnect", async () => {
+    const client = await connectedClient();
+    expect(client.haRunning).toBe(true);
+
+    listeners.disconnected();
+    expect(client.haRunning).toBe(false);
+  });
+
+  it("starts false when the socket dropped right after the RUNNING check", async () => {
+    const connection = {
+      close: vi.fn(),
+      connected: false,
+      addEventListener: vi.fn((event: string, cb: () => void) => {
+        listeners[event] = cb;
+      }),
+    };
+    vi.mocked(createConnection).mockResolvedValue(connection as never);
+    const client = new HomeAssistantClient(fakeLogger(), options);
+    const init = client.construction;
+    await vi.runAllTimersAsync();
+    await init;
+
+    expect(client.haRunning).toBe(false);
+  });
+
+  it("stays false on reconnect until HA reports RUNNING again", async () => {
+    const client = await connectedClient();
+    listeners.disconnected();
+
+    sendMessage.mockResolvedValueOnce({ state: "STARTING" });
+    listeners.ready();
+    await vi.advanceTimersByTimeAsync(0);
+    // First poll saw STARTING: the registry must not be trusted yet.
+    expect(client.haRunning).toBe(false);
+
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(client.haRunning).toBe(true);
+  });
+
+  it("keeps polling when HA holds the socket open but never answers", async () => {
+    const client = await connectedClient();
+    listeners.disconnected();
+
+    // A hung get_config must time out, not park the loop forever.
+    sendMessage.mockImplementationOnce(() => new Promise(() => {}));
+    listeners.ready();
+    await vi.advanceTimersByTimeAsync(options.messageTimeoutMs + 5_000);
+
+    expect(client.haRunning).toBe(true);
+  });
+
+  it("stamps runningSince when HA comes back, so the grace outlasts its start", async () => {
+    const client = await connectedClient();
+    const first = client.runningSince;
+
+    listeners.disconnected();
+    await vi.advanceTimersByTimeAsync(60_000);
+    listeners.ready();
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(client.runningSince).toBeGreaterThan(first);
+  });
+
+  it("a stale running poll never wins over a newer disconnect", async () => {
+    const client = await connectedClient();
+
+    let resolveConfig!: (value: unknown) => void;
+    sendMessage.mockImplementationOnce(
+      () =>
+        new Promise((resolve: (value: unknown) => void) => {
+          resolveConfig = resolve;
+        }),
+    );
+    listeners.ready();
+    // The connection drops again while the poll is still in flight.
+    listeners.disconnected();
+    resolveConfig({ state: "RUNNING" });
+    await vi.runAllTimersAsync();
+
+    expect(client.haRunning).toBe(false);
   });
 });

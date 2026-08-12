@@ -103,6 +103,152 @@ describe("HomeAssistantRegistry", () => {
     expect(fake.connection.sendMessagePromise).toHaveBeenCalled();
   });
 
+  it("holds the trusted fingerprint and generation through a starting-HA window (#438)", async () => {
+    const fake = makeConnection();
+    let entityList: unknown[] = [];
+    fake.connection.sendMessagePromise = vi.fn((message: { type: string }) =>
+      Promise.resolve(
+        message.type === "config/entity_registry/list" ? entityList : [],
+      ),
+    ) as unknown as Connection["sendMessagePromise"];
+    const client = {
+      connection: fake.connection,
+      haRunning: true,
+    } as unknown as HomeAssistantClient & { haRunning: boolean };
+    const registry = new HomeAssistantRegistry(client, defaultOptions);
+    const initPromise = registry.construction;
+    await vi.runAllTimersAsync();
+    await initPromise;
+    const g0 = registry.snapshotGeneration;
+    expect(g0).toBeGreaterThan(0);
+
+    // HA restarts, a partial snapshot arrives while it is still STARTING.
+    // Neither the generation nor the fingerprint may move.
+    client.haRunning = false;
+    entityList = [{ entity_id: "light.a" }];
+    await registry.reload();
+    expect(registry.snapshotGeneration).toBe(g0);
+
+    // The first RUNNING reload with the very same data must still read as
+    // changed, so the managers reconcile what the partial snapshots skipped.
+    client.haRunning = true;
+    await expect(registry.reload()).resolves.toBe(true);
+    expect(registry.snapshotGeneration).toBe(g0 + 1);
+  });
+
+  it("does not trust a snapshot fetched while HA was still starting, even if it turns RUNNING mid-fetch (#438)", async () => {
+    const fake = makeConnection();
+    const client = {
+      connection: fake.connection,
+      haRunning: false,
+    } as unknown as HomeAssistantClient & { haRunning: boolean };
+    fake.connection.sendMessagePromise = vi.fn((message: { type: string }) => {
+      // HA reaches RUNNING while this very fetch is in flight.
+      client.haRunning = true;
+      return Promise.resolve(
+        message.type === "config/entity_registry/list"
+          ? [{ entity_id: "light.partial" }]
+          : [],
+      );
+    }) as unknown as Connection["sendMessagePromise"];
+    const registry = new HomeAssistantRegistry(client, defaultOptions);
+    const initPromise = registry.construction;
+    await vi.runAllTimersAsync();
+    await initPromise;
+
+    // The fetch started untrusted, so nothing it returned may confirm a
+    // removal, and the next full RUNNING reload must still read as changed.
+    expect(registry.snapshotGeneration).toBe(0);
+    await expect(registry.reload()).resolves.toBe(true);
+    expect(registry.snapshotGeneration).toBe(1);
+  });
+
+  it("discards a snapshot that started trusted but lost HA before it finished (#438)", async () => {
+    const fake = makeConnection();
+    const client = {
+      connection: fake.connection,
+      haRunning: true,
+    } as unknown as HomeAssistantClient & { haRunning: boolean };
+    let dropDuringFetch = false;
+    fake.connection.sendMessagePromise = vi.fn((message: { type: string }) => {
+      if (dropDuringFetch) client.haRunning = false;
+      return Promise.resolve(
+        message.type === "config/entity_registry/list"
+          ? [{ entity_id: "light.a" }]
+          : [],
+      );
+    }) as unknown as Connection["sendMessagePromise"];
+    const registry = new HomeAssistantRegistry(client, defaultOptions);
+    await vi.runAllTimersAsync();
+    await registry.construction;
+    const generation = registry.snapshotGeneration;
+
+    // HA drops mid-fetch: whatever came back is a torn read.
+    dropDuringFetch = true;
+    await expect(registry.reload()).resolves.toBe(false);
+    expect(registry.snapshotGeneration).toBe(generation);
+  });
+
+  it("reports changed after an HA-down window even when nothing in HA changed (#438)", async () => {
+    const fake = makeConnection();
+    fake.connection.sendMessagePromise = vi.fn((message: { type: string }) =>
+      Promise.resolve(
+        message.type === "config/entity_registry/list"
+          ? [{ entity_id: "light.a" }]
+          : [],
+      ),
+    ) as unknown as Connection["sendMessagePromise"];
+    const client = {
+      connection: fake.connection,
+      haRunning: true,
+    } as unknown as HomeAssistantClient & { haRunning: boolean };
+    const registry = new HomeAssistantRegistry(client, defaultOptions);
+    await vi.runAllTimersAsync();
+    await registry.construction;
+    await expect(registry.reload()).resolves.toBe(false);
+
+    // Bridges skipped every reconcile while HA was down, so the first good
+    // reload has to drive one even though the registry is identical.
+    client.haRunning = false;
+    await registry.reload();
+    client.haRunning = true;
+    await expect(registry.reload()).resolves.toBe(true);
+  });
+
+  it("keeps the last trusted registry contents through an untrusted reload (#438)", async () => {
+    const fake = makeConnection();
+    let entityList: unknown[] = [
+      { entity_id: "light.a" },
+      { entity_id: "light.b" },
+    ];
+    fake.connection.sendMessagePromise = vi.fn((message: { type: string }) =>
+      Promise.resolve(
+        message.type === "config/entity_registry/list" ? entityList : [],
+      ),
+    ) as unknown as Connection["sendMessagePromise"];
+    const client = {
+      connection: fake.connection,
+      haRunning: true,
+    } as unknown as HomeAssistantClient & { haRunning: boolean };
+    const registry = new HomeAssistantRegistry(client, defaultOptions);
+    await vi.runAllTimersAsync();
+    await registry.construction;
+    expect(Object.keys(registry.entities).sort()).toEqual([
+      "light.a",
+      "light.b",
+    ]);
+
+    // HA restarts and serves a partial list. The cached registry must not
+    // take it, or a later removal would confirm against the missing entity.
+    client.haRunning = false;
+    entityList = [{ entity_id: "light.a" }];
+    await registry.reload();
+    expect(Object.keys(registry.entities).sort()).toEqual([
+      "light.a",
+      "light.b",
+    ]);
+  });
+
   it("times out a hung get_states query instead of blocking Promise.all forever", async () => {
     const fake = makeConnection();
     fake.connection.sendMessagePromise = vi.fn((message: { type: string }) => {

@@ -558,7 +558,7 @@ async function buildManager(
   );
   const manager = new BridgeEndpointManager(
     // biome-ignore lint/suspicious/noExplicitAny: client only used for observing
-    { connection: {} } as any,
+    { connection: {}, haRunning: true, runningSince: 0 } as any,
     registry,
     asMapping(mapping),
     asIdentity(identity),
@@ -781,6 +781,9 @@ describe("stable identity through BridgeEndpointManager (#404)", () => {
   it("stamps missingSince when the entity leaves the full registry, clears on return, never auto-deletes (orphan cleanup)", async () => {
     const ha = makeHa();
     setEntity(ha, "switch.orphan", { unique_id: "U", platform: "hue" });
+    // A second entity keeps the registry non-empty: a fully empty snapshot
+    // reads as HA down and must not stamp anything (#438).
+    setEntity(ha, "switch.other", { unique_id: "UO", platform: "hue" });
     const identity = new FakeIdentityStorage();
     const manager = await buildManager(
       ha,
@@ -814,6 +817,41 @@ describe("stable identity through BridgeEndpointManager (#404)", () => {
     expect(identity.getIdentity("bridge-orphan", key)).toBeDefined();
     expect(
       identity.getIdentity("bridge-orphan", key)?.missingSince,
+    ).toBeUndefined();
+  });
+
+  it("does not stamp or renumber anything from an empty registry snapshot (#438)", async () => {
+    const ha = makeHa();
+    setEntity(ha, "switch.orphan", { unique_id: "U", platform: "hue" });
+    const identity = new FakeIdentityStorage();
+    const manager = await buildManager(
+      ha,
+      makeProvider("bridge-438-stamp", { stableIdentity: true }),
+      new FakeMappingStorage(),
+      identity,
+    );
+    const key = identityKey({
+      entity_id: "switch.orphan",
+      registry: reg("U", "hue"),
+    })!;
+    await manager.refreshDevices();
+    const before = await read(manager, "switch.orphan");
+
+    // HA down: the whole registry empties. No tombstone, no removal.
+    ha.entities = {};
+    ha.states = {};
+    await manager.refreshDevices();
+    expect(
+      identity.getIdentity("bridge-438-stamp", key)?.missingSince,
+    ).toBeUndefined();
+
+    // HA back with the same entity: same endpoint number, still no stamp.
+    setEntity(ha, "switch.orphan", { unique_id: "U", platform: "hue" });
+    await manager.refreshDevices();
+    const after = await read(manager, "switch.orphan");
+    expect(after!.number).toBe(before!.number);
+    expect(
+      identity.getIdentity("bridge-438-stamp", key)?.missingSince,
     ).toBeUndefined();
   });
 

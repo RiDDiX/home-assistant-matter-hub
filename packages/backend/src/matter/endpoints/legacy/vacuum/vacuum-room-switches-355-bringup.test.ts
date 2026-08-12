@@ -306,7 +306,7 @@ async function buildManager(
   const registry = new BridgeRegistry(ha as any, provider);
   const manager = new BridgeEndpointManager(
     // biome-ignore lint/suspicious/noExplicitAny: client only used for observing
-    { connection: {} } as any,
+    { connection: {}, haRunning: true, runningSince: 0 } as any,
     registry,
     asMapping(mapping),
     asIdentity(new FakeIdentityStorage()),

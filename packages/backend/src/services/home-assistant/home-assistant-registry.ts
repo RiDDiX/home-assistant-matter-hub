@@ -35,6 +35,14 @@ export class HomeAssistantRegistry extends Service {
   private autoRefresh?: NodeJS.Timeout;
   private lastRegistryFingerprint = "";
 
+  // Bumped on every successful reload, even an unchanged one. Endpoint
+  // removal requires a bump between stamp and delete, so a stale cached
+  // snapshot can never confirm a removal (#438).
+  private _snapshotGeneration = 0;
+  get snapshotGeneration() {
+    return this._snapshotGeneration;
+  }
+
   private _devices: HomeAssistantDevices = {};
   get devices() {
     return this._devices;
@@ -170,6 +178,9 @@ export class HomeAssistantRegistry extends Service {
   }
 
   private async runRegistryQueries(): Promise<boolean> {
+    // Trust must hold for the WHOLE fetch: a flip to RUNNING mid-flight
+    // would otherwise let a STARTING-era partial snapshot commit (#438).
+    const trustedAtStart = this.client.haRunning;
     const connection = this.client.connection;
 
     // Fire the five HA queries in parallel. Label and area registries aren't
@@ -213,6 +224,20 @@ export class HomeAssistantRegistry extends Service {
     for (const l of labels) hash.update(`${l.label_id}\n`);
     for (const a of areas) hash.update(`${a.area_id}\0${a.name}\n`);
     const fingerprint = hash.digest("hex");
+
+    // A snapshot taken while HA was starting is partial. Publishing it would
+    // leave entities missing from the cached registry long after HA is back,
+    // and a later removal would confirm against that stale data (#438). Drop
+    // the whole fetch instead and keep the last good one.
+    if (!trustedAtStart || !this.client.haRunning) {
+      logger.debug("Discarding registry snapshot, HA was not running");
+      // Forget the fingerprint so the first trusted fetch always counts as
+      // changed. Bridges skip reconciling while HA is down, so they need that
+      // one refresh even when HA comes back with the same registry (#438).
+      this.lastRegistryFingerprint = "";
+      return false;
+    }
+    this._snapshotGeneration++;
 
     // Always update states (values change via WebSocket, but fresh data
     // is needed for the UI and initial endpoint state)
