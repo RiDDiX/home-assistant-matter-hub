@@ -4,12 +4,14 @@ import {
   type HomeAssistantEntityInformation,
 } from "@home-assistant-matter-hub/common";
 import { Behavior, EventEmitter } from "@matter/main";
+import { StatusCode, StatusResponseError } from "@matter/main/types";
 
 import {
   type HomeAssistantAction,
   HomeAssistantActions,
 } from "../../services/home-assistant/home-assistant-actions.js";
 import { AsyncObservable } from "../../utils/async-observable.js";
+import { transactionIsOffline } from "../../utils/transaction-is-offline.js";
 
 export class HomeAssistantEntityBehavior extends Behavior {
   static override readonly id = ClusterId.homeAssistantEntity;
@@ -35,7 +37,28 @@ export class HomeAssistantEntityBehavior extends Behavior {
     );
   }
 
+  // #446: fail the command instead of telling the controller it worked while
+  // the call never reaches HA. `=== false` on purpose: test stubs do not
+  // define `available`, and undefined must read as "no opinion".
+  // ponytail: commands only. Attribute writes that fan and thermostat handle
+  // in reactors run as a local actor, so they still go through and rely on HA
+  // state to correct them. Plumb it there too if that shows up in reports.
+  assertAvailable() {
+    const actions = this.env.get(HomeAssistantActions);
+    // Optional call: test stubs define neither member.
+    const blocked =
+      actions.available === false ||
+      actions.isTargetBlocked?.(this.entityId) === true;
+    if (blocked && !transactionIsOffline(this.context)) {
+      throw new StatusResponseError(
+        "Home Assistant is not reachable",
+        StatusCode.Failure,
+      );
+    }
+  }
+
   callAction(action: HomeAssistantAction) {
+    this.assertAvailable();
     const actions = this.env.get(HomeAssistantActions);
     actions.call(action, this.entityId);
   }

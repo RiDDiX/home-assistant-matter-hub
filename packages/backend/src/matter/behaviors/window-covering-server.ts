@@ -744,6 +744,34 @@ export class WindowCoveringServerBase extends FeaturedBase {
     this.writeOperationalStatus({ [axis]: status });
   }
 
+  // matter.js runs handleMovement as a worker, so a throw in there cannot fail
+  // the command. The commands that start movement check up front instead, and
+  // the HA call is deferred past the debounce anyway, outside the transaction
+  // where a rollback could not undo the optimistic target (#446).
+  override async upOrOpen() {
+    this.agent.get(HomeAssistantEntityBehavior).assertAvailable();
+    return super.upOrOpen();
+  }
+
+  override async downOrClose() {
+    this.agent.get(HomeAssistantEntityBehavior).assertAvailable();
+    return super.downOrClose();
+  }
+
+  override async goToLiftPercentage(
+    request: WindowCovering.GoToLiftPercentageRequest,
+  ) {
+    this.agent.get(HomeAssistantEntityBehavior).assertAvailable();
+    return super.goToLiftPercentage(request);
+  }
+
+  override async goToTiltPercentage(
+    request: WindowCovering.GoToTiltPercentageRequest,
+  ) {
+    this.agent.get(HomeAssistantEntityBehavior).assertAvailable();
+    return super.goToTiltPercentage(request);
+  }
+
   override async handleMovement(
     type: MovementType,
     _: boolean,

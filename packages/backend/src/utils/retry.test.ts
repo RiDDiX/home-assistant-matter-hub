@@ -123,3 +123,41 @@ describe("CircuitBreaker", () => {
     expect(result).toBe("ok");
   });
 });
+
+// #446: callers pre-check availability, so isOpen alone would keep the
+// breaker latched: nothing would ever run the half-open probe.
+describe("CircuitBreaker.isBlocking", () => {
+  it("stops blocking once the reset window has passed", async () => {
+    const breaker = new CircuitBreaker(1, 50);
+    await expect(
+      breaker.execute(async () => {
+        throw new Error("nope");
+      }),
+    ).rejects.toThrow("nope");
+    expect(breaker.isOpen).toBe(true);
+    expect(breaker.isBlocking).toBe(true);
+
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    expect(breaker.isOpen).toBe(true);
+    expect(breaker.isBlocking).toBe(false);
+    await expect(breaker.execute(async () => "probe")).resolves.toBe("probe");
+    expect(breaker.isOpen).toBe(false);
+  });
+});
+
+describe("withRetry shouldRetry", () => {
+  it("gives up immediately when the error must not be repeated", async () => {
+    const fn = vi.fn(async () => {
+      throw new Error("HA message 'call_service' timed out after 100ms");
+    });
+    await expect(
+      withRetry(fn, {
+        maxAttempts: 3,
+        baseDelayMs: 1,
+        shouldRetry: (e) =>
+          !(e instanceof Error && e.message.includes("timed out")),
+      }),
+    ).rejects.toThrow("timed out");
+    expect(fn).toHaveBeenCalledTimes(1);
+  });
+});

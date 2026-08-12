@@ -76,6 +76,10 @@ export class HomeAssistantClient extends Service {
     return this.options.accessToken;
   }
 
+  get messageTimeoutMs(): number {
+    return this.options.messageTimeoutMs;
+  }
+
   constructor(
     logger: LoggerService,
     private readonly options: HomeAssistantClientProps,

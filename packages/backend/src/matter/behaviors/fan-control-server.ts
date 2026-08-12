@@ -532,6 +532,9 @@ export class FanControlServerBase extends FeaturedBase {
       homeAssistant.callAction(action);
       return;
     }
+    // Deferred past the debounce, so it runs outside the transaction and a
+    // rollback cannot undo the optimistic write. Check now (#446).
+    homeAssistant.assertAvailable();
     // Capture plain values now, the deferred dispatch runs outside any
     // transaction, the same way the cover debounce fires (#411).
     const entityId = homeAssistant.entityId;

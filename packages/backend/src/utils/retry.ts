@@ -4,14 +4,17 @@ export interface RetryOptions {
   maxDelayMs?: number;
   backoffMultiplier?: number;
   onRetry?: (attempt: number, error: unknown, delayMs: number) => void;
+  /** Return false to give up immediately, e.g. for a call that may have landed. */
+  shouldRetry?: (error: unknown) => boolean;
 }
 
-const defaultOptions: Required<Omit<RetryOptions, "onRetry">> = {
-  maxAttempts: 3,
-  baseDelayMs: 100,
-  maxDelayMs: 5000,
-  backoffMultiplier: 2,
-};
+const defaultOptions: Required<Omit<RetryOptions, "onRetry" | "shouldRetry">> =
+  {
+    maxAttempts: 3,
+    baseDelayMs: 100,
+    maxDelayMs: 5000,
+    backoffMultiplier: 2,
+  };
 
 export async function withRetry<T>(
   fn: () => Promise<T>,
@@ -26,7 +29,10 @@ export async function withRetry<T>(
     } catch (error) {
       lastError = error;
 
-      if (attempt === opts.maxAttempts) {
+      if (
+        attempt === opts.maxAttempts ||
+        options.shouldRetry?.(error) === false
+      ) {
         break;
       }
 
@@ -89,6 +95,16 @@ export class CircuitBreaker {
 
   get isOpen(): boolean {
     return this.state === "open";
+  }
+
+  // Open AND still inside the reset window. Callers that pre-check
+  // availability must use this, not isOpen, or the half-open probe never
+  // happens and the breaker stays latched forever (#446).
+  get isBlocking(): boolean {
+    return (
+      this.state === "open" &&
+      Date.now() - this.lastFailureTime < this.resetTimeoutMs
+    );
   }
 
   reset(): void {
