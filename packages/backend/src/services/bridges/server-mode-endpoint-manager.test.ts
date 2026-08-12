@@ -616,6 +616,129 @@ describe("ServerModeEndpointManager (#301)", () => {
     expect(h.manager.failedEntities).toEqual([]);
   });
 
+  it("a disabled entity keeps its endpoint id reserved (#438)", async () => {
+    const h = makeHarness(["light.one", "light.two"], "light.one");
+    await h.manager.refreshDevices();
+    h.mappingStorage.getMapping.mockImplementation((_b: string, e: string) =>
+      e === "light.one" ? { disabled: true } : undefined,
+    );
+    await h.manager.refreshDevices();
+
+    // light.two now claims the disabled entity's id: its number is parked
+    // there, so the mount has to be refused instead of inheriting it.
+    legacyCreate.mockImplementation(
+      async (_registry, entityId) =>
+        fakeEndpoint(entityId as string, {
+          id: "light_one",
+        }) as unknown as LegacyEndpoint,
+    );
+    h.mappingStorage.getMapping.mockImplementation((_b: string, e: string) =>
+      e === "light.one" ? { disabled: true } : { customName: "light one" },
+    );
+    await h.manager.refreshDevices();
+
+    expect(h.manager.failedEntities.map((f) => f.entityId)).toContain(
+      "light.two",
+    );
+  });
+
+  it("reserves a disabled entity's id even when it starts disabled (#438)", async () => {
+    // Restart with the mapping already disabled: nothing was ever closed in
+    // this process, but the number is still parked in Matter storage.
+    const h = makeHarness(["light.one", "light.two"], "light.one");
+    // light.two carries a custom name that resolves to the same endpoint id
+    h.mappingStorage.getMapping.mockImplementation((_b: string, e: string) =>
+      e === "light.one" ? { disabled: true } : { customName: "light one" },
+    );
+    await h.manager.refreshDevices();
+
+    expect(h.manager.failedEntities.map((f) => f.entityId)).toContain(
+      "light.two",
+    );
+  });
+
+  it("moves the reservation when a disabled entity is renamed (#438)", async () => {
+    const h = makeHarness(["light.one", "light.two"], "light.one");
+    h.mappingStorage.getMapping.mockImplementation((_b: string, e: string) =>
+      e === "light.one" ? { disabled: true } : undefined,
+    );
+    await h.manager.refreshDevices();
+
+    // The disabled entity gets a custom name, so its id moves.
+    h.mappingStorage.getMapping.mockImplementation((_b: string, e: string) =>
+      e === "light.one"
+        ? { disabled: true, customName: "elsewhere" }
+        : undefined,
+    );
+    await h.manager.refreshDevices();
+
+    // light.two may now take the id the disabled entity left behind.
+    h.mappingStorage.getMapping.mockImplementation((_b: string, e: string) =>
+      e === "light.one"
+        ? { disabled: true, customName: "elsewhere" }
+        : { customName: "light one" },
+    );
+    await h.manager.refreshDevices();
+
+    expect(h.manager.devices.map((d) => d.entityId)).toContain("light.two");
+  });
+
+  it("releases the old reservation when a re-enable also renames (#438)", async () => {
+    const h = makeHarness(["light.one"], "light.one");
+    h.mappingStorage.getMapping.mockReturnValue({ disabled: true });
+    await h.manager.refreshDevices();
+    // biome-ignore lint/suspicious/noExplicitAny: reach the private reservations
+    const parked = (h.manager as any).parkedEndpointIds as Map<string, string>;
+    expect([...parked.keys()]).toEqual(["light_one"]);
+
+    // Re-enabled under a new name: it mounts elsewhere, so the old id must
+    // stop blocking other entities.
+    h.mappingStorage.getMapping.mockReturnValue({ customName: "elsewhere" });
+    await h.manager.refreshDevices();
+
+    expect([...parked.keys()]).toEqual([]);
+  });
+
+  it("keeps the id parked when the re-enable fails to mount (#438)", async () => {
+    const h = makeHarness(["light.one", "light.two"], "light.one");
+    await h.manager.refreshDevices();
+    h.mappingStorage.getMapping.mockImplementation((_b: string, e: string) =>
+      e === "light.one" ? { disabled: true } : undefined,
+    );
+    await h.manager.refreshDevices();
+
+    // Re-enabled, but the mount fails.
+    h.mappingStorage.getMapping.mockReturnValue(undefined);
+    h.serverNode.addDevice.mockRejectedValueOnce(new Error("mount failed"));
+    await h.manager.refreshDevices();
+
+    // light.two must still not be allowed onto the parked id.
+    h.mappingStorage.getMapping.mockImplementation((_b: string, e: string) =>
+      e === "light.two" ? { customName: "light one" } : undefined,
+    );
+    h.registry.entityIds = ["light.two"];
+    await h.manager.refreshDevices();
+    expect(h.manager.failedEntities.map((f) => f.entityId)).toContain(
+      "light.two",
+    );
+  });
+
+  it("a stop during a refresh leaves no recheck timer behind (#438)", async () => {
+    const h = makeHarness(["light.a", "light.b"], "light.a");
+    await h.manager.refreshDevices();
+
+    h.registry.entityIds = ["light.a"];
+    // The bridge stops while the refresh is still running.
+    h.registry.firstEntityMatching.mockImplementationOnce(() => {
+      h.manager.stopObserving();
+      return "light.a";
+    });
+    await h.manager.refreshDevices();
+
+    // biome-ignore lint/suspicious/noExplicitAny: reach the private timer
+    expect((h.manager as any).removalRecheckTimer).toBeNull();
+  });
+
   it("an endpoint that fails to close stays tracked so the id cannot clash (#438)", async () => {
     const h = makeHarness(["light.one"]);
     await h.manager.refreshDevices();

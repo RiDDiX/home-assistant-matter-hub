@@ -93,6 +93,9 @@ export class BridgeEndpointManager extends Service {
   // entityId -> first absence stamp (grace window)
   private readonly pendingRemovals = new Map<string, PendingRemoval>();
   private removalRecheckTimer: ReturnType<typeof setTimeout> | null = null;
+  // Bumped on every stop, so a refresh that was already running cannot arm a
+  // timer on a bridge that has since stopped (#438).
+  private lifecycle = 0;
   private readonly pluginEndpoints = new Map<string, Endpoint>();
   private readonly pluginStateUpdating = new Set<string>();
   private readonly pluginListeners = new Map<string, PluginListenerRef[]>();
@@ -500,12 +503,14 @@ export class BridgeEndpointManager extends Service {
       this.removalRecheckTimer = null;
     }
     if (this.pendingRemovals.size === 0) return;
+    const lifecycle = this.lifecycle;
     this.removalRecheckTimer = setTimeout(() => {
       this.removalRecheckTimer = null;
       this.refreshDevices().catch((e) => {
         this.log.warn("Endpoint removal recheck failed:", e);
-        // A failed refresh must not strand the held removals with no timer.
-        this.scheduleRemovalRecheck();
+        // A failed refresh must not strand the held removals with no timer,
+        // but a bridge that stopped meanwhile gets no new one.
+        if (lifecycle === this.lifecycle) this.scheduleRemovalRecheck();
       });
     }, ENDPOINT_REMOVAL_GRACE_MS + 5_000);
   }
@@ -598,6 +603,7 @@ export class BridgeEndpointManager extends Service {
 
   stopObserving() {
     this.observingRequested = false;
+    this.lifecycle++;
     this.clearSubscription();
     // Bridges stop through this, never through dispose(), so the recheck
     // timer has to die here or it deletes on a stopped bridge (#438).
@@ -609,6 +615,7 @@ export class BridgeEndpointManager extends Service {
 
   async refreshDevices() {
     this.registry.refresh();
+    const lifecycle = this.lifecycle;
 
     // Area switches (#355) share the vacuum's entity_id but ride their own
     // reconcile pass keyed off the surviving vacuum endpoint, so they must never
@@ -869,7 +876,10 @@ export class BridgeEndpointManager extends Service {
       }
     }
 
-    this.scheduleRemovalRecheck();
+    // A stop that landed mid-refresh wins: no timer on a stopped bridge.
+    if (lifecycle === this.lifecycle) {
+      this.scheduleRemovalRecheck();
+    }
 
     let memoryLimitReached = false;
 

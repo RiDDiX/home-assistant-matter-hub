@@ -215,6 +215,80 @@ describe("HomeAssistantRegistry", () => {
     await expect(registry.reload()).resolves.toBe(true);
   });
 
+  it("refreshes bridges after an HA restart it never saw (#438)", async () => {
+    const fake = makeConnection();
+    fake.connection.sendMessagePromise = vi.fn((message: { type: string }) =>
+      Promise.resolve(
+        message.type === "config/entity_registry/list"
+          ? [{ entity_id: "light.a" }]
+          : [],
+      ),
+    ) as unknown as Connection["sendMessagePromise"];
+    const client = {
+      connection: fake.connection,
+      haRunning: true,
+      runningSince: 1_000,
+    } as unknown as HomeAssistantClient & { runningSince: number };
+    const registry = new HomeAssistantRegistry(client, defaultOptions);
+    await vi.runAllTimersAsync();
+    await registry.construction;
+
+    const onRefresh = vi.fn();
+    registry.enableAutoRefresh(onRefresh);
+    await vi.advanceTimersByTimeAsync(defaultOptions.refreshInterval * 1000);
+    onRefresh.mockClear();
+
+    // HA restarted between two ticks, so the registry never saw it go down
+    // and its content is unchanged. Bridges still need one reconcile.
+    client.runningSince = 2_000;
+    await vi.advanceTimersByTimeAsync(defaultOptions.refreshInterval * 1000);
+    expect(onRefresh).toHaveBeenCalledTimes(1);
+
+    // Steady state stays quiet.
+    onRefresh.mockClear();
+    await vi.advanceTimersByTimeAsync(defaultOptions.refreshInterval * 1000);
+    expect(onRefresh).not.toHaveBeenCalled();
+    registry.disableAutoRefresh();
+  });
+
+  it("a failed reload does not consume the pending restart (#438)", async () => {
+    const fake = makeConnection();
+    fake.connection.sendMessagePromise = vi.fn((message: { type: string }) =>
+      Promise.resolve(
+        message.type === "config/entity_registry/list"
+          ? [{ entity_id: "light.a" }]
+          : [],
+      ),
+    ) as unknown as Connection["sendMessagePromise"];
+    const client = {
+      connection: fake.connection,
+      haRunning: true,
+      runningSince: 1_000,
+    } as unknown as HomeAssistantClient & { runningSince: number };
+    const registry = new HomeAssistantRegistry(client, defaultOptions);
+    await vi.runAllTimersAsync();
+    await registry.construction;
+
+    const onRefresh = vi.fn();
+    registry.enableAutoRefresh(onRefresh);
+    await vi.advanceTimersByTimeAsync(defaultOptions.refreshInterval * 1000);
+    onRefresh.mockClear();
+
+    // HA restarted, but the first reload after it fails outright.
+    client.runningSince = 2_000;
+    const reload = vi
+      .spyOn(registry, "reload")
+      .mockRejectedValueOnce(new Error("boom"));
+    await vi.advanceTimersByTimeAsync(defaultOptions.refreshInterval * 1000);
+    expect(onRefresh).not.toHaveBeenCalled();
+
+    // The next good reload still owes the bridges their reconcile.
+    reload.mockRestore();
+    await vi.advanceTimersByTimeAsync(defaultOptions.refreshInterval * 1000);
+    expect(onRefresh).toHaveBeenCalledTimes(1);
+    registry.disableAutoRefresh();
+  });
+
   it("keeps the last trusted registry contents through an untrusted reload (#438)", async () => {
     const fake = makeConnection();
     let entityList: unknown[] = [

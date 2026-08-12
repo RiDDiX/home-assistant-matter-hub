@@ -43,6 +43,10 @@ export class HomeAssistantRegistry extends Service {
     return this._snapshotGeneration;
   }
 
+  // Last HA uptime stamp the auto-refresh saw, so a restart between ticks
+  // still drives one reconcile (#438).
+  private lastRunningSince = 0;
+
   private _devices: HomeAssistantDevices = {};
   get devices() {
     return this._devices;
@@ -106,8 +110,16 @@ export class HomeAssistantRegistry extends Service {
       }
       refreshing = true;
       try {
+        // Bridges skip reconciling while HA is down, and a short outage
+        // between two ticks can leave the registry structurally unchanged.
+        // Compare HA's uptime stamp so that restart still drives one
+        // refresh (#438).
+        const runningSince = this.client.runningSince;
+        const restarted = runningSince !== this.lastRunningSince;
         const changed = await this.reload();
-        if (changed) {
+        // stamp only now: a reload that failed must not consume the restart
+        this.lastRunningSince = runningSince;
+        if (changed || restarted) {
           await onRefresh();
         }
       } catch (e) {

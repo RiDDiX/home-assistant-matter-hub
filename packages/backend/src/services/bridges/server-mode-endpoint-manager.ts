@@ -62,6 +62,12 @@ export class ServerModeEndpointManager extends Service {
   // device (#438).
   private readonly pendingRemovals = new Map<string, PendingRemoval>();
   private removalRecheckTimer: ReturnType<typeof setTimeout> | null = null;
+  // endpoint id -> entity that closed but may come back (disable). Its number
+  // is still parked, so nobody else may mount on that id (#438).
+  private readonly parkedEndpointIds = new Map<string, string>();
+  // Bumped on every stop, so a refresh that was already running cannot arm a
+  // timer on a bridge that has since stopped.
+  private lifecycle = 0;
 
   get failedEntities(): FailedEntity[] {
     return this._failedEntities;
@@ -163,6 +169,7 @@ export class ServerModeEndpointManager extends Service {
 
   stopObserving(): void {
     this.observingRequested = false;
+    this.lifecycle++;
     this.clearSubscription();
     // Bridges stop through this, never through dispose(), so the recheck
     // timer has to die here or it refreshes a stopped node.
@@ -232,12 +239,14 @@ export class ServerModeEndpointManager extends Service {
       this.removalRecheckTimer = null;
     }
     if (this.pendingRemovals.size === 0) return;
+    const lifecycle = this.lifecycle;
     this.removalRecheckTimer = setTimeout(() => {
       this.removalRecheckTimer = null;
       this.refreshDevices().catch((e) => {
         this.log.warn("Endpoint removal recheck failed:", e);
-        // A failed refresh must not strand the held removals with no timer.
-        this.scheduleRemovalRecheck();
+        // A failed refresh must not strand the held removals with no timer,
+        // but a bridge that stopped meanwhile gets no new one.
+        if (lifecycle === this.lifecycle) this.scheduleRemovalRecheck();
       });
     }, ENDPOINT_REMOVAL_GRACE_MS + 5_000);
   }
@@ -262,6 +271,7 @@ export class ServerModeEndpointManager extends Service {
   async refreshDevices(): Promise<void> {
     this.registry.refresh();
 
+    const lifecycle = this.lifecycle;
     const fullEntities = this.registry.fullEntities;
 
     try {
@@ -386,6 +396,25 @@ export class ServerModeEndpointManager extends Service {
         removed.length > genuinelyRemoved.length || confirmedRemoved.length > 0;
       await this.removeEndpoints(confirmedRemoved);
 
+      // Reserve every disabled entity's id up front: an active entity that
+      // sorts earlier would otherwise mount on it first and inherit its
+      // persisted number (#438).
+      for (const entityId of orderedIds) {
+        const mapping = this.getEntityMapping(entityId);
+        if (!mapping?.disabled) continue;
+        // Drop this entity's older reservations first: a customName edit
+        // while disabled moves the id and the stale one would block others.
+        for (const [id, owner] of this.parkedEndpointIds) {
+          if (owner === entityId) this.parkedEndpointIds.delete(id);
+        }
+        this.parkedEndpointIds.set(
+          this.endpoints.get(entityId)?.endpoint.id ??
+            resolvedByEntity.get(entityId)?.endpointId ??
+            createEndpointId(entityId, mapping.customName),
+          entityId,
+        );
+      }
+
       for (const entityId of orderedIds) {
         const mapping = this.getEntityMapping(entityId);
 
@@ -393,9 +422,9 @@ export class ServerModeEndpointManager extends Service {
           this.log.warn(
             `Entity in server mode bridge is disabled: ${entityId}`,
           );
+          // Disabling is reversible, so close() keeps the number, the way
+          // plugin disable does (#439, #438). The id was reserved above.
           if (this.endpoints.has(entityId)) {
-            // Disabling is reversible, so close() keeps the number, the way
-            // plugin disable does (#439, #438).
             await this.closeEndpoint(entityId);
             structureChanged = true;
           }
@@ -445,10 +474,11 @@ export class ServerModeEndpointManager extends Service {
         const collision = [...this.endpoints.entries()].find(
           ([, entry]) => entry.endpoint.id === endpointId,
         );
-        if (collision) {
+        const parkedBy = this.parkedEndpointIds.get(endpointId);
+        if (collision || (parkedBy != null && parkedBy !== entityId)) {
           this._failedEntities.push({
             entityId,
-            reason: `Endpoint id collides with ${collision[0]}. Set distinct custom names.`,
+            reason: `Endpoint id collides with ${collision?.[0] ?? parkedBy}. Set distinct custom names.`,
           });
           continue;
         }
@@ -498,6 +528,13 @@ export class ServerModeEndpointManager extends Service {
 
           await this.serverNode.addDevice(endpoint);
           this.endpoints.set(entityId, { endpoint, fingerprint });
+          // mounted for real, so nothing this entity parked is reserved any
+          // more, not even an id it left behind under an older custom name
+          for (const [id, owner] of this.parkedEndpointIds) {
+            if (id === endpointId || owner === entityId) {
+              this.parkedEndpointIds.delete(id);
+            }
+          }
           structureChanged = true;
           this.log.info(`Server mode: Added device ${entityId}`);
         } catch (e) {
@@ -519,7 +556,10 @@ export class ServerModeEndpointManager extends Service {
         }
       }
     } finally {
-      this.scheduleRemovalRecheck();
+      // A stop that landed mid-refresh wins: no timer on a stopped bridge.
+      if (lifecycle === this.lifecycle) {
+        this.scheduleRemovalRecheck();
+      }
       // re-subscribe on every path so mapped-entity subscriptions stay fresh
       if (this.observingRequested) {
         this.startObserving();
