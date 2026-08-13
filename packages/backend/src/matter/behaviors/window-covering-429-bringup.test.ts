@@ -803,3 +803,25 @@ describe("#429 command logs identify the entity and the resolved flags", () => {
     expect(open).toContain("spaceInverted=");
   });
 });
+
+// #328: Apple reads the first report of a movement and infers the direction
+// from current vs target. Sending the new current in that same report made it
+// briefly draw the cover moving the wrong way, so the tick that starts a
+// movement carries status and target only.
+describe("#328 the tick that starts a movement withholds current", () => {
+  it("emits no current position on the tick that starts moving", async () => {
+    const endpoint = await mount("open", 100);
+    const cap = subscribe(endpoint);
+
+    // HA starts closing and already reports a lower position in the same tick.
+    await drive(endpoint, "closing", 80);
+
+    expect(cap.ops).toEqual([Closing]);
+    expect(cap.currents).toEqual([]);
+    expect(cap.targets.length).toBeGreaterThan(0);
+
+    // The next tick carries the position on its own.
+    await drive(endpoint, "closing", 60);
+    expect(cap.currents.length).toBeGreaterThan(0);
+  });
+});
