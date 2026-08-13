@@ -37,7 +37,7 @@ of port forwarding etc.
 
 | Channel | Branch | Current Version | Description |
 |---------|--------|-----------------|-------------|
-| **Stable** | `main` | v2.0.54 | Production-ready, recommended for most users |
+| **Stable** | `main` | v2.0.55 | Production-ready, recommended for most users |
 | **Alpha** | `alpha` | v2.1.0-alpha.x | Currently level with Stable; next pre-release lands here first |
 | **Testing** | `testing` | v4.1.0-testing.x | ⚠️ **Highly unstable!** Experimental features, may break |
 
@@ -61,9 +61,20 @@ Re-assign the affected devices to their rooms after they reconnect. See the [doc
 ## 🎉 What's New
 
 <details>
-<summary><strong>📦 Stable Features (v2.0.54)</strong> - Click to expand</summary>
+<summary><strong>📦 Stable Features (v2.0.55)</strong> - Click to expand</summary>
 
-**New in v2.0.54 (hotfix release):**
+**New in v2.0.55:**
+- 🔗 Devices keep their Matter numbers when Home Assistant restarts, so controllers stop re-adding everything and losing groups and routines ([#438](https://github.com/RiDDiX/home-assistant-matter-hub/issues/438))
+- 🔌 One plugin device no longer stalls every state update on its bridge, and plugin devices stop vanishing a minute after a refresh ([#445](https://github.com/RiDDiX/home-assistant-matter-hub/issues/445))
+- 🚫 A command that cannot reach Home Assistant now fails instead of reporting success, so a cover no longer shows a position it never reached ([#446](https://github.com/RiDDiX/home-assistant-matter-hub/issues/446))
+- 💡 Identify presses the identify button of the device, on everything rather than vacuums alone ([#447](https://github.com/RiDDiX/home-assistant-matter-hub/issues/447))
+- 🌡️ Climate power-on reaches the device even when the cached state lags ([#441](https://github.com/RiDDiX/home-assistant-matter-hub/issues/441))
+- 🌀 Fan speed zero picks the slowest mode the entity really has, and fan sliders can be debounced so bridged air conditioners stop beeping ([#442](https://github.com/RiDDiX/home-assistant-matter-hub/issues/442), [#443](https://github.com/RiDDiX/home-assistant-matter-hub/issues/443))
+- 🎚️ Number feature flags render as number inputs, so the cover and fan debounce settings are reachable in the UI at last
+- 🤝 A controller that is still being interviewed is no longer disconnected halfway, which could abort commissioning
+- 📷 Camera devices carry the bridged information every device under a bridge needs ([#155](https://github.com/RiDDiX/home-assistant-matter-hub/issues/155))
+
+**Previously in v2.0.54 (hotfix release):**
 - 🔌 Plugin disable now sticks across restarts, for the security and camera plugins alike
 - 👻 An unconfigured security plugin exposes no devices anymore; updating removes the ghost plugs
 - 🔁 Disabling a plugin removes its devices immediately, re-enabling keeps their identity
@@ -291,7 +302,7 @@ Re-assign the affected devices to their rooms after they reconnect. See the [doc
 <details>
 <summary><strong>🧪 Alpha Features (v2.1.0-alpha.x)</strong> - Click to expand</summary>
 
-**Alpha is currently level with Stable (v2.0.54).** All alpha work up to the latest pre-release has been promoted into v2.0.54. New alpha work continues from the next pre-release tag onward and will appear here as development progresses.
+**Alpha is currently level with Stable (v2.0.55).** All alpha work up to the latest pre-release has been promoted into v2.0.55. New alpha work continues from the next pre-release tag onward and will appear here as development progresses.
 
 </details>
 
