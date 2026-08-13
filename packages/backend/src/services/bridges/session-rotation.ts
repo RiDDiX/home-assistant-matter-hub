@@ -45,6 +45,16 @@ export function deadSessionTimeoutMs(flags?: BridgeFeatureFlags): number {
 // briefly-quiet Apple hub sessions and wedged them on "Updating..." (#398).
 export const STALE_SESSION_QUIET_WINDOW_MS = 5 * 60 * 1000;
 
+// A controller can spend 10s or more streaming its priming report, and it
+// holds no subscription until that finishes. Sessions replaced by a new CASE
+// session wait at least this long, even under fastSessionRecovery, so an
+// interview is never cut short (#424).
+export const PRIMING_GRACE_MS = 30_000;
+
+export function replacedSessionTimeoutMs(flags?: BridgeFeatureFlags): number {
+  return Math.max(deadSessionTimeoutMs(flags), PRIMING_GRACE_MS);
+}
+
 // fastSessionRecovery users opted into aggressive cleanup (#386),
 // keep their behavior exactly as it is today.
 export function staleSessionQuietWindowMs(flags?: BridgeFeatureFlags): number {

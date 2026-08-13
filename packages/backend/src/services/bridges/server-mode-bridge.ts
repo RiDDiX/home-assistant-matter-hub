@@ -34,8 +34,10 @@ import type { ServerModeEndpointManager } from "./server-mode-endpoint-manager.j
 import {
   DEFAULT_SESSION_MAX_AGE_HOURS,
   deadSessionTimeoutMs,
+  PRIMING_GRACE_MS,
   parseSessionMaxAgeHours,
   ROTATION_CHECK_INTERVAL_MS,
+  replacedSessionTimeoutMs,
   SESSION_MAX_AGE_HOURS_RANGE,
   seedExistingSessionStarts,
   selectSupersededSessions,
@@ -600,12 +602,26 @@ export class ServerModeBridge {
             s.fabric?.fabricIndex === newSession.fabric?.fabricIndex &&
             s.subscriptions.size === 0
           ) {
+            // A subscription only counts once its priming report finished,
+            // so closing here would abort a controller mid-interview. Hand
+            // the session to the stale timer instead: it keeps anything that
+            // gained subscriptions and still closes a dead one.
             this.log.info(
-              `Closing stale session ${s.id} (peer ${s.peerNodeId}, 0 subs), replaced by session ${newSession.id}`,
+              `Session ${s.id} (peer ${s.peerNodeId}, 0 subs) replaced by session ${newSession.id}, closing it once it goes quiet`,
             );
-            s.initiateForceClose({
-              cause: new Error("stale session replaced by new session"),
-            }).catch(() => {});
+            // Replace any shorter timer armed earlier, it would fire mid
+            // priming.
+            const staleId = s.id;
+            const armed = this.staleSessionTimers.get(staleId);
+            if (armed) clearTimeout(armed);
+            this.staleSessionTimers.set(
+              staleId,
+              setTimeout(() => {
+                this.staleSessionTimers.delete(staleId);
+                // keep the priming floor across re-arms
+                this.closeStaleSession(staleId, PRIMING_GRACE_MS);
+              }, replacedSessionTimeoutMs(this.dataProvider.featureFlags)),
+            );
           }
         }
         // Sweep superseded sessions the #105 loop cannot: same peer+fabric
@@ -649,6 +665,12 @@ export class ServerModeBridge {
         peerNodeId: unknown;
       }) => {
         this.sessionStartedAt.delete(session.id);
+        // its timer has nothing left to close
+        const armed = this.staleSessionTimers.get(session.id);
+        if (armed) {
+          clearTimeout(armed);
+          this.staleSessionTimers.delete(session.id);
+        }
         const sessions = [...sessionManager.sessions];
         this.log.warn(
           `Session closed: id=${session.id} peer=${session.peerNodeId} | remaining sessions=${sessions.length}`,
@@ -791,7 +813,7 @@ export class ServerModeBridge {
     });
   }
 
-  private closeStaleSession(sessionId: number) {
+  private closeStaleSession(sessionId: number, minQuietMs = 0) {
     try {
       const sessionManager = this.server.env.get(SessionManager);
       for (const s of [...sessionManager.sessions]) {
@@ -802,7 +824,10 @@ export class ServerModeBridge {
         if (
           !staleSessionShouldClose(
             s,
-            staleSessionQuietWindowMs(this.dataProvider.featureFlags),
+            Math.max(
+              staleSessionQuietWindowMs(this.dataProvider.featureFlags),
+              minQuietMs,
+            ),
           )
         ) {
           // 0 subs but recent traffic: the peer is recovering, not dead.
@@ -815,7 +840,8 @@ export class ServerModeBridge {
             sessionId,
             setTimeout(() => {
               this.staleSessionTimers.delete(sessionId);
-              this.closeStaleSession(sessionId);
+              // carry the floor, or the re-arm drops back to no quiet window
+              this.closeStaleSession(sessionId, minQuietMs);
             }, deadSessionTimeoutMs(this.dataProvider.featureFlags)),
           );
           break;
@@ -847,6 +873,11 @@ export class ServerModeBridge {
       let kept = 0;
       for (const s of sessions) {
         if (s.isClosing || s.subscriptions.size > 0) {
+          continue;
+        }
+        // A per-session timer already owns this one, and it may be priming
+        // right now, which shows as 0 subscriptions (#424).
+        if (this.staleSessionTimers.has(s.id)) {
           continue;
         }
         const idleSec = Math.round((Date.now() - s.timestamp) / 1000);
