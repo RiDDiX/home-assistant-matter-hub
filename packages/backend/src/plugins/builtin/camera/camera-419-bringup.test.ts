@@ -1,12 +1,15 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Environment, VariableService } from "@matter/general";
+import { Environment, Logger, VariableService } from "@matter/general";
 import { Endpoint, VendorId } from "@matter/main";
+import { BridgedDeviceBasicInformationServer } from "@matter/main/behaviors";
 import { CameraAvStreamManagement } from "@matter/main/clusters";
 import { ServerNode } from "@matter/main/node";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { AggregatorEndpoint } from "../../../matter/endpoints/aggregator-endpoint.js";
+import { BridgeDataProvider } from "../../../services/bridges/bridge-data-provider.js";
+import { BridgeEndpointManager } from "../../../services/bridges/bridge-endpoint-manager.js";
 import { createCameraEndpointType } from "./camera-endpoint.js";
 import type { WebRtcBridge } from "./webrtc-bridge.js";
 
@@ -153,5 +156,212 @@ describe("bridge server node tcp shape (#419)", () => {
       incoming: true,
       outgoing: false,
     });
+  });
+});
+
+// Every endpoint under an aggregator needs BridgedDeviceBasicInformation or
+// controllers do not render it. Plugin endpoints that bring their own
+// endpointType used to mount without it.
+describe("plugin endpoint mounts carry bridged basic information", () => {
+  it("gives a camera device its bridged basic information", async () => {
+    env.set(
+      BridgeDataProvider,
+      new BridgeDataProvider({
+        id: "b",
+        name: "b",
+        port: 0,
+        filter: { include: [], exclude: [], includeMode: "any" },
+        basicInformation: {
+          vendorId: 0xfff1,
+          vendorName: "t",
+          productName: "t",
+          productLabel: "t",
+          hardwareVersion: 1,
+          softwareVersion: 1,
+          // biome-ignore lint/suspicious/noExplicitAny: test fixture
+        } as any,
+        // biome-ignore lint/suspicious/noExplicitAny: test fixture
+      } as any),
+    );
+    server = await ServerNode.create({
+      // biome-ignore lint/suspicious/noExplicitAny: env valid at runtime
+      environment: env as any,
+      id: `cam419-plugin-${counter++}`,
+      network: { port: 0 },
+      commissioning: { passcode: 20202021, discriminator: 3840 },
+      basicInformation: { vendorId: VendorId(0xfff1), productId: 0x8000 },
+    });
+
+    const pluginManager = {
+      onDeviceRegistered: undefined as
+        | ((name: string, device: unknown) => Promise<void>)
+        | undefined,
+      onDeviceUnregistered: undefined,
+      getDomainMappings: () => new Map(),
+    };
+    const manager = new BridgeEndpointManager(
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      "b",
+      Logger.get("Camera419"),
+      pluginManager as never,
+    );
+    await server.add(manager.root);
+
+    await pluginManager.onDeviceRegistered?.("camera", {
+      id: "front",
+      name: "Front Door",
+      deviceType: "camera",
+      clusters: [],
+      endpointType: createCameraEndpointType(bridge, "camera.front"),
+    });
+
+    const part = [...manager.root.parts].find((p) => p.id === "plugin_front");
+    if (!part) throw new Error("camera part not mounted");
+    const label = await part.act(
+      // biome-ignore lint/suspicious/noExplicitAny: read the cluster state
+      (agent) => (agent as any).bridgedDeviceBasicInformation.state.nodeLabel,
+    );
+    expect(label).toBe("Front Door");
+    await manager.dispose();
+  });
+
+  it("skips an endpointType that can take neither config nor identity", async () => {
+    env.set(
+      BridgeDataProvider,
+      new BridgeDataProvider({
+        id: "b",
+        name: "b",
+        port: 0,
+        filter: { include: [], exclude: [], includeMode: "any" },
+        basicInformation: {
+          vendorId: 0xfff1,
+          vendorName: "t",
+          productName: "t",
+          productLabel: "t",
+          hardwareVersion: 1,
+          softwareVersion: 1,
+          // biome-ignore lint/suspicious/noExplicitAny: test fixture
+        } as any,
+        // biome-ignore lint/suspicious/noExplicitAny: test fixture
+      } as any),
+    );
+    server = await ServerNode.create({
+      // biome-ignore lint/suspicious/noExplicitAny: env valid at runtime
+      environment: env as any,
+      id: `cam419-immutable-${counter++}`,
+      network: { port: 0 },
+      commissioning: { passcode: 20202021, discriminator: 3840 },
+      basicInformation: { vendorId: VendorId(0xfff1), productId: 0x8000 },
+    });
+
+    const pluginManager = {
+      onDeviceRegistered: undefined as
+        | ((name: string, device: unknown) => Promise<void>)
+        | undefined,
+      onDeviceUnregistered: undefined,
+      getDomainMappings: () => new Map(),
+    };
+    const manager = new BridgeEndpointManager(
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      "b",
+      Logger.get("Camera419immutable"),
+      pluginManager as never,
+    );
+    await server.add(manager.root);
+
+    // Neither with() nor set(): mounting it would drop the cluster config.
+    const frozen = { deviceType: 0x0142, name: "Frozen", behaviors: {} };
+    await pluginManager.onDeviceRegistered?.("camera", {
+      id: "frozen",
+      name: "Frozen",
+      deviceType: "camera",
+      clusters: [{ clusterId: "onOff", attributes: { onOff: true } }],
+      endpointType: frozen,
+    });
+
+    expect([...manager.root.parts].map((p) => p.id)).not.toContain(
+      "plugin_frozen",
+    );
+    await manager.dispose();
+  });
+
+  it("leaves a plugin that brings its own identity alone", async () => {
+    env.set(
+      BridgeDataProvider,
+      new BridgeDataProvider({
+        id: "b",
+        name: "b",
+        port: 0,
+        filter: { include: [], exclude: [], includeMode: "any" },
+        basicInformation: {
+          vendorId: 0xfff1,
+          vendorName: "t",
+          productName: "t",
+          productLabel: "t",
+          hardwareVersion: 1,
+          softwareVersion: 1,
+          // biome-ignore lint/suspicious/noExplicitAny: test fixture
+        } as any,
+        // biome-ignore lint/suspicious/noExplicitAny: test fixture
+      } as any),
+    );
+    server = await ServerNode.create({
+      // biome-ignore lint/suspicious/noExplicitAny: env valid at runtime
+      environment: env as any,
+      id: `cam419-own-${counter++}`,
+      network: { port: 0 },
+      commissioning: { passcode: 20202021, discriminator: 3840 },
+      basicInformation: { vendorId: VendorId(0xfff1), productId: 0x8000 },
+    });
+
+    const pluginManager = {
+      onDeviceRegistered: undefined as
+        | ((name: string, device: unknown) => Promise<void>)
+        | undefined,
+      onDeviceUnregistered: undefined,
+      getDomainMappings: () => new Map(),
+    };
+    const manager = new BridgeEndpointManager(
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      "b",
+      Logger.get("Camera419own"),
+      pluginManager as never,
+    );
+    await server.add(manager.root);
+
+    // The plugin already declares the cluster, so ours must not replace it.
+    const own = createCameraEndpointType(bridge, "camera.own").with(
+      BridgedDeviceBasicInformationServer,
+    );
+    await pluginManager.onDeviceRegistered?.("camera", {
+      id: "own",
+      name: "Own Identity",
+      deviceType: "camera",
+      clusters: [
+        {
+          clusterId: "bridgedDeviceBasicInformation",
+          attributes: { nodeLabel: "Set By Plugin", reachable: true },
+        },
+      ],
+      endpointType: own,
+    });
+
+    const part = [...manager.root.parts].find((p) => p.id === "plugin_own");
+    if (!part) throw new Error("part not mounted");
+    const label = await part.act(
+      // biome-ignore lint/suspicious/noExplicitAny: read the cluster state
+      (agent) => (agent as any).bridgedDeviceBasicInformation.state.nodeLabel,
+    );
+    expect(label).toBe("Set By Plugin");
+    await manager.dispose();
   });
 });

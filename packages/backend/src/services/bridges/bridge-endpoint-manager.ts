@@ -16,6 +16,8 @@ import { getVacuumServiceAreas } from "../../matter/endpoints/legacy/vacuum/beha
 import { VacuumAreaSwitchEndpoint } from "../../matter/endpoints/legacy/vacuum/vacuum-area-switch.js";
 import { validateEndpointType } from "../../matter/endpoints/validate-endpoint-type.js";
 import { BUILTIN_PLUGINS } from "../../plugins/builtin/index.js";
+import { PluginBasicInformationServer } from "../../plugins/plugin-basic-information-server.js";
+import { PluginDeviceBehavior } from "../../plugins/plugin-behavior.js";
 import { createPluginEndpointType } from "../../plugins/plugin-device-factory.js";
 import type { PluginInstaller } from "../../plugins/plugin-installer.js";
 import type { PluginManager } from "../../plugins/plugin-manager.js";
@@ -168,12 +170,51 @@ export class BridgeEndpointManager extends Service {
           );
           return;
         }
+        const supplied = device.endpointType as Partial<MutableEndpoint>;
         const initialState: Record<string, object> = {};
         for (const cluster of device.clusters) {
+          if (
+            cluster.clusterId === "pluginDevice" &&
+            supplied.behaviors?.pluginDevice == null &&
+            supplied.behaviors?.bridgedDeviceBasicInformation == null
+          ) {
+            this.log.warn(
+              `Plugin "${pluginName}": device "${device.id}" declares a "pluginDevice" cluster without owning that behavior, ignoring it`,
+            );
+            continue;
+          }
           initialState[cluster.clusterId] = cluster.attributes;
         }
-        // The plugin owns its behaviors, so no PluginDeviceBehavior here.
-        const base = device.endpointType as MutableEndpoint;
+        // The plugin owns its clusters, but every endpoint under an
+        // aggregator still needs BridgedDeviceBasicInformation or controllers
+        // do not render it. Only add ours when the plugin brought none, and
+        // only to a type that can take it: with()/set() are MutableEndpoint.
+        const hasOwnIdentity =
+          supplied.behaviors?.bridgedDeviceBasicInformation != null;
+        // Our identity server reads PluginDeviceBehavior's state, so we can
+        // only add it when that id is ours to define.
+        const ownsPluginDevice = supplied.behaviors?.pluginDevice != null;
+        const mutable =
+          typeof supplied.with === "function" &&
+          typeof supplied.set === "function";
+        if (!mutable && Object.keys(initialState).length > 0) {
+          // Mounting it would drop the cluster config the plugin asked for.
+          this.log.warn(
+            `Plugin "${pluginName}": endpointType for device "${device.id}" cannot take its cluster config, skipping it`,
+          );
+          return;
+        }
+        if (!hasOwnIdentity && (!mutable || ownsPluginDevice)) {
+          this.log.warn(
+            `Plugin "${pluginName}": device "${device.id}" mounts without BridgedDeviceBasicInformation, controllers may not show it`,
+          );
+        }
+        let base = device.endpointType as MutableEndpoint;
+        if (mutable && !hasOwnIdentity && !ownsPluginDevice) {
+          base = base.with(PluginBasicInformationServer, PluginDeviceBehavior);
+          // after the cluster loop: a plugin cluster must not clobber this
+          initialState.pluginDevice = { device, pluginName };
+        }
         endpoint = new Endpoint(
           Object.keys(initialState).length > 0 ? base.set(initialState) : base,
           { id: `plugin_${device.id}` },
