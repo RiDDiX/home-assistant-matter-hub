@@ -70,25 +70,44 @@ export const deviceClassMapping = (entity: HomeAssistantEntityState) => {
   const mapping = DEVICE_CLASS_TO_MATTER_TYPE[raw.toLowerCase()];
   if (!mapping) return undefined;
 
-  // TiltBlindTiltOnly only fits tilt-only covers: fall back to Rollershade
-  // for lift-only blinds (#312) and TiltBlindLift for lift+tilt (#323).
+  // The Type has to agree with the feature map or controllers drop the device
+  // (#304). Lift is always in it (see the cover endpoint), so a tilt-capable
+  // cover can only be Shutter or TiltBlindLift, and tilt-only never applies.
   const supportedFeatures = attributes(entity).supported_features ?? 0;
-  const hasLift =
-    (supportedFeatures & CoverSupportedFeatures.support_open) !== 0;
   const hasTilt = coverHasTilt(supportedFeatures);
+  if (hasTilt) {
+    // Shutter covers both axes, and RollerShutter belongs to it.
+    if (mapping.type === WindowCovering.WindowCoveringType.Shutter) {
+      return mapping;
+    }
+    // EndProductType has to belong to the Type, so the lift-only products
+    // move to their tilting counterpart, and the rare rest stays Unknown.
+    const tiltProducts: Partial<
+      Record<WindowCovering.EndProductType, WindowCovering.EndProductType>
+    > = {
+      [WindowCovering.EndProductType.InteriorBlind]:
+        WindowCovering.EndProductType.InteriorBlind,
+      [WindowCovering.EndProductType.CentralCurtain]:
+        WindowCovering.EndProductType.VerticalBlindStripCurtain,
+      [WindowCovering.EndProductType.RollerShade]:
+        WindowCovering.EndProductType.SheerShade,
+    };
+    return {
+      type: WindowCovering.WindowCoveringType.TiltBlindLift,
+      // a tilting roof window is no sheer shade, Unknown is honest there
+      endProductType:
+        raw.toLowerCase() === "window"
+          ? WindowCovering.EndProductType.Unknown
+          : (tiltProducts[mapping.endProductType] ??
+            WindowCovering.EndProductType.Unknown),
+    };
+  }
   if (mapping.type === WindowCovering.WindowCoveringType.TiltBlindTiltOnly) {
-    if (!hasTilt) {
-      return {
-        type: WindowCovering.WindowCoveringType.Rollershade,
-        endProductType: mapping.endProductType,
-      };
-    }
-    if (hasLift) {
-      return {
-        type: WindowCovering.WindowCoveringType.TiltBlindLift,
-        endProductType: mapping.endProductType,
-      };
-    }
+    // InteriorBlind needs LF & TL per spec, a lift-only blind cannot claim it
+    return {
+      type: WindowCovering.WindowCoveringType.Rollershade,
+      endProductType: WindowCovering.EndProductType.Unknown,
+    };
   }
   return mapping;
 };

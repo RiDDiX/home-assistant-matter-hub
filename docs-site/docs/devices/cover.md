@@ -52,9 +52,9 @@ By default, HAMH inverts the percentage to comply with the Matter specification.
 |------------|-----------|----------|------|------|
 | Apple Home | ✅ | ✅ | ✅ | ✅ |
 | Google Home | ✅ | ✅ | ⚠️ | ✅ |
-| Amazon Alexa | ✅ | ✅ | ⚠️ | ✅ |
+| Amazon Alexa | ✅ | ✅ | ❌ | ✅ |
 
-> Tilt support varies by controller. Apple Home has the best tilt control support.
+> Tilt support varies by controller. Apple Home has the best tilt control support. Alexa maps Matter covers to open/close/position only and offers no tilt control at all, whatever the bridge advertises (#405). Control the slats from Home Assistant instead.
 
 ## Troubleshooting
 
@@ -94,12 +94,13 @@ Google Home does not support WindowCovering devices as actions in Automations. W
 
 ### Cover cannot be used in Alexa routines
 
-Alexa does not expose Matter WindowCovering devices as actions in its routine builder. The covers appear in the Alexa device list and respond to manual open/close and voice commands, but they are not offered when building a routine. This is an Alexa limitation, not a bridge issue: the [Matter ecosystem table](https://github.com/project-chip/matter.js/blob/main/docs/ECOSYSTEMS.md) lists Window Covering (0x0202) as not supported by Amazon, and Amazon only maps the cluster to manual open/close control. No `device_class` or Matter type change makes the cover routine-selectable.
+Alexa does not offer Matter WindowCovering devices as actions in its routine builder. The covers appear in the Alexa device list, respond to manual open/close and to voice, and accept position commands over Matter, they are simply not selectable when building a routine. Reporters have confirmed this across Rollershade, Drapery and Shutter types, and Alexa's own routine category does list covers that reach it through a skill instead of Matter, so the line is Matter versus skill on Amazon's side. No `device_class` or Matter type change makes the cover routine-selectable (#312).
 
 **Workarounds:**
-1. Wrap the cover in a Home Assistant script or scene and expose that to Alexa, scripts and scenes do show up as routine actions.
-2. Use Home Assistant automations instead of Alexa routines.
-3. Voice control still works ("Alexa, close the blinds"), only the routine builder is affected.
+1. Set `coverExposeAsDimmableLight` on that cover in the Entity Mapping dialog. It is exposed as a dimmable light instead, where on/off is open/close and brightness is position, and lights are selectable in routines. Alexa caches the device type, so re-add the device in Alexa afterwards.
+2. Wrap the cover in a Home Assistant script or scene and expose that to Alexa, scripts and scenes do show up as routine actions.
+3. Use Home Assistant automations instead of Alexa routines.
+4. Voice control still works ("Alexa, close the blinds"), only the routine builder is affected.
 
 ### Cover doesn't appear in Alexa routine picker after changing `device_class`
 
