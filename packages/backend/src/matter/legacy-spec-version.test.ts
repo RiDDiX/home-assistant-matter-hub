@@ -63,8 +63,8 @@ import { BasicInformationServer } from "@matter/main/behaviors";
 import { ServerNode } from "@matter/main/node";
 import { SessionManager } from "@matter/main/protocol";
 import { afterEach, beforeEach } from "vitest";
-import { ServerModeServerNode } from "./endpoints/server-mode-server-node.js";
 import { createBridgeServerConfig } from "../utils/json/create-bridge-server-config.js";
+import { ServerModeServerNode } from "./endpoints/server-mode-server-node.js";
 
 let dir: string;
 let server: ServerNode | undefined;
