@@ -3,6 +3,7 @@ import type { BridgeData } from "@home-assistant-matter-hub/common";
 import { AggregatorEndpoint } from "@matter/main/endpoints";
 import { type Node, ServerNode } from "@matter/main/node";
 import { VendorId } from "@matter/main/types";
+import { legacySpecBasicInformation } from "../../matter/legacy-spec-version.js";
 import { matterSubscriptionOptions } from "../../matter/subscription-options.js";
 import { trimToLength } from "../trim-to-length.js";
 
@@ -26,6 +27,7 @@ export function createBridgeServerConfig(
       deviceType: AggregatorEndpoint.deviceType,
     },
     basicInformation: {
+      ...legacySpecBasicInformation(data.featureFlags),
       uniqueId: data.id,
       nodeLabel: trimToLength(data.name, 32, "..."),
       vendorId: VendorId(data.basicInformation.vendorId),

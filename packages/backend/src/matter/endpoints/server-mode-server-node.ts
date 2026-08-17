@@ -11,6 +11,7 @@ import { type Endpoint, ServerNode } from "@matter/main/node";
 import { DeviceTypeId, VendorId } from "@matter/main/types";
 import { sanitizeMatterString } from "../../utils/sanitize-matter-string.js";
 import { trimToLength } from "../../utils/trim-to-length.js";
+import { legacySpecBasicInformation } from "../legacy-spec-version.js";
 import { matterSubscriptionOptions } from "../subscription-options.js";
 
 const logger = Logger.get("ServerModeServerNode");
@@ -48,6 +49,7 @@ export class ServerModeServerNode extends ServerNode {
         deviceType: DeviceTypeId(RoboticVacuumCleanerDevice.deviceType),
       },
       basicInformation: {
+        ...legacySpecBasicInformation(bridgeData.featureFlags),
         uniqueId: bridgeData.id,
         nodeLabel: trimToLength(bridgeData.name, 32, "..."),
         vendorId: VendorId(bridgeData.basicInformation.vendorId),

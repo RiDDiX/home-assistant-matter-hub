@@ -332,6 +332,22 @@ const featureFlagSchema: JSONSchema7 = {
       default: 0,
     },
 
+    advertiseSpecVersion151: {
+      title: "Advertise Matter 1.5.1 (Alexa pairing diagnostic)",
+      description:
+        "Mask the Matter version identifiers as 1.5.1 instead of 1.6.0, in " +
+        "the BasicInformation attributes and the session parameters. The " +
+        "data model itself stays 1.6. Only for diagnosing Alexa pairing " +
+        "failures that stop right after the " +
+        "attestation step (#449): 2.0.49 was the last release to advertise " +
+        "1.5.1 and the last with a confirmed Echo pairing. Every controller " +
+        "on this bridge sees the masked version on its next reconnect, so " +
+        "use a dedicated test bridge, and restart the bridge plus re-pair " +
+        "the Echo after changing it. Default off.",
+      type: "boolean",
+      default: false,
+    },
+
     fastSessionRecovery: {
       title: "Fast Session Recovery (Google offline workaround)",
       description:

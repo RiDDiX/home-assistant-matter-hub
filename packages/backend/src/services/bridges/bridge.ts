@@ -7,6 +7,7 @@ import {
 } from "@home-assistant-matter-hub/common";
 import type { Environment } from "@matter/general";
 import { type Endpoint, Network } from "@matter/main";
+import { BasicInformationServer } from "@matter/main/behaviors";
 import { CommissioningServer, InteractionServer } from "@matter/main/node";
 import {
   DeviceAdvertiser,
@@ -19,6 +20,10 @@ import {
 import { FilteredNetwork } from "../../core/app/filtered-network.js";
 import type { BetterLogger, LoggerService } from "../../core/app/logger.js";
 import { BridgeServerNode } from "../../matter/endpoints/bridge-server-node.js";
+import {
+  applyLegacySpecSessionParameters,
+  specVersionValues,
+} from "../../matter/legacy-spec-version.js";
 import {
   collectAdvertisedAddresses,
   runMdnsAddressWatchTick,
@@ -478,6 +483,16 @@ export class Bridge {
       );
       this.endpointManager.startObserving();
       ensureCommissioningConfig(this.server);
+      // before start: a fast commissioner can PASE immediately, and a node
+      // kept across a flag change must follow the flag (#449)
+      applyLegacySpecSessionParameters(
+        this.server.env.get(SessionManager),
+        this.dataProvider.featureFlags,
+      );
+      await this.server.setStateOf(
+        BasicInformationServer,
+        specVersionValues(this.dataProvider.featureFlags),
+      );
       await this.server.start();
       await this.endpointManager.startPlugins();
       this.setStatus({ code: BridgeStatus.Running });
