@@ -606,6 +606,19 @@ describe("identity survives isolation and plugin stops (#438)", () => {
   });
 });
 
+// Poll instead of a fixed sleep, CI runners stretch the retry timing. The
+// condition may throw mid-rebuild (endpoint removed, not yet re-added).
+async function until(cond: () => boolean, ms = 5000) {
+  const start = Date.now();
+  for (;;) {
+    try {
+      if (cond()) return;
+    } catch {}
+    if (Date.now() - start >= ms) return;
+    await new Promise((r) => setTimeout(r, 25));
+  }
+}
+
 // #450: a battery sensor that was unavailable when the endpoint was built
 // never got picked up later. The resolved battery is part of the mapping
 // fingerprint now, so the endpoint rebuilds once the sensor appears.
@@ -661,7 +674,7 @@ describe("battery sensor appearing after endpoint creation (#450)", () => {
 
     ha.states[BATTERY].state = "85";
     await manager.updateStates(ha.states, new Set([BATTERY]));
-    await new Promise((r) => setTimeout(r, 100));
+    await until(() => vacuumEndpoint(manager) !== first);
     expect(vacuumEndpoint(manager)).not.toBe(first);
     expect(vacuumEndpoint(manager).mappedEntityIds).toContain(BATTERY);
   });
@@ -742,7 +755,7 @@ describe("battery sensor appearing after endpoint creation (#450)", () => {
 
     ha.states[BATTERY].state = "85";
     await manager.updateStates(ha.states, new Set([BATTERY]));
-    await new Promise((r) => setTimeout(r, 100));
+    await until(() => vacuumEndpoint(manager) !== first);
 
     const second = vacuumEndpoint(manager);
     expect(second).not.toBe(first);
@@ -750,7 +763,7 @@ describe("battery sensor appearing after endpoint creation (#450)", () => {
 
     // an unrelated later state batch does not rebuild again
     await manager.updateStates(ha.states, new Set([BATTERY]));
-    await new Promise((r) => setTimeout(r, 100));
+    await new Promise((r) => setTimeout(r, 150));
     expect(vacuumEndpoint(manager)).toBe(second);
   });
 });
