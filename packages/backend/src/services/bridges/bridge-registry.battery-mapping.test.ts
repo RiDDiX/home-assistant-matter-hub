@@ -55,7 +55,10 @@ function state(
   };
 }
 
-function sut(states: Record<string, HomeAssistantEntityState>) {
+function sut(
+  states: Record<string, HomeAssistantEntityState>,
+  autoBatteryMapping = true,
+) {
   const entities = Object.fromEntries(
     Object.keys(states).map((entityId) => [entityId, registryEntity(entityId)]),
   );
@@ -67,7 +70,7 @@ function sut(states: Record<string, HomeAssistantEntityState>) {
     states,
   } as unknown as HomeAssistantRegistry;
   const dataProvider = {
-    featureFlags: { autoBatteryMapping: true },
+    featureFlags: { autoBatteryMapping },
     filter: { include: [], exclude: [], includeMode: "any" },
   } as unknown as BridgeDataProvider;
 
@@ -157,6 +160,26 @@ describe("BridgeRegistry battery mapping", () => {
     );
   });
 
+  it("resolves the sensor after a refresh once it becomes available (#450)", () => {
+    const states: Record<string, HomeAssistantEntityState> = {
+      "sensor.robot_battery": state("sensor.robot_battery", "unavailable", {
+        device_class: SensorDeviceClass.battery,
+      }),
+    };
+    const registry = sut(states);
+    expect(registry.findBatteryEntityForDevice(deviceId)).toBeUndefined();
+    // negative answer is cached until the next refresh
+    expect(registry.findBatteryEntityForDevice(deviceId)).toBeUndefined();
+
+    states["sensor.robot_battery"] = state("sensor.robot_battery", "85", {
+      device_class: SensorDeviceClass.battery,
+    });
+    registry.refresh();
+    expect(registry.findBatteryEntityForDevice(deviceId)).toBe(
+      "sensor.robot_battery",
+    );
+  });
+
   it("prefers a real battery sensor over a classless last_clean_area sibling", () => {
     const registry = sut({
       "sensor.last_clean_area": state("sensor.last_clean_area", "27", {}),
@@ -167,6 +190,67 @@ describe("BridgeRegistry battery mapping", () => {
 
     expect(registry.findBatteryEntityForDevice(deviceId)).toBe(
       "sensor.battery_level",
+    );
+  });
+});
+
+describe("batteryFingerprintFor (#450)", () => {
+  const VACUUM = "vacuum.robot";
+  const BATTERY = "sensor.robot_battery";
+
+  function vacuumStates(
+    batteryValue: string,
+  ): Record<string, HomeAssistantEntityState> {
+    return {
+      [VACUUM]: state(VACUUM, "docked", {}),
+      [BATTERY]: state(BATTERY, batteryValue, {
+        device_class: SensorDeviceClass.battery,
+      }),
+    };
+  }
+
+  it("follows the resolver across a refresh", () => {
+    const states = vacuumStates("unavailable");
+    const registry = sut(states);
+    expect(registry.batteryFingerprintFor(VACUUM, undefined)).toBe("");
+
+    states[BATTERY] = state(BATTERY, "85", {
+      device_class: SensorDeviceClass.battery,
+    });
+    registry.refresh();
+    expect(registry.batteryFingerprintFor(VACUUM, undefined)).toBe(BATTERY);
+  });
+
+  it("stays empty when the mapping already decides the battery", () => {
+    const registry = sut(vacuumStates("85"));
+    expect(
+      registry.batteryFingerprintFor(VACUUM, {
+        entityId: VACUUM,
+        batteryEntity: BATTERY,
+      }),
+    ).toBe("");
+    expect(
+      registry.batteryFingerprintFor(VACUUM, {
+        entityId: VACUUM,
+        disableBatteryMapping: true,
+      }),
+    ).toBe("");
+  });
+
+  it("vacuums resolve even without the auto mapping flag, others do not", () => {
+    const registry = sut(vacuumStates("85"), false);
+    expect(registry.batteryFingerprintFor(VACUUM, undefined)).toBe(BATTERY);
+    expect(registry.batteryFingerprintFor(BATTERY, undefined)).toBe("");
+  });
+
+  it("sensor endpoints never carry a battery fingerprint, even with the flag", () => {
+    // a sibling temperature sensor would resolve the device battery without
+    // the sensor gate, the self-check alone does not cover this
+    const states = vacuumStates("85");
+    states["sensor.robot_temp"] = state("sensor.robot_temp", "21", {});
+    const registry = sut(states, true);
+    expect(registry.batteryFingerprintFor("sensor.robot_temp", undefined)).toBe(
+      "",
     );
   });
 });

@@ -29,7 +29,7 @@ import {
   ENDPOINT_REMOVAL_GRACE_MS,
   type PendingRemoval,
 } from "./bridge-endpoint-manager.js";
-import type { BridgeRegistry } from "./bridge-registry.js";
+import { type BridgeRegistry, fingerprintBattery } from "./bridge-registry.js";
 import {
   IdentityResolver,
   identityKey,
@@ -100,11 +100,117 @@ export class ServerModeEndpointManager extends Service {
     return this.mappingStorage.getMapping(this.dataProvider.id, entityId);
   }
 
+  // #450: an endpoint built while its battery sensor was unavailable stays
+  // battery-less, because registry ticks only refresh on structural changes.
+  // When a same-device sensor state arrives, re-resolve and rebuild.
+  private batteryRetryScheduled = false;
+  private batteryRetryTimer: ReturnType<typeof setTimeout> | null = null;
+  // deviceId -> primary entityId of endpoints that auto-map but carry no
+  // battery, bounds the per-state-batch check to a map hit
+  private readonly batteryRetryCandidates = new Map<string, string>();
+
+  // Only endpoints the auto-mapping applies to belong here: a manual or
+  // disabled mapping, or a sensor endpoint sharing the device, must not
+  // claim the slot (last writer would win) and stall the recovery.
+  private batteryRetryEligible(entityId: string): boolean {
+    const mapping = this.getEntityMapping(entityId);
+    if (mapping?.batteryEntity || mapping?.disableBatteryMapping) return false;
+    if (
+      entityId.startsWith("sensor.") ||
+      entityId.startsWith("binary_sensor.")
+    ) {
+      return false;
+    }
+    return (
+      entityId.startsWith("vacuum.") ||
+      !!this.registry.isAutoBatteryMappingEnabled?.()
+    );
+  }
+
+  private rebuildBatteryRetryCandidates(): void {
+    this.batteryRetryCandidates.clear();
+    for (const [entityId, entry] of this.endpoints) {
+      if (fingerprintBattery(entry.fingerprint) != null) continue;
+      if (!this.batteryRetryEligible(entityId)) continue;
+      const deviceId = this.registry.entity(entityId)?.device_id;
+      if (deviceId) this.batteryRetryCandidates.set(deviceId, entityId);
+    }
+  }
+
+  private maybeRetryBatteryMapping(states: HomeAssistantStates): void {
+    // a stop mid-flight leaves queued batches behind, never schedule on a
+    // stopped manager
+    if (
+      !this.observingRequested ||
+      this.batteryRetryScheduled ||
+      this.batteryRetryCandidates.size === 0
+    ) {
+      return;
+    }
+    for (const id of Object.keys(states)) {
+      if (!id.startsWith("sensor.") && !id.startsWith("binary_sensor."))
+        continue;
+      const deviceId = this.registry.fullEntities[id]?.device_id;
+      if (!deviceId) continue;
+      const entityId = this.batteryRetryCandidates.get(deviceId);
+      if (!entityId) continue;
+      this.registry.forgetBatteryCacheForDevice(deviceId);
+      const resolved = this.registry.batteryFingerprintFor(
+        entityId,
+        this.getEntityMapping(entityId),
+      );
+      if (!resolved) continue;
+      this.batteryRetryScheduled = true;
+      this.log.info(
+        `Battery sensor ${resolved} appeared for ${entityId}, rebuilding`,
+      );
+      // flag stays set until the refresh completes, no concurrent reconcile
+      this.batteryRetryTimer = setTimeout(() => {
+        this.batteryRetryTimer = null;
+        this.refreshDevices()
+          .catch((e) => this.log.warn("Battery retry refresh failed:", e))
+          .finally(() => {
+            this.batteryRetryScheduled = false;
+          });
+      }, 0);
+      return;
+    }
+  }
+
   private computeMappingFingerprint(
     mapping: EntityMappingConfig | undefined,
+    entityId?: string,
   ): string {
-    if (!mapping) return "";
-    return JSON.stringify(mapping);
+    // the auto-resolved battery is part of the endpoint shape, so a sensor
+    // that appears later must change the fingerprint and rebuild. JSON tuple
+    // so mapping text can never collide with a battery marker (#450).
+    const battery = entityId
+      ? this.registry.batteryFingerprintFor(entityId, mapping)
+      : "";
+    return JSON.stringify([mapping ?? null, battery || null]);
+  }
+
+  // Live fingerprint for reconcile compares: when the resolver finds nothing
+  // right now but the stored fingerprint maps a sensor that still exists on
+  // the SAME device, keep it. An unavailable snapshot (HA restart) must not
+  // strip the mapping and rebuild the endpoint battery-less (#450).
+  private compareFingerprint(
+    mapping: EntityMappingConfig | undefined,
+    entityId: string,
+    storedFingerprint: string | undefined,
+  ): string {
+    const fingerprint = this.computeMappingFingerprint(mapping, entityId);
+    if (fingerprintBattery(fingerprint) != null || !storedFingerprint)
+      return fingerprint;
+    if (!this.batteryRetryEligible(entityId)) return fingerprint;
+    const battery = fingerprintBattery(storedFingerprint);
+    if (!battery) return fingerprint;
+    const deviceId = this.registry.entity(entityId)?.device_id;
+    const stillSameDevice =
+      !!deviceId && this.registry.fullEntities[battery]?.device_id === deviceId;
+    return stillSameDevice
+      ? JSON.stringify([mapping ?? null, battery])
+      : fingerprint;
   }
 
   override async dispose(): Promise<void> {
@@ -159,6 +265,20 @@ export class ServerModeEndpointManager extends Service {
         ids.add(mappedId);
       }
     }
+    // #450: battery-less auto-map endpoints watch their device's sensors,
+    // an unresolved battery is not mapped so it would never arrive otherwise
+    if (this.batteryRetryCandidates.size > 0) {
+      for (const entity of Object.values(this.registry.fullEntities)) {
+        if (!entity.device_id) continue;
+        if (!this.batteryRetryCandidates.has(entity.device_id)) continue;
+        if (
+          entity.entity_id.startsWith("sensor.") ||
+          entity.entity_id.startsWith("binary_sensor.")
+        ) {
+          ids.add(entity.entity_id);
+        }
+      }
+    }
     return [...ids];
   }
 
@@ -177,6 +297,11 @@ export class ServerModeEndpointManager extends Service {
       clearTimeout(this.removalRecheckTimer);
       this.removalRecheckTimer = null;
     }
+    if (this.batteryRetryTimer) {
+      clearTimeout(this.batteryRetryTimer);
+      this.batteryRetryTimer = null;
+    }
+    this.batteryRetryScheduled = false;
   }
 
   /** Primary first (the entity the first include matcher tests true for). */
@@ -435,9 +560,13 @@ export class ServerModeEndpointManager extends Service {
           continue;
         }
 
-        const fingerprint = this.computeMappingFingerprint(mapping);
+        const fingerprint = this.computeMappingFingerprint(mapping, entityId);
         const existing = this.endpoints.get(entityId);
-        if (existing && existing.fingerprint === fingerprint) {
+        if (
+          existing &&
+          existing.fingerprint ===
+            this.compareFingerprint(mapping, entityId, existing.fingerprint)
+        ) {
           this.log.debug(`Device endpoint already exists for ${entityId}`);
           continue;
         }
@@ -527,7 +656,15 @@ export class ServerModeEndpointManager extends Service {
           }
 
           await this.serverNode.addDevice(endpoint);
-          this.endpoints.set(entityId, { endpoint, fingerprint });
+          // stored fingerprint reflects what was built: a battery resolved
+          // while this endpoint missed it must still trigger the catch-up
+          const builtBattery = fingerprintBattery(fingerprint);
+          const asBuilt =
+            builtBattery != null &&
+            !endpoint.mappedEntityIds.includes(builtBattery)
+              ? JSON.stringify([mapping ?? null, null])
+              : fingerprint;
+          this.endpoints.set(entityId, { endpoint, fingerprint: asBuilt });
           // mounted for real, so nothing this entity parked is reserved any
           // more, not even an id it left behind under an older custom name
           for (const [id, owner] of this.parkedEndpointIds) {
@@ -560,6 +697,7 @@ export class ServerModeEndpointManager extends Service {
       if (lifecycle === this.lifecycle) {
         this.scheduleRemovalRecheck();
       }
+      this.rebuildBatteryRetryCandidates();
       // re-subscribe on every path so mapped-entity subscriptions stay fresh
       if (this.observingRequested) {
         this.startObserving();
@@ -571,6 +709,8 @@ export class ServerModeEndpointManager extends Service {
     // Merge subscription states into registry so EntityStateProvider
     // reads fresh values for mapped entities (battery, humidity, etc.)
     this.registry.mergeExternalStates(states);
+
+    this.maybeRetryBatteryMapping(states);
 
     for (const [entityId, entry] of this.endpoints) {
       try {

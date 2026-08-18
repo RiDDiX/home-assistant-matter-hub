@@ -1,5 +1,6 @@
 import type {
   CleanAreaRoom,
+  EntityMappingConfig,
   HomeAssistantDeviceRegistry,
   HomeAssistantEntityRegistry,
   HomeAssistantEntityState,
@@ -26,6 +27,19 @@ import type {
 import type { BridgeDataProvider } from "./bridge-data-provider.js";
 import { resolveBatteryPercent } from "./entity-state-provider.js";
 import { testMatchers } from "./matcher/matches-entity-filter.js";
+
+// Battery marker inside a manager mapping fingerprint, a JSON tuple of
+// [mapping, batteryEntityId] so mapping text can never collide with it (#450).
+export function fingerprintBattery(fingerprint: string): string | null {
+  try {
+    const parsed = JSON.parse(fingerprint);
+    return Array.isArray(parsed) && typeof parsed[1] === "string"
+      ? parsed[1]
+      : null;
+  } catch {
+    return null;
+  }
+}
 
 export interface BridgeRegistryProps {
   readonly registry: HomeAssistantRegistry;
@@ -97,6 +111,42 @@ export class BridgeRegistry {
     return (
       this._devices[entity.device_id] ?? this.registry.devices[entity.device_id]
     );
+  }
+
+  /**
+   * The battery sensor the auto-mapping would resolve for this entity right
+   * now, or "" when auto-mapping does not apply. Part of the endpoint mapping
+   * fingerprint: a sensor that was unavailable at endpoint creation used to be
+   * negative-cached forever, the endpoint never rebuilt and the vacuum lost
+   * its battery until a full restart (#450).
+   */
+  batteryFingerprintFor(
+    entityId: string,
+    mapping: EntityMappingConfig | undefined,
+  ): string {
+    if (mapping?.batteryEntity || mapping?.disableBatteryMapping) return "";
+    // sensor endpoints never auto-map a battery, same gate as the managers
+    if (
+      entityId.startsWith("sensor.") ||
+      entityId.startsWith("binary_sensor.")
+    ) {
+      return "";
+    }
+    if (
+      !this.isAutoBatteryMappingEnabled() &&
+      !entityId.startsWith("vacuum.")
+    ) {
+      return "";
+    }
+    const entity = this.entity(entityId);
+    if (!entity?.device_id) return "";
+    const resolved = this.findBatteryEntityForDevice(entity.device_id);
+    return resolved && resolved !== entityId ? resolved : "";
+  }
+
+  /** Drop one cached battery answer so the next lookup resolves fresh (#450). */
+  forgetBatteryCacheForDevice(deviceId: string): void {
+    this._batteryEntityCache.delete(deviceId);
   }
 
   /**

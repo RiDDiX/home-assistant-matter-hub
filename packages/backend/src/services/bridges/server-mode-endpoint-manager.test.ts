@@ -70,6 +70,8 @@ interface Harness {
     entity: ReturnType<typeof vi.fn>;
     initialState: ReturnType<typeof vi.fn>;
     mergeExternalStates: ReturnType<typeof vi.fn>;
+    batteryFingerprintFor: ReturnType<typeof vi.fn>;
+    forgetBatteryCacheForDevice: ReturnType<typeof vi.fn>;
     // biome-ignore lint/suspicious/noExplicitAny: registry stub
     fullEntities: Record<string, any>;
     snapshotGeneration: number;
@@ -82,7 +84,10 @@ interface Harness {
 
 interface HarnessOptions {
   flags?: Record<string, unknown>;
-  entities?: Record<string, { unique_id?: string; platform?: string }>;
+  entities?: Record<
+    string,
+    { unique_id?: string; platform?: string; device_id?: string }
+  >;
 }
 
 function makeHarness(
@@ -116,6 +121,8 @@ function makeHarness(
     entity: vi.fn((id: string) => (opts?.entities as any)?.[id]),
     initialState: vi.fn(() => undefined),
     mergeExternalStates: vi.fn(),
+    batteryFingerprintFor: vi.fn(() => ""),
+    forgetBatteryCacheForDevice: vi.fn(),
     fullEntities,
     snapshotGeneration: 1,
   };
@@ -457,6 +464,36 @@ describe("ServerModeEndpointManager (#301)", () => {
     for (const endpoint of endpoints) {
       expect(endpoint.updateStates).toHaveBeenCalledWith(states);
     }
+  });
+
+  it("a same-device sensor state retriggers battery mapping (#450)", async () => {
+    vacuumCreate.mockImplementation(
+      async (_registry, entityId) =>
+        fakeEndpoint(entityId as string, {
+          deviceType: 0x74,
+        }) as unknown as ServerModeVacuumEndpoint,
+    );
+    const h = makeHarness(["vacuum.robo"], "vacuum.robo", {
+      entities: {
+        "vacuum.robo": { device_id: "dev450" },
+        "sensor.robo_battery": { device_id: "dev450" },
+      },
+    });
+    await h.manager.refreshDevices();
+    // biome-ignore lint/suspicious/noExplicitAny: the retry only runs while observing
+    (h.manager as any).observingRequested = true;
+
+    const refresh = vi.spyOn(h.manager, "refreshDevices");
+    h.registry.batteryFingerprintFor.mockReturnValue("sensor.robo_battery");
+    await h.manager.updateStates({
+      "sensor.robo_battery": { state: "85" },
+    } as never);
+    await new Promise((r) => setTimeout(r, 50));
+
+    expect(h.registry.forgetBatteryCacheForDevice).toHaveBeenCalledWith(
+      "dev450",
+    );
+    expect(refresh).toHaveBeenCalled();
   });
 
   it("closes every endpoint on dispose without deleting", async () => {
