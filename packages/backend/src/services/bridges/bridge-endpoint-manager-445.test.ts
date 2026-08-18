@@ -669,6 +669,8 @@ describe("battery sensor appearing after endpoint creation (#450)", () => {
     await manager.refreshDevices();
     // biome-ignore lint/suspicious/noExplicitAny: the retry only runs while observing
     (manager as any).observingRequested = true;
+    // the deferred refresh must not dial the fake connection
+    vi.spyOn(manager, "startObserving").mockResolvedValue(undefined);
     const first = vacuumEndpoint(manager);
     expect(first.mappedEntityIds).not.toContain(BATTERY);
 
@@ -677,6 +679,9 @@ describe("battery sensor appearing after endpoint creation (#450)", () => {
     await until(() => vacuumEndpoint(manager) !== first);
     expect(vacuumEndpoint(manager)).not.toBe(first);
     expect(vacuumEndpoint(manager).mappedEntityIds).toContain(BATTERY);
+    // drain the deferred refresh before teardown
+    // biome-ignore lint/suspicious/noExplicitAny: reach the retry flag
+    await until(() => !(manager as any).batteryRetryScheduled);
   });
 
   it("a device move drops the kept battery mapping", async () => {
@@ -750,6 +755,8 @@ describe("battery sensor appearing after endpoint creation (#450)", () => {
     await manager.refreshDevices();
     // biome-ignore lint/suspicious/noExplicitAny: the retry only runs while observing
     (manager as any).observingRequested = true;
+    // the deferred refresh must not dial the fake connection
+    vi.spyOn(manager, "startObserving").mockResolvedValue(undefined);
     const first = vacuumEndpoint(manager);
     expect(first.mappedEntityIds).not.toContain(BATTERY);
 
@@ -765,5 +772,8 @@ describe("battery sensor appearing after endpoint creation (#450)", () => {
     await manager.updateStates(ha.states, new Set([BATTERY]));
     await new Promise((r) => setTimeout(r, 150));
     expect(vacuumEndpoint(manager)).toBe(second);
+    // drain the deferred refresh before teardown
+    // biome-ignore lint/suspicious/noExplicitAny: reach the retry flag
+    await until(() => !(manager as any).batteryRetryScheduled);
   });
 });

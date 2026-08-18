@@ -728,6 +728,12 @@ export class LegacyEndpoint extends EntityEndpoint {
       ) {
         return;
       }
+      // A closed or rebuilt endpoint has its behaviors detached, a late flush
+      // against it is moot. Rethrowing lands in the unawaited update chain and
+      // becomes an unhandled rejection (#450 CI).
+      if (errorMessage.includes("is not present on this endpoint")) {
+        return;
+      }
       throw error;
     }
   }

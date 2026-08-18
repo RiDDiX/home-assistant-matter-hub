@@ -483,7 +483,9 @@ describe("ServerModeEndpointManager (#301)", () => {
     // biome-ignore lint/suspicious/noExplicitAny: the retry only runs while observing
     (h.manager as any).observingRequested = true;
 
-    const refresh = vi.spyOn(h.manager, "refreshDevices");
+    const refresh = vi
+      .spyOn(h.manager, "refreshDevices")
+      .mockResolvedValue(undefined);
     h.registry.batteryFingerprintFor.mockReturnValue("sensor.robo_battery");
     await h.manager.updateStates({
       "sensor.robo_battery": { state: "85" },
