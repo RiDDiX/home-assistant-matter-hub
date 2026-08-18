@@ -13,6 +13,7 @@ import { sanitizeMatterString } from "../../utils/sanitize-matter-string.js";
 import { trimToLength } from "../../utils/trim-to-length.js";
 import { legacySpecBasicInformation } from "../legacy-spec-version.js";
 import { matterSubscriptionOptions } from "../subscription-options.js";
+import { rootEndpointType } from "../tc-general-commissioning.js";
 
 const logger = Logger.get("ServerModeServerNode");
 
@@ -35,6 +36,7 @@ export class ServerModeServerNode extends ServerNode {
 
   constructor(env: Environment, bridgeData: BridgeData) {
     super({
+      type: rootEndpointType(bridgeData.featureFlags),
       id: bridgeData.id,
       environment: env,
       network: {

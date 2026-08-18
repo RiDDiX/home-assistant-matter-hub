@@ -348,6 +348,19 @@ const featureFlagSchema: JSONSchema7 = {
       default: false,
     },
 
+    supportTermsAndConditions: {
+      title: "Accept Terms and Conditions commands (Alexa pairing diagnostic)",
+      description:
+        "Advertise the Matter 1.4 TermsAndConditions feature and accept the " +
+        "SetTcAcknowledgements command instead of rejecting it as unsupported. " +
+        "No terms are enforced, the bridge accepts any acknowledgement. Alexa " +
+        "sends this command during pairing and some Echo firmwares may stall " +
+        "when it fails (#449). Restart the bridge and re-pair after changing " +
+        "it. Default off.",
+      type: "boolean",
+      default: false,
+    },
+
     fastSessionRecovery: {
       title: "Fast Session Recovery (Google offline workaround)",
       description:

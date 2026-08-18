@@ -1,10 +1,11 @@
 import crypto from "node:crypto";
 import type { BridgeData } from "@home-assistant-matter-hub/common";
 import { AggregatorEndpoint } from "@matter/main/endpoints";
-import { type Node, ServerNode } from "@matter/main/node";
+import type { Node, ServerNode } from "@matter/main/node";
 import { VendorId } from "@matter/main/types";
 import { legacySpecBasicInformation } from "../../matter/legacy-spec-version.js";
 import { matterSubscriptionOptions } from "../../matter/subscription-options.js";
+import { rootEndpointType } from "../../matter/tc-general-commissioning.js";
 import { trimToLength } from "../trim-to-length.js";
 
 export type BridgeServerNodeConfig =
@@ -15,7 +16,7 @@ export function createBridgeServerConfig(
   options?: { tcp?: { incoming: boolean; outgoing: boolean } },
 ): BridgeServerNodeConfig {
   return {
-    type: ServerNode.RootEndpoint,
+    type: rootEndpointType(data.featureFlags),
     id: data.id,
     network: {
       port: data.port,
