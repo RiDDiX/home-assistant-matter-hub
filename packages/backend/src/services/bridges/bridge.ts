@@ -29,6 +29,7 @@ import {
   runMdnsAddressWatchTick,
 } from "../../matter/mdns-address-watch.js";
 import {
+  applyTcpFlagBeforeStart,
   CAMERA_TCP_CONFIG,
   parseCameraList,
 } from "../../plugins/builtin/camera/camera-tcp-requirement.js";
@@ -371,7 +372,9 @@ export class Bridge {
   // message size. Match the bridge listener to the saved camera list. Changing
   // network config takes effect on (re)start, so bounce the bridge if running.
   private async applyCameraTcp(config: Record<string, unknown>): Promise<void> {
-    const want = parseCameraList(config.cameras).length > 0;
+    const want =
+      parseCameraList(config.cameras).length > 0 ||
+      !!this.dataProvider.featureFlags?.enableMatterTcp;
     const have = !!this.server.state.network.tcp;
     if (want === have) {
       return;
@@ -492,6 +495,10 @@ export class Bridge {
       await this.server.setStateOf(
         BasicInformationServer,
         specVersionValues(this.dataProvider.featureFlags),
+      );
+      await applyTcpFlagBeforeStart(
+        this.server,
+        this.dataProvider.featureFlags,
       );
       await this.server.start();
       await this.endpointManager.startPlugins();

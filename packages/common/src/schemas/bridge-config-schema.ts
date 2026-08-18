@@ -361,6 +361,18 @@ const featureFlagSchema: JSONSchema7 = {
       default: false,
     },
 
+    enableMatterTcp: {
+      title: "Matter over TCP (Alexa pairing diagnostic)",
+      description:
+        "Open a Matter TCP listener and advertise TCP support alongside UDP. " +
+        "Some controllers support Matter over TCP and may attempt it, the " +
+        "Echo Dot advertises it (#449). Camera bridges enable this " +
+        "automatically already. Restart the bridge and re-pair after " +
+        "enabling it. Disabling needs a matterhub restart. Default off.",
+      type: "boolean",
+      default: false,
+    },
+
     fastSessionRecovery: {
       title: "Fast Session Recovery (Google offline workaround)",
       description:

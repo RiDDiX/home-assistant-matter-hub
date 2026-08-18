@@ -6,6 +6,7 @@ import { VendorId } from "@matter/main/types";
 import { legacySpecBasicInformation } from "../../matter/legacy-spec-version.js";
 import { matterSubscriptionOptions } from "../../matter/subscription-options.js";
 import { rootEndpointType } from "../../matter/tc-general-commissioning.js";
+import { CAMERA_TCP_CONFIG } from "../../plugins/builtin/camera/camera-tcp-requirement.js";
 import { trimToLength } from "../trim-to-length.js";
 
 export type BridgeServerNodeConfig =
@@ -21,7 +22,12 @@ export function createBridgeServerConfig(
     network: {
       port: data.port,
       subscriptionOptions: matterSubscriptionOptions(),
-      ...(options?.tcp ? { tcp: options.tcp } : {}),
+      // camera serverOptions win, the flag reuses the same listener config
+      ...(options?.tcp
+        ? { tcp: options.tcp }
+        : data.featureFlags?.enableMatterTcp
+          ? { tcp: CAMERA_TCP_CONFIG }
+          : {}),
     },
     productDescription: {
       name: data.name,

@@ -28,6 +28,7 @@ import {
   collectAdvertisedAddresses,
   runMdnsAddressWatchTick,
 } from "../../matter/mdns-address-watch.js";
+import { applyTcpFlagBeforeStart } from "../../plugins/builtin/camera/camera-tcp-requirement.js";
 import { ensureCommissioningConfig } from "../../utils/ensure-commissioning-config.js";
 import { logMemoryUsage } from "../../utils/log-memory.js";
 import { diagnosticEventBus } from "../diagnostics/diagnostic-event-bus.js";
@@ -378,6 +379,10 @@ export class ServerModeBridge {
       await this.server.setStateOf(
         BasicInformationServer,
         specVersionValues(this.dataProvider.featureFlags),
+      );
+      await applyTcpFlagBeforeStart(
+        this.server,
+        this.dataProvider.featureFlags,
       );
       await this.server.start();
       this.setStatus({ code: BridgeStatus.Running });
