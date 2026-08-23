@@ -135,6 +135,7 @@ const BUILT_IN_LANGUAGES = [
   { code: "zh", name: "中文" },
   { code: "zh-TW", name: "繁體中文" },
   { code: "ja", name: "日本語" },
+  { code: "ko", name: "한국어" },
   { code: "th", name: "ไทย" },
   { code: "sv", name: "Svenska" },
   { code: "tr", name: "Türkçe" },
