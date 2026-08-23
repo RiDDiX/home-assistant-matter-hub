@@ -53,7 +53,9 @@ function makeBridge(
     server as never,
   );
   (
-    bridge as unknown as { wireSessionDiagnostics(): void }
+    (bridge as unknown as { sessions: unknown }).sessions as unknown as {
+      wireSessionDiagnostics(): void;
+    }
   ).wireSessionDiagnostics();
   return { handlers, bridge };
 }
@@ -303,7 +305,9 @@ describe("ServerModeBridge does not close a session that may be priming", () => 
       subscriptions: { size: 0 },
     } as never);
     const timers = (
-      bridge as unknown as { staleSessionTimers: Map<number, unknown> }
+      (bridge as unknown as { sessions: unknown }).sessions as unknown as {
+        staleSessionTimers: Map<number, unknown>;
+      }
     ).staleSessionTimers;
     expect(timers.has(1)).toBe(true);
 

@@ -1,6 +1,8 @@
+import type { Environment, Logger } from "@matter/general";
 import { SessionManager } from "@matter/main/protocol";
 import { describe, expect, it, vi } from "vitest";
-import { Bridge } from "./bridge.js";
+import type { BridgeDataProvider } from "./bridge-data-provider.js";
+import { SessionSupervisor } from "./session-supervisor.js";
 
 // A subscription only joins session.subscriptions once its priming report
 // finished, so a controller still being interviewed looks exactly like a dead
@@ -51,26 +53,13 @@ function makeBridge(sessions: FakeSession[], featureFlags = {}) {
         key === SessionManager ? sessionManager : sessionManager,
     },
   };
-  const bridge = Object.create(Bridge.prototype) as Bridge;
-  Object.assign(bridge as unknown as Record<string, unknown>, {
-    server,
-    log: { debug() {}, info() {}, warn() {}, error() {} },
-    dataProvider: {
-      id: "b",
-      featureFlags,
-      withMetadata: () => ({ id: "b", name: "b" }),
-    },
-    endpointManager: { root: { parts: { size: 0 } }, failedEntities: [] },
-    getExposedDeviceTypes: () => [],
-    staleSessionTimers: new Map(),
-    sessionStartedAt: new Map(),
-    subscribeTimesMs: new WeakMap(),
-    giveUpTimesMs: new WeakMap(),
-    wedgeHookedSessions: new WeakSet(),
-    wedgeLastRotatedAt: new WeakMap(),
-    lastImRequestAt: new WeakMap(),
-    lastCommandImAt: new WeakMap(),
-  });
+  const bridge = new SessionSupervisor(
+    { debug() {}, info() {}, warn() {}, error() {} } as unknown as Logger,
+    server as unknown as { env: Environment },
+    { id: "b", featureFlags } as unknown as BridgeDataProvider,
+    () => ({ id: "b", name: "b" }),
+    0,
+  );
   (
     bridge as unknown as { wireSessionDiagnostics(): void }
   ).wireSessionDiagnostics();

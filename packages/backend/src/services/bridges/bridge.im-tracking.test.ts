@@ -1,7 +1,9 @@
+import type { Environment, Logger } from "@matter/general";
 import { InteractionServer } from "@matter/main/node";
 import { MessageType } from "@matter/main/protocol";
 import { describe, expect, it } from "vitest";
-import { Bridge } from "./bridge.js";
+import type { BridgeDataProvider } from "./bridge-data-provider.js";
+import { SessionSupervisor } from "./session-supervisor.js";
 
 // The aggregator Bridge carries the same wedge instrumentation as
 // ServerModeBridge: wireImRequestTracking wraps InteractionServer.onNewExchange
@@ -44,18 +46,14 @@ function makeBridge(sessions: FakeSession[] = []) {
   const server = { env };
   // Bypass the heavy constructor (see file header) and set only the fields
   // wireImRequestTracking and getSessionInfo touch.
-  const bridge = Object.create(Bridge.prototype) as Bridge;
-  Object.assign(bridge as unknown as Record<string, unknown>, {
-    server,
-    log: { debug() {}, info() {}, warn() {}, error() {} },
-    lastImRequestAt: new WeakMap<object, number>(),
-    lastCommandImAt: new WeakMap<object, number>(),
-    subscribeTimesMs: new WeakMap<object, number[]>(),
-    giveUpTimesMs: new WeakMap<object, number[]>(),
-    wedgeHookedSessions: new WeakSet<object>(),
-    wedgeLastRotatedAt: new WeakMap<object, number>(),
-    sessionStartedAt: new Map<number, number>(),
-  });
+  // The tracking lives on the supervisor now, drive it directly.
+  const bridge = new SessionSupervisor(
+    { debug() {}, info() {}, warn() {}, error() {} } as unknown as Logger,
+    server as unknown as { env: Environment },
+    { id: "b", featureFlags: {} } as unknown as BridgeDataProvider,
+    () => ({ id: "b", name: "b" }),
+    0,
+  );
   const wire = () =>
     (
       bridge as unknown as { wireImRequestTracking(): void }

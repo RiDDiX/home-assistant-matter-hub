@@ -66,7 +66,9 @@ function makeBridge(sessions: FakeSession[] = []) {
   );
   const wire = () =>
     (
-      bridge as unknown as { wireSessionDiagnostics(): void }
+      (bridge as unknown as { sessions: unknown }).sessions as unknown as {
+        wireSessionDiagnostics(): void;
+      }
     ).wireSessionDiagnostics();
   return {
     bridge,
@@ -223,7 +225,9 @@ describe("ServerModeBridge subscription give-up tracking (#365 v2)", () => {
     const added = () => handlers.added?.(sess as never);
     const stampInbound = (msAgo: number) =>
       (
-        bridge as unknown as { lastImRequestAt: WeakMap<object, number> }
+        (bridge as unknown as { sessions: unknown }).sessions as unknown as {
+          lastImRequestAt: WeakMap<object, number>;
+        }
       ).lastImRequestAt.set(sess, Date.now() - msAgo);
     const giveUps = () => bridge.getSessionInfo().sessions[0].giveUpsLast30Min;
     return { deleted, added, stampInbound, giveUps };
@@ -272,7 +276,9 @@ describe("ServerModeBridge subscription give-up tracking (#365 v2)", () => {
     wire();
     handlers.added?.(sess as never);
     (
-      bridge as unknown as { lastImRequestAt: WeakMap<object, number> }
+      (bridge as unknown as { sessions: unknown }).sessions as unknown as {
+        lastImRequestAt: WeakMap<object, number>;
+      }
     ).lastImRequestAt.set(sibling, Date.now());
     deleted.emit({ subscriptionId: 5, isTerminated: true });
     expect(bridge.getSessionInfo().sessions[0].giveUpsLast30Min).toBe(0);
@@ -288,7 +294,9 @@ describe("ServerModeBridge subscription give-up tracking (#365 v2)", () => {
     wire();
     handlers.added?.(sess as never);
     (
-      bridge as unknown as { lastImRequestAt: WeakMap<object, number> }
+      (bridge as unknown as { sessions: unknown }).sessions as unknown as {
+        lastImRequestAt: WeakMap<object, number>;
+      }
     ).lastImRequestAt.set(stranger, Date.now());
     deleted.emit({ subscriptionId: 5, isTerminated: true });
     expect(bridge.getSessionInfo().sessions[0].giveUpsLast30Min).toBe(1);
@@ -304,7 +312,9 @@ describe("ServerModeBridge subscription give-up tracking (#365 v2)", () => {
     const { bridge, wire } = makeBridge([sess]);
     wire();
     (
-      bridge as unknown as { lastImRequestAt: WeakMap<object, number> }
+      (bridge as unknown as { sessions: unknown }).sessions as unknown as {
+        lastImRequestAt: WeakMap<object, number>;
+      }
     ).lastImRequestAt.set(sess, Date.now() - 10_000);
     deleted.emit({ subscriptionId: 5, isTerminated: true });
     expect(bridge.getSessionInfo().sessions[0].giveUpsLast30Min).toBe(1);
@@ -333,7 +343,8 @@ describe("ServerModeBridge subscription give-up tracking (#365 v2)", () => {
     };
     const { bridge, wire } = makeBridge([sess]);
     wire();
-    const b = bridge as unknown as {
+    const b = (bridge as unknown as { sessions: unknown })
+      .sessions as unknown as {
       sessionStartedAt: Map<number, number>;
       lastImRequestAt: WeakMap<object, number>;
       lastCommandImAt: WeakMap<object, number>;
