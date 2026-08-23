@@ -31,6 +31,7 @@ import type {
   BridgeServerStatus,
 } from "./bridge-data-provider.js";
 import type { BridgeEndpointManager } from "./bridge-endpoint-manager.js";
+import { EntityIsolationService } from "./entity-isolation-service.js";
 import { SessionSupervisor } from "./session-supervisor.js";
 
 // Auto Force Sync interval in milliseconds (90 seconds).
@@ -261,6 +262,9 @@ export class Bridge {
 
   private async runStart() {
     this.lastSyncedStates.clear();
+    // every start recreates the endpoints, so an isolation from a previous
+    // run must not keep showing the entity as failed
+    EntityIsolationService.clearIsolatedEntities(this.id);
     try {
       this.setStatus({
         code: BridgeStatus.Starting,

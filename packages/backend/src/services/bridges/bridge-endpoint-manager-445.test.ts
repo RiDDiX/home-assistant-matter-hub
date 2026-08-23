@@ -681,7 +681,7 @@ describe("battery sensor appearing after endpoint creation (#450)", () => {
     expect(vacuumEndpoint(manager).mappedEntityIds).toContain(BATTERY);
     // drain the deferred refresh before teardown
     // biome-ignore lint/suspicious/noExplicitAny: reach the retry flag
-    await until(() => !(manager as any).batteryRetryScheduled);
+    await until(() => !(manager as any).mappingSync.retryPending);
   });
 
   it("a device move drops the kept battery mapping", async () => {
@@ -712,7 +712,13 @@ describe("battery sensor appearing after endpoint creation (#450)", () => {
     const refresh = vi.spyOn(manager, "refreshDevices");
     // the queued-batch path delivers states after the stop landed
     // biome-ignore lint/suspicious/noExplicitAny: drive the private hook
-    (manager as any).maybeRetryBatteryMapping(ha.states, new Set([BATTERY]));
+    const m = manager as any;
+    m.mappingSync.maybeRetry(
+      ha.states,
+      new Set([BATTERY]),
+      m.observingRequested,
+      () => manager.refreshDevices(),
+    );
     await new Promise((r) => setTimeout(r, 50));
     expect(refresh).not.toHaveBeenCalled();
   });
@@ -774,6 +780,6 @@ describe("battery sensor appearing after endpoint creation (#450)", () => {
     expect(vacuumEndpoint(manager)).toBe(second);
     // drain the deferred refresh before teardown
     // biome-ignore lint/suspicious/noExplicitAny: reach the retry flag
-    await until(() => !(manager as any).batteryRetryScheduled);
+    await until(() => !(manager as any).mappingSync.retryPending);
   });
 });
