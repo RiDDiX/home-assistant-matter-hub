@@ -38,13 +38,13 @@ of port forwarding etc.
 | Channel | Branch | Current Version | Description |
 |---------|--------|-----------------|-------------|
 | **Stable** | `main` | v2.0.55 | Production-ready, recommended for most users |
-| **Alpha** | `alpha` | v2.1.0-alpha.x | Currently level with Stable; next pre-release lands here first |
+| **Alpha** | `alpha` | v2.1.0-alpha.874 | Ahead of Stable, carries the fixes and features listed under Alpha Features |
 | **Testing** | `testing` | v4.1.0-testing.x | ⚠️ **Highly unstable!** Experimental features, may break |
 
 ### Which version should I use?
 
 - **Most users**: Use **Stable** (`main` branch) - thoroughly tested
-- **Early adopters**: Use **Alpha** (`alpha` branch) - currently level with Stable until the next pre-release lands
+- **Early adopters**: Use **Alpha** (`alpha` branch) - gets every fix and feature first, see Alpha Features below
 - **Developers/Testers**: Use **Testing** (`testing` branch) - bleeding edge, expect breakage
 
 ### Upgrading from 2.0.46
@@ -302,7 +302,33 @@ Re-assign the affected devices to their rooms after they reconnect. See the [doc
 <details>
 <summary><strong>🧪 Alpha Features (v2.1.0-alpha.x)</strong> - Click to expand</summary>
 
-**Alpha is currently level with Stable (v2.0.55).** All alpha work up to the latest pre-release has been promoted into v2.0.55. New alpha work continues from the next pre-release tag onward and will appear here as development progresses.
+**Alpha is ahead of Stable (v2.0.55).** Everything below ships in the alpha channel now and lands in the next stable promote, grouped by the pre-release tag it first appeared in.
+
+**v2.1.0-alpha.874:**
+- 🇰🇷 Korean translation by [@hyeok-yoo](https://github.com/hyeok-yoo) ([#455](https://github.com/RiDDiX/home-assistant-matter-hub/pull/455))
+
+**v2.1.0-alpha.873:**
+- 🧹 Entity mapping sync and the battery retry moved out of both endpoint managers into shared code, so Bridge Mode and Server Mode can no longer drift apart on mapping fixes; no behavior change
+
+**v2.1.0-alpha.872:**
+- 🧹 Session supervision moved out of both bridge flavours into shared code, same reason, same no-change promise
+- 🌫️ **PM2.5, PM10 and CO₂ sensor overrides**: map a single-pollutant sensor to an Air Quality Sensor endpoint carrying just that concentration cluster via the Entity Mapping UI (Aqara renders them, Alexa partially)
+
+**v2.1.0-alpha.871:**
+- 🌡️ Thermostats write their absolute limits before the user limits, so a flat heat range can no longer trip the range check on bring-up ([#454](https://github.com/RiDDiX/home-assistant-matter-hub/issues/454))
+- 💡 **RGB-only lights pass controller conformance again**: the Extended Color Light always advertises the full mandatory feature set, which brings WLED and similar lights back to Alexa ([#452](https://github.com/RiDDiX/home-assistant-matter-hub/issues/452))
+
+**v2.1.0-alpha.870:**
+- 🔀 Debounced commands no longer swallow an explicit on/off that arrives next to a level or color change ([#453](https://github.com/RiDDiX/home-assistant-matter-hub/pull/453))
+
+**v2.1.0-alpha.869:**
+- 🔋 **Vacuum battery after HA 2026.8**: integrations that moved the battery to a separate sensor are picked up as the sensor appears, a missing percentage reports an unknown charge state instead of "charging forever", and terminal states like "not charging" stop counting as charging ([#450](https://github.com/RiDDiX/home-assistant-matter-hub/issues/450))
+
+**v2.1.0-alpha.866 to alpha.868 (Alexa pairing diagnostics, all off by default):**
+- 🔍 `advertiseSpecVersion151` masks the Matter version as 1.5.1, `supportTermsAndConditions` accepts the Terms and Conditions commissioning commands, `enableMatterTcp` opens a Matter TCP listener. Use them on a dedicated test bridge when an Echo stops right after attestation ([#449](https://github.com/RiDDiX/home-assistant-matter-hub/issues/449))
+
+**v2.1.0-alpha.865:**
+- 🪟 Cover end product type follows the feature map: a tilting curtain or shade reports the matching tilting product, a lift-only blind stops claiming InteriorBlind, so controllers no longer see a cover whose product type contradicts its features (follow-up to [#304](https://github.com/RiDDiX/home-assistant-matter-hub/issues/304))
 
 </details>
 

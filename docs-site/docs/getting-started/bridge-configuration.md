@@ -310,6 +310,9 @@ Feature flags control advanced behavior of the bridge. Configure them in the **B
 | `preferEntityRegistryName` | Use the entity registry name (or `original_name`) as `nodeLabel` instead of the composed `friendly_name`. HA 2026.4 prefixes `friendly_name` with the device name, breaking voice commands that relied on the short entity name. `customName` still wins. | `false` |
 | `vacuumOnOff` | Add OnOff cluster to vacuum endpoints. Some Alexa setups need this for the vacuum to be discovered. Disabled by default in both Bridge Mode and Server Mode. | `false` |
 | `vacuumIncludeUnnamedRooms` | Include rooms without names in vacuum room selection | `false` |
+| `advertiseSpecVersion151` | Alexa pairing diagnostic: mask the Matter version identifiers as 1.5.1 in BasicInformation and the session parameters; the data model stays 1.6. Use on a dedicated test bridge, restart and re-pair after changing ([#449](https://github.com/RiDDiX/home-assistant-matter-hub/issues/449)) | `false` |
+| `supportTermsAndConditions` | Alexa pairing diagnostic: advertise the Matter 1.4 TermsAndConditions feature and accept `SetTcAcknowledgements` instead of rejecting it. No terms are enforced. Restart and re-pair after changing ([#449](https://github.com/RiDDiX/home-assistant-matter-hub/issues/449)) | `false` |
+| `enableMatterTcp` | Alexa pairing diagnostic: open a Matter TCP listener and advertise TCP next to UDP. Camera bridges do this automatically. Restart and re-pair after enabling, disabling needs a matterhub restart ([#449](https://github.com/RiDDiX/home-assistant-matter-hub/issues/449)) | `false` |
 
 ## Issues with labels
 

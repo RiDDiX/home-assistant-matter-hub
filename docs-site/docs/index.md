@@ -302,7 +302,33 @@ Home, ...) are not placed in the same network segment. Please make sure to revie
 <details>
 <summary><strong>🧪 Alpha (v2.1.0-alpha.x)</strong></summary>
 
-**Alpha is currently level with Stable (v2.0.55).** All alpha work up to the latest pre-release has been promoted into v2.0.55. New alpha work continues from the next pre-release tag onward and will appear here as development progresses. See the [Alpha Features Guide](./guides/alpha-features.md) for installation instructions.
+**Alpha is ahead of Stable (v2.0.55).** Everything below ships in the alpha channel now and lands in the next stable promote, grouped by the pre-release tag it first appeared in.
+
+**v2.1.0-alpha.874:**
+- 🇰🇷 Korean translation by [@hyeok-yoo](https://github.com/hyeok-yoo) ([#455](https://github.com/RiDDiX/home-assistant-matter-hub/pull/455))
+
+**v2.1.0-alpha.873:**
+- 🧹 Entity mapping sync and the battery retry moved out of both endpoint managers into shared code, so Bridge Mode and Server Mode can no longer drift apart on mapping fixes; no behavior change
+
+**v2.1.0-alpha.872:**
+- 🧹 Session supervision moved out of both bridge flavours into shared code, same reason, same no-change promise
+- 🌫️ **PM2.5, PM10 and CO₂ sensor overrides**: map a single-pollutant sensor to an Air Quality Sensor endpoint carrying just that concentration cluster via the Entity Mapping UI (Aqara renders them, Alexa partially)
+
+**v2.1.0-alpha.871:**
+- 🌡️ Thermostats write their absolute limits before the user limits, so a flat heat range can no longer trip the range check on bring-up ([#454](https://github.com/RiDDiX/home-assistant-matter-hub/issues/454))
+- 💡 **RGB-only lights pass controller conformance again**: the Extended Color Light always advertises the full mandatory feature set, which brings WLED and similar lights back to Alexa ([#452](https://github.com/RiDDiX/home-assistant-matter-hub/issues/452))
+
+**v2.1.0-alpha.870:**
+- 🔀 Debounced commands no longer swallow an explicit on/off that arrives next to a level or color change ([#453](https://github.com/RiDDiX/home-assistant-matter-hub/pull/453))
+
+**v2.1.0-alpha.869:**
+- 🔋 **Vacuum battery after HA 2026.8**: integrations that moved the battery to a separate sensor are picked up as the sensor appears, a missing percentage reports an unknown charge state instead of "charging forever", and terminal states like "not charging" stop counting as charging ([#450](https://github.com/RiDDiX/home-assistant-matter-hub/issues/450))
+
+**v2.1.0-alpha.866 to alpha.868 (Alexa pairing diagnostics, all off by default):**
+- 🔍 `advertiseSpecVersion151` masks the Matter version as 1.5.1, `supportTermsAndConditions` accepts the Terms and Conditions commissioning commands, `enableMatterTcp` opens a Matter TCP listener. Use them on a dedicated test bridge when an Echo stops right after attestation ([#449](https://github.com/RiDDiX/home-assistant-matter-hub/issues/449))
+
+**v2.1.0-alpha.865:**
+- 🪟 Cover end product type follows the feature map: a tilting curtain or shade reports the matching tilting product, a lift-only blind stops claiming InteriorBlind, so controllers no longer see a cover whose product type contradicts its features (follow-up to [#304](https://github.com/RiDDiX/home-assistant-matter-hub/issues/304)) See the [Alpha Features Guide](./guides/alpha-features.md) for installation instructions.
 
 </details>
 
