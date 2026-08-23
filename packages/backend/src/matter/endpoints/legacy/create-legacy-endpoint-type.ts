@@ -54,6 +54,7 @@ import { AirQualitySensorType } from "./sensor/devices/air-quality-sensor.js";
 import { BatterySensorType } from "./sensor/devices/battery-sensor.js";
 import { batteryStorageEssType } from "./sensor/devices/battery-storage-ess.js";
 import { CarbonMonoxideSensorType } from "./sensor/devices/carbon-monoxide-sensor.js";
+import { Co2SensorType } from "./sensor/devices/co2-sensor.js";
 import { ElectricalMeterType } from "./sensor/devices/electrical-meter.js";
 import { ElectricalSensorType } from "./sensor/devices/electrical-sensor.js";
 import { ElectricalUtilityMeterType } from "./sensor/devices/electrical-utility-meter.js";
@@ -65,6 +66,8 @@ import { IlluminanceSensorType } from "./sensor/devices/illuminance-sensor.js";
 import { NitrogenDioxideSensorType } from "./sensor/devices/nitrogen-dioxide-sensor.js";
 import { OzoneSensorType } from "./sensor/devices/ozone-sensor.js";
 import { Pm1SensorType } from "./sensor/devices/pm1-sensor.js";
+import { Pm10SensorType } from "./sensor/devices/pm10-sensor.js";
+import { Pm25SensorType } from "./sensor/devices/pm25-sensor.js";
 import { PressureSensorType } from "./sensor/devices/pressure-sensor.js";
 import { RadonSensorType } from "./sensor/devices/radon-sensor.js";
 import { TemperatureSensorType } from "./sensor/devices/temperature-sensor.js";
@@ -346,6 +349,9 @@ const matterDeviceTypeFactories: Partial<
     FormaldehydeSensorType.set({ homeAssistantEntity: ha }),
   radon_sensor: (ha) => RadonSensorType.set({ homeAssistantEntity: ha }),
   pm1_sensor: (ha) => Pm1SensorType.set({ homeAssistantEntity: ha }),
+  pm25_sensor: (ha) => Pm25SensorType.set({ homeAssistantEntity: ha }),
+  pm10_sensor: (ha) => Pm10SensorType.set({ homeAssistantEntity: ha }),
+  carbon_dioxide_sensor: (ha) => Co2SensorType.set({ homeAssistantEntity: ha }),
   electrical_meter: (ha) =>
     ElectricalMeterType.set({ homeAssistantEntity: ha }),
   // Legacy SolarPower alias, kept for existing mappings.

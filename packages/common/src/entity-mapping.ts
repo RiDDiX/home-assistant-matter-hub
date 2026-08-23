@@ -35,6 +35,9 @@ export type MatterDeviceType =
   | "mounted_on_off_control"
   | "ozone_sensor"
   | "pm1_sensor"
+  | "pm25_sensor"
+  | "pm10_sensor"
+  | "carbon_dioxide_sensor"
   | "pressure_sensor"
   | "pump"
   | "rain_sensor"
@@ -569,6 +572,9 @@ export const matterDeviceTypeLabels: Record<MatterDeviceType, string> = {
   mounted_on_off_control: "Mounted On/Off Control (experimental)",
   ozone_sensor: "Ozone (O\u2083) Sensor",
   pm1_sensor: "PM1 Sensor",
+  pm25_sensor: "PM2.5 Sensor",
+  pm10_sensor: "PM10 Sensor",
+  carbon_dioxide_sensor: "Carbon Dioxide (CO\u2082) Sensor",
   pressure_sensor: "Pressure Sensor",
   pump: "Pump",
   rain_sensor: "Rain Sensor",
@@ -759,6 +765,14 @@ export const matterDeviceTypeControllerSupport: Record<
   },
   radon_sensor: { apple: "no", google: "no", alexa: "partial", aqara: "yes" },
   pm1_sensor: { apple: "no", google: "no", alexa: "partial", aqara: "yes" },
+  pm25_sensor: { apple: "no", google: "no", alexa: "partial", aqara: "yes" },
+  pm10_sensor: { apple: "no", google: "no", alexa: "partial", aqara: "yes" },
+  carbon_dioxide_sensor: {
+    apple: "no",
+    google: "no",
+    alexa: "partial",
+    aqara: "yes",
+  },
   electrical_meter: {
     apple: "no",
     google: "yes",
@@ -939,6 +953,7 @@ export const domainToDefaultMatterTypes: Partial<
   sensor: [
     "air_quality_sensor",
     "battery_storage",
+    "carbon_dioxide_sensor",
     "carbon_monoxide_sensor",
     "electrical_meter",
     "electrical_sensor",
@@ -950,6 +965,8 @@ export const domainToDefaultMatterTypes: Partial<
     "nitrogen_dioxide_sensor",
     "ozone_sensor",
     "pm1_sensor",
+    "pm25_sensor",
+    "pm10_sensor",
     "pressure_sensor",
     "radon_sensor",
     "solar_power",
