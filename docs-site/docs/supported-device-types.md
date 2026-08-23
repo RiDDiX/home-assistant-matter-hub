@@ -598,6 +598,7 @@ You can override the default device type mapping per entity using the Entity Map
 - BasicVideoPlayer
 - HumiditySensor, TemperatureSensor, PressureSensor, LightSensor, FlowSensor
 - AirQualitySensor, BatteryStorage, TVOCSensor
+- PM2.5 Sensor, PM10 Sensor, Carbon Dioxide (CO₂) Sensor (Air Quality Sensor endpoints carrying the single concentration cluster, for `sensor` entities that report one pollutant; Aqara renders them, Alexa partially, Apple and Google do not)
 - WaterValve, Pump
 - WaterHeater
 - WaterHeaterManagement — "Water Heater with Boost (Matter 1.4)", the 0x050F device type with the WaterHeaterManagement (Boost / CancelBoost), WaterHeaterMode and heating Thermostat clusters. Opt-in: it is aimed at energy-management controllers, no mainstream controller renders 0x050F yet, and switching an already-paired entity to it needs a re-pair

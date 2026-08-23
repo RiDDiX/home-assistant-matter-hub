@@ -31,7 +31,18 @@ docker run -d \
 
 ## Current Alpha Features
 
-Alpha is currently level with Stable (v2.0.53); there are no alpha-only features right now. Standalone Devices graduated to Stable in v2.0.47, see [Standalone Devices](../getting-started/standalone-devices.md).
+Alpha is ahead of Stable (v2.0.55). The alpha channel currently carries, newest first:
+
+- Korean translation (alpha.874)
+- PM2.5, PM10 and CO₂ sensor overrides in the Entity Mapping UI (alpha.872)
+- RGB-only lights such as WLED advertise the full Extended Color Light feature set again, so Alexa keeps them ([#452](https://github.com/RiDDiX/home-assistant-matter-hub/issues/452)) (alpha.871)
+- Thermostat bring-up with a flat heat range no longer trips the range check ([#454](https://github.com/RiDDiX/home-assistant-matter-hub/issues/454)) (alpha.871)
+- Debounced commands keep an explicit on/off next to a level change ([#453](https://github.com/RiDDiX/home-assistant-matter-hub/pull/453)) (alpha.870)
+- Vacuum battery and charge state after the HA 2026.8 battery sensor split ([#450](https://github.com/RiDDiX/home-assistant-matter-hub/issues/450)) (alpha.869)
+- Three Alexa pairing diagnostic flags, off by default: `advertiseSpecVersion151`, `supportTermsAndConditions`, `enableMatterTcp` ([#449](https://github.com/RiDDiX/home-assistant-matter-hub/issues/449)) (alpha.866 to alpha.868)
+- Cover end product type follows the feature map, follow-up to [#304](https://github.com/RiDDiX/home-assistant-matter-hub/issues/304) (alpha.865)
+
+The full list with details lives in the [What's New](../index.md#whats-new) section. Standalone Devices graduated to Stable in v2.0.47, see [Standalone Devices](../getting-started/standalone-devices.md).
 
 For a complete list of all supported features and device types, see [Supported Device Types](../supported-device-types.md).
 
