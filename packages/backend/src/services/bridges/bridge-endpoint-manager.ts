@@ -103,6 +103,9 @@ export class BridgeEndpointManager extends Service {
   private readonly pluginEndpoints = new Map<string, Endpoint>();
   private readonly pluginStateUpdating = new Set<string>();
   private readonly pluginListeners = new Map<string, PluginListenerRef[]>();
+  private topologyChangeHandler = async (change: () => Promise<unknown>) => {
+    await change();
+  };
 
   get failedEntities(): FailedEntity[] {
     // Combine static failed entities with dynamically isolated entities
@@ -152,6 +155,12 @@ export class BridgeEndpointManager extends Service {
     if (this.pluginManager) {
       this.wirePluginCallbacks();
     }
+  }
+
+  setTopologyChangeHandler(
+    handler: (change: () => Promise<unknown>) => Promise<void>,
+  ): void {
+    this.topologyChangeHandler = handler;
   }
 
   private wirePluginCallbacks(): void {
@@ -246,7 +255,7 @@ export class BridgeEndpointManager extends Service {
         });
       }
       try {
-        await this.root.add(endpoint);
+        await this.topologyChangeHandler(() => this.root.add(endpoint));
         this.pluginEndpoints.set(device.id, endpoint);
         this.wirePluginEndpointEvents(device, endpoint);
         this.log.info(
@@ -283,9 +292,9 @@ export class BridgeEndpointManager extends Service {
             // A reversible stop: close keeps the persisted endpoint number,
             // so a re-enable mounts under the same identity. delete would
             // free the number and renumber every device on the next enable.
-            await endpoint.close();
+            await this.topologyChangeHandler(() => endpoint.close());
           } else {
-            await endpoint.delete();
+            await this.topologyChangeHandler(() => endpoint.delete());
           }
         } catch (e) {
           this.log.warn(
