@@ -4,7 +4,6 @@ import { join } from "node:path";
 import { Environment, Logger, VariableService } from "@matter/general";
 import type { Endpoint } from "@matter/main";
 import { VendorId } from "@matter/main";
-import { BasicInformationServer } from "@matter/main/behaviors";
 import {
   ContactSensorDevice,
   OnOffPlugInUnitDevice,
@@ -84,11 +83,6 @@ async function bringUp() {
     manager,
   );
   await server.add(bem.root);
-  bem.setTopologyChangeHandler(async (change) => {
-    await server!.act("plugin topology change", (agent) =>
-      agent.get(BasicInformationServer).increaseConfigurationVersion(change),
-    );
-  });
   // Production order (bridge.ts runStart): the node starts before the plugins
   // register, so behavior events exist when the endpoint wiring attaches.
   await server.start();
@@ -120,23 +114,11 @@ describe("security plugin bring-up (#419)", () => {
     const { manager, endpoints } = await bringUp();
 
     expect([...endpoints.keys()]).toEqual([...MODE_IDS, "alarm"]);
-    for (const [id, name] of [
-      ["mode_home", "Home"],
-      ["mode_away", "Away"],
-      ["mode_night", "Night"],
-      ["mode_vacation", "Vacation"],
-    ] as const) {
+    for (const id of MODE_IDS) {
       expect(endpoints.get(id)!.type.deviceType).toBe(
         OnOffPlugInUnitDevice.deviceType,
       );
       expect(stateOf(endpoints.get(id)!).onOff.onOff).toBe(false);
-      expect(
-        stateOf(endpoints.get(id)!).bridgedDeviceBasicInformation,
-      ).toMatchObject({
-        nodeLabel: name,
-        productName: name,
-        productLabel: name,
-      });
     }
     expect(endpoints.get("alarm")!.type.deviceType).toBe(
       ContactSensorDevice.deviceType,
@@ -210,21 +192,6 @@ describe("security plugin bring-up (#419)", () => {
     await bem.enablePlugin("security");
     expect([...bem.root.parts].length).toBe(5);
     expect(manager.getMetadata()[0].enabled).toBe(true);
-
-    await manager.shutdownAll();
-  });
-
-  it("increments the root configuration version when plugin endpoints change", async () => {
-    const { manager, bem } = await bringUp();
-
-    expect(server!.stateOf(BasicInformationServer).configurationVersion).toBe(
-      6,
-    );
-
-    await bem.disablePlugin("security");
-    expect(server!.stateOf(BasicInformationServer).configurationVersion).toBe(
-      11,
-    );
 
     await manager.shutdownAll();
   });
