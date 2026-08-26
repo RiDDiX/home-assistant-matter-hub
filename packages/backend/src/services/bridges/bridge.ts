@@ -198,6 +198,15 @@ export class Bridge {
       this.endpointManager.root,
       this.serverOptions,
     );
+    this.endpointManager.setTopologyChangeHandler(async (change) => {
+      await this.server.act("plugin topology change", (agent) =>
+        agent.get(BasicInformationServer).increaseConfigurationVersion(change),
+      );
+      this.log.debugCtx("Matter topology configuration version increased", {
+        configurationVersion: this.server.stateOf(BasicInformationServer)
+          .configurationVersion,
+      });
+    });
     // rotation is opt-in on an aggregator bridge, one controller session
     // holds many devices
     this.sessions = new SessionSupervisor(
