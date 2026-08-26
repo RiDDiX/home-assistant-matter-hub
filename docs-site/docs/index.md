@@ -315,6 +315,9 @@ Home, ...) are not placed in the same network segment. Please make sure to revie
 
 **Alpha is ahead of Stable (v2.0.56).** Everything below ships in the alpha channel now and lands in the next stable promote, grouped by the pre-release tag it first appeared in.
 
+**v2.1.0-alpha.877:**
+- 🧠 **Heap limit is configurable now**: the add-on takes a `heap_size_mb` option, the automatic sizing moved from a quarter to half of the available memory, and a `NODE_OPTIONS` you set yourself is honored instead of being silently overridden ([#459](https://github.com/RiDDiX/home-assistant-matter-hub/issues/459))
+
 **v2.1.0-alpha.876:**
 - 🧩 **Third-party plugins load again**: an installed plugin package is imported through its manifest entry point instead of its directory, which Node refuses, and the entry has to resolve inside the package; contributed by Patrick Gu ([#458](https://github.com/RiDDiX/home-assistant-matter-hub/pull/458))
 - 🏷️ Plugin devices report their own name to controllers instead of a generic device-type label

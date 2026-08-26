@@ -38,7 +38,7 @@ of port forwarding etc.
 | Channel | Branch | Current Version | Description |
 |---------|--------|-----------------|-------------|
 | **Stable** | `main` | v2.0.56 | Production-ready, recommended for most users |
-| **Alpha** | `alpha` | v2.1.0-alpha.876 | Ahead of Stable, carries the additions listed under Alpha Features |
+| **Alpha** | `alpha` | v2.1.0-alpha.877 | Ahead of Stable, carries the additions listed under Alpha Features |
 | **Testing** | `testing` | v4.1.0-testing.x | ⚠️ **Highly unstable!** Experimental features, may break |
 
 ### Which version should I use?
@@ -314,6 +314,9 @@ Re-assign the affected devices to their rooms after they reconnect. See the [doc
 <summary><strong>🧪 Alpha Features (v2.1.0-alpha.x)</strong> - Click to expand</summary>
 
 **Alpha is ahead of Stable (v2.0.56).** Everything below ships in the alpha channel now and lands in the next stable promote, grouped by the pre-release tag it first appeared in.
+
+**v2.1.0-alpha.877:**
+- 🧠 **Heap limit is configurable now**: the add-on takes a `heap_size_mb` option, the automatic sizing moved from a quarter to half of the available memory, and a `NODE_OPTIONS` you set yourself is honored instead of being silently overridden ([#459](https://github.com/RiDDiX/home-assistant-matter-hub/issues/459))
 
 **v2.1.0-alpha.876:**
 - 🧩 **Third-party plugins load again**: an installed plugin package is imported through its manifest entry point instead of its directory, which Node refuses, and the entry has to resolve inside the package; contributed by Patrick Gu ([#458](https://github.com/RiDDiX/home-assistant-matter-hub/pull/458))

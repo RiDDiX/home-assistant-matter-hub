@@ -85,14 +85,14 @@ See [Temperature & Humidity Sensor](./devices/temperature-humidity-sensor.md) fo
 
 ## The app keeps crashing or restarting on my HA Yellow / Raspberry Pi / VM
 
-Low-resource devices (1-2 GB RAM) or VMs with limited memory allocation can run out of memory. Since v2.0.25, HAMH dynamically sizes the Node.js heap to 25% of your system RAM (clamped between 256 MB and 1024 MB). The startup log shows the calculated value: `System RAM: 2048MB → Node.js heap: 512MB`. The total process memory (including matter.js cluster definitions, SQLite, and V8 overhead) can reach 400-600 MB even before bridges start.
+Low-resource devices (1-2 GB RAM) or VMs with limited memory allocation can run out of memory. HAMH dynamically sizes the Node.js heap to 50% of the available system memory (clamped between 256 MB and 2048 MB), and the add-on takes a `heap_size_mb` option to override that. The startup log shows the calculated value: `Memory: total=4096MB, available=1024MB, cgroup=noneMB → heap: 512MB`. The total process memory (including matter.js cluster definitions, SQLite, and V8 overhead) can reach 400-600 MB even before bridges start.
 
 The telltale sign of an OOM kill is the log showing `Killed` with no error message or stack trace, this means the Linux kernel terminated the process.
 
 If crashes persist:
 
 1. Reduce the number of devices per bridge
-2. Split large bridges into smaller ones (e.g. per room)
+2. Raise `heap_size_mb` if the machine has the memory or swap for it. Splitting entities across more bridges does not reduce memory, everything runs in one process
 3. Stop other memory-heavy add-ons (Frigate, Whisper, Piper, Music Assistant, Python Matter Server)
 4. For VMs (`qemux86-64`): increase RAM allocation to at least 4 GB
 5. Consider using a device with more RAM
