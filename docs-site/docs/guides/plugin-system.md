@@ -200,6 +200,8 @@ Every entity field is a comma-separated list, deduplicated on parse. Alert lists
 | `alwaysAlerts` | Master alert list, fired on every trip in addition to the tier's alerts. |
 | `haUrl` / `haToken` | Optional. Set both to point the plugin at a different Home Assistant; one without the other is ignored with a warning. Left empty the plugin dials its own socket with the bridge's credentials (the bridge connection itself is not reused). |
 
+Arm and disarm calls carry no alarm code. A panel that requires a code for arming or disarming rejects those calls; the bridge logs the failure and the switches fall back to the panel's real state. The `armed_custom_bypass` state is not mapped and leaves the Matter view unchanged.
+
 Known limits: changing `haUrl`/`haToken` while silences or setters are still pending can replay them against the new Home Assistant, and a silence that keeps failing is retried on every reconnect without a cap. Both are on the list for the next revision.
 
 If you already run Alarmo or another alarm integration, keep it as the source of truth and set `sourceAlarmPanel` to its `alarm_control_panel.*` entity. The four Matter switches and Alarm contact sensor then follow the panel's initial state and subsequent `state_changed` events. Matter switch writes call `alarm_arm_home`, `alarm_arm_away`, `alarm_arm_night`, `alarm_arm_vacation`, or `alarm_disarm` on that entity. Local trigger, setter, alert, and silence logic stays inactive while a source panel is configured.

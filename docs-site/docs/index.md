@@ -313,7 +313,10 @@ Home, ...) are not placed in the same network segment. Please make sure to revie
 <details>
 <summary><strong>🧪 Alpha (v2.1.0-alpha.x)</strong></summary>
 
-**Alpha is currently level with Stable (v2.0.56).** All alpha work up to the latest pre-release has been promoted into v2.0.56. New alpha work continues from the next pre-release tag onward and will appear here as development progresses.
+**Alpha is ahead of Stable (v2.0.56).** Everything below ships in the alpha channel now and lands in the next stable promote, grouped by the pre-release tag it first appeared in.
+
+**v2.1.0-alpha.875:**
+- 🚨 **Security plugin can mirror an existing alarm panel**: the new `sourceAlarmPanel` setting turns the four mode switches and the Alarm contact into a Matter view of an `alarm_control_panel.*` entity (Alarmo etc.), with arm and disarm flowing back to Home Assistant; contributed by Patrick Gu ([#457](https://github.com/RiDDiX/home-assistant-matter-hub/pull/457)). Panels that require an alarm code reject the bridge's arm/disarm calls, the switches then fall back to the panel's real state
 
 </details>
 

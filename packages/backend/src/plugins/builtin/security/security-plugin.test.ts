@@ -1445,3 +1445,384 @@ describe("SecurityPlugin", () => {
     await plugin.onShutdown();
   });
 });
+
+describe("source alarm panel review hardening", () => {
+  function sourcePluginWith(sourceState: () => string) {
+    let stateHandler: ((event: unknown) => void) | undefined;
+    const conn = {
+      ...fakeConnection(),
+      sendMessagePromise: vi.fn(async (msg: ServiceMessage) =>
+        msg.type === "get_states"
+          ? [{ entity_id: "alarm_control_panel.house", state: sourceState() }]
+          : {},
+      ),
+      subscribeEvents: vi.fn(async (handler: (event: unknown) => void) => {
+        stateHandler = handler;
+        return () => {};
+      }),
+    };
+    const { ctx, devices } = createMockContext({ homeAssistant: ha });
+    const plugin = new SecurityPlugin(
+      { sourceAlarmPanel: "alarm_control_panel.house" },
+      { connect: async () => conn as unknown as Connection },
+    );
+    const sendSourceState = (state: string) =>
+      stateHandler?.({
+        data: {
+          entity_id: "alarm_control_panel.house",
+          old_state: { state: "unknown" },
+          new_state: { state, attributes: {} },
+        },
+      });
+    return {
+      conn,
+      ctx,
+      devices,
+      plugin,
+      sendSourceState,
+      ready: () => vi.waitFor(() => expect(stateHandler).toBeDefined()),
+    };
+  }
+
+  const snapshotOf = (plugin: SecurityPlugin) =>
+    (plugin as unknown as { machine: { snapshot: unknown } }).machine.snapshot;
+
+  it("keeps the requested mode visible through the exit delay", async () => {
+    const h = sourcePluginWith(() => "disarmed");
+    await h.plugin.onStart(h.ctx);
+    await h.ready();
+    // Let the connect-time state read land before writing, as it would live.
+    await vi.waitFor(() =>
+      expect(h.ctx.updateDeviceState).toHaveBeenCalledWith(
+        "mode_away",
+        "onOff",
+        {
+          onOff: false,
+        },
+      ),
+    );
+
+    await armVia(h.devices, "mode_away");
+    await vi.waitFor(() =>
+      expect(h.conn.sendMessagePromise).toHaveBeenCalledWith(
+        expect.objectContaining({ service: "alarm_arm_away" }),
+      ),
+    );
+
+    vi.mocked(h.ctx.updateDeviceState).mockClear();
+    h.sendSourceState("arming");
+    await vi.waitFor(() =>
+      expect(snapshotOf(h.plugin)).toMatchObject({
+        mode: "away",
+        phase: "arming",
+      }),
+    );
+    const awayPushes = vi
+      .mocked(h.ctx.updateDeviceState)
+      .mock.calls.filter(
+        ([id, cluster]) => id === "mode_away" && cluster === "onOff",
+      );
+    expect(awayPushes.at(-1)?.[2]).toEqual({ onOff: true });
+    await h.plugin.onShutdown();
+  });
+
+  it("disarms a triggered panel whose mode is unknown", async () => {
+    const h = sourcePluginWith(() => "triggered");
+    await h.plugin.onStart(h.ctx);
+    await h.ready();
+    await vi.waitFor(() =>
+      expect(snapshotOf(h.plugin)).toMatchObject({ phase: "triggered" }),
+    );
+
+    await h.devices
+      .get("mode_home")
+      ?.onAttributeWrite?.("onOff", "onOff", false);
+    await vi.waitFor(() =>
+      expect(h.conn.sendMessagePromise).toHaveBeenCalledWith(
+        expect.objectContaining({ service: "alarm_disarm" }),
+      ),
+    );
+    await h.plugin.onShutdown();
+  });
+
+  it("republishes the honest state when an arm call changes nothing", async () => {
+    vi.useFakeTimers();
+    const h = sourcePluginWith(() => "disarmed");
+    await h.plugin.onStart(h.ctx);
+    await h.ready();
+
+    await armVia(h.devices, "mode_away");
+    await vi.waitFor(() =>
+      expect(h.conn.sendMessagePromise).toHaveBeenCalledWith(
+        expect.objectContaining({ service: "alarm_arm_away" }),
+      ),
+    );
+
+    vi.mocked(h.ctx.updateDeviceState).mockClear();
+    await vi.advanceTimersByTimeAsync(6000);
+    expect(h.ctx.updateDeviceState).toHaveBeenCalledWith("mode_away", "onOff", {
+      onOff: false,
+    });
+    await h.plugin.onShutdown();
+  });
+
+  it("ignores malformed source panel values", () => {
+    const read = (value: unknown) =>
+      (
+        new SecurityPlugin({
+          sourceAlarmPanel: value as string,
+        }) as unknown as { sourceAlarmPanel(): string | undefined }
+      ).sourceAlarmPanel();
+    expect(read("alarm_control_panel.house")).toBe("alarm_control_panel.house");
+    expect(read("alarm_control_panel.a,alarm_control_panel.b")).toBeUndefined();
+    expect(read("alarm_control_panel.")).toBeUndefined();
+    expect(read({})).toBeUndefined();
+  });
+
+  it("silences alerts left over from local mode when mirroring starts", async () => {
+    const h = sourcePluginWith(() => "disarmed");
+    await h.plugin.onStart(h.ctx);
+    await h.ready();
+    (h.plugin as unknown as { activeAlerts: string[] }).activeAlerts = [
+      "siren.horn",
+    ];
+    await (h.plugin as unknown as { bringUp(): Promise<void> }).bringUp();
+    await vi.waitFor(() =>
+      expect(h.conn.sendMessagePromise).toHaveBeenCalledWith(
+        expect.objectContaining({
+          service: "turn_off",
+          target: { entity_id: "siren.horn" },
+        }),
+      ),
+    );
+    await h.plugin.onShutdown();
+  });
+
+  it("drops a stale source read that finishes after a config change", async () => {
+    let release: (value: unknown) => void = () => {};
+    const h = sourcePluginWith(() => "armed_away");
+    h.conn.sendMessagePromise = vi.fn(
+      async (msg: ServiceMessage): Promise<unknown> => {
+        if (msg.type === "get_states") {
+          return new Promise<unknown>((r) => {
+            release = r;
+          });
+        }
+        return {};
+      },
+    ) as typeof h.conn.sendMessagePromise;
+    await h.plugin.onStart(h.ctx);
+    await h.ready();
+    const stale = (
+      h.plugin as unknown as { syncSourceAlarmState(): Promise<void> }
+    ).syncSourceAlarmState();
+    await h.plugin.onConfigChanged({
+      sourceAlarmPanel: "alarm_control_panel.other",
+    });
+    release([{ entity_id: "alarm_control_panel.house", state: "armed_away" }]);
+    await stale;
+    expect(snapshotOf(h.plugin)).not.toMatchObject({ mode: "away" });
+    await h.plugin.onShutdown();
+  });
+});
+
+describe("source alarm panel write races", () => {
+  function raceHarness() {
+    let stateHandler: ((event: unknown) => void) | undefined;
+    const conn = {
+      connected: true,
+      sendMessagePromise: vi.fn(async (msg: { type?: string }) =>
+        msg.type === "get_states"
+          ? [{ entity_id: "alarm_control_panel.house", state: "disarmed" }]
+          : {},
+      ),
+      subscribeEvents: vi.fn(async (handler: (event: unknown) => void) => {
+        stateHandler = handler;
+        return () => {};
+      }),
+      addEventListener: vi.fn(),
+      close: vi.fn(),
+    };
+    const { ctx, devices } = createMockContext({ homeAssistant: ha });
+    const plugin = new SecurityPlugin(
+      { sourceAlarmPanel: "alarm_control_panel.house" },
+      { connect: async () => conn as unknown as Connection },
+    );
+    const sendSourceState = (state: string) =>
+      stateHandler?.({
+        data: {
+          entity_id: "alarm_control_panel.house",
+          old_state: { state: "unknown" },
+          new_state: { state, attributes: {} },
+        },
+      });
+    const snapshot = () =>
+      (plugin as unknown as { machine: { snapshot: unknown } }).machine
+        .snapshot;
+    const pending = () =>
+      (plugin as unknown as { pendingArmMode: unknown }).pendingArmMode;
+    return {
+      conn,
+      ctx,
+      devices,
+      plugin,
+      sendSourceState,
+      snapshot,
+      pending,
+      ready: async () => {
+        await vi.waitFor(() => expect(stateHandler).toBeDefined());
+        await vi.waitFor(() =>
+          expect(conn.sendMessagePromise).toHaveBeenCalledWith({
+            type: "get_states",
+          }),
+        );
+      },
+    };
+  }
+
+  it("does not leak the requested mode into a later keypad arm", async () => {
+    const h = raceHarness();
+    await h.plugin.onStart(h.ctx);
+    await h.ready();
+
+    await armVia(h.devices, "mode_away");
+    await vi.waitFor(() =>
+      expect(h.conn.sendMessagePromise).toHaveBeenCalledWith(
+        expect.objectContaining({ service: "alarm_arm_away" }),
+      ),
+    );
+    h.sendSourceState("arming");
+    await vi.waitFor(() =>
+      expect(h.snapshot()).toMatchObject({ mode: "away", phase: "arming" }),
+    );
+    h.sendSourceState("disarmed");
+    await vi.waitFor(() =>
+      expect(h.snapshot()).toMatchObject({ mode: null, phase: "disarmed" }),
+    );
+
+    h.sendSourceState("arming");
+    await new Promise((r) => setTimeout(r, 20));
+    expect(h.snapshot()).toMatchObject({ mode: null, phase: "disarmed" });
+    await h.plugin.onShutdown();
+  });
+
+  it("clears an unconsumed pending mode when only disarmed comes back", async () => {
+    vi.useFakeTimers();
+    const h = raceHarness();
+    await h.plugin.onStart(h.ctx);
+    await vi.waitFor(() => expect(h.conn.subscribeEvents).toHaveBeenCalled());
+
+    await armVia(h.devices, "mode_away");
+    await vi.waitFor(() =>
+      expect(h.conn.sendMessagePromise).toHaveBeenCalledWith(
+        expect.objectContaining({ service: "alarm_arm_away" }),
+      ),
+    );
+    h.sendSourceState("disarmed");
+    await vi.advanceTimersByTimeAsync(6000);
+    expect(h.pending()).toBeNull();
+    h.sendSourceState("arming");
+    expect(h.snapshot()).toMatchObject({ mode: null, phase: "disarmed" });
+    await h.plugin.onShutdown();
+  });
+
+  it("lets the newest of two overlapping writes own the pending mode", async () => {
+    const h = raceHarness();
+    let releaseFirst: (value: unknown) => void = () => {};
+    let firstCaptured = false;
+    h.conn.sendMessagePromise = vi.fn(
+      async (msg: { type?: string; service?: string }): Promise<unknown> => {
+        if (msg.type === "get_states") {
+          return [
+            { entity_id: "alarm_control_panel.house", state: "disarmed" },
+          ];
+        }
+        if (msg.service === "alarm_arm_away" && !firstCaptured) {
+          firstCaptured = true;
+          return new Promise<unknown>((r) => {
+            releaseFirst = r;
+          });
+        }
+        return {};
+      },
+    ) as typeof h.conn.sendMessagePromise;
+    await h.plugin.onStart(h.ctx);
+    await h.ready();
+
+    const firstWrite = armVia(h.devices, "mode_away");
+    await vi.waitFor(() => expect(firstCaptured).toBe(true));
+    await armVia(h.devices, "mode_night");
+    await vi.waitFor(() =>
+      expect(h.conn.sendMessagePromise).toHaveBeenCalledWith(
+        expect.objectContaining({ service: "alarm_arm_night" }),
+      ),
+    );
+    releaseFirst({});
+    await firstWrite;
+    await new Promise((r) => setTimeout(r, 20));
+    expect(h.pending()).toBe("night");
+    h.sendSourceState("arming");
+    await vi.waitFor(() =>
+      expect(h.snapshot()).toMatchObject({ mode: "night", phase: "arming" }),
+    );
+    await h.plugin.onShutdown();
+  });
+});
+
+describe("source alarm panel lifecycle", () => {
+  it("drops an in-flight write across a config change", async () => {
+    let release: (value: unknown) => void = () => {};
+    let stateHandler: ((event: unknown) => void) | undefined;
+    const conn = {
+      connected: true,
+      sendMessagePromise: vi.fn(
+        async (msg: { type?: string; service?: string }): Promise<unknown> => {
+          if (msg.type === "get_states") {
+            return [
+              { entity_id: "alarm_control_panel.house", state: "disarmed" },
+              { entity_id: "alarm_control_panel.other", state: "disarmed" },
+            ];
+          }
+          if (msg.service === "alarm_arm_away") {
+            return new Promise<unknown>((r) => {
+              release = r;
+            });
+          }
+          return {};
+        },
+      ),
+      subscribeEvents: vi.fn(async (handler: (event: unknown) => void) => {
+        stateHandler = handler;
+        return () => {};
+      }),
+      addEventListener: vi.fn(),
+      close: vi.fn(),
+    };
+    const { ctx, devices } = createMockContext({ homeAssistant: ha });
+    const plugin = new SecurityPlugin(
+      { sourceAlarmPanel: "alarm_control_panel.house" },
+      { connect: async () => conn as unknown as Connection },
+    );
+    await plugin.onStart(ctx);
+    await vi.waitFor(() => expect(stateHandler).toBeDefined());
+
+    const write = armVia(devices, "mode_away");
+    await vi.waitFor(() =>
+      expect(conn.sendMessagePromise).toHaveBeenCalledWith(
+        expect.objectContaining({ service: "alarm_arm_away" }),
+      ),
+    );
+    await plugin.onConfigChanged({
+      sourceAlarmPanel: "alarm_control_panel.other",
+    });
+    release({});
+    await write;
+    const internals = plugin as unknown as {
+      pendingArmMode: unknown;
+      sourceWriteReconcile: unknown;
+    };
+    expect(internals.pendingArmMode).toBeNull();
+    expect(internals.sourceWriteReconcile).toBeUndefined();
+    await plugin.onShutdown();
+  });
+});
