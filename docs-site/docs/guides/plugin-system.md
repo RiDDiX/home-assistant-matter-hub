@@ -160,7 +160,7 @@ Some device types need a live matter.js `EndpointType` (custom clusters and comm
 
 Plugins run on standard bridges only. A bridge with Server Mode enabled hosts no plugins at all, including the built-in camera; the Plugins page lists it with a note saying so. If every bridge you have is in Server Mode, create a standard bridge and put the camera there. Apple Home does not render Matter cameras; as of 2026 SmartThings is the only controller that does.
 
-A built-in plugin registers no devices until it is actually configured: the camera waits for camera entity ids, the security plugin for at least one trigger list. Until then nothing appears on your controllers, and once you save a real config the devices mount without a bridge restart. Disabling a plugin removes its mounted devices right away and the choice is stored per bridge, so a disabled plugin stays disabled across restarts until you enable it again.
+A built-in plugin registers no devices until it is actually configured: the camera waits for camera entity ids, the security plugin for at least one trigger list or a source alarm panel. Until then nothing appears on your controllers, and once you save a real config the devices mount without a bridge restart. Disabling a plugin removes its mounted devices right away and the choice is stored per bridge, so a disabled plugin stays disabled across restarts until you enable it again.
 
 **Camera** exposes a Home Assistant camera as a Matter Camera (0x0142). It implements the Matter `WebRtcTransportProvider` flow and bridges HA's WebRTC. To configure it, open the Plugins page and click the camera plugin (or its gear icon). A settings dialog opens; fill in the cameras and save:
 
@@ -189,6 +189,7 @@ Every entity field is a comma-separated list, deduplicated on parse. Alert lists
 | `exitDelaySeconds` | Delay before an armed mode takes effect. Default 60, 0 disables. |
 | `entryDelaySeconds` | Delay for perimeter (door/window/garage door/opening) sensors while armed. Default 60, 0 disables. |
 | `triggerTimeSeconds` | How long the alarm stays tripped before returning to the state it was tripped from. Default 120, 0 keeps it tripped until disarm. |
+| `sourceAlarmPanel` | Optional existing `alarm_control_panel.*` entity to mirror instead of running an independent alarm. |
 | `homeSetters` / `awaySetters` / `nightSetters` | Entities invoked when that mode is reached, comma-separated. |
 | `offSetters` | Entities invoked on disarm. |
 | `homeTriggers` / `awayTriggers` / `nightTriggers` | Sensors that trip the alarm in that mode. |
@@ -201,7 +202,7 @@ Every entity field is a comma-separated list, deduplicated on parse. Alert lists
 
 Known limits: changing `haUrl`/`haToken` while silences or setters are still pending can replay them against the new Home Assistant, and a silence that keeps failing is retried on every reconnect without a cap. Both are on the list for the next revision.
 
-If you already run Alarmo or another alarm integration, keep using it and bridge its `alarm_control_panel` entity instead. This plugin runs its own state machine, so pointing both at the same sensors gives you two independent alarms that do not know about each other. The first version targets users without an alarm integration.
+If you already run Alarmo or another alarm integration, keep it as the source of truth and set `sourceAlarmPanel` to its `alarm_control_panel.*` entity. The four Matter switches and Alarm contact sensor then follow the panel's initial state and subsequent `state_changed` events. Matter switch writes call `alarm_arm_home`, `alarm_arm_away`, `alarm_arm_night`, `alarm_arm_vacation`, or `alarm_disarm` on that entity. Local trigger, setter, alert, and silence logic stays inactive while a source panel is configured.
 
 ### Cluster IDs
 
