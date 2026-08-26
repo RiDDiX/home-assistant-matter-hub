@@ -12,19 +12,20 @@ import { LightOnOffServer } from "../behaviors/light-on-off-server.js";
 
 export const ExtendedColorLightType = (
   supportsColorControl: boolean,
-  supportsTemperature: boolean,
+  // kept for the call sites, CT is always advertised now (#452)
+  _supportsTemperature: boolean,
   hasBattery = false,
 ) => {
   const features: FeatureSelection<typeof ColorControl.Cluster> = new Set();
+  // Xy AND ColorTemperature are both mandatory for device type
+  // ExtendedColorLight (0x010d) per Matter Device Library § 4.4. Leaving one
+  // out makes the endpoint non-conformant and Alexa drops it (#452, same
+  // class as #182). HueSaturation stays optional, only added for lights that
+  // actually speak color.
+  features.add("Xy");
+  features.add("ColorTemperature");
   if (supportsColorControl) {
-    // Xy is mandatory for device type ExtendedColorLight (0x010d) per Matter
-    // Device Library § 4.4. HueSaturation is optional but kept for controllers
-    // that prefer it (Apple Home / Alexa).
     features.add("HueSaturation");
-    features.add("Xy");
-  }
-  if (supportsTemperature) {
-    features.add("ColorTemperature");
   }
 
   if (hasBattery) {

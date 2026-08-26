@@ -141,13 +141,16 @@ let seq = 0;
 const servers: ServerNode[] = [];
 const managers: BridgeEndpointManager[] = [];
 
-function makeProvider(): BridgeDataProvider {
+function makeProvider(patterns: string[] = ["vacuum.*"]): BridgeDataProvider {
   return new BridgeDataProvider({
     id: "bridge-445",
     name: "b",
     port: 0,
     filter: {
-      include: [{ type: HomeAssistantMatcherType.Pattern, value: "vacuum.*" }],
+      include: patterns.map((value) => ({
+        type: HomeAssistantMatcherType.Pattern,
+        value,
+      })),
       exclude: [],
       includeMode: "any",
     },
@@ -165,8 +168,8 @@ function makeProvider(): BridgeDataProvider {
   } as any);
 }
 
-async function buildManager(ha: FakeHa) {
-  const provider = makeProvider();
+async function buildManager(ha: FakeHa, patterns?: string[]) {
+  const provider = makeProvider(patterns);
   const env = new Environment("test", Environment.default);
   env.get(VariableService).set("storage.path", dir);
   env.set(BridgeDataProvider, provider);
@@ -600,5 +603,183 @@ describe("identity survives isolation and plugin stops (#438)", () => {
 
     const again = await addPluginPart(manager);
     expect(again.number).toBe(before);
+  });
+});
+
+// Poll instead of a fixed sleep, CI runners stretch the retry timing. The
+// condition may throw mid-rebuild (endpoint removed, not yet re-added).
+async function until(cond: () => boolean, ms = 5000) {
+  const start = Date.now();
+  for (;;) {
+    try {
+      if (cond()) return;
+    } catch {}
+    if (Date.now() - start >= ms) return;
+    await new Promise((r) => setTimeout(r, 25));
+  }
+}
+
+// #450: a battery sensor that was unavailable when the endpoint was built
+// never got picked up later. The resolved battery is part of the mapping
+// fingerprint now, so the endpoint rebuilds once the sensor appears.
+describe("battery sensor appearing after endpoint creation (#450)", () => {
+  const BATTERY = "sensor.robot_battery";
+
+  function haWithBattery(batteryState: string): FakeHa {
+    const ha = makeHa();
+    ha.entities[VACUUM].device_id = "dev450";
+    ha.entities[BATTERY] = { entity_id: BATTERY, device_id: "dev450" };
+    ha.devices.dev450 = { id: "dev450", name: "Robot" };
+    ha.states[BATTERY] = {
+      entity_id: BATTERY,
+      state: batteryState,
+      attributes: { device_class: "battery" },
+      context: { id: "ctx" },
+      last_changed: "2026-01-01T00:00:00",
+      last_updated: "2026-01-01T00:00:00",
+    };
+    return ha;
+  }
+
+  it("rebuilds the endpoint with the battery once the sensor resolves", async () => {
+    const ha = haWithBattery("unavailable");
+    const { manager, registry } = await buildManager(ha);
+    await manager.refreshDevices();
+    const first = vacuumEndpoint(manager);
+    expect(first.mappedEntityIds).not.toContain(BATTERY);
+
+    ha.states[BATTERY].state = "85";
+    registry.refresh();
+    await manager.refreshDevices();
+    const second = vacuumEndpoint(manager);
+    expect(second).not.toBe(first);
+    expect(second.mappedEntityIds).toContain(BATTERY);
+
+    // stable afterwards, no rebuild churn
+    registry.refresh();
+    await manager.refreshDevices();
+    expect(vacuumEndpoint(manager)).toBe(second);
+  });
+
+  it("an exposed battery sensor endpoint does not displace the vacuum candidate", async () => {
+    // sensor.* inside the filter: the battery sensor mounts as its own
+    // endpoint on the same device and must not steal the retry slot
+    const ha = haWithBattery("unavailable");
+    const { manager } = await buildManager(ha, ["vacuum.*", "sensor.*"]);
+    await manager.refreshDevices();
+    // biome-ignore lint/suspicious/noExplicitAny: the retry only runs while observing
+    (manager as any).observingRequested = true;
+    // the deferred refresh must not dial the fake connection
+    vi.spyOn(manager, "startObserving").mockResolvedValue(undefined);
+    const first = vacuumEndpoint(manager);
+    expect(first.mappedEntityIds).not.toContain(BATTERY);
+
+    ha.states[BATTERY].state = "85";
+    await manager.updateStates(ha.states, new Set([BATTERY]));
+    await until(() => vacuumEndpoint(manager) !== first);
+    expect(vacuumEndpoint(manager)).not.toBe(first);
+    expect(vacuumEndpoint(manager).mappedEntityIds).toContain(BATTERY);
+    // drain the deferred refresh before teardown
+    // biome-ignore lint/suspicious/noExplicitAny: reach the retry flag
+    await until(() => !(manager as any).mappingSync.retryPending);
+  });
+
+  it("a device move drops the kept battery mapping", async () => {
+    const ha = haWithBattery("85");
+    const { manager, registry } = await buildManager(ha);
+    await manager.refreshDevices();
+    const first = vacuumEndpoint(manager);
+    expect(first.mappedEntityIds).toContain(BATTERY);
+
+    // sensor moves to another HA device while still existing: the mapping
+    // must not survive on the old device
+    ha.entities[BATTERY].device_id = "other-device";
+    ha.states[BATTERY].state = "unavailable";
+    registry.refresh();
+    await manager.refreshDevices();
+    const rebuilt = vacuumEndpoint(manager);
+    expect(rebuilt).not.toBe(first);
+    expect(rebuilt.mappedEntityIds).not.toContain(BATTERY);
+  });
+
+  it("no retry schedule after stopObserving, queued batches included", async () => {
+    const ha = haWithBattery("unavailable");
+    const { manager } = await buildManager(ha);
+    await manager.refreshDevices();
+
+    manager.stopObserving();
+    ha.states[BATTERY].state = "85";
+    const refresh = vi.spyOn(manager, "refreshDevices");
+    // the queued-batch path delivers states after the stop landed
+    // biome-ignore lint/suspicious/noExplicitAny: drive the private hook
+    const m = manager as any;
+    m.mappingSync.maybeRetry(
+      ha.states,
+      new Set([BATTERY]),
+      m.observingRequested,
+      () => manager.refreshDevices(),
+    );
+    await new Promise((r) => setTimeout(r, 50));
+    expect(refresh).not.toHaveBeenCalled();
+  });
+
+  it("an unavailable snapshot does not strip a mapped battery", async () => {
+    const ha = haWithBattery("85");
+    const { manager, registry } = await buildManager(ha);
+    await manager.refreshDevices();
+    const first = vacuumEndpoint(manager);
+    expect(first.mappedEntityIds).toContain(BATTERY);
+
+    // HA restart snapshot: sensor briefly unavailable must not rebuild the
+    // endpoint battery-less
+    ha.states[BATTERY].state = "unavailable";
+    registry.refresh();
+    await manager.refreshDevices();
+    expect(vacuumEndpoint(manager)).toBe(first);
+
+    // the sensor entity leaving HA entirely does rebuild without it
+    delete ha.entities[BATTERY];
+    delete ha.states[BATTERY];
+    registry.refresh();
+    await manager.refreshDevices();
+    const rebuilt = vacuumEndpoint(manager);
+    expect(rebuilt).not.toBe(first);
+    expect(rebuilt.mappedEntityIds).not.toContain(BATTERY);
+  });
+
+  it("subscribes the device sensors while the battery is unresolved", async () => {
+    const ha = haWithBattery("unavailable");
+    const { manager } = await buildManager(ha);
+    await manager.refreshDevices();
+    // biome-ignore lint/suspicious/noExplicitAny: pin the subscription list
+    expect((manager as any).collectSubscriptionEntityIds()).toContain(BATTERY);
+  });
+
+  it("a state update alone triggers the rebuild, registry ticks skip state-only changes", async () => {
+    const ha = haWithBattery("unavailable");
+    const { manager } = await buildManager(ha);
+    await manager.refreshDevices();
+    // biome-ignore lint/suspicious/noExplicitAny: the retry only runs while observing
+    (manager as any).observingRequested = true;
+    // the deferred refresh must not dial the fake connection
+    vi.spyOn(manager, "startObserving").mockResolvedValue(undefined);
+    const first = vacuumEndpoint(manager);
+    expect(first.mappedEntityIds).not.toContain(BATTERY);
+
+    ha.states[BATTERY].state = "85";
+    await manager.updateStates(ha.states, new Set([BATTERY]));
+    await until(() => vacuumEndpoint(manager) !== first);
+
+    const second = vacuumEndpoint(manager);
+    expect(second).not.toBe(first);
+    expect(second.mappedEntityIds).toContain(BATTERY);
+
+    // an unrelated later state batch does not rebuild again
+    await manager.updateStates(ha.states, new Set([BATTERY]));
+    await new Promise((r) => setTimeout(r, 150));
+    expect(vacuumEndpoint(manager)).toBe(second);
+    // drain the deferred refresh before teardown
+    // biome-ignore lint/suspicious/noExplicitAny: reach the retry flag
+    await until(() => !(manager as any).mappingSync.retryPending);
   });
 });

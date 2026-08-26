@@ -476,20 +476,23 @@ export class ThermostatServerBase extends FullFeaturedBase {
     // property write triggers an error, subsequent properties won't be set.
     // Limits are set FIRST to ensure they're applied even if mode changes trigger errors.
     applyPatchState(this.state, {
+      // abs limits BEFORE user limits: on a widening update the user limit
+      // must never transiently sit outside the still-narrow abs limit, the
+      // reactor asserts against abs on every write (#454 hardening)
       ...(this.features.heating
         ? {
-            minHeatSetpointLimit: minHeatLimit,
-            maxHeatSetpointLimit: maxHeatLimit,
             absMinHeatSetpointLimit: minHeatLimit,
             absMaxHeatSetpointLimit: maxHeatLimit,
+            minHeatSetpointLimit: minHeatLimit,
+            maxHeatSetpointLimit: maxHeatLimit,
           }
         : {}),
       ...(this.features.cooling
         ? {
-            minCoolSetpointLimit: minCoolLimit,
-            maxCoolSetpointLimit: maxCoolLimit,
             absMinCoolSetpointLimit: minCoolLimit,
             absMaxCoolSetpointLimit: maxCoolLimit,
+            minCoolSetpointLimit: minCoolLimit,
+            maxCoolSetpointLimit: maxCoolLimit,
           }
         : {}),
       localTemperature: localTemperature,

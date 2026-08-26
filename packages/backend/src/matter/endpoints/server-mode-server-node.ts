@@ -9,9 +9,12 @@ import type { Environment } from "@matter/main";
 import { RoboticVacuumCleanerDevice } from "@matter/main/devices";
 import { type Endpoint, ServerNode } from "@matter/main/node";
 import { DeviceTypeId, VendorId } from "@matter/main/types";
+import { CAMERA_TCP_CONFIG } from "../../plugins/builtin/camera/camera-tcp-requirement.js";
 import { sanitizeMatterString } from "../../utils/sanitize-matter-string.js";
 import { trimToLength } from "../../utils/trim-to-length.js";
+import { legacySpecBasicInformation } from "../legacy-spec-version.js";
 import { matterSubscriptionOptions } from "../subscription-options.js";
+import { rootEndpointType } from "../tc-general-commissioning.js";
 
 const logger = Logger.get("ServerModeServerNode");
 
@@ -34,6 +37,7 @@ export class ServerModeServerNode extends ServerNode {
 
   constructor(env: Environment, bridgeData: BridgeData) {
     super({
+      type: rootEndpointType(bridgeData.featureFlags),
       id: bridgeData.id,
       environment: env,
       network: {
@@ -42,12 +46,16 @@ export class ServerModeServerNode extends ServerNode {
         // iOS does not show a stale "Updating" tile (#287), no jitter so the
         // keepalive stays inside a controller's ceiling (#386).
         subscriptionOptions: matterSubscriptionOptions(),
+        ...(bridgeData.featureFlags?.enableMatterTcp
+          ? { tcp: CAMERA_TCP_CONFIG }
+          : {}),
       },
       productDescription: {
         name: bridgeData.name,
         deviceType: DeviceTypeId(RoboticVacuumCleanerDevice.deviceType),
       },
       basicInformation: {
+        ...legacySpecBasicInformation(bridgeData.featureFlags),
         uniqueId: bridgeData.id,
         nodeLabel: trimToLength(bridgeData.name, 32, "..."),
         vendorId: VendorId(bridgeData.basicInformation.vendorId),

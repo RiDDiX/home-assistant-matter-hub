@@ -1,9 +1,12 @@
 import crypto from "node:crypto";
 import type { BridgeData } from "@home-assistant-matter-hub/common";
 import { AggregatorEndpoint } from "@matter/main/endpoints";
-import { type Node, ServerNode } from "@matter/main/node";
+import type { Node, ServerNode } from "@matter/main/node";
 import { VendorId } from "@matter/main/types";
+import { legacySpecBasicInformation } from "../../matter/legacy-spec-version.js";
 import { matterSubscriptionOptions } from "../../matter/subscription-options.js";
+import { rootEndpointType } from "../../matter/tc-general-commissioning.js";
+import { CAMERA_TCP_CONFIG } from "../../plugins/builtin/camera/camera-tcp-requirement.js";
 import { trimToLength } from "../trim-to-length.js";
 
 export type BridgeServerNodeConfig =
@@ -14,18 +17,24 @@ export function createBridgeServerConfig(
   options?: { tcp?: { incoming: boolean; outgoing: boolean } },
 ): BridgeServerNodeConfig {
   return {
-    type: ServerNode.RootEndpoint,
+    type: rootEndpointType(data.featureFlags),
     id: data.id,
     network: {
       port: data.port,
       subscriptionOptions: matterSubscriptionOptions(),
-      ...(options?.tcp ? { tcp: options.tcp } : {}),
+      // camera serverOptions win, the flag reuses the same listener config
+      ...(options?.tcp
+        ? { tcp: options.tcp }
+        : data.featureFlags?.enableMatterTcp
+          ? { tcp: CAMERA_TCP_CONFIG }
+          : {}),
     },
     productDescription: {
       name: data.name,
       deviceType: AggregatorEndpoint.deviceType,
     },
     basicInformation: {
+      ...legacySpecBasicInformation(data.featureFlags),
       uniqueId: data.id,
       nodeLabel: trimToLength(data.name, 32, "..."),
       vendorId: VendorId(data.basicInformation.vendorId),

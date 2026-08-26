@@ -41,13 +41,23 @@ function isCharging(entity: { attributes: Record<string, unknown> }): boolean {
   if (attrs.is_charging === false || attrs.charging === false) return false;
   const level = batteryFromAttributes(entity.attributes);
   if (level != null && level >= 100) return false;
-  if (attrs.battery_icon?.includes("charging")) return true;
+  // "Fully charged", "Charge complete" and "not_charging" all contain "charg"
+  // but mean the opposite, and a stale charging icon must not override a
+  // terminal status (#450). Separators normalized so not_charging matches.
+  const status =
+    typeof attrs.status === "string"
+      ? attrs.status.toLowerCase().replace(/[-_]/g, " ")
+      : "";
   if (
-    typeof attrs.status === "string" &&
-    attrs.status.toLowerCase().includes("charg")
-  )
-    return true;
-  return false;
+    status.includes("discharg") ||
+    status.includes("not charg") ||
+    status.includes("full") ||
+    status.includes("complete")
+  ) {
+    return false;
+  }
+  if (attrs.battery_icon?.includes("charging")) return true;
+  return status.includes("charg");
 }
 
 // On the dock: an explicit signal wins, otherwise below full means charging,

@@ -30,6 +30,7 @@ import {
   type PendingRemoval,
 } from "./bridge-endpoint-manager.js";
 import type { BridgeRegistry } from "./bridge-registry.js";
+import { EntityMappingSync } from "./entity-mapping-sync.js";
 import {
   IdentityResolver,
   identityKey,
@@ -57,6 +58,7 @@ export class ServerModeEndpointManager extends Service {
   private observingRequested = false;
   private _failedEntities: FailedEntity[] = [];
   private readonly endpoints = new Map<string, ManagedEndpoint>();
+  private readonly mappingSync: EntityMappingSync;
   // Same grace as the aggregator manager: server mode deleted on the FIRST
   // refresh an entity was absent, so one partial HA snapshot re-minted the
   // device (#438).
@@ -94,17 +96,15 @@ export class ServerModeEndpointManager extends Service {
       identityStorage,
       mappingStorage,
     );
+    this.mappingSync = new EntityMappingSync(
+      registry,
+      (entityId) => this.getEntityMapping(entityId),
+      log,
+    );
   }
 
   private getEntityMapping(entityId: string): EntityMappingConfig | undefined {
     return this.mappingStorage.getMapping(this.dataProvider.id, entityId);
-  }
-
-  private computeMappingFingerprint(
-    mapping: EntityMappingConfig | undefined,
-  ): string {
-    if (!mapping) return "";
-    return JSON.stringify(mapping);
   }
 
   override async dispose(): Promise<void> {
@@ -159,6 +159,9 @@ export class ServerModeEndpointManager extends Service {
         ids.add(mappedId);
       }
     }
+    for (const id of this.mappingSync.candidateSensorIds()) {
+      ids.add(id);
+    }
     return [...ids];
   }
 
@@ -177,6 +180,7 @@ export class ServerModeEndpointManager extends Service {
       clearTimeout(this.removalRecheckTimer);
       this.removalRecheckTimer = null;
     }
+    this.mappingSync.cancelRetry();
   }
 
   /** Primary first (the entity the first include matcher tests true for). */
@@ -435,9 +439,16 @@ export class ServerModeEndpointManager extends Service {
           continue;
         }
 
-        const fingerprint = this.computeMappingFingerprint(mapping);
         const existing = this.endpoints.get(entityId);
-        if (existing && existing.fingerprint === fingerprint) {
+        if (
+          existing &&
+          existing.fingerprint ===
+            this.mappingSync.compareFingerprint(
+              mapping,
+              entityId,
+              existing.fingerprint,
+            )
+        ) {
           this.log.debug(`Device endpoint already exists for ${entityId}`);
           continue;
         }
@@ -527,7 +538,14 @@ export class ServerModeEndpointManager extends Service {
           }
 
           await this.serverNode.addDevice(endpoint);
-          this.endpoints.set(entityId, { endpoint, fingerprint });
+          this.endpoints.set(entityId, {
+            endpoint,
+            fingerprint: this.mappingSync.fingerprintAsBuilt(
+              mapping,
+              entityId,
+              endpoint.mappedEntityIds,
+            ),
+          });
           // mounted for real, so nothing this entity parked is reserved any
           // more, not even an id it left behind under an older custom name
           for (const [id, owner] of this.parkedEndpointIds) {
@@ -560,6 +578,12 @@ export class ServerModeEndpointManager extends Service {
       if (lifecycle === this.lifecycle) {
         this.scheduleRemovalRecheck();
       }
+      this.mappingSync.rebuildCandidates(
+        [...this.endpoints].map(
+          ([entityId, entry]) =>
+            [entityId, entry.fingerprint] as [string, string],
+        ),
+      );
       // re-subscribe on every path so mapped-entity subscriptions stay fresh
       if (this.observingRequested) {
         this.startObserving();
@@ -571,6 +595,10 @@ export class ServerModeEndpointManager extends Service {
     // Merge subscription states into registry so EntityStateProvider
     // reads fresh values for mapped entities (battery, humidity, etc.)
     this.registry.mergeExternalStates(states);
+
+    this.mappingSync.maybeRetry(states, null, this.observingRequested, () =>
+      this.refreshDevices(),
+    );
 
     for (const [entityId, entry] of this.endpoints) {
       try {

@@ -122,6 +122,12 @@ interface AllBridgeFeatureFlags {
    * Default: false (disabled)
    */
   readonly fastSessionRecovery: boolean;
+  /** Advertise Matter 1.5.1 instead of 1.6.0, pairing diagnostic for older Alexa stacks (#449). */
+  readonly advertiseSpecVersion151: boolean;
+  /** Accept SetTcAcknowledgements instead of rejecting it, pairing experiment for Echo stalls (#449). */
+  readonly supportTermsAndConditions: boolean;
+  /** Open a Matter TCP listener like camera bridges do, pairing experiment for Echo stalls (#449). */
+  readonly enableMatterTcp: boolean;
   /**
    * Stable Device Identity: anchor each device's Matter endpoint id, uniqueId
    * and serialNumber to the Home Assistant entity registry unique_id instead of

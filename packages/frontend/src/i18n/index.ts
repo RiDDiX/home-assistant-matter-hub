@@ -8,6 +8,7 @@ import fr from "./locales/fr.json";
 import hu from "./locales/hu.json";
 import it from "./locales/it.json";
 import ja from "./locales/ja.json";
+import ko from "./locales/ko.json";
 import pl from "./locales/pl.json";
 import ptBR from "./locales/pt-br.json";
 import ru from "./locales/ru.json";
@@ -103,6 +104,7 @@ i18n
       fr: { translation: fr },
       it: { translation: it },
       ja: { translation: ja },
+      ko: { translation: ko },
       es: { translation: es },
       zh: { translation: zh },
       "zh-TW": { translation: zhTW },

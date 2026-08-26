@@ -42,6 +42,7 @@ import {
 } from "../storage/orphan-cleanup.js";
 import type { BridgeRegistry } from "./bridge-registry.js";
 import { EntityIsolationService } from "./entity-isolation-service.js";
+import { EntityMappingSync } from "./entity-mapping-sync.js";
 import {
   IdentityResolver,
   identityKey,
@@ -92,6 +93,7 @@ export class BridgeEndpointManager extends Service {
   private observingRequested = false;
   private _failedEntities: FailedEntity[] = [];
   private readonly mappingFingerprints = new Map<string, string>();
+  private readonly mappingSync: EntityMappingSync;
   // entityId -> first absence stamp (grace window)
   private readonly pendingRemovals = new Map<string, PendingRemoval>();
   private removalRecheckTimer: ReturnType<typeof setTimeout> | null = null;
@@ -134,6 +136,11 @@ export class BridgeEndpointManager extends Service {
     this.identityResolver = new IdentityResolver(
       identityStorage,
       mappingStorage,
+    );
+    this.mappingSync = new EntityMappingSync(
+      registry,
+      (entityId) => this.getEntityMapping(entityId),
+      log,
     );
 
     // Register callback to isolate problematic entities at runtime
@@ -571,13 +578,6 @@ export class BridgeEndpointManager extends Service {
     return this.mappingStorage.getMapping(this.bridgeId, entityId);
   }
 
-  private computeMappingFingerprint(
-    mapping: EntityMappingConfig | undefined,
-  ): string {
-    if (!mapping) return "";
-    return JSON.stringify(mapping);
-  }
-
   override async dispose(): Promise<void> {
     this.stopObserving();
     if (this.removalRecheckTimer) {
@@ -634,6 +634,9 @@ export class BridgeEndpointManager extends Service {
         }
       }
     }
+    for (const id of this.mappingSync.candidateSensorIds()) {
+      ids.add(id);
+    }
     return [...ids];
   }
 
@@ -652,6 +655,7 @@ export class BridgeEndpointManager extends Service {
       clearTimeout(this.removalRecheckTimer);
       this.removalRecheckTimer = null;
     }
+    this.mappingSync.cancelRetry();
   }
 
   async refreshDevices() {
@@ -881,8 +885,12 @@ export class BridgeEndpointManager extends Service {
         // Check if the mapping changed since the endpoint was created.
         // If so, delete the old endpoint so it gets recreated with the new config.
         const currentMapping = this.getEntityMapping(endpoint.entityId);
-        const currentFp = this.computeMappingFingerprint(currentMapping);
         const storedFp = this.mappingFingerprints.get(endpoint.entityId) ?? "";
+        const currentFp = this.mappingSync.compareFingerprint(
+          currentMapping,
+          endpoint.entityId,
+          storedFp,
+        );
         if (currentFp !== storedFp) {
           this.log.info(
             `Mapping changed for ${endpoint.entityId}, recreating endpoint`,
@@ -998,7 +1006,11 @@ export class BridgeEndpointManager extends Service {
             await this.root.add(endpoint);
             this.mappingFingerprints.set(
               entityId,
-              this.computeMappingFingerprint(mapping),
+              this.mappingSync.fingerprintAsBuilt(
+                mapping,
+                entityId,
+                endpoint.mappedEntityIds,
+              ),
             );
           } catch (e) {
             const errorMessage = e instanceof Error ? e.message : String(e);
@@ -1015,6 +1027,13 @@ export class BridgeEndpointManager extends Service {
     }
 
     await this.reconcileAreaSwitches();
+
+    this.mappingSync.rebuildCandidates(
+      [...this.root.parts].filter(hasEntityIdentity).flatMap((p) => {
+        const fp = this.mappingFingerprints.get(p.entityId);
+        return fp === undefined ? [] : [[p.entityId, fp] as [string, string]];
+      }),
+    );
 
     if (this.observingRequested) {
       this.startObserving();
@@ -1204,6 +1223,10 @@ export class BridgeEndpointManager extends Service {
     // Merge subscription states into registry so EntityStateProvider
     // reads fresh values for mapped entities (battery, humidity, etc.)
     this.registry.mergeExternalStates(states);
+
+    this.mappingSync.maybeRetry(states, changed, this.observingRequested, () =>
+      this.refreshDevices(),
+    );
 
     const allEndpoints = [...this.root.parts].filter(isEntityPart);
     // One HA event arrives as the full state map. Hand it only to endpoints

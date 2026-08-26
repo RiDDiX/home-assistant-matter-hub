@@ -94,10 +94,14 @@ class PowerSourceServerBase extends FeaturedBase {
     // Determine charge state
     let batChargeState = PowerSource.BatChargeState.Unknown;
     if (isCharging === true) {
+      // without a percent the full-charge escape can never fire, so a docked
+      // robot would read IsCharging forever, stay Unknown instead (#450)
       batChargeState =
-        batteryPercent != null && batteryPercent >= 100
-          ? PowerSource.BatChargeState.IsAtFullCharge
-          : PowerSource.BatChargeState.IsCharging;
+        batteryPercent == null
+          ? PowerSource.BatChargeState.Unknown
+          : batteryPercent >= 100
+            ? PowerSource.BatChargeState.IsAtFullCharge
+            : PowerSource.BatChargeState.IsCharging;
     } else if (isCharging === false) {
       batChargeState = PowerSource.BatChargeState.IsNotCharging;
     }

@@ -313,6 +313,25 @@ describe("explicit matterDeviceType battery (#408)", () => {
   });
 });
 
+// The pm25, pm10 and co2 endpoints existed but were not selectable as an
+// override, unlike every sibling gas sensor.
+describe("particulate and co2 overrides", () => {
+  const entity = createEntity("sensor.aq", "12", {});
+
+  it.each([
+    ["pm25_sensor", "pm25ConcentrationMeasurement"],
+    ["pm10_sensor", "pm10ConcentrationMeasurement"],
+    ["carbon_dioxide_sensor", "carbonDioxideConcentrationMeasurement"],
+  ] as const)("%s mounts its measurement cluster", (override, cluster) => {
+    const type = createLegacyEndpointType(entity, {
+      entityId: "sensor.aq",
+      matterDeviceType: override,
+    });
+    expect(type).toBeDefined();
+    expect(type!.behaviors).toHaveProperty(cluster);
+  });
+});
+
 function createEntity<T extends {} = {}>(
   entityId: string,
   state: string,

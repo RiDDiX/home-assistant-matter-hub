@@ -146,7 +146,8 @@ export class HomeAssistantActions extends Service {
     // are debounced independently instead of being merged incorrectly.
     const target =
       action.target === false ? entityId : (action.target ?? entityId);
-    const key = `${target}-${action.action}`;
+    const intent = Object.keys(action.data ?? {}).length ? "adjust" : "command";
+    const key = `${target}-${action.action}-${intent}`;
     this.debounceContext.get(key, 100)({ ...action, entityId });
   }
 

@@ -17,7 +17,12 @@ function fakeLogger(): LoggerService {
   } as unknown as LoggerService;
 }
 
-function makeActions(sendMessagePromise: () => Promise<unknown>) {
+function makeActions(
+  sendMessagePromise: (message: {
+    type: string;
+    [key: string]: unknown;
+  }) => Promise<unknown>,
+) {
   const client = {
     haRunning: true,
     messageTimeoutMs: 50,
@@ -100,5 +105,34 @@ describe("HomeAssistantActions availability (#446)", () => {
     await vi.waitFor(() =>
       expect(actions.isTargetBlocked("light.flaky")).toBe(false),
     );
+  });
+});
+
+describe("HomeAssistantActions debounce", () => {
+  it("keeps explicit commands separate while coalescing adjustments", async () => {
+    const serviceData: unknown[] = [];
+    const sendMessagePromise = async (message: {
+      type: string;
+      [key: string]: unknown;
+    }) => {
+      if (message.type === "call_service") {
+        serviceData.push(message.service_data);
+      }
+      return {};
+    };
+    const { actions } = makeActions(sendMessagePromise);
+
+    actions.call(
+      { action: "light.turn_on", data: { brightness: 100 } },
+      "light.lamp",
+    );
+    actions.call({ action: "light.turn_on" }, "light.lamp");
+    actions.call(
+      { action: "light.turn_on", data: { brightness: 200 } },
+      "light.lamp",
+    );
+
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    expect(serviceData).toEqual([{ brightness: 200 }, {}]);
   });
 });

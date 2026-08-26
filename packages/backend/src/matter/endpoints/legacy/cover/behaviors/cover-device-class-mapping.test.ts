@@ -69,12 +69,17 @@ describe("deviceClassMapping", () => {
   });
 
   it("falls back to Rollershade for blind without tilt feature (#312)", () => {
-    // supported_features=7 = open + close + set_position (lift only)
+    // supported_features=7 = open + close + set_position (lift only).
+    // InteriorBlind needs LF & TL per spec, so the product goes Unknown.
     const mapping = deviceClassMapping(entity("blind", 7));
     expect(mapping?.type).toBe(WindowCovering.WindowCoveringType.Rollershade);
-    expect(mapping?.endProductType).toBe(
-      WindowCovering.EndProductType.InteriorBlind,
-    );
+    expect(mapping?.endProductType).toBe(WindowCovering.EndProductType.Unknown);
+  });
+
+  it("uses Unknown for a window that also tilts", () => {
+    const mapping = deviceClassMapping(entity("window", 143));
+    expect(mapping?.type).toBe(WindowCovering.WindowCoveringType.TiltBlindLift);
+    expect(mapping?.endProductType).toBe(WindowCovering.EndProductType.Unknown);
   });
 
   it("uses TiltBlindLift for blind with both lift and tilt (#323)", () => {
@@ -86,14 +91,48 @@ describe("deviceClassMapping", () => {
     );
   });
 
-  it("keeps TiltBlindTiltOnly for tilt-only blind (no lift)", () => {
+  // The endpoint always puts Lift in the feature map, so TiltBlindTiltOnly
+  // (conformance !LF & TL) can never be honest here, whatever HA reports.
+  it("uses TiltBlindLift for a tilt-only blind, since Lift is advertised anyway", () => {
     // supported_features=16+32+64+128=240 = tilt features only
     const mapping = deviceClassMapping(entity("blind", 240));
-    expect(mapping?.type).toBe(
-      WindowCovering.WindowCoveringType.TiltBlindTiltOnly,
-    );
+    expect(mapping?.type).toBe(WindowCovering.WindowCoveringType.TiltBlindLift);
     expect(mapping?.endProductType).toBe(
       WindowCovering.EndProductType.InteriorBlind,
+    );
+  });
+
+  it("uses TiltBlindLift with a matching product for a curtain that also tilts", () => {
+    // Drapery is LF & !TL, and CentralCurtain belongs to Drapery, so both
+    // move: the tilting curtain product is the vertical blind strip curtain
+    const mapping = deviceClassMapping(entity("curtain", 143));
+    expect(mapping?.type).toBe(WindowCovering.WindowCoveringType.TiltBlindLift);
+    expect(mapping?.endProductType).toBe(
+      WindowCovering.EndProductType.VerticalBlindStripCurtain,
+    );
+  });
+
+  it("uses SheerShade for a shade that also tilts", () => {
+    const mapping = deviceClassMapping(entity("shade", 143));
+    expect(mapping?.type).toBe(WindowCovering.WindowCoveringType.TiltBlindLift);
+    expect(mapping?.endProductType).toBe(
+      WindowCovering.EndProductType.SheerShade,
+    );
+  });
+
+  it("falls back to Unknown for a tilting awning", () => {
+    // No tilting counterpart exists for awnings, honest beats wrong
+    const mapping = deviceClassMapping(entity("awning", 143));
+    expect(mapping?.type).toBe(WindowCovering.WindowCoveringType.TiltBlindLift);
+    expect(mapping?.endProductType).toBe(WindowCovering.EndProductType.Unknown);
+  });
+
+  it("keeps Shutter for a shutter that also tilts", () => {
+    // Shutter is LF | TL, so it stays honest with or without tilt
+    const mapping = deviceClassMapping(entity("shutter", 143));
+    expect(mapping?.type).toBe(WindowCovering.WindowCoveringType.Shutter);
+    expect(mapping?.endProductType).toBe(
+      WindowCovering.EndProductType.RollerShutter,
     );
   });
 
