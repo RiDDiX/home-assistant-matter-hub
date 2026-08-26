@@ -114,11 +114,23 @@ describe("security plugin bring-up (#419)", () => {
     const { manager, endpoints } = await bringUp();
 
     expect([...endpoints.keys()]).toEqual([...MODE_IDS, "alarm"]);
-    for (const id of MODE_IDS) {
+    for (const [id, name] of [
+      ["mode_home", "Home"],
+      ["mode_away", "Away"],
+      ["mode_night", "Night"],
+      ["mode_vacation", "Vacation"],
+    ] as const) {
       expect(endpoints.get(id)!.type.deviceType).toBe(
         OnOffPlugInUnitDevice.deviceType,
       );
       expect(stateOf(endpoints.get(id)!).onOff.onOff).toBe(false);
+      expect(
+        stateOf(endpoints.get(id)!).bridgedDeviceBasicInformation,
+      ).toMatchObject({
+        nodeLabel: name,
+        productName: name,
+        productLabel: name,
+      });
     }
     expect(endpoints.get("alarm")!.type.deviceType).toBe(
       ContactSensorDevice.deviceType,
