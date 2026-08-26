@@ -93,6 +93,39 @@ interface PluginInstance {
  * Each bridge gets its own PluginManager instance. Plugins register devices
  * which are then exposed as Matter endpoints on the bridge.
  */
+// The entry the manifest points at, as a real file path. Node ESM cannot
+// import a directory, so the package "main" has to be resolved by hand. Both
+// sides are canonicalized before the containment check: path.resolve does not
+// follow symlinks, so a lexical check alone would let a symlinked main load
+// code from outside the package.
+export function resolvePluginEntry(
+  packagePath: string,
+  manifest: { name?: string; main?: string },
+): string {
+  const containmentError = () =>
+    new Error(
+      `Plugin "${manifest.name}" main entry must stay inside the package directory`,
+    );
+  const packageRoot = fs.realpathSync(path.resolve(packagePath));
+  const entryPath = path.resolve(packageRoot, manifest.main ?? "");
+  const contains = (candidate: string) =>
+    candidate === packageRoot ||
+    candidate.startsWith(`${packageRoot}${path.sep}`);
+  if (!contains(entryPath)) {
+    throw containmentError();
+  }
+  if (!fs.existsSync(entryPath) || !fs.statSync(entryPath).isFile()) {
+    throw new Error(
+      `Plugin "${manifest.name}" main entry does not exist: ${manifest.main}`,
+    );
+  }
+  const realEntry = fs.realpathSync(entryPath);
+  if (!contains(realEntry)) {
+    throw containmentError();
+  }
+  return realEntry;
+}
+
 export class PluginManager {
   private readonly instances = new Map<string, PluginInstance>();
   private readonly domainMappings = new Map<string, PluginDomainMapping>();
@@ -196,21 +229,7 @@ export class PluginManager {
         );
       }
 
-      const packageRoot = path.resolve(packagePath);
-      const entryPath = path.resolve(packageRoot, manifest.main);
-      if (
-        entryPath !== packageRoot &&
-        !entryPath.startsWith(`${packageRoot}${path.sep}`)
-      ) {
-        throw new Error(
-          `Plugin "${manifest.name}" main entry must stay inside the package directory`,
-        );
-      }
-      if (!fs.existsSync(entryPath) || !fs.statSync(entryPath).isFile()) {
-        throw new Error(
-          `Plugin "${manifest.name}" main entry does not exist: ${manifest.main}`,
-        );
-      }
+      const entryPath = resolvePluginEntry(packagePath, manifest);
 
       const module = await this.runner.run(
         manifest.name,

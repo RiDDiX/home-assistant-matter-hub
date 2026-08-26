@@ -106,6 +106,75 @@ export class BridgeEndpointManager extends Service {
   private topologyChangeHandler = async (change: () => Promise<unknown>) => {
     await change();
   };
+  // Bridge start and stop mount or unmount every plugin device at once. That
+  // is one topology change, not one per device, and a restart that ends with
+  // the same devices is none at all, so controllers are not told to
+  // re-discover the bridge on every restart.
+  // Depth, not a flag: a stop and a start can overlap, and the inner one
+  // finishing must not un-quiet the outer.
+  private topologyBatchDepth = 0;
+  // The handler writes the Matter configuration version, which takes a
+  // synchronous lock on the root node. Two overlapping registrations would
+  // make the second one throw and leave its endpoint mounted but untracked,
+  // so every change goes through here one at a time, batch or not.
+  private topologyQueue: Promise<unknown> = Promise.resolve();
+  // What controllers were last told the plugin composition is. Survives a
+  // bridge restart within the process, so a restart that brings back the same
+  // devices announces nothing while a changed set announces once.
+  private announcedPluginTopology = "";
+
+  private pluginTopology(): string {
+    return [...this.root.parts]
+      .map((part) => part.id)
+      .filter((id) => id.startsWith("plugin_"))
+      .sort()
+      .join(" ");
+  }
+
+  private async enqueueTopology(
+    change: () => Promise<unknown>,
+    batched: boolean,
+  ): Promise<void> {
+    const next = this.topologyQueue.then(async () => {
+      // Inside a start or stop batch the mutation still has to be serialized,
+      // only the announcement is held back until the batch is done.
+      if (batched) {
+        await change();
+        return;
+      }
+      await this.topologyChangeHandler(change);
+      this.announcedPluginTopology = this.pluginTopology();
+    });
+    this.topologyQueue = next.catch(() => undefined);
+    await next;
+  }
+
+  private async topologyChange(change: () => Promise<unknown>): Promise<void> {
+    // Read the batch at enqueue time: work handed over during a batch belongs
+    // to it even if the queue only gets to it after the batch has ended.
+    await this.enqueueTopology(change, this.topologyBatchDepth > 0);
+  }
+
+  // Start and stop mount or unmount every plugin device at once. That is one
+  // topology change, not one per device, and a stop is none at all because the
+  // devices come back with the same numbers on the next start (#438).
+  private async duringPluginBatch(
+    run: () => Promise<void>,
+    announce: boolean,
+  ): Promise<void> {
+    this.topologyBatchDepth++;
+    try {
+      await run();
+    } finally {
+      this.topologyBatchDepth--;
+    }
+    if (!announce) return;
+    const topology = this.pluginTopology();
+    if (topology === this.announcedPluginTopology) return;
+    // Always a real announcement, even when another batch is still open:
+    // this one has already decided the composition changed.
+    await this.enqueueTopology(async () => undefined, false);
+  }
 
   get failedEntities(): FailedEntity[] {
     // Combine static failed entities with dynamically isolated entities
@@ -255,7 +324,7 @@ export class BridgeEndpointManager extends Service {
         });
       }
       try {
-        await this.topologyChangeHandler(() => this.root.add(endpoint));
+        await this.topologyChange(() => this.root.add(endpoint));
         this.pluginEndpoints.set(device.id, endpoint);
         this.wirePluginEndpointEvents(device, endpoint);
         this.log.info(
@@ -292,9 +361,9 @@ export class BridgeEndpointManager extends Service {
             // A reversible stop: close keeps the persisted endpoint number,
             // so a re-enable mounts under the same identity. delete would
             // free the number and renumber every device on the next enable.
-            await this.topologyChangeHandler(() => endpoint.close());
+            await this.topologyChange(() => endpoint.close());
           } else {
-            await this.topologyChangeHandler(() => endpoint.delete());
+            await this.topologyChange(() => endpoint.delete());
           }
         } catch (e) {
           this.log.warn(
@@ -386,10 +455,12 @@ export class BridgeEndpointManager extends Service {
 
   async startPlugins(): Promise<void> {
     if (!this.pluginManager) return;
-    await this.registerBuiltInPlugins();
-    await this.loadRegisteredPlugins();
-    await this.pluginManager.startAll();
-    await this.pluginManager.configureAll();
+    await this.duringPluginBatch(async () => {
+      await this.registerBuiltInPlugins();
+      await this.loadRegisteredPlugins();
+      await this.pluginManager?.startAll();
+      await this.pluginManager?.configureAll();
+    }, true);
   }
 
   // Built-in plugins ship inside the backend bundle, so they share the same
@@ -432,17 +503,19 @@ export class BridgeEndpointManager extends Service {
 
   async stopPlugins(): Promise<void> {
     if (!this.pluginManager) return;
-    await this.pluginManager.shutdownAll("Bridge stopping");
-    // close() keeps the numbers, so plugin devices survive every bridge stop
-    // and restart (#438). Permanent removal goes through onDeviceUnregistered.
-    for (const [id, endpoint] of this.pluginEndpoints) {
-      try {
-        await endpoint.close();
-      } catch (e) {
-        this.log.warn(`Failed to close plugin endpoint ${id}:`, e);
+    await this.duringPluginBatch(async () => {
+      await this.pluginManager?.shutdownAll("Bridge stopping");
+      // close() keeps the numbers, so plugin devices survive every bridge stop
+      // and restart (#438). Permanent removal goes through onDeviceUnregistered.
+      for (const [id, endpoint] of this.pluginEndpoints) {
+        try {
+          await this.topologyChange(() => endpoint.close());
+        } catch (e) {
+          this.log.warn(`Failed to close plugin endpoint ${id}:`, e);
+        }
       }
-    }
-    this.pluginEndpoints.clear();
+      this.pluginEndpoints.clear();
+    }, false);
   }
 
   getPluginInfo(): {

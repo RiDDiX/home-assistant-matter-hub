@@ -31,7 +31,7 @@ docker run -d \
 
 ## Current Alpha Features
 
-Alpha is ahead of Stable (v2.0.56): the security plugin can mirror an existing Home Assistant alarm panel via the new `sourceAlarmPanel` setting ([#457](https://github.com/RiDDiX/home-assistant-matter-hub/pull/457)) (alpha.875). Standalone Devices graduated to Stable in v2.0.47, see [Standalone Devices](../getting-started/standalone-devices.md).
+Alpha is ahead of Stable (v2.0.56): third-party plugins load through their manifest entry point, plugin devices carry their own name on controllers, and plugin topology changes are announced to commissioned controllers ([#458](https://github.com/RiDDiX/home-assistant-matter-hub/pull/458)) (alpha.876); the security plugin can mirror an existing Home Assistant alarm panel via the new `sourceAlarmPanel` setting ([#457](https://github.com/RiDDiX/home-assistant-matter-hub/pull/457)) (alpha.875). Standalone Devices graduated to Stable in v2.0.47, see [Standalone Devices](../getting-started/standalone-devices.md).
 
 For a complete list of all supported features and device types, see [Supported Device Types](../supported-device-types.md).
 
