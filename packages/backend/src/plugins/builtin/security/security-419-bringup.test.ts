@@ -310,8 +310,9 @@ describe("security plugin bring-up (#419)", () => {
 
   it("announces a finished batch while another batch is still open", async () => {
     const { manager, bem } = await bringUp();
-    const afterStart = server!.stateOf(BasicInformationServer)
-      .configurationVersion;
+    const afterStart = server!.stateOf(
+      BasicInformationServer,
+    ).configurationVersion;
     const registered = (
       manager as unknown as {
         onDeviceRegistered?: (plugin: string, device: unknown) => Promise<void>;
