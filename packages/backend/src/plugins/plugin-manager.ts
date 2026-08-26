@@ -1,5 +1,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { pathToFileURL } from "node:url";
 import { Logger } from "@matter/general";
 import { getSupportedPluginDeviceTypes } from "./plugin-device-factory.js";
 import type { PluginRegistry } from "./plugin-registry.js";
@@ -195,10 +196,26 @@ export class PluginManager {
         );
       }
 
+      const packageRoot = path.resolve(packagePath);
+      const entryPath = path.resolve(packageRoot, manifest.main);
+      if (
+        entryPath !== packageRoot &&
+        !entryPath.startsWith(`${packageRoot}${path.sep}`)
+      ) {
+        throw new Error(
+          `Plugin "${manifest.name}" main entry must stay inside the package directory`,
+        );
+      }
+      if (!fs.existsSync(entryPath) || !fs.statSync(entryPath).isFile()) {
+        throw new Error(
+          `Plugin "${manifest.name}" main entry does not exist: ${manifest.main}`,
+        );
+      }
+
       const module = await this.runner.run(
         manifest.name,
         "import",
-        () => import(packagePath),
+        () => import(pathToFileURL(entryPath).href),
         15_000,
       );
       if (!module) {
