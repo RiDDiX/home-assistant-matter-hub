@@ -59,7 +59,9 @@ interface ServiceMessage {
 function fakeConnection() {
   return {
     connected: true,
-    sendMessagePromise: vi.fn(async (_msg: ServiceMessage) => ({})),
+    sendMessagePromise: vi.fn(async (msg: ServiceMessage) =>
+      msg.type === "get_states" ? [] : {},
+    ),
     subscribeEvents: vi.fn(async () => () => {}),
     addEventListener: vi.fn(),
     close: vi.fn(),
@@ -111,6 +113,204 @@ describe("SecurityPlugin", () => {
     await plugin.onShutdown();
   });
 
+  it("registers devices for a source alarm panel without dummy triggers", async () => {
+    const conn = fakeConnection();
+    const { ctx, devices } = createMockContext({ homeAssistant: ha });
+    const plugin = new SecurityPlugin(
+      { sourceAlarmPanel: "alarm_control_panel.house" },
+      { connect: async () => conn as unknown as Connection },
+    );
+
+    await plugin.onStart(ctx);
+
+    expect(devices.size).toBe(5);
+    expect(ctx.registerDevice).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "mode_home" }),
+    );
+    await plugin.onShutdown();
+  });
+
+  it("reads and mirrors the source alarm panel after connecting", async () => {
+    const conn = fakeConnection();
+    conn.sendMessagePromise = vi.fn(async (msg: ServiceMessage) =>
+      msg.type === "get_states"
+        ? [{ entity_id: "alarm_control_panel.house", state: "armed_home" }]
+        : {},
+    );
+    const { ctx } = createMockContext({ homeAssistant: ha });
+    const plugin = new SecurityPlugin(
+      {
+        sourceAlarmPanel: "alarm_control_panel.house",
+        homeSetters: "scene.arm_home",
+      },
+      { connect: async () => conn as unknown as Connection },
+    );
+
+    await plugin.onStart(ctx);
+
+    await vi.waitFor(() => {
+      expect(ctx.updateDeviceState).toHaveBeenCalledWith("mode_home", "onOff", {
+        onOff: true,
+      });
+    });
+    expect(ctx.updateDeviceState).toHaveBeenCalledWith(
+      "alarm",
+      "booleanState",
+      { stateValue: true },
+    );
+    const services = conn.sendMessagePromise.mock.calls
+      .map(([message]) => message)
+      .filter((message) => message.type === "call_service");
+    expect(services).toEqual([]);
+    await plugin.onShutdown();
+  });
+
+  it("mirrors source state events, including the triggered contact state", async () => {
+    let stateHandler: ((event: unknown) => void) | undefined;
+    const conn = {
+      ...fakeConnection(),
+      sendMessagePromise: vi.fn(async (msg: ServiceMessage) =>
+        msg.type === "get_states"
+          ? [{ entity_id: "alarm_control_panel.house", state: "armed_away" }]
+          : {},
+      ),
+      subscribeEvents: vi.fn(async (handler: (event: unknown) => void) => {
+        stateHandler = handler;
+        return () => {};
+      }),
+    };
+    const { ctx } = createMockContext({ homeAssistant: ha });
+    const plugin = new SecurityPlugin(
+      { sourceAlarmPanel: "alarm_control_panel.house" },
+      { connect: async () => conn as unknown as Connection },
+    );
+    await plugin.onStart(ctx);
+    await vi.waitFor(() => expect(stateHandler).toBeDefined());
+
+    stateHandler?.({
+      data: {
+        entity_id: "alarm_control_panel.house",
+        old_state: { state: "armed_away" },
+        new_state: { state: "armed_night", attributes: {} },
+      },
+    });
+    expect(ctx.updateDeviceState).toHaveBeenCalledWith("mode_night", "onOff", {
+      onOff: true,
+    });
+
+    stateHandler?.({
+      data: {
+        entity_id: "alarm_control_panel.house",
+        old_state: { state: "armed_night" },
+        new_state: { state: "triggered", attributes: {} },
+      },
+    });
+    expect(ctx.updateDeviceState).toHaveBeenCalledWith(
+      "alarm",
+      "booleanState",
+      { stateValue: false },
+    );
+    await plugin.onShutdown();
+  });
+
+  it("forwards Matter mode writes to the source alarm panel", async () => {
+    let sourceState = "disarmed";
+    const conn = fakeConnection();
+    conn.sendMessagePromise = vi.fn(async (msg: ServiceMessage) => {
+      if (msg.type === "get_states") {
+        return [{ entity_id: "alarm_control_panel.house", state: sourceState }];
+      }
+      return {};
+    });
+    const { ctx, devices } = createMockContext({ homeAssistant: ha });
+    const plugin = new SecurityPlugin(
+      { sourceAlarmPanel: "alarm_control_panel.house" },
+      { connect: async () => conn as unknown as Connection },
+    );
+    await plugin.onStart(ctx);
+    await vi.waitFor(() =>
+      expect(conn.sendMessagePromise).toHaveBeenCalledWith({
+        type: "get_states",
+      }),
+    );
+
+    await armVia(devices, "mode_night");
+    await vi.waitFor(() => {
+      expect(conn.sendMessagePromise).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: "call_service",
+          domain: "alarm_control_panel",
+          service: "alarm_arm_night",
+          target: { entity_id: "alarm_control_panel.house" },
+        }),
+      );
+    });
+
+    sourceState = "armed_night";
+    await (
+      plugin as unknown as {
+        syncSourceAlarmState(): Promise<void>;
+      }
+    ).syncSourceAlarmState();
+    await devices
+      .get("mode_night")
+      ?.onAttributeWrite?.("onOff", "onOff", false);
+    await vi.waitFor(() => {
+      expect(conn.sendMessagePromise).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: "call_service",
+          domain: "alarm_control_panel",
+          service: "alarm_disarm",
+          target: { entity_id: "alarm_control_panel.house" },
+        }),
+      );
+    });
+    await plugin.onShutdown();
+  });
+
+  it("does not run local triggers or alerts while a source panel owns state", async () => {
+    const conn = fakeConnection();
+    conn.sendMessagePromise = vi.fn(async (msg: ServiceMessage) =>
+      msg.type === "get_states"
+        ? [{ entity_id: "alarm_control_panel.house", state: "armed_home" }]
+        : {},
+    );
+    const { ctx } = createMockContext({ homeAssistant: ha });
+    const plugin = new SecurityPlugin(
+      {
+        sourceAlarmPanel: "alarm_control_panel.house",
+        exitDelaySeconds: 0,
+        homeTriggers: "binary_sensor.motion",
+        homeAlerts: "siren.horn",
+      },
+      { connect: async () => conn as unknown as Connection },
+    );
+    await plugin.onStart(ctx);
+    await vi.waitFor(() => {
+      expect(ctx.updateDeviceState).toHaveBeenCalledWith("mode_home", "onOff", {
+        onOff: true,
+      });
+    });
+
+    plugin.handleTriggerEvent("binary_sensor.motion", "on", "motion");
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    const alertCalls = conn.sendMessagePromise.mock.calls
+      .map(([message]) => message)
+      .filter(
+        (message) =>
+          message.type === "call_service" &&
+          message.target?.entity_id === "siren.horn",
+      );
+    expect(alertCalls).toEqual([]);
+    expect(ctx.updateDeviceState).not.toHaveBeenCalledWith(
+      "alarm",
+      "booleanState",
+      { stateValue: false },
+    );
+    await plugin.onShutdown();
+  });
+
   it("mounts the devices live when a config change adds a trigger (#439)", async () => {
     const { ctx, devices } = createMockContext();
     const plugin = new SecurityPlugin();
@@ -155,6 +355,7 @@ describe("SecurityPlugin", () => {
       "exitDelaySeconds",
       "entryDelaySeconds",
       "triggerTimeSeconds",
+      "sourceAlarmPanel",
       "homeSetters",
       "homeTriggers",
       "homeAlerts",
@@ -181,6 +382,7 @@ describe("SecurityPlugin", () => {
     });
     expect(schema.properties.entryDelaySeconds.default).toBe(60);
     expect(schema.properties.triggerTimeSeconds.default).toBe(120);
+    expect(schema.properties.sourceAlarmPanel.title).toBe("Source alarm panel");
     expect(schema.properties.alwaysAlerts.title).toBe("Always");
     // The fallback is a documented behavior, the field description must say it.
     expect(schema.properties.vacationSetters.description).toMatch(/away/i);

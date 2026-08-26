@@ -29,6 +29,12 @@ export interface SecuritySnapshot {
   modeReached?: boolean;
 }
 
+export interface ObservedSecurityState {
+  /** Omit the mode for phase-only updates such as pending or triggered. */
+  mode?: ArmMode | null;
+  phase?: SecurityPhase;
+}
+
 export interface SecurityMachineConfig {
   /** Exit delay before an armed mode takes effect. 0 arms immediately. */
   exitDelaySeconds: number;
@@ -371,6 +377,33 @@ export class SecurityStateMachine {
     }
   }
 
+  // Mirrors a state owned by an external alarm panel. This observation path
+  // updates only the reported switches and persisted snapshot: local setters,
+  // alerts and silence handlers must not run for an alarm owned elsewhere.
+  applyObservedState(state: ObservedSecurityState): boolean {
+    this.clearTimer();
+    let nextMode =
+      state.mode === undefined
+        ? this.mode
+        : this.normalizeObservedMode(state.mode);
+    const nextPhase = this.normalizeObservedPhase(state.phase, nextMode);
+    if (nextPhase === "disarmed") nextMode = null;
+
+    if (this.mode === nextMode && this.phase === nextPhase) {
+      this.reportSwitches();
+      return false;
+    }
+
+    this.mode = nextMode;
+    this.phase = nextPhase;
+    this.returnMode = nextPhase === "triggered" ? nextMode : null;
+    this.trippedTier = null;
+    this.modeReachedRan = true;
+    this.reportSwitches();
+    this.persist();
+    return true;
+  }
+
   shutdown(): void {
     this.clearTimer();
   }
@@ -418,6 +451,22 @@ export class SecurityStateMachine {
     const states = {} as Record<ArmMode, boolean>;
     for (const mode of ARM_MODES) states[mode] = mode === active;
     this.effects.switchStates(states);
+  }
+
+  private normalizeObservedMode(mode: ObservedSecurityState["mode"]) {
+    if (mode == null) return null;
+    return ARM_MODES.includes(mode) ? mode : null;
+  }
+
+  private normalizeObservedPhase(
+    phase: ObservedSecurityState["phase"],
+    mode: ArmMode | null,
+  ): SecurityPhase {
+    if (phase === "triggered") return phase;
+    if (phase === "arming" || phase === "pending" || phase === "armed") {
+      return mode ? phase : "disarmed";
+    }
+    return mode ? "armed" : "disarmed";
   }
 
   private persist(): void {
