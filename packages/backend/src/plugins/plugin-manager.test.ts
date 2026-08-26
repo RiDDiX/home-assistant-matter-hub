@@ -818,6 +818,52 @@ export default class TestPlugin {
       expect(pm.getMetadata()[0].source).toBe(pluginDir);
     });
 
+    it("should load the manifest main entry instead of importing the package directory", async () => {
+      const pluginDir = fs.mkdtempSync(
+        path.join(os.tmpdir(), "hamh-test-plugin-main-"),
+      );
+      tempDirs.push(pluginDir);
+      fs.mkdirSync(path.join(pluginDir, "dist"));
+      fs.writeFileSync(
+        path.join(pluginDir, "package.json"),
+        JSON.stringify({
+          name: "nested-main-plugin",
+          version: "0.1.0",
+          main: "dist/plugin.js",
+          type: "module",
+        }),
+      );
+      fs.writeFileSync(
+        path.join(pluginDir, "dist", "plugin.js"),
+        `export default class NestedMainPlugin {
+  name = "nested-main-plugin";
+  version = "0.1.0";
+  async onStart() {}
+}`,
+      );
+
+      const pm = new PluginManager("bridge-1", storageDir);
+      await pm.loadExternal(pluginDir, {});
+
+      expect(pm.getMetadata()[0].name).toBe("nested-main-plugin");
+    });
+
+    it("should reject a manifest main entry outside the package directory", async () => {
+      const pluginDir = createTempPlugin(
+        "export default class X {}",
+        "escaping-main-plugin",
+      );
+      const manifestPath = path.join(pluginDir, "package.json");
+      const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf-8"));
+      manifest.main = "../outside.js";
+      fs.writeFileSync(manifestPath, JSON.stringify(manifest));
+
+      const pm = new PluginManager("bridge-1", storageDir);
+      await expect(pm.loadExternal(pluginDir, {})).rejects.toThrow(
+        "must stay inside the package directory",
+      );
+    });
+
     it("should reject plugin without package.json", async () => {
       const dir = fs.mkdtempSync(path.join(os.tmpdir(), "hamh-test-nopkg-"));
       tempDirs.push(dir);
