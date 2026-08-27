@@ -315,6 +315,9 @@ Home, ...) are not placed in the same network segment. Please make sure to revie
 
 **Alpha is ahead of Stable (v2.0.56).** Everything below ships in the alpha channel now and lands in the next stable promote, grouped by the pre-release tag it first appeared in.
 
+**v2.1.0-alpha.878:**
+- 🪟 **Covers keep the same Matter fingerprint for life**: a cover that had been moved used to come back from a restart advertising an extra attribute it never had when the controller paired it, because matter.js counts movements in a stored attribute that only appears once it is set ([#456](https://github.com/RiDDiX/home-assistant-matter-hub/issues/456))
+
 **v2.1.0-alpha.877:**
 - 🧠 **Heap limit is configurable now**: the add-on takes a `heap_size_mb` option, the automatic sizing moved from a quarter to half of the available memory, and a `NODE_OPTIONS` you set yourself is honored instead of being silently overridden ([#459](https://github.com/RiDDiX/home-assistant-matter-hub/issues/459))
 

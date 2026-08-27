@@ -296,6 +296,15 @@ export class WindowCoveringServerBase extends FeaturedBase {
         internal: { disableOperationalModeHandling: boolean };
       }
     ).internal.disableOperationalModeHandling = true;
+    // matter.js counts movements in these, and they persist. Left undefined
+    // they only materialize after the first move, so a paired cover would come
+    // back from a restart with an attribute it did not advertise before (#456).
+    // Seeding them keeps the attribute list identical for every cover, for its
+    // whole life, without dropping a count that is already stored.
+    this.state.numberOfActuationsLift ??= 0;
+    if (this.features.tilt) {
+      this.state.numberOfActuationsTilt ??= 0;
+    }
     if (this.features.positionAwareLift) {
       this.state.currentPositionLiftPercentage = undefined;
       if (this.state.currentPositionLiftPercent100ths === undefined) {
