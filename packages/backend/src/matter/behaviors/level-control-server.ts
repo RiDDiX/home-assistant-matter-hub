@@ -1,5 +1,7 @@
 import type { HomeAssistantEntityInformation } from "@home-assistant-matter-hub/common";
-import { Logger } from "@matter/general";
+import { classifyController } from "@home-assistant-matter-hub/common";
+import { type Environment, Logger } from "@matter/general";
+import type { FabricIndex } from "@matter/main";
 // OnOffServer comes from matter.js, not from ./on-off-server.js, because that
 // module already imports this one and the cycle would break at load time.
 import {
@@ -7,11 +9,25 @@ import {
   OnOffServer,
 } from "@matter/main/behaviors";
 import { LevelControl } from "@matter/main/clusters/level-control";
+import { FabricManager } from "@matter/main/protocol";
 import { BridgeDataProvider } from "../../services/bridges/bridge-data-provider.js";
 import { applyPatchState } from "../../utils/apply-patch-state.js";
 import type { FeatureSelection } from "../../utils/feature-selection.js";
 import { HomeAssistantEntityBehavior } from "./home-assistant-entity-behavior.js";
 import type { ValueGetter, ValueSetter } from "./utils/cluster-config.js";
+
+// Which controller sent the current command, resolved through its fabric.
+// Unknown for a local write or a fabric the node does not know, and unknown
+// never counts as Alexa (#460).
+export function commandFromAlexa(
+  context: { fabric?: FabricIndex },
+  env: Environment,
+): boolean {
+  const fabricIndex = context.fabric;
+  if (fabricIndex == null) return false;
+  const fabric = env.maybeGet(FabricManager)?.maybeFor(fabricIndex);
+  return fabric != null && classifyController(fabric.rootVendorId) === "alexa";
+}
 
 // Track when lights were turned on to detect Alexa's brightness reset pattern
 const lastTurnOnTimestamps = new Map<string, number>();
@@ -332,9 +348,14 @@ export class LevelControlServerBase extends FeaturedBase {
     // on() followed by moveToLevel(254) within ~50ms, resetting brightness to
     // 100%. Apple Home's room-level "set to 100%" Siri command uses the same
     // on() + moveToLevel(254) pattern (#306), so this has to stay behind a
-    // feature flag, dropping the command by default breaks Apple Home.
+    // feature flag, dropping the command by default breaks Apple Home. It also
+    // only applies to the Alexa fabric: on a bridge shared with Apple Home the
+    // flag swallowed every Siri "set to 100%" (#460).
     const { featureFlags } = this.env.get(BridgeDataProvider);
-    if (featureFlags?.alexaPreserveBrightnessOnTurnOn === true) {
+    if (
+      featureFlags?.alexaPreserveBrightnessOnTurnOn === true &&
+      commandFromAlexa(this.context, this.env)
+    ) {
       const lastTurnOn = lastTurnOnTimestamps.get(entityId);
       const timeSinceTurnOn = lastTurnOn ? Date.now() - lastTurnOn : Infinity;
       if (level >= this.maxLevel && timeSinceTurnOn < 200) {
