@@ -47,6 +47,12 @@ This only takes effect when the climate entity reports the `FAN_MODE` feature. E
 
 Turning the Fan tile off now sends `climate.turn_off` (it no longer flips the AC into cool/heat). Turning it on puts the AC into `fan_only`, and the tile's speed maps to `climate.set_fan_mode`.
 
+## Forced turn on for IR ACs (opt-in)
+
+An IR blaster only sends, it never hears back, so Home Assistant reports the last command instead of the real device state. When HA says the AC is on, the bridge skips `climate.turn_on` to keep the current HVAC mode ([#269](https://github.com/RiDDiX/home-assistant-matter-hub/issues/269)), and a physically off AC stays off.
+
+Set `climateForceTurnOn` per entity in **Entity Mapping** to always send `climate.turn_on` on a Matter On command ([#462](https://github.com/RiDDiX/home-assistant-matter-hub/issues/462)).
+
 ## Plain Thermostat fallback (Aqara)
 
 A climate entity with a fan mode is exposed as a Matter **Room Air Conditioner** (0x0072). Aqara Home only knows that type since app 5.1.9 / controller firmware 4.3.5, older versions silently drop the endpoint. Set `disableClimateFanControl` in **Entity Mapping** to expose the entity as a plain **Thermostat** instead, which Aqara has long supported.

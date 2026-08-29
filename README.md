@@ -38,13 +38,13 @@ of port forwarding etc.
 | Channel | Branch | Current Version | Description |
 |---------|--------|-----------------|-------------|
 | **Stable** | `main` | v2.0.56 | Production-ready, recommended for most users |
-| **Alpha** | `alpha` | v2.1.0-alpha.x | Currently level with Stable; next pre-release lands here first |
+| **Alpha** | `alpha` | v2.1.0-alpha.879 | Ahead of Stable, carries the additions listed under Alpha Features |
 | **Testing** | `testing` | v4.1.0-testing.x | ⚠️ **Highly unstable!** Experimental features, may break |
 
 ### Which version should I use?
 
 - **Most users**: Use **Stable** (`main` branch) - thoroughly tested
-- **Early adopters**: Use **Alpha** (`alpha` branch) - currently level with Stable until the next pre-release lands
+- **Early adopters**: Use **Alpha** (`alpha` branch) - gets every fix and feature first, see Alpha Features below
 - **Developers/Testers**: Use **Testing** (`testing` branch) - bleeding edge, expect breakage
 
 ### Upgrading from 2.0.46
@@ -313,7 +313,27 @@ Re-assign the affected devices to their rooms after they reconnect. See the [doc
 <details>
 <summary><strong>🧪 Alpha Features (v2.1.0-alpha.x)</strong> - Click to expand</summary>
 
-**Alpha is currently level with Stable (v2.0.56).** All alpha work up to the latest pre-release has been promoted into v2.0.56. New alpha work continues from the next pre-release tag onward and will appear here as development progresses.
+**Alpha is ahead of Stable (v2.0.56).** Everything below ships in the alpha channel now and lands in the next stable promote, grouped by the pre-release tag it first appeared in.
+
+**v2.1.0-alpha.879:**
+- 🧹 **Air purifiers stop rebuilding themselves**: a composed device never listed its battery entity, so the battery auto-map retry rebuilt the endpoint on every sensor update, burning CPU and raising unhandled rejections. A sensor without a device class also needs "batt" in its id now, a filter life percentage is no longer taken for a battery ([#461](https://github.com/RiDDiX/home-assistant-matter-hub/issues/461))
+- 🪟 **Covers moved together no longer lose their position**: state writes are serialized per device, two updates in the same millisecond used to collide on the endpoint lock and matter.js dropped the position attributes with a warning only ([#464](https://github.com/RiDDiX/home-assistant-matter-hub/issues/464))
+- 💡 **Siri "set to 100%" works next to Alexa**: `alexaPreserveBrightnessOnTurnOn` now only suppresses the brightness reset for commands arriving over the Alexa fabric, before it swallowed the same command from Apple Home ([#460](https://github.com/RiDDiX/home-assistant-matter-hub/issues/460))
+- ❄️ **Per-entity `climateForceTurnOn`**: sends `climate.turn_on` on every Matter On command, for IR controlled ACs where Home Assistant can report on while the device is off ([#462](https://github.com/RiDDiX/home-assistant-matter-hub/issues/462))
+
+**v2.1.0-alpha.878:**
+- 🪟 **Covers keep the same Matter fingerprint for life**: a cover that had been moved used to come back from a restart advertising an extra attribute it never had when the controller paired it, because matter.js counts movements in a stored attribute that only appears once it is set ([#456](https://github.com/RiDDiX/home-assistant-matter-hub/issues/456))
+
+**v2.1.0-alpha.877:**
+- 🧠 **Heap limit is configurable now**: the add-on takes a `heap_size_mb` option, the automatic sizing moved from a quarter to half of the available memory, and a `NODE_OPTIONS` you set yourself is honored instead of being silently overridden ([#459](https://github.com/RiDDiX/home-assistant-matter-hub/issues/459))
+
+**v2.1.0-alpha.876:**
+- 🧩 **Third-party plugins load again**: an installed plugin package is imported through its manifest entry point instead of its directory, which Node refuses, and the entry has to resolve inside the package; contributed by Patrick Gu ([#458](https://github.com/RiDDiX/home-assistant-matter-hub/pull/458))
+- 🏷️ Plugin devices report their own name to controllers instead of a generic device-type label
+- 📣 Adding or removing a plugin device now tells commissioned controllers that the bridge composition changed, so they re-discover it; a restart with unchanged devices stays silent
+
+**v2.1.0-alpha.875:**
+- 🚨 **Security plugin can mirror an existing alarm panel**: the new `sourceAlarmPanel` setting turns the four mode switches and the Alarm contact into a Matter view of an `alarm_control_panel.*` entity (Alarmo etc.), with arm and disarm flowing back to Home Assistant; contributed by Patrick Gu ([#457](https://github.com/RiDDiX/home-assistant-matter-hub/pull/457)). Panels that require an alarm code reject the bridge's arm/disarm calls, the switches then fall back to the panel's real state
 
 </details>
 
