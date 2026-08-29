@@ -7,7 +7,14 @@ const logger = Logger.get("ClimateOnOffServer");
 
 export const ClimateOnOffServer = OnOffServer({
   turnOn: (_value, agent) => {
-    const entity = agent.get(HomeAssistantEntityBehavior).entity;
+    const homeAssistant = agent.get(HomeAssistantEntityBehavior);
+    const entity = homeAssistant.entity;
+    // IR controlled ACs are one way, HA only knows what it sent last, so the
+    // skip below can leave a physically off device off. Opt in per entity to
+    // always send the command (#462).
+    if (homeAssistant.state.mapping?.climateForceTurnOn === true) {
+      return { action: "climate.turn_on" };
+    }
     // Skip only while cluster AND HA cache agree the device is on. The
     // attribute follows Matter commands immediately, so a power-on right after
     // a Matter power-off is honoured even while the HA cache lags (#441). The

@@ -407,6 +407,12 @@ export interface EntityMappingConfig {
    */
   readonly climateKeepModeOnIdle?: boolean;
   /**
+   * Optional: Send climate.turn_on for every Matter On command, even while HA
+   * already reports the entity as on. IR controlled ACs are one way, so the HA
+   * state can disagree with the real device and the skip leaves it off (#462).
+   */
+  readonly climateForceTurnOn?: boolean;
+  /**
    * Optional: Expose a second Matter Fan device alongside this climate AC,
    * bound to the same HA entity. Apple Home does not surface a thermostat
    * fan / fan_only mode, so this companion Fan tile turns the AC's fan_only
@@ -526,6 +532,7 @@ export interface EntityMappingRequest {
   readonly disableClimateOnOff?: boolean;
   readonly disableClimateFanControl?: boolean;
   readonly climateKeepModeOnIdle?: boolean;
+  readonly climateForceTurnOn?: boolean;
   readonly climateExposeFan?: boolean;
   readonly climateAutoMode?: ClimateAutoMode;
   readonly composedEntities?: ComposedSubEntity[];

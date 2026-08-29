@@ -219,6 +219,7 @@ export class EntityMappingStorage extends Service {
       disableClimateOnOff: request.disableClimateOnOff || undefined,
       disableClimateFanControl: request.disableClimateFanControl || undefined,
       climateKeepModeOnIdle: request.climateKeepModeOnIdle || undefined,
+      climateForceTurnOn: request.climateForceTurnOn || undefined,
       climateExposeFan: request.climateExposeFan || undefined,
       climateAutoMode: request.climateAutoMode || undefined,
       composedEntities:
@@ -285,6 +286,7 @@ export class EntityMappingStorage extends Service {
       !config.disableClimateOnOff &&
       !config.disableClimateFanControl &&
       !config.climateKeepModeOnIdle &&
+      !config.climateForceTurnOn &&
       !config.climateExposeFan &&
       !config.climateAutoMode &&
       (!config.composedEntities || config.composedEntities.length === 0) &&

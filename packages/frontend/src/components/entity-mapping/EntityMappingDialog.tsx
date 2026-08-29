@@ -185,6 +185,7 @@ export function EntityMappingDialog({
   const [disableClimateFanControl, setDisableClimateFanControl] =
     useState(false);
   const [climateKeepModeOnIdle, setClimateKeepModeOnIdle] = useState(false);
+  const [climateForceTurnOn, setClimateForceTurnOn] = useState(false);
   const [climateExposeFan, setClimateExposeFan] = useState(false);
   const [fanRestoreSpeedOnPowerOn, setFanRestoreSpeedOnPowerOn] =
     useState(false);
@@ -314,6 +315,7 @@ export function EntityMappingDialog({
         currentMapping?.disableClimateFanControl || false,
       );
       setClimateKeepModeOnIdle(currentMapping?.climateKeepModeOnIdle || false);
+      setClimateForceTurnOn(currentMapping?.climateForceTurnOn || false);
       setClimateExposeFan(currentMapping?.climateExposeFan || false);
       setFanRestoreSpeedOnPowerOn(
         currentMapping?.fanRestoreSpeedOnPowerOn || false,
@@ -466,6 +468,7 @@ export function EntityMappingDialog({
       disableClimateOnOff: disableClimateOnOff || undefined,
       disableClimateFanControl: disableClimateFanControl || undefined,
       climateKeepModeOnIdle: climateKeepModeOnIdle || undefined,
+      climateForceTurnOn: climateForceTurnOn || undefined,
       climateExposeFan: climateExposeFan || undefined,
       fanRestoreSpeedOnPowerOn: fanRestoreSpeedOnPowerOn || undefined,
       climateAutoMode: climateAutoMode || undefined,
@@ -533,6 +536,7 @@ export function EntityMappingDialog({
     disableClimateOnOff,
     disableClimateFanControl,
     climateKeepModeOnIdle,
+    climateForceTurnOn,
     climateExposeFan,
     fanRestoreSpeedOnPowerOn,
     climateAutoMode,
@@ -1598,6 +1602,16 @@ export function EntityMappingDialog({
                 />
               }
               label="Keep last mode on Matter while off + idle (workaround for ACs that report off + hvac_action=idle during internal cleaning, so the controller's Off button stays actionable)"
+              sx={{ mt: 1, display: "block" }}
+            />
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={climateForceTurnOn}
+                  onChange={(e) => setClimateForceTurnOn(e.target.checked)}
+                />
+              }
+              label="Always send climate.turn_on (for IR controlled ACs, where Home Assistant can report on while the device is off)"
               sx={{ mt: 1, display: "block" }}
             />
             <FormControlLabel
