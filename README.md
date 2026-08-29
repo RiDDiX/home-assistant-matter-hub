@@ -38,7 +38,7 @@ of port forwarding etc.
 | Channel | Branch | Current Version | Description |
 |---------|--------|-----------------|-------------|
 | **Stable** | `main` | v2.0.56 | Production-ready, recommended for most users |
-| **Alpha** | `alpha` | v2.1.0-alpha.878 | Ahead of Stable, carries the additions listed under Alpha Features |
+| **Alpha** | `alpha` | v2.1.0-alpha.879 | Ahead of Stable, carries the additions listed under Alpha Features |
 | **Testing** | `testing` | v4.1.0-testing.x | ⚠️ **Highly unstable!** Experimental features, may break |
 
 ### Which version should I use?
@@ -314,6 +314,12 @@ Re-assign the affected devices to their rooms after they reconnect. See the [doc
 <summary><strong>🧪 Alpha Features (v2.1.0-alpha.x)</strong> - Click to expand</summary>
 
 **Alpha is ahead of Stable (v2.0.56).** Everything below ships in the alpha channel now and lands in the next stable promote, grouped by the pre-release tag it first appeared in.
+
+**v2.1.0-alpha.879:**
+- 🧹 **Air purifiers stop rebuilding themselves**: a composed device never listed its battery entity, so the battery auto-map retry rebuilt the endpoint on every sensor update, burning CPU and raising unhandled rejections. A sensor without a device class also needs "batt" in its id now, a filter life percentage is no longer taken for a battery ([#461](https://github.com/RiDDiX/home-assistant-matter-hub/issues/461))
+- 🪟 **Covers moved together no longer lose their position**: state writes are serialized per device, two updates in the same millisecond used to collide on the endpoint lock and matter.js dropped the position attributes with a warning only ([#464](https://github.com/RiDDiX/home-assistant-matter-hub/issues/464))
+- 💡 **Siri "set to 100%" works next to Alexa**: `alexaPreserveBrightnessOnTurnOn` now only suppresses the brightness reset for commands arriving over the Alexa fabric, before it swallowed the same command from Apple Home ([#460](https://github.com/RiDDiX/home-assistant-matter-hub/issues/460))
+- ❄️ **Per-entity `climateForceTurnOn`**: sends `climate.turn_on` on every Matter On command, for IR controlled ACs where Home Assistant can report on while the device is off ([#462](https://github.com/RiDDiX/home-assistant-matter-hub/issues/462))
 
 **v2.1.0-alpha.878:**
 - 🪟 **Covers keep the same Matter fingerprint for life**: a cover that had been moved used to come back from a restart advertising an extra attribute it never had when the controller paired it, because matter.js counts movements in a stored attribute that only appears once it is set ([#456](https://github.com/RiDDiX/home-assistant-matter-hub/issues/456))
