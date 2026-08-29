@@ -294,6 +294,7 @@ export class ComposedSensorEndpoint extends Endpoint {
     // Expose non-primary sub-entity IDs so bridge-endpoint-manager subscribes
     // to their state changes via WebSocket.
     const mappedIds: string[] = [];
+    if (config.batteryEntityId) mappedIds.push(config.batteryEntityId);
     if (config.humidityEntityId) mappedIds.push(config.humidityEntityId);
     if (config.pressureEntityId) mappedIds.push(config.pressureEntityId);
     if (config.powerEntityId) mappedIds.push(config.powerEntityId);

@@ -355,8 +355,12 @@ export class ComposedAirPurifierEndpoint extends Endpoint {
     });
 
     // Expose non-primary entity IDs so bridge-endpoint-manager subscribes to
-    // their state changes via WebSocket.
+    // their state changes via WebSocket. The battery belongs in here too: the
+    // mapping fingerprint only counts a battery as built when the endpoint
+    // maps it, otherwise the auto-map retry rebuilds this endpoint on every
+    // sensor update (#461).
     const mappedIds: string[] = [];
+    if (config.batteryEntityId) mappedIds.push(config.batteryEntityId);
     if (config.temperatureEntityId) mappedIds.push(config.temperatureEntityId);
     if (config.humidityEntityId) mappedIds.push(config.humidityEntityId);
     if (config.mapping?.filterLifeEntity)

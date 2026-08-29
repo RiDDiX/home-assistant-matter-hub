@@ -71,7 +71,7 @@ export interface ComposedClimateFanConfig {
  */
 export class ComposedClimateFanEndpoint extends Endpoint {
   readonly entityId: string;
-  readonly mappedEntityIds: string[] = [];
+  readonly mappedEntityIds: string[];
   private subEndpointList: Endpoint[] = [];
   private lastStates = new Map<string, string>();
   private debouncedUpdates = new Map<
@@ -154,6 +154,12 @@ export class ComposedClimateFanEndpoint extends Endpoint {
       primaryEntityId,
       endpointId,
       [climateSub, fanSub],
+      // The mapping fingerprint only counts a battery as built when the
+      // endpoint maps it, otherwise the auto-map retry rebuilds this endpoint
+      // on every sensor update (#461).
+      mapping.batteryEntity && !mapping.disableBatteryMapping
+        ? [mapping.batteryEntity]
+        : [],
     );
     logger.info(`Created composed climate+fan endpoint ${primaryEntityId}`);
     return endpoint;
@@ -164,10 +170,12 @@ export class ComposedClimateFanEndpoint extends Endpoint {
     entityId: string,
     id: string,
     parts: Endpoint[],
+    mappedEntityIds: string[],
   ) {
     super(type, { id, parts });
     this.entityId = entityId;
     this.subEndpointList = parts;
+    this.mappedEntityIds = mappedEntityIds;
   }
 
   async updateStates(states: HomeAssistantStates): Promise<void> {
