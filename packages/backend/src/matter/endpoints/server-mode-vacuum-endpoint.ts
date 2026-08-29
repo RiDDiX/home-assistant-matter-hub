@@ -3,19 +3,15 @@ import type {
   HomeAssistantEntityState,
   VacuumDeviceAttributes,
 } from "@home-assistant-matter-hub/common";
-import {
-  DestroyedDependencyError,
-  Logger,
-  TransactionDestroyedError,
-} from "@matter/general";
+import { Logger } from "@matter/general";
 import type { EndpointType } from "@matter/main";
 import debounce from "debounce";
 import type { BridgeRegistry } from "../../services/bridges/bridge-registry.js";
 import type { HomeAssistantStates } from "../../services/home-assistant/home-assistant-registry.js";
-import { HomeAssistantEntityBehavior } from "../behaviors/home-assistant-entity-behavior.js";
 import { EntityEndpoint, getMappedEntityIds } from "./entity-endpoint.js";
 import { supportsCleaningModes } from "./legacy/vacuum/behaviors/vacuum-rvc-clean-mode-server.js";
 import { ServerModeVacuumDevice } from "./legacy/vacuum/server-mode-vacuum-device.js";
+import { updateEntityState } from "./update-entity-state.js";
 
 const logger = Logger.get("ServerModeVacuumEndpoint");
 
@@ -331,43 +327,15 @@ export class ServerModeVacuumEndpoint extends EntityEndpoint {
   }
 
   private async flushPendingUpdate(state: HomeAssistantEntityState) {
-    try {
-      await this.construction.ready;
-    } catch {
-      return;
+    // When only a mapped entity changed (e.g. battery sensor), the primary
+    // entity state is structurally identical. matter.js uses isDeepEqual on
+    // setStateOf, so the entity$Changed event would never fire. Bump
+    // last_updated to force a structural difference.
+    let effectiveState = state;
+    if (this.pendingMappedChange) {
+      this.pendingMappedChange = false;
+      effectiveState = { ...state, last_updated: new Date().toISOString() };
     }
-
-    try {
-      const current = this.stateOf(HomeAssistantEntityBehavior).entity;
-      // When only a mapped entity changed (e.g. battery sensor), the primary
-      // entity state is structurally identical. matter.js uses isDeepEqual on
-      // setStateOf, so the entity$Changed event would never fire. Bump
-      // last_updated to force a structural difference.
-      let effectiveState = state;
-      if (this.pendingMappedChange) {
-        this.pendingMappedChange = false;
-        effectiveState = { ...state, last_updated: new Date().toISOString() };
-      }
-      await this.setStateOf(HomeAssistantEntityBehavior, {
-        entity: { ...current, state: effectiveState },
-      });
-    } catch (error) {
-      if (
-        error instanceof TransactionDestroyedError ||
-        error instanceof DestroyedDependencyError
-      ) {
-        return;
-      }
-      const errorMessage =
-        error instanceof Error ? error.message : String(error);
-      if (
-        errorMessage.includes(
-          "Endpoint storage inaccessible because endpoint is not a node and is not owned by another endpoint",
-        )
-      ) {
-        return;
-      }
-      throw error;
-    }
+    await updateEntityState(this, effectiveState);
   }
 }

@@ -10,6 +10,7 @@ import { CommissioningServer } from "@matter/main/node";
 import { SessionManager } from "@matter/main/protocol";
 import type { BetterLogger, LoggerService } from "../../core/app/logger.js";
 import { BridgeServerNode } from "../../matter/endpoints/bridge-server-node.js";
+import { updateEntityState } from "../../matter/endpoints/update-entity-state.js";
 import {
   applyLegacySpecSessionParameters,
   specVersionValues,
@@ -501,12 +502,7 @@ export class Bridge {
 
           if (stateJson !== lastJson) {
             // State has changed since last sync, push update
-            await endpoint.setStateOf(HomeAssistantEntityBehavior, {
-              entity: {
-                ...currentEntity,
-                state: { ...currentEntity.state },
-              },
-            });
+            await updateEntityState(endpoint, { ...currentEntity.state });
             this.lastSyncedStates.set(entityId, stateJson);
             syncedCount++;
           } else {

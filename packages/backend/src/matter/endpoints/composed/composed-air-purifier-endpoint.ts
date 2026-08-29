@@ -6,11 +6,7 @@ import type {
   SensorDeviceAttributes,
 } from "@home-assistant-matter-hub/common";
 import { FanDeviceFeature } from "@home-assistant-matter-hub/common";
-import {
-  DestroyedDependencyError,
-  Logger,
-  TransactionDestroyedError,
-} from "@matter/general";
+import { Logger } from "@matter/general";
 import { Endpoint, type EndpointType } from "@matter/main";
 import { FixedLabelServer } from "@matter/main/behaviors";
 import type { FanControl } from "@matter/main/clusters";
@@ -48,6 +44,7 @@ import {
 import { AirPurifierHepaFilterMonitoringServer } from "../legacy/air-purifier/behaviors/air-purifier-hepa-filter-monitoring-server.js";
 import { FanFanControlServer } from "../legacy/fan/behaviors/fan-fan-control-server.js";
 import { FanOnOffServer } from "../legacy/fan/behaviors/fan-on-off-server.js";
+import { updateEntityState } from "../update-entity-state.js";
 
 const logger = Logger.get("ComposedAirPurifierEndpoint");
 
@@ -460,35 +457,7 @@ export class ComposedAirPurifierEndpoint extends Endpoint {
     endpoint: Endpoint,
     state: HomeAssistantEntityState,
   ) {
-    try {
-      await endpoint.construction.ready;
-    } catch {
-      return;
-    }
-
-    try {
-      const current = endpoint.stateOf(HomeAssistantEntityBehavior).entity;
-      await endpoint.setStateOf(HomeAssistantEntityBehavior, {
-        entity: { ...current, state },
-      });
-    } catch (error) {
-      if (
-        error instanceof TransactionDestroyedError ||
-        error instanceof DestroyedDependencyError
-      ) {
-        return;
-      }
-      const errorMessage =
-        error instanceof Error ? error.message : String(error);
-      if (
-        errorMessage.includes(
-          "Endpoint storage inaccessible because endpoint is not a node and is not owned by another endpoint",
-        )
-      ) {
-        return;
-      }
-      throw error;
-    }
+    await updateEntityState(endpoint, state);
   }
 
   override async delete() {

@@ -9,6 +9,7 @@ import { CommissioningServer } from "@matter/main/node";
 import { SessionManager } from "@matter/main/protocol";
 import type { LoggerService } from "../../core/app/logger.js";
 import type { ServerModeServerNode } from "../../matter/endpoints/server-mode-server-node.js";
+import { updateEntityState } from "../../matter/endpoints/update-entity-state.js";
 import {
   applyLegacySpecSessionParameters,
   specVersionValues,
@@ -338,12 +339,10 @@ export class ServerModeBridge {
         const behavior = device.stateOf(HomeAssistantEntityBehavior);
         const currentEntity = behavior.entity;
         if (currentEntity?.state) {
-          await device.setStateOf(HomeAssistantEntityBehavior, {
-            entity: {
-              ...currentEntity,
-              state: makeWarmStartState(currentEntity.state),
-            },
-          });
+          await updateEntityState(
+            device,
+            makeWarmStartState(currentEntity.state),
+          );
           pushed++;
         }
       } catch (e) {
@@ -403,12 +402,7 @@ export class ServerModeBridge {
 
           if (stateJson !== this.lastSyncedStates.get(device.entityId)) {
             // State has changed since last sync, push update
-            await device.setStateOf(HomeAssistantEntityBehavior, {
-              entity: {
-                ...currentEntity,
-                state: { ...currentEntity.state },
-              },
-            });
+            await updateEntityState(device, { ...currentEntity.state });
             this.lastSyncedStates.set(device.entityId, stateJson);
             synced++;
           }
