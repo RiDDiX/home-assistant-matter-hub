@@ -38,7 +38,7 @@ of port forwarding etc.
 | Channel | Branch | Current Version | Description |
 |---------|--------|-----------------|-------------|
 | **Stable** | `main` | v2.0.56 | Production-ready, recommended for most users |
-| **Alpha** | `alpha` | v2.1.0-alpha.880 | Ahead of Stable, carries the additions listed under Alpha Features |
+| **Alpha** | `alpha` | v2.1.0-alpha.881 | Ahead of Stable, carries the additions listed under Alpha Features |
 | **Testing** | `testing` | v4.1.0-testing.x | ⚠️ **Highly unstable!** Experimental features, may break |
 
 ### Which version should I use?
@@ -314,6 +314,10 @@ Re-assign the affected devices to their rooms after they reconnect. See the [doc
 <summary><strong>🧪 Alpha Features (v2.1.0-alpha.x)</strong> - Click to expand</summary>
 
 **Alpha is ahead of Stable (v2.0.56).** Everything below ships in the alpha channel now and lands in the next stable promote, grouped by the pre-release tag it first appeared in.
+
+**v2.1.0-alpha.881:**
+- 🔒 **Locks reject an empty or overlong PIN**: a controller could program a zero length PIN, which switched remote PIN enforcement on and was then accepted as the PIN itself. SetCredential checks the length against the minimum and maximum the lock advertises now
+- ⚡ **PIN hashing no longer stalls the bridge**: every PIN protected unlock hashed on the event loop, which froze all bridges, Matter traffic, mDNS and the Home Assistant connection for the duration. Hashing moved to the thread pool
 
 **v2.1.0-alpha.880:**
 - 🪟 **Covers keep their position while a controller is talking to them**: a Home Assistant update that arrived while the controller held the same device was dropped with a warning only, which is what still lost positions after the alpha.879 serialization. Attribute writes wait for the device to be free now instead of being thrown away ([#464](https://github.com/RiDDiX/home-assistant-matter-hub/issues/464))
