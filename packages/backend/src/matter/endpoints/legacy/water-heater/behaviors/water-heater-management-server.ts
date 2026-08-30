@@ -92,7 +92,10 @@ class WaterHeaterManagementServerBase extends Base {
     const homeAssistant = await this.agent.load(HomeAssistantEntityBehavior);
     await this.resumeBoostAfterRestart();
     this.update(homeAssistant.entity);
-    this.reactTo(homeAssistant.onChange, this.update, { offline: true });
+    this.reactTo(homeAssistant.onChange, this.update, {
+      offline: true,
+      lock: true,
+    });
   }
 
   /**

@@ -66,7 +66,10 @@ class PowerSourceServerBase extends FeaturedBase {
     }
 
     this.update(homeAssistant.entity);
-    this.reactTo(homeAssistant.onChange, this.update, { offline: true });
+    this.reactTo(homeAssistant.onChange, this.update, {
+      offline: true,
+      lock: true,
+    });
   }
 
   private update(entity: HomeAssistantEntityInformation) {

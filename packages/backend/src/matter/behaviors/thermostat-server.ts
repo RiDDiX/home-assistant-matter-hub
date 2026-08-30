@@ -334,7 +334,7 @@ async function thermostatPostInitialize(self: any): Promise<void> {
       self.heatingSetpointChanging,
     );
   }
-  self.reactTo(homeAssistant.onChange, self.update);
+  self.reactTo(homeAssistant.onChange, self.update, { lock: true });
 }
 
 export class ThermostatServerBase extends FullFeaturedBase {

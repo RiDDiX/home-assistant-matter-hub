@@ -27,7 +27,10 @@ class ElectricalEnergyMeasurementServerBase extends FeaturedBase {
     }
 
     this.update();
-    this.reactTo(homeAssistant.onChange, this.update, { offline: true });
+    this.reactTo(homeAssistant.onChange, this.update, {
+      offline: true,
+      lock: true,
+    });
   }
 
   private update() {

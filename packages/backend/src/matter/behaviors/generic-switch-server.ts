@@ -87,7 +87,9 @@ class HaGenericSwitchServerBase extends SimpleBase {
 
     logger.debug(`[${entityId}] GenericSwitch initialized (simple)`);
 
-    this.reactTo(homeAssistant.onChange, this.handleEventChange);
+    this.reactTo(homeAssistant.onChange, this.handleEventChange, {
+      lock: true,
+    });
   }
 
   private handleEventChange() {
@@ -165,7 +167,9 @@ class HaGenericSwitchServerMultiBase extends FullBase {
 
     logger.debug(`[${entityId}] GenericSwitch initialized (multi)`);
 
-    this.reactTo(homeAssistant.onChange, this.handleEventChange);
+    this.reactTo(homeAssistant.onChange, this.handleEventChange, {
+      lock: true,
+    });
   }
 
   private handleEventChange() {

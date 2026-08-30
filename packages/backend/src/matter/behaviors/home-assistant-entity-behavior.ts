@@ -27,7 +27,16 @@ export class HomeAssistantEntityBehavior extends Behavior {
   }
 
   get onChange(): HomeAssistantEntityBehavior.Events["entity$Changed"] {
-    return this.events.entity$Changed;
+    const onChange = this.events.entity$Changed;
+    // matter.js hands out a proxy per behavior and the proxy does not carry the
+    // async flag of the observable it wraps, so reactors reject an async update
+    // and the state write has to take its lock synchronously. Restore the flag
+    // the Events class declares, then a reactor can wait for the lock (#464).
+    onChange.isAsync = true;
+    // Reactors on this must return nothing: matter.js stops the emission at the
+    // first observer that resolves to a value, so a returning update() would
+    // cut every behavior registered after it out of the fan-out.
+    return onChange;
   }
 
   get isAvailable(): boolean {

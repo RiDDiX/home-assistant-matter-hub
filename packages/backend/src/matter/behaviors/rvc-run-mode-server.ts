@@ -119,7 +119,10 @@ class RvcRunModeServerBase extends Base {
     // Without this, reactor writes are buffered but never produce
     // subscription reports (the parent transaction has already finalized),
     // so controllers like Apple Home never see state transitions.
-    this.reactTo(homeAssistant.onChange, this.update, { offline: true });
+    this.reactTo(homeAssistant.onChange, this.update, {
+      offline: true,
+      lock: true,
+    });
   }
 
   private update(entity: HomeAssistantEntityInformation) {
