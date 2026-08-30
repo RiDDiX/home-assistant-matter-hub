@@ -139,14 +139,14 @@ function hasStoredCredentialHelper(env: EnvLike, entityId: string): boolean {
   }
 }
 
-function verifyStoredPinHelper(
+async function verifyStoredPinHelper(
   env: EnvLike,
   entityId: string,
   pin: string,
-): boolean {
+): Promise<boolean> {
   try {
     const storage = env.get(LockCredentialStorage);
-    return storage.verifyPin(entityId, pin);
+    return await storage.verifyPin(entityId, pin);
   } catch {
     return false;
   }
@@ -255,6 +255,7 @@ export async function applySetCredential(
   entityId: string,
   request: DoorLock.SetCredentialRequest,
   fabricIndex: number | undefined,
+  pinLengths: { min: number; max: number },
   passthrough?: UsercodePassthrough,
 ): Promise<DoorLock.SetCredentialResponse> {
   if (
@@ -276,6 +277,18 @@ export async function applySetCredential(
     };
   }
   if (request.credentialData) {
+    // An empty Uint8Array is truthy, so without this a controller could store a
+    // zero length PIN. That PIN makes hasCredential true, which turns
+    // requirePinForRemoteOperation on, and the empty PIN then satisfies it.
+    // Check the octet count against the lengths this lock advertises.
+    const length = request.credentialData.byteLength;
+    if (length < pinLengths.min || length > pinLengths.max) {
+      return {
+        status: Status.Failure,
+        userIndex: null,
+        nextCredentialIndex: null,
+      };
+    }
     const pinCode = new TextDecoder().decode(request.credentialData);
     const storage = env.get(LockCredentialStorage);
     await storage.setCredential({
@@ -551,7 +564,7 @@ class LockServerWithPinBase extends PinCredentialBase {
     homeAssistant.callAction(action);
   }
 
-  override unlockDoor(request: DoorLock.UnlockDoorRequest) {
+  override async unlockDoor(request: DoorLock.UnlockDoorRequest) {
     const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);
     const action = this.state.config.unlock(void 0, this.agent);
 
@@ -572,7 +585,11 @@ class LockServerWithPinBase extends PinCredentialBase {
       }
       const providedPin = new TextDecoder().decode(request.pinCode);
       if (
-        !verifyStoredPinHelper(this.env, homeAssistant.entityId, providedPin)
+        !(await verifyStoredPinHelper(
+          this.env,
+          homeAssistant.entityId,
+          providedPin,
+        ))
       ) {
         logger.info(
           `unlockDoor REJECTED for ${homeAssistant.entityId} - invalid PIN`,
@@ -624,6 +641,7 @@ class LockServerWithPinBase extends PinCredentialBase {
       homeAssistant.entityId,
       request,
       this.context.fabric,
+      effectivePinCodeLengths(homeAssistant),
       usercodePassthroughFrom(homeAssistant),
     );
   }
@@ -775,7 +793,7 @@ class LockServerWithPinAndUnboltBase extends PinCredentialUnboltBase {
     homeAssistant.callAction(action);
   }
 
-  override unlockDoor(request: DoorLock.UnlockDoorRequest) {
+  override async unlockDoor(request: DoorLock.UnlockDoorRequest) {
     const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);
     // Use unlatch action if available (lock.open = unlock + unlatch on most
     // locks), Apple Home's unlock then also unlatches, matching Google Home.
@@ -799,7 +817,11 @@ class LockServerWithPinAndUnboltBase extends PinCredentialUnboltBase {
       }
       const providedPin = new TextDecoder().decode(request.pinCode);
       if (
-        !verifyStoredPinHelper(this.env, homeAssistant.entityId, providedPin)
+        !(await verifyStoredPinHelper(
+          this.env,
+          homeAssistant.entityId,
+          providedPin,
+        ))
       ) {
         logger.info(
           `unlockDoor REJECTED for ${homeAssistant.entityId} - invalid PIN`,
@@ -812,7 +834,7 @@ class LockServerWithPinAndUnboltBase extends PinCredentialUnboltBase {
     homeAssistant.callAction(action);
   }
 
-  override unboltDoor(request: DoorLock.UnboltDoorRequest) {
+  override async unboltDoor(request: DoorLock.UnboltDoorRequest) {
     const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);
     // Unbolt pulls the bolt but not the latch, so unlock, not open (#397).
     const action = this.state.config.unlock(void 0, this.agent);
@@ -832,7 +854,11 @@ class LockServerWithPinAndUnboltBase extends PinCredentialUnboltBase {
       }
       const providedPin = new TextDecoder().decode(request.pinCode);
       if (
-        !verifyStoredPinHelper(this.env, homeAssistant.entityId, providedPin)
+        !(await verifyStoredPinHelper(
+          this.env,
+          homeAssistant.entityId,
+          providedPin,
+        ))
       ) {
         logger.info(
           `unboltDoor REJECTED for ${homeAssistant.entityId} - invalid PIN`,
@@ -883,6 +909,7 @@ class LockServerWithPinAndUnboltBase extends PinCredentialUnboltBase {
       homeAssistant.entityId,
       request,
       this.context.fabric,
+      effectivePinCodeLengths(homeAssistant),
       usercodePassthroughFrom(homeAssistant),
     );
   }

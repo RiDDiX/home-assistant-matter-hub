@@ -1,4 +1,5 @@
-import { pbkdf2Sync, randomBytes, timingSafeEqual } from "node:crypto";
+import { pbkdf2, randomBytes, timingSafeEqual } from "node:crypto";
+import { promisify } from "node:util";
 import type {
   LockCredential,
   LockCredentialLegacy,
@@ -24,6 +25,12 @@ const HASH_ITERATIONS = 100000;
 const HASH_KEY_LENGTH = 64;
 const HASH_ALGORITHM = "sha512";
 const SALT_LENGTH = 32;
+
+// pbkdf2Sync blocks the event loop for the whole derivation, and 100k sha512
+// rounds are tens of milliseconds on a server and hundreds on a Pi. Every
+// bridge, all Matter traffic, mDNS and the Home Assistant websocket sit in that
+// stall, so the hashing runs on the thread pool instead.
+const pbkdf2Async = promisify(pbkdf2);
 
 export class LockCredentialStorage extends Service {
   private storage!: StorageContext;
@@ -65,7 +72,7 @@ export class LockCredentialStorage extends Service {
       for (const legacyCredential of data.credentials as unknown as LockCredentialLegacy[]) {
         // Hash the plain text PIN during migration
         const salt = randomBytes(SALT_LENGTH).toString("hex");
-        const hash = this.hashPin(legacyCredential.pinCode, salt);
+        const hash = await this.hashPin(legacyCredential.pinCode, salt);
 
         const credential: LockCredential = {
           entityId: legacyCredential.entityId,
@@ -94,27 +101,28 @@ export class LockCredentialStorage extends Service {
   /**
    * Hash a PIN using PBKDF2 with the given salt
    */
-  private hashPin(pin: string, salt: string): string {
-    return pbkdf2Sync(
+  private async hashPin(pin: string, salt: string): Promise<string> {
+    const derived = await pbkdf2Async(
       pin,
       salt,
       HASH_ITERATIONS,
       HASH_KEY_LENGTH,
       HASH_ALGORITHM,
-    ).toString("hex");
+    );
+    return derived.toString("hex");
   }
 
   /**
    * Verify a PIN against a stored credential
    * @returns true if the PIN matches, false otherwise
    */
-  verifyPin(entityId: string, pin: string): boolean {
+  async verifyPin(entityId: string, pin: string): Promise<boolean> {
     const credential = this.credentials.get(entityId);
     if (!credential?.enabled) {
       return false;
     }
     const computed = Buffer.from(
-      this.hashPin(pin, credential.pinCodeSalt),
+      await this.hashPin(pin, credential.pinCodeSalt),
       "hex",
     );
     const expected = Buffer.from(credential.pinCodeHash, "hex");
@@ -158,7 +166,7 @@ export class LockCredentialStorage extends Service {
 
     // Generate new salt and hash the PIN
     const salt = randomBytes(SALT_LENGTH).toString("hex");
-    const hash = this.hashPin(request.pinCode, salt);
+    const hash = await this.hashPin(request.pinCode, salt);
 
     const credential: LockCredential = {
       entityId: request.entityId,

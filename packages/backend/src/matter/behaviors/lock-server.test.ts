@@ -89,6 +89,7 @@ function makeEnv(storage: FakeStorage) {
 }
 
 const ENTITY = "lock.front_door";
+const PIN_LENGTHS = { min: 4, max: 8 };
 
 describe("normalizeSupportedIndex", () => {
   it("maps 0 (allocate any free slot) to the single supported slot", () => {
@@ -130,6 +131,7 @@ describe("applySetCredential", () => {
         userType: null,
       },
       3,
+      PIN_LENGTHS,
     );
 
     expect(response.status).toBe(0x00);
@@ -138,6 +140,54 @@ describe("applySetCredential", () => {
     const stored = storage.getCredential(ENTITY);
     expect(stored?.creatorFabricIndex).toBe(3);
     expect(stored?.lastModifiedFabricIndex).toBe(3);
+  });
+
+  // A zero length Uint8Array is truthy, so the empty PIN used to be stored and
+  // then satisfied the very PIN check it switched on.
+  it("rejects an empty PIN", async () => {
+    const response = await applySetCredential(
+      makeEnv(storage),
+      ENTITY,
+      {
+        operationType: DoorLock.DataOperationType.Add,
+        credential: {
+          credentialType: DoorLock.CredentialType.Pin,
+          credentialIndex: 1,
+        },
+        credentialData: new Uint8Array(0),
+        userIndex: 1,
+        userStatus: null,
+        userType: null,
+      },
+      3,
+      PIN_LENGTHS,
+    );
+
+    expect(response.status).not.toBe(0x00);
+    expect(storage.hasCredential(ENTITY)).toBe(false);
+  });
+
+  it("rejects a PIN longer than the advertised maximum", async () => {
+    const response = await applySetCredential(
+      makeEnv(storage),
+      ENTITY,
+      {
+        operationType: DoorLock.DataOperationType.Add,
+        credential: {
+          credentialType: DoorLock.CredentialType.Pin,
+          credentialIndex: 1,
+        },
+        credentialData: new TextEncoder().encode("123456789"),
+        userIndex: 1,
+        userStatus: null,
+        userType: null,
+      },
+      3,
+      PIN_LENGTHS,
+    );
+
+    expect(response.status).not.toBe(0x00);
+    expect(storage.hasCredential(ENTITY)).toBe(false);
   });
 
   it("also accepts credentialIndex 1", async () => {
@@ -156,6 +206,7 @@ describe("applySetCredential", () => {
         userType: null,
       },
       undefined,
+      PIN_LENGTHS,
     );
     expect(response.status).toBe(0x00);
     expect(response.userIndex).toBe(1);
@@ -177,6 +228,7 @@ describe("applySetCredential", () => {
         userType: null,
       },
       undefined,
+      PIN_LENGTHS,
     );
     expect(response.status).toBe(0x01);
     expect(response.userIndex).toBeNull();
@@ -199,6 +251,7 @@ describe("applySetCredential", () => {
         userType: null,
       },
       undefined,
+      PIN_LENGTHS,
     );
     expect(response.status).toBe(0x01);
   });
@@ -219,6 +272,7 @@ describe("applySetCredential", () => {
         userType: null,
       },
       undefined,
+      PIN_LENGTHS,
     );
     expect(response.status).toBe(0x01);
   });
@@ -405,6 +459,7 @@ describe("Apple Home setup flow parity", () => {
         userType: null,
       },
       5,
+      PIN_LENGTHS,
     );
 
     expect(setCredentialResponse.status).toBe(0x00);
