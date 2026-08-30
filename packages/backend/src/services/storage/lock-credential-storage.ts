@@ -5,6 +5,7 @@ import type {
   LockCredentialLegacy,
   LockCredentialRequest,
 } from "@home-assistant-matter-hub/common";
+import { Logger, Observable } from "@matter/general";
 import type { StorageContext, SupportedStorageTypes } from "@matter/main";
 import { Service } from "../../core/ioc/service.js";
 import type { AppStorage } from "./app-storage.js";
@@ -32,9 +33,27 @@ const SALT_LENGTH = 32;
 // stall, so the hashing runs on the thread pool instead.
 const pbkdf2Async = promisify(pbkdf2);
 
+const logger = Logger.get("LockCredentialStorage");
+
+function isHashedCredential(value: unknown): value is LockCredential {
+  const c = value as LockCredential | undefined;
+  return (
+    typeof c?.entityId === "string" &&
+    typeof c.pinCodeHash === "string" &&
+    typeof c.pinCodeSalt === "string"
+  );
+}
+
 export class LockCredentialStorage extends Service {
   private storage!: StorageContext;
   private credentials: Map<string, LockCredential> = new Map();
+
+  /**
+   * Emits the entity whose credential changed. The DoorLock behaviors advertise
+   * requirePinForRemoteOperation from this storage, and without a signal that
+   * attribute only refreshed on the next Home Assistant state change.
+   */
+  readonly changed = Observable<[entityId: string]>();
 
   constructor(private readonly appStorage: AppStorage) {
     super("LockCredentialStorage");
@@ -56,37 +75,62 @@ export class LockCredentialStorage extends Service {
     }
 
     const data = stored as unknown as StoredCredentials;
-    if (data.version !== CURRENT_VERSION) {
+    if (!Array.isArray(data.credentials)) {
+      logger.warn("Credential file carries no credential list, ignoring it");
+      return;
+    }
+
+    if (data.version === 1) {
       await this.migrate(data);
       return;
     }
 
+    if (data.version !== CURRENT_VERSION) {
+      // A file written by a newer build. Taking the records we do understand
+      // keeps the PINs alive, starting empty would let the next write persist
+      // an empty set over them.
+      logger.warn(
+        `Credential file has unsupported version ${data.version}, reading the records that look readable`,
+      );
+    }
+
     for (const credential of data.credentials) {
+      if (!isHashedCredential(credential)) {
+        logger.warn("Skipping a credential record that is not readable");
+        continue;
+      }
       this.credentials.set(credential.entityId, credential);
     }
   }
 
   private async migrate(data: StoredCredentials): Promise<void> {
     // Migrate from v1 (plain text PIN) to v2 (hashed PIN)
-    if (data.version === 1) {
-      for (const legacyCredential of data.credentials as unknown as LockCredentialLegacy[]) {
-        // Hash the plain text PIN during migration
-        const salt = randomBytes(SALT_LENGTH).toString("hex");
-        const hash = await this.hashPin(legacyCredential.pinCode, salt);
-
-        const credential: LockCredential = {
-          entityId: legacyCredential.entityId,
-          pinCodeHash: hash,
-          pinCodeSalt: salt,
-          name: legacyCredential.name,
-          enabled: legacyCredential.enabled,
-          createdAt: legacyCredential.createdAt,
-          updatedAt: Date.now(),
-        };
-        this.credentials.set(credential.entityId, credential);
+    for (const record of data.credentials as unknown as LockCredentialLegacy[]) {
+      // A half migrated file carries both shapes. Keep what is already hashed,
+      // hashing an absent pinCode used to abort startup.
+      if (isHashedCredential(record)) {
+        this.credentials.set(record.entityId, record);
+        continue;
       }
-      await this.persist();
+      if (typeof record?.entityId !== "string" || !record.pinCode) {
+        logger.warn("Skipping a legacy credential record without a PIN");
+        continue;
+      }
+      const salt = randomBytes(SALT_LENGTH).toString("hex");
+      const hash = await this.hashPin(record.pinCode, salt);
+
+      const credential: LockCredential = {
+        entityId: record.entityId,
+        pinCodeHash: hash,
+        pinCodeSalt: salt,
+        name: record.name,
+        enabled: record.enabled,
+        createdAt: record.createdAt,
+        updatedAt: Date.now(),
+      };
+      this.credentials.set(credential.entityId, credential);
     }
+    await this.persist();
   }
 
   private async persist(): Promise<void> {
@@ -188,6 +232,7 @@ export class LockCredentialStorage extends Service {
 
     this.credentials.set(request.entityId, credential);
     await this.persist();
+    this.changed.emit(request.entityId);
     return credential;
   }
 
@@ -221,17 +266,23 @@ export class LockCredentialStorage extends Service {
     };
     this.credentials.set(params.entityId, credential);
     await this.persist();
+    this.changed.emit(params.entityId);
     return credential;
   }
 
   async deleteCredential(entityId: string): Promise<void> {
     this.credentials.delete(entityId);
     await this.persist();
+    this.changed.emit(entityId);
   }
 
   async deleteAllCredentials(): Promise<void> {
+    const entityIds = [...this.credentials.keys()];
     this.credentials.clear();
     await this.persist();
+    for (const entityId of entityIds) {
+      this.changed.emit(entityId);
+    }
   }
 
   /**
@@ -254,6 +305,7 @@ export class LockCredentialStorage extends Service {
 
     this.credentials.set(entityId, updated);
     await this.persist();
+    this.changed.emit(entityId);
     return updated;
   }
 }
