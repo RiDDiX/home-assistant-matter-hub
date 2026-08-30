@@ -2,6 +2,7 @@ import type { BridgeFeatureFlags } from "@home-assistant-matter-hub/common";
 import { GeneralCommissioningServer } from "@matter/main/behaviors";
 import { GeneralCommissioning } from "@matter/main/clusters";
 import { ServerNode } from "@matter/main/node";
+import { AttestationWarningServer } from "./attestation-warning.js";
 
 // #449: Alexa invokes SetTcAcknowledgements during pairing. matter.js does not
 // implement the TermsAndConditions feature, so the command fails as
@@ -37,7 +38,12 @@ export namespace TcGeneralCommissioningServer {
 }
 
 export function rootEndpointType(flags?: BridgeFeatureFlags) {
+  // AttestationWarningServer adds no cluster state, so the node fingerprint is
+  // the same with and without it and it can be mounted unconditionally (#465).
   return flags?.supportTermsAndConditions
-    ? ServerNode.RootEndpoint.with(TcGeneralCommissioningServer)
-    : ServerNode.RootEndpoint;
+    ? ServerNode.RootEndpoint.with(
+        TcGeneralCommissioningServer,
+        AttestationWarningServer,
+      )
+    : ServerNode.RootEndpoint.with(AttestationWarningServer);
 }
