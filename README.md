@@ -38,7 +38,7 @@ of port forwarding etc.
 | Channel | Branch | Current Version | Description |
 |---------|--------|-----------------|-------------|
 | **Stable** | `main` | v2.0.56 | Production-ready, recommended for most users |
-| **Alpha** | `alpha` | v2.1.0-alpha.881 | Ahead of Stable, carries the additions listed under Alpha Features |
+| **Alpha** | `alpha` | v2.1.0-alpha.882 | Ahead of Stable, carries the additions listed under Alpha Features |
 | **Testing** | `testing` | v4.1.0-testing.x | ⚠️ **Highly unstable!** Experimental features, may break |
 
 ### Which version should I use?
@@ -314,6 +314,12 @@ Re-assign the affected devices to their rooms after they reconnect. See the [doc
 <summary><strong>🧪 Alpha Features (v2.1.0-alpha.x)</strong> - Click to expand</summary>
 
 **Alpha is ahead of Stable (v2.0.56).** Everything below ships in the alpha channel now and lands in the next stable promote, grouped by the pre-release tag it first appeared in.
+
+**v2.1.0-alpha.882:**
+- 🔒 **A lock PIN takes effect immediately**: PIN enforcement was read from an attribute that only refreshed on the next Home Assistant state change, so a PIN added through a controller or the web page was not demanded yet, and a cleared one was still demanded. Both the check and the attribute follow the credential store now
+- 👥 **Lock credentials respect Add, Modify and the fabric that created them**: adding over an occupied slot, modifying an empty one, or a second controller replacing a PIN it did not create are refused, matching the Matter rules
+- 🛠️ **Programming a physical lock is confirmed before success is reported**: with `lockUsercodeService` set, a code the lock rejected was still reported as programmed, and a failed clear left a working keypad code while the controller was told it was gone
+- 💾 **Credential files are read defensively**: a file written by a newer build used to load nothing and then get overwritten with an empty set, losing every stored PIN, and a half migrated file aborted startup
 
 **v2.1.0-alpha.881:**
 - 🔒 **Locks reject an empty or overlong PIN**: a controller could program a zero length PIN, which switched remote PIN enforcement on and was then accepted as the PIN itself. SetCredential checks the length against the minimum and maximum the lock advertises now
