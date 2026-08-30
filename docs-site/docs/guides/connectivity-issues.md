@@ -186,6 +186,25 @@ See [Discussion #388](https://github.com/RiDDiX/home-assistant-matter-hub/discus
   Follow [this guide](https://github.com/project-chip/matter.js/blob/main/docs/ECOSYSTEMS.md#google-home-ecosystem) to
   register your hub properly with Google Home.
 
+### Controllers that only pair with CSA certified products
+
+Some controllers verify the device attestation against the production Matter trust store and refuse anything else. HAMH cannot pass that check, and no bridge setting changes it.
+
+Every Matter device presents three credentials during pairing: a Device Attestation Certificate (DAC), the Product Attestation Intermediate that signed it, and a Certification Declaration. On a certified product the DAC chains up to a Product Attestation Authority the vendor operates and that is listed in the Distributed Compliance Ledger, and the Certification Declaration is signed by the CSA once the product passes certification. HAMH is a software bridge, it has no CSA certification and no allocated vendor id, so matter.js generates development credentials instead: test vendor `0xFFF1`, product `0x8000`, a chain rooted in the public "Matter Test PAA", and a Certification Declaration of type "test". Apple Home, Google Home, Alexa and SmartThings are known to accept those. A controller with a certified-only policy does not.
+
+You can recognise it in the log. The controller reads the certificate chain, asks for the attestation, and then stops without ever sending `CSRRequest`:
+
+```text
+Invoke « 0.operationalCredentials.certificateChainRequest certificateType: 2
+Invoke « 0.operationalCredentials.certificateChainRequest certificateType: 1
+Invoke « 0.operationalCredentials.attestationRequest attestationNonce: ...
+Invoke « 0.generalCommissioning.armFailSafe expiryLengthSeconds: 0 breadcrumb: 0
+```
+
+`armFailSafe` with `expiryLengthSeconds: 0` is the controller cancelling. Since v2.1.0-alpha.883 HAMH also writes a plain warning when this happens, so you do not have to read the protocol trace.
+
+Known cases: the **Philips Ambiscape** feature on Ambilight TVs ([#465](https://github.com/RiDDiX/home-assistant-matter-hub/issues/465)), which only lists CSA certified bulbs and hubs as compatible. There is no workaround. Pair such a controller with real Matter hardware, for example a Hue bridge, and control the rest through Home Assistant.
+
 ### Duplicate / ghost mDNS records after re-pairing
 
 If you see two `_matter._tcp` instances with the same fabric prefix and one of them fails to resolve, a controller or network cache is still holding a record from an earlier pairing. The bridge is not announcing it, so restarting HAMH will not clear it. Check the **Fabrics** card on the bridge page first: if it really shows 2 fabrics, factory-reset the bridge instead.

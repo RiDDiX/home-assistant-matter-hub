@@ -315,6 +315,22 @@ Home, ...) are not placed in the same network segment. Please make sure to revie
 
 **Alpha is ahead of Stable (v2.0.56).** Everything below ships in the alpha channel now and lands in the next stable promote, grouped by the pre-release tag it first appeared in.
 
+**v2.1.0-alpha.883:**
+- 🔐 **A controller that refuses the bridge certificates says so in the log now**: pairing that stops right after the attestation step left only a bare "Failed" on the controller and nothing in the HAMH log. The bridge notices that no CSRRequest followed and names the step in its own log. Controllers that only pair with CSA certified products, like the Ambiscape feature on Philips Ambilight TVs, cannot be used at all: HAMH serves matter.js development certificates (test vendor `0xFFF1`, "Matter Test PAA", certification type "test") and no bridge setting changes that ([#465](https://github.com/RiDDiX/home-assistant-matter-hub/issues/465))
+
+**v2.1.0-alpha.882:**
+- 🔒 **A lock PIN takes effect immediately**: PIN enforcement was read from an attribute that only refreshed on the next Home Assistant state change, so a PIN added through a controller or the web page was not demanded yet, and a cleared one was still demanded. Both the check and the attribute follow the credential store now
+- 👥 **Lock credentials respect Add, Modify and the fabric that created them**: adding over an occupied slot, modifying an empty one, or a second controller replacing a PIN it did not create are refused, matching the Matter rules
+- 🛠️ **Programming a physical lock is confirmed before success is reported**: with `lockUsercodeService` set, a code the lock rejected was still reported as programmed, and a failed clear left a working keypad code while the controller was told it was gone
+- 💾 **Credential files are read defensively**: a file written by a newer build used to load nothing and then get overwritten with an empty set, losing every stored PIN, and a half migrated file aborted startup
+
+**v2.1.0-alpha.881:**
+- 🔒 **Locks reject an empty or overlong PIN**: a controller could program a zero length PIN, which switched remote PIN enforcement on and was then accepted as the PIN itself. SetCredential checks the length against the minimum and maximum the lock advertises now
+- ⚡ **PIN hashing no longer stalls the bridge**: every PIN protected unlock hashed on the event loop, which froze all bridges, Matter traffic, mDNS and the Home Assistant connection for the duration. Hashing moved to the thread pool
+
+**v2.1.0-alpha.880:**
+- 🪟 **Covers keep their position while a controller is talking to them**: a Home Assistant update that arrived while the controller held the same device was dropped with a warning only, which is what still lost positions after the alpha.879 serialization. Attribute writes wait for the device to be free now instead of being thrown away ([#464](https://github.com/RiDDiX/home-assistant-matter-hub/issues/464))
+
 **v2.1.0-alpha.879:**
 - 🧹 **Air purifiers stop rebuilding themselves**: a composed device never listed its battery entity, so the battery auto-map retry rebuilt the endpoint on every sensor update, burning CPU and raising unhandled rejections. A sensor without a device class also needs "batt" in its id now, a filter life percentage is no longer taken for a battery ([#461](https://github.com/RiDDiX/home-assistant-matter-hub/issues/461))
 - 🪟 **Covers moved together no longer lose their position**: state writes are serialized per device, two updates in the same millisecond used to collide on the endpoint lock and matter.js dropped the position attributes with a warning only ([#464](https://github.com/RiDDiX/home-assistant-matter-hub/issues/464))

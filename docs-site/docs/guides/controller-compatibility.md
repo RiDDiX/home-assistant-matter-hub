@@ -132,6 +132,16 @@ HAMH includes built-in controller profiles that pre-configure feature flags for 
 
 See [Bridge Configuration](../getting-started/bridge-configuration.md) for details on how to select a profile.
 
+## Controllers that cannot pair at all
+
+A controller that only accepts CSA certified devices rejects HAMH during the attestation step of pairing and never gets as far as the device list above. HAMH serves the development attestation matter.js generates by default (test vendor `0xFFF1`, "Matter Test PAA", certification type "test"), because an uncertified bridge has no CSA issued Certification Declaration to offer. Nothing in the bridge configuration changes it.
+
+| Controller | State | Note |
+|---|---|---|
+| **Philips Ambiscape** (Ambilight TVs) | ❌ | Pairing fails with "Failed", the TV aborts right after `attestationRequest`. Its compatible list is CSA certified bulbs and hubs only ([#465](https://github.com/RiDDiX/home-assistant-matter-hub/issues/465)) |
+
+See [Connectivity Issues](./connectivity-issues.md#controllers-that-only-pair-with-csa-certified-products) for how to recognise this in the log.
+
 ## Official Controller Documentation
 
 - **Alexa**: [Matter Support](https://developer.amazon.com/en-US/docs/alexa/smarthome/matter-support.html#device-categories-and-clusters)

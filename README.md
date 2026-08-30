@@ -38,7 +38,7 @@ of port forwarding etc.
 | Channel | Branch | Current Version | Description |
 |---------|--------|-----------------|-------------|
 | **Stable** | `main` | v2.0.56 | Production-ready, recommended for most users |
-| **Alpha** | `alpha` | v2.1.0-alpha.882 | Ahead of Stable, carries the additions listed under Alpha Features |
+| **Alpha** | `alpha` | v2.1.0-alpha.883 | Ahead of Stable, carries the additions listed under Alpha Features |
 | **Testing** | `testing` | v4.1.0-testing.x | ⚠️ **Highly unstable!** Experimental features, may break |
 
 ### Which version should I use?
@@ -314,6 +314,9 @@ Re-assign the affected devices to their rooms after they reconnect. See the [doc
 <summary><strong>🧪 Alpha Features (v2.1.0-alpha.x)</strong> - Click to expand</summary>
 
 **Alpha is ahead of Stable (v2.0.56).** Everything below ships in the alpha channel now and lands in the next stable promote, grouped by the pre-release tag it first appeared in.
+
+**v2.1.0-alpha.883:**
+- 🔐 **A controller that refuses the bridge certificates says so in the log now**: pairing that stops right after the attestation step left only a bare "Failed" on the controller and nothing in the HAMH log. The bridge notices that no CSRRequest followed and names the step in its own log. Controllers that only pair with CSA certified products, like the Ambiscape feature on Philips Ambilight TVs, cannot be used at all: HAMH serves matter.js development certificates (test vendor `0xFFF1`, "Matter Test PAA", certification type "test") and no bridge setting changes that ([#465](https://github.com/RiDDiX/home-assistant-matter-hub/issues/465))
 
 **v2.1.0-alpha.882:**
 - 🔒 **A lock PIN takes effect immediately**: PIN enforcement was read from an attribute that only refreshed on the next Home Assistant state change, so a PIN added through a controller or the web page was not demanded yet, and a cleared one was still demanded. Both the check and the attribute follow the credential store now
