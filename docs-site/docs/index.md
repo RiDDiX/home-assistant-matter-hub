@@ -315,6 +315,9 @@ Home, ...) are not placed in the same network segment. Please make sure to revie
 
 **Alpha is ahead of Stable (v2.0.56).** Everything below ships in the alpha channel now and lands in the next stable promote, grouped by the pre-release tag it first appeared in.
 
+**v2.1.0-alpha.884:**
+- 🧩 **A grouped device can announce its own type again**: the parent endpoint of a composed device only said "bridged node", so Apple Home had no device type to read on the accessory and took the icon from one of the grouped entities. A light grouped with a button showed up as an outlet. The new `composedPrimaryOnParent` bridge option puts the primary entity on the parent endpoint, which is the same shape an ungrouped entity has, so the accessory reads as a light and the grouped entities keep their own types. It applies to devices you group yourself with Composed Sub-Entities and needs `autoComposedDevices` on as well, the automatically composed sensors, air purifiers and climate/fan devices are not affected. Off by default because it changes the endpoint layout, so the device has to be removed and added again in the controller, and because an earlier attempt at this shape made Apple Home stop listing the grouped entities ([#469](https://github.com/RiDDiX/home-assistant-matter-hub/issues/469))
+
 **v2.1.0-alpha.883:**
 - 🔐 **A controller that refuses the bridge certificates says so in the log now**: pairing that stops right after the attestation step left only a bare "Failed" on the controller and nothing in the HAMH log. The bridge notices that no CSRRequest followed and names the step in its own log. Controllers that only pair with CSA certified products, like the Ambiscape feature on Philips Ambilight TVs, cannot be used at all: HAMH serves matter.js development certificates (test vendor `0xFFF1`, "Matter Test PAA", certification type "test") and no bridge setting changes that ([#465](https://github.com/RiDDiX/home-assistant-matter-hub/issues/465))
 

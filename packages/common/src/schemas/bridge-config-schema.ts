@@ -409,6 +409,26 @@ const featureFlagSchema: JSONSchema7 = {
       type: "boolean",
       default: false,
     },
+
+    composedPrimaryOnParent: {
+      title: "Composed Devices: Primary Entity On The Parent Endpoint",
+      description:
+        "For devices you group yourself with Composed Sub-Entities, needs " +
+        "autoComposedDevices on as well. Puts the primary entity on the parent " +
+        "endpoint instead of on an extra sub-endpoint, so the device advertises " +
+        "its own type (light, switch, ...) the way an uncomposed device does. " +
+        "Automatically composed sensors, air purifiers and climate/fan devices " +
+        "are not affected. Apple " +
+        "Home otherwise has no type to read on the parent and labels the whole " +
+        "accessory after one of the grouped entities, for example an outlet " +
+        "icon for a composed light. Takes effect after the bridge restarts, " +
+        "and changes the endpoint layout, so composed devices have to be " +
+        "removed and added again in your controller. Try it on one bridge " +
+        "first: Apple Home has been seen to stop listing the grouped entities " +
+        "once the parent carries its own device type. Default off.",
+      type: "boolean",
+      default: false,
+    },
   },
 };
 

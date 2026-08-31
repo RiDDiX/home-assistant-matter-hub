@@ -307,6 +307,15 @@ export class BridgeRegistry {
   }
 
   /**
+   * Check if the primary entity of a composed device lives on the parent
+   * endpoint instead of on its own sub-endpoint (#469). Off by default: it
+   * rewrites the endpoint tree of already commissioned composed devices.
+   */
+  isComposedPrimaryOnParentEnabled(): boolean {
+    return this.dataProvider.featureFlags?.composedPrimaryOnParent === true;
+  }
+
+  /**
    * Check if auto humidity mapping is enabled for this bridge.
    * Default: true (enabled by default).
    * When enabled, humidity sensors on the same device as a temperature sensor

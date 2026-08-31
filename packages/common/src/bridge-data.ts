@@ -146,6 +146,19 @@ interface AllBridgeFeatureFlags {
    * Default: false (disabled)
    */
   readonly wedgeWatchdog: boolean;
+  /**
+   * Composed devices: put the primary entity on the parent endpoint instead of
+   * on a sub-endpoint, so the parent advertises [<app device type>, 0x0013]
+   * like a standalone device does. Without it the parent is a bare Bridged Node
+   * and Apple Home has no device type to derive the accessory category from, so
+   * it picks one of the children (#469). Changes the endpoint tree of an
+   * existing composed device, which means it has to be removed and re-added in
+   * the controller. Opt-in because #218 saw Apple Home stop listing the
+   * sub-endpoints of a composed device once the parent had its own application
+   * device type.
+   * Default: false (disabled)
+   */
+  readonly composedPrimaryOnParent: boolean;
 }
 
 export type BridgeFeatureFlags = Partial<AllBridgeFeatureFlags>;

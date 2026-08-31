@@ -31,6 +31,13 @@ function stripBasicInformation(type: EndpointType): EndpointType {
   return { ...type, behaviors };
 }
 
+// createLegacyEndpointType returns the bare EndpointType union, which has no
+// with()/set(), so the parent is cast back when it needs either.
+type MutableEndpointType = EndpointType & {
+  with(...behaviors: unknown[]): EndpointType;
+  set(state: Record<string, unknown>): EndpointType;
+};
+
 function createEndpointId(entityId: string, customName?: string): string {
   const baseName = customName || entityId;
   return baseName.replace(/\./g, "_").replace(/\s+/g, "_");
@@ -69,11 +76,16 @@ export interface UserComposedConfig {
 
 /**
  * A user-defined composed endpoint that groups arbitrary HA entities
- * into a single Matter device using BridgedNodeEndpoint as the parent.
+ * into a single Matter device.
  *
  * Structure:
  *   BridgedNodeEndpoint (parent - basic info)
  *     ├── PrimaryDevice (sub-endpoint from primary entity)
+ *     ├── SubDevice1 (sub-endpoint from composed entity 1)
+ *     └── SubDevice2 (sub-endpoint from composed entity 2)
+ *
+ * With composedPrimaryOnParent the primary is the parent instead (#469):
+ *   PrimaryDevice (parent - basic info, primary clusters)
  *     ├── SubDevice1 (sub-endpoint from composed entity 1)
  *     └── SubDevice2 (sub-endpoint from composed entity 2)
  */
@@ -98,34 +110,12 @@ export class UserComposedEndpoint extends Endpoint {
     const primaryPayload = buildEntityPayload(registry, primaryEntityId);
     if (!primaryPayload) return undefined;
 
-    // Build parent type (BridgedNodeEndpoint with BasicInfo)
-    let parentType = BridgedNodeEndpoint.with(
-      BasicInformationServer,
-      IdentifyServer,
-      HomeAssistantEntityBehavior,
-    );
-
-    if (config.areaName) {
-      const truncatedName =
-        config.areaName.length > 16
-          ? config.areaName.substring(0, 16)
-          : config.areaName;
-      parentType = parentType.with(
-        FixedLabelServer.set({
-          labelList: [{ label: "room", value: truncatedName }],
-        }),
-      );
-    }
-
     // Auto-mapped or explicit battery lives on the parent so controllers show
     // the device battery, not on a random sub-endpoint. Skipped when
     // disableBatteryMapping is set (#427), even if a batteryEntity is also
     // (contradictorily) configured.
     const hasParentBattery =
       !!config.mapping?.batteryEntity && !config.mapping?.disableBatteryMapping;
-    if (hasParentBattery) {
-      parentType = parentType.with(DefaultPowerSourceServer);
-    }
 
     const endpointId =
       config.endpointId ?? createEndpointId(primaryEntityId, config.customName);
@@ -138,7 +128,7 @@ export class UserComposedEndpoint extends Endpoint {
       mappedIds.push(config.mapping.batteryEntity);
     }
 
-    // Primary entity sub-endpoint. The parent owns the device battery, so drop
+    // Primary entity type. The parent owns the device battery, so drop
     // batteryEntity from the mapping and the battery/battery_level attributes
     // from the payload. Domain factories pick a WithBattery variant from either
     // one, and a sub PowerSource would duplicate the parent. Shallow copies
@@ -168,16 +158,74 @@ export class UserComposedEndpoint extends Endpoint {
       return undefined;
     }
 
-    const primarySub = new Endpoint(stripBasicInformation(primaryType), {
-      id: `${endpointId}_primary`,
-    });
-    parts.push(primarySub);
-    subEndpointMap.set(primaryEntityId, primarySub);
+    // With composedPrimaryOnParent the primary IS the parent: its endpoint type
+    // already carries BasicInformationServer, Identify and the room label, and
+    // matter.js adds BridgedNode (0x0013) from the BridgedDeviceBasicInformation
+    // behavior, so the parent goes on the wire as [<app device type>, 0x0013],
+    // the same shape an uncomposed entity has. A bare BridgedNodeEndpoint parent
+    // carries no application device type at all, which leaves Apple Home to pick
+    // the accessory category from one of the children (#469). Off by default,
+    // it changes the endpoint tree of an already commissioned device.
+    const primaryOnParent = registry.isComposedPrimaryOnParentEnabled();
+    let parentType = (
+      primaryOnParent
+        ? primaryType
+        : BridgedNodeEndpoint.with(
+            BasicInformationServer,
+            IdentifyServer,
+            HomeAssistantEntityBehavior,
+          )
+    ) as MutableEndpointType;
+
+    // The merged parent already got the room label from createLegacyEndpointType.
+    if (!primaryOnParent && config.areaName) {
+      const truncatedName =
+        config.areaName.length > 16
+          ? config.areaName.substring(0, 16)
+          : config.areaName;
+      parentType = parentType.with(
+        FixedLabelServer.set({
+          labelList: [{ label: "room", value: truncatedName }],
+        }),
+      ) as MutableEndpointType;
+    }
+
+    // A merged parent can already own a PowerSource, a vacuum always does, and
+    // .with() would replace it by behavior id and lose the domain's own charge
+    // state. The bare BridgedNodeEndpoint parent never has one.
+    if (hasParentBattery && !("powerSource" in parentType.behaviors)) {
+      parentType = parentType.with(
+        DefaultPowerSourceServer,
+      ) as MutableEndpointType;
+    }
+
+    if (!primaryOnParent) {
+      const primarySub = new Endpoint(stripBasicInformation(primaryType), {
+        id: `${endpointId}_primary`,
+      });
+      parts.push(primarySub);
+      subEndpointMap.set(primaryEntityId, primarySub);
+    }
 
     // Composed sub-entity endpoints
     for (let i = 0; i < composedEntities.length; i++) {
       const sub = composedEntities[i];
       if (!sub.entityId) continue;
+
+      // Merged mode only, so a bridge that never turns the flag on keeps the
+      // exact tree it was paired with. The primary is the parent here, and a
+      // repeated entity would mount a second endpoint that no state update ever
+      // reaches, subEndpointMap is keyed by entity id so only the last wins.
+      if (
+        primaryOnParent &&
+        (sub.entityId === primaryEntityId || subEndpointMap.has(sub.entityId))
+      ) {
+        logger.warn(
+          `Composed sub-entity ${sub.entityId} of ${primaryEntityId} is the ` +
+            `primary itself or listed twice, skipping the duplicate`,
+        );
+        continue;
+      }
 
       const subPayload = buildEntityPayload(registry, sub.entityId);
       if (!subPayload) {
@@ -213,10 +261,13 @@ export class UserComposedEndpoint extends Endpoint {
       mappedIds.push(sub.entityId);
     }
 
-    if (parts.length < 2) {
+    // Without the primary sub-endpoint one grouped entity is enough for a
+    // composed device, with it the primary itself is the first part.
+    const minParts = primaryOnParent ? 1 : 2;
+    if (parts.length < minParts) {
       logger.warn(
-        `User composed device ${primaryEntityId}: only ${parts.length} sub-endpoint(s), ` +
-          `need at least 2 (primary + one sub-entity). Falling back to standalone.`,
+        `User composed device ${primaryEntityId}: no sub-entity endpoint could ` +
+          `be built, need at least one. Falling back to standalone.`,
       );
       return undefined;
     }
@@ -241,12 +292,11 @@ export class UserComposedEndpoint extends Endpoint {
 
     endpoint.subEndpoints = subEndpointMap;
 
-    const labels = parts
-      .map((_, i) =>
-        i === 0
-          ? primaryEntityId.split(".")[0]
-          : (composedEntities[i - 1]?.entityId?.split(".")[0] ?? "?"),
-      )
+    const labels = [
+      primaryEntityId,
+      ...[...subEndpointMap.keys()].filter((id) => id !== primaryEntityId),
+    ]
+      .map((id) => id.split(".")[0])
       .join("+");
 
     logger.info(
