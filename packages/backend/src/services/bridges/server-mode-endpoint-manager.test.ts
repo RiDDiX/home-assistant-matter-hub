@@ -390,7 +390,27 @@ describe("ServerModeEndpointManager (#301)", () => {
     expect(advertised).toBe(0x74);
   });
 
-  it("deletes endpoints whose entity left the filter, but only past the grace", async () => {
+  it("removes an endpoint immediately when its entity leaves the filter but stays in HA (#468)", async () => {
+    const h = makeHarness(["light.a", "light.b"], "light.a");
+    await h.manager.refreshDevices();
+    const endpointB = h.serverNode.addDevice.mock.calls
+      .map((c) => c[0] as EntityEndpoint)
+      .find((e) => e.entityId === "light.b");
+
+    // The filter no longer matches light.b, but HA still has the entity:
+    // a deliberate edit, so no grace. close() keeps the number reserved.
+    h.registry.entityIds = ["light.a"];
+    legacyCreate.mockClear();
+    await h.manager.refreshDevices();
+
+    expect(endpointB?.close).toHaveBeenCalledTimes(1);
+    expect(endpointB?.delete).not.toHaveBeenCalled();
+    expect(h.serverNode.forgetDevice).toHaveBeenCalledWith(endpointB);
+    expect(legacyCreate).not.toHaveBeenCalled();
+    expect(h.manager.devices.map((d) => d.entityId)).toEqual(["light.a"]);
+  });
+
+  it("deletes endpoints whose entity left HA, but only past the grace (#438)", async () => {
     const h = makeHarness(["light.a", "light.b"], "light.a");
     await h.manager.refreshDevices();
     const endpointB = h.serverNode.addDevice.mock.calls
@@ -398,6 +418,7 @@ describe("ServerModeEndpointManager (#301)", () => {
       .find((e) => e.entityId === "light.b");
 
     h.registry.entityIds = ["light.a"];
+    delete h.registry.fullEntities["light.b"];
     legacyCreate.mockClear();
     await h.manager.refreshDevices();
 
@@ -421,6 +442,7 @@ describe("ServerModeEndpointManager (#301)", () => {
       .find((e) => e.entityId === "light.b");
 
     h.registry.entityIds = ["light.a"];
+    delete h.registry.fullEntities["light.b"];
     await h.manager.refreshDevices();
 
     // Time passes but the snapshot is the same cached one, so the recheck
@@ -594,8 +616,10 @@ describe("ServerModeEndpointManager (#301)", () => {
     });
     await h.manager.refreshDevices();
 
-    // gone for one refresh, the grace stamp is set
+    // gone for one refresh, the grace stamp is set. The rename removed the
+    // old id from HA's registry too, only the new id remains.
     h.registry.entityIds = [];
+    delete h.registry.fullEntities["light.old"];
     await h.manager.refreshDevices();
     // biome-ignore lint/suspicious/noExplicitAny: reach the private grace map
     const pending = (h.manager as any).pendingRemovals as Map<string, unknown>;
@@ -617,6 +641,7 @@ describe("ServerModeEndpointManager (#301)", () => {
       .find((e) => e.entityId === "light.b");
 
     h.registry.entityIds = ["light.a"];
+    delete h.registry.fullEntities["light.b"];
     await h.manager.refreshDevices();
     expect(endpointB?.delete).not.toHaveBeenCalled();
 
@@ -845,6 +870,7 @@ describe("ServerModeEndpointManager (#301)", () => {
       .find((e) => e.entityId === "light.b");
 
     h.registry.entityIds = ["light.a"];
+    delete h.registry.fullEntities["light.b"];
     await h.manager.refreshDevices();
     // Production start order: refreshDevices, then startObserving.
     await h.manager.startObserving();
@@ -875,6 +901,7 @@ describe("ServerModeEndpointManager (#301)", () => {
       .find((e) => e.entityId === "light.b");
 
     h.registry.entityIds = ["light.a"];
+    delete h.registry.fullEntities["light.b"];
     await h.manager.refreshDevices();
 
     // Grace elapsed on the wall clock, but HA only just came back, so its
@@ -893,13 +920,30 @@ describe("ServerModeEndpointManager (#301)", () => {
     expect(endpointB?.delete).toHaveBeenCalledTimes(1);
   });
 
-  it("holds the grace when the filter suddenly matches nothing (#438)", async () => {
+  it("removes the last endpoint immediately when the filter empties but HA keeps the entity (#468)", async () => {
     const h = makeHarness(["light.a"]);
     await h.manager.refreshDevices();
     const ep = h.serverNode.addDevice.mock.calls[0][0] as EntityEndpoint;
 
-    // Filter empties while HA still reports entities (partial snapshot).
+    // The filter matches nothing, but HA still has the entity: a deliberate
+    // edit, so no grace. close() keeps the number reserved.
     h.registry.entityIds = [];
+    await h.manager.refreshDevices();
+
+    expect(ep.close).toHaveBeenCalledTimes(1);
+    expect(ep.delete).not.toHaveBeenCalled();
+    expect(h.serverNode.forgetDevice).toHaveBeenCalledWith(ep);
+  });
+
+  it("holds the grace when the filter empties and the entity left HA too (#438)", async () => {
+    const h = makeHarness(["light.a"], undefined, {
+      entities: { "light.unrelated": {} },
+    });
+    await h.manager.refreshDevices();
+    const ep = h.serverNode.addDevice.mock.calls[0][0] as EntityEndpoint;
+
+    h.registry.entityIds = [];
+    delete h.registry.fullEntities["light.a"];
     await h.manager.refreshDevices();
     expect(ep.delete).not.toHaveBeenCalled();
 

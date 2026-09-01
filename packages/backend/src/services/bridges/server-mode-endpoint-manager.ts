@@ -212,6 +212,28 @@ export class ServerModeEndpointManager extends Service {
     }
   }
 
+  // An entity still in the full HA registry was dropped by the filter (or
+  // hidden/disabled in HA) on purpose, not by an outage: skip the #438 grace
+  // and unmount now so a filter edit takes effect without a restart (#468).
+  // close() keeps the number reserved for a later re-include (#404). Returns
+  // the ids genuinely absent from HA, which must still ride the grace.
+  private async closeFilteredOut(candidateIds: string[]): Promise<string[]> {
+    const fullEntities = this.registry.fullEntities;
+    const absent: string[] = [];
+    for (const id of candidateIds) {
+      if (fullEntities[id] == null) {
+        absent.push(id);
+        continue;
+      }
+      this.log.info(
+        `Entity ${id} is no longer exposed by the filter, removing endpoint`,
+      );
+      await this.closeEndpoint(id);
+      this.pendingRemovals.delete(id);
+    }
+    return absent;
+  }
+
   // Absence-driven removals wait out the grace window AND a fresh successful
   // HA reload, so restarts and stale snapshots never erase numbers (#438).
   // Returns the ids whose absence is confirmed, ready for removeEndpoints.
@@ -318,9 +340,8 @@ export class ServerModeEndpointManager extends Service {
 
       if (this.entityIds.length === 0) {
         this.log.warn("Server mode bridge has no entities configured");
-        await this.removeEndpoints(
-          this.removableAfterGrace([...this.endpoints.keys()]),
-        );
+        const absent = await this.closeFilteredOut([...this.endpoints.keys()]);
+        await this.removeEndpoints(this.removableAfterGrace(absent));
         // surface the empty node in the UI instead of running silently
         this._failedEntities.push({
           entityId:
@@ -398,9 +419,12 @@ export class ServerModeEndpointManager extends Service {
           genuinelyRemoved.push(oldId);
         }
       }
-      const confirmedRemoved = this.removableAfterGrace(genuinelyRemoved);
+      const absent = await this.closeFilteredOut(genuinelyRemoved);
+      const confirmedRemoved = this.removableAfterGrace(absent);
       let structureChanged =
-        removed.length > genuinelyRemoved.length || confirmedRemoved.length > 0;
+        removed.length > genuinelyRemoved.length ||
+        genuinelyRemoved.length > absent.length ||
+        confirmedRemoved.length > 0;
       await this.removeEndpoints(confirmedRemoved);
 
       // Reserve every disabled entity's id up front: an active entity that

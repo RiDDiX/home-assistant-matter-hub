@@ -917,6 +917,29 @@ export class BridgeEndpointManager extends Service {
         this.pendingRemovals.delete(endpoint.entityId);
       }
       if (!present) {
+        // Still in the full HA registry means the filter (or a hide/disable
+        // in HA) dropped it deliberately, not an outage blip: the grace below
+        // protects against untrusted snapshots (#438), which this is not.
+        // Remove now so a filter edit takes effect without a restart (#468).
+        // close(), not delete(): the persisted number stays reserved, so
+        // re-including the entity brings the device back under its old
+        // identity and controllers keep their groups (#404).
+        if (fullEntities[endpoint.entityId] != null) {
+          this.log.info(
+            `Entity ${endpoint.entityId} is no longer exposed by the filter, removing endpoint ${endpoint.number}`,
+          );
+          try {
+            await endpoint.close();
+          } catch (e) {
+            this.log.warn(
+              `Failed to remove filtered endpoint ${endpoint.entityId}:`,
+              e,
+            );
+          }
+          this.mappingFingerprints.delete(endpoint.entityId);
+          this.pendingRemovals.delete(endpoint.entityId);
+          continue;
+        }
         // An entity can vanish from the registry briefly during an HA restart.
         // delete() erases the persisted endpoint number, so controllers (Alexa)
         // treat the recreated device as new and lose groups. Wait out a grace
