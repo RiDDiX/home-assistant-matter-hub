@@ -38,7 +38,7 @@ of port forwarding etc.
 | Channel | Branch | Current Version | Description |
 |---------|--------|-----------------|-------------|
 | **Stable** | `main` | v2.0.56 | Production-ready, recommended for most users |
-| **Alpha** | `alpha` | v2.1.0-alpha.885 | Ahead of Stable, carries the additions listed under Alpha Features |
+| **Alpha** | `alpha` | v2.1.0-alpha.886 | Ahead of Stable, carries the additions listed under Alpha Features |
 | **Testing** | `testing` | v4.1.0-testing.x | ⚠️ **Highly unstable!** Experimental features, may break |
 
 ### Which version should I use?
@@ -314,6 +314,10 @@ Re-assign the affected devices to their rooms after they reconnect. See the [doc
 <summary><strong>🧪 Alpha Features (v2.1.0-alpha.x)</strong> - Click to expand</summary>
 
 **Alpha is ahead of Stable (v2.0.56).** Everything below ships in the alpha channel now and lands in the next stable promote, grouped by the pre-release tag it first appeared in.
+
+**v2.1.0-alpha.886:**
+- 🔍 **Editing the entity filter takes effect right away**: an entity removed from the filter rode the outage protection meant for Home Assistant restarts, so its endpoint stayed on the bridge for at least five minutes and the endpoint list looked frozen. An entity that Home Assistant still knows is removed on the spot now, and because the endpoint number stays reserved, putting it back into the filter later brings the device back with its controller groups intact ([#468](https://github.com/RiDDiX/home-assistant-matter-hub/issues/468))
+- 📡 **New bridge option `omitEventsInPriming` for Google fabrics that never come online**: a packet capture showed Google acknowledging every chunk of the initial subscription report on the wire but never answering the final one, which carries the stored StartUp and BootReason events, so the subscription aborts after about 11 seconds and the device stays permanently offline. With the option on, the initial report carries attributes only, live events afterwards are unaffected. Technically off-spec, so it is off by default and meant only for bridges paired to an affected Google fabric ([#424](https://github.com/RiDDiX/home-assistant-matter-hub/issues/424))
 
 **v2.1.0-alpha.885:**
 - 🏷️ **A device renamed in Home Assistant reaches the controller**: an endpoint that survived a refresh kept the registry snapshot it was built with, so a device rename, and its manufacturer, model or firmware version, only showed up after a restart. With `preferEntityRegistryName` on, an entity rename never arrived at all. The snapshot is refreshed on every registry poll now, an entity rename triggers that poll in the first place, and server mode pushes the renamed identity to its root node instead of waiting for a structural change. Note that Apple Home takes the accessory name when the device is added and keeps its own copy afterwards, so a rename shows up there only for accessories you add after it ([#467](https://github.com/RiDDiX/home-assistant-matter-hub/issues/467))
