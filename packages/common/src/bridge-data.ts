@@ -122,6 +122,17 @@ interface AllBridgeFeatureFlags {
    * Default: false (disabled)
    */
   readonly fastSessionRecovery: boolean;
+  /**
+   * Omit events from the initial subscription report. Google's stack has been
+   * seen to MRP-ack every priming chunk but never answer the final one at the
+   * Interaction Model level, and that chunk carries the stored StartUp and
+   * BootReason events: the subscription aborts after ~11s and the device stays
+   * offline forever (#424). With this flag the priming report carries
+   * attributes only. Live events still reach the controller once the
+   * subscription stands. Off-spec, so opt-in per bridge.
+   * Default: false (disabled)
+   */
+  readonly omitEventsInPriming: boolean;
   /** Advertise Matter 1.5.1 instead of 1.6.0, pairing diagnostic for older Alexa stacks (#449). */
   readonly advertiseSpecVersion151: boolean;
   /** Accept SetTcAcknowledgements instead of rejecting it, pairing experiment for Echo stalls (#449). */

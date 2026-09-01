@@ -227,6 +227,9 @@ export class ServerModeBridge {
   async update(update: UpdateBridgeRequest): Promise<void> {
     try {
       this.dataProvider.update(update);
+      // the next priming report reads this live, no restart needed (#424)
+      this.server.hamhOmitEventsInPriming =
+        this.dataProvider.featureFlags?.omitEventsInPriming === true;
       await this.refreshDevices();
       // Re-evaluate auto force sync setting after config update
       if (this.status.code === BridgeStatus.Running) {

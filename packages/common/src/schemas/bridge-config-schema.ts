@@ -385,6 +385,22 @@ const featureFlagSchema: JSONSchema7 = {
       default: false,
     },
 
+    omitEventsInPriming: {
+      title: "Omit Events From Priming (Google offline workaround)",
+      description:
+        "Send the initial subscription report without the stored StartUp and " +
+        "BootReason events. Google controllers have been seen to receive and " +
+        "acknowledge every priming chunk on the wire but never answer the " +
+        "final one, which carries exactly these events, so the subscription " +
+        "aborts after about 11 seconds and the device stays offline (#424). " +
+        "Live events after the subscription are unaffected. Technically " +
+        "off-spec, so only enable it on a bridge paired to an affected " +
+        "Google fabric. Applies to the next subscription a controller " +
+        "opens. Default off.",
+      type: "boolean",
+      default: false,
+    },
+
     stableIdentity: {
       title: "Stable Device Identity",
       description:

@@ -1,7 +1,16 @@
 diff --git a/dist/cjs/node/server/ServerSubscription.js b/dist/cjs/node/server/ServerSubscription.js
-index 97a786839b4daf262cb980e82f1b76c242a8c5df..f85d1ec9c6c34b0388a2f20429add5ea4b017094 100644
+index 97a786839b4daf262cb980e82f1b76c242a8c5df..7adb5b6adae5c7a01bd479fa1eb5a215867f7cd1 100644
 --- a/dist/cjs/node/server/ServerSubscription.js
 +++ b/dist/cjs/node/server/ServerSubscription.js
+@@ -503,7 +503,7 @@ class ServerSubscription {
+         }
+         validAttributes = attributeReader.counts.existent;
+       }
+-      if (import_protocol.Read.containsEvent(request)) {
++      if (import_protocol.Read.containsEvent(request) && !(validAttributes > 0 && this.#context.node.hamhOmitEventsInPriming === true)) {
+         const eventReader = new import_protocol.EventReadResponse(this.#context.node.protocol, session);
+         for await (const chunk of eventReader.process(request)) {
+           for await (const report of chunk) {
 @@ -686,6 +686,14 @@ class ServerSubscription {
      }
    }
@@ -18,9 +27,18 @@ index 97a786839b4daf262cb980e82f1b76c242a8c5df..f85d1ec9c6c34b0388a2f20429add5ea
      if (exchange === void 0) {
        return false;
 diff --git a/dist/esm/node/server/ServerSubscription.js b/dist/esm/node/server/ServerSubscription.js
-index 77934d8fd3cdafa2d26ec2545224027e81d892ea..6b2e75da17d83b45d4214a48be359579b64a67d3 100644
+index 77934d8fd3cdafa2d26ec2545224027e81d892ea..dbd4c54fd1f21433f6ee05c159d379d4322c038c 100644
 --- a/dist/esm/node/server/ServerSubscription.js
 +++ b/dist/esm/node/server/ServerSubscription.js
+@@ -509,7 +509,7 @@ class ServerSubscription {
+         }
+         validAttributes = attributeReader.counts.existent;
+       }
+-      if (Read.containsEvent(request)) {
++      if (Read.containsEvent(request) && !(validAttributes > 0 && this.#context.node.hamhOmitEventsInPriming === true)) {
+         const eventReader = new EventReadResponse(this.#context.node.protocol, session);
+         for await (const chunk of eventReader.process(request)) {
+           for await (const report of chunk) {
 @@ -692,6 +692,14 @@ class ServerSubscription {
      }
    }
