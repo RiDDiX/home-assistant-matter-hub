@@ -1,4 +1,5 @@
 import { Logger } from "@matter/general";
+import type { Endpoint } from "@matter/main";
 import { ElectricalEnergyMeasurementServer as Base } from "@matter/main/behaviors";
 import { ElectricalPowerMeasurement } from "@matter/main/clusters";
 import { EntityStateProvider } from "../../services/bridges/entity-state-provider.js";
@@ -8,6 +9,11 @@ import { HomeAssistantEntityBehavior } from "./home-assistant-entity-behavior.js
 const logger = Logger.get("ElectricalEnergyMeasurementServer");
 
 const FeaturedBase = Base.with("CumulativeEnergy", "ImportedEnergy");
+
+// Last reading actually reported per endpoint. A behavior instance field is
+// reset on every transaction, and the cluster attribute cannot stand in for it
+// because it is declared with a 0 placeholder.
+const lastEmitted = new WeakMap<Endpoint, number>();
 
 // biome-ignore lint/correctness/noUnusedVariables: Used by the function below
 class ElectricalEnergyMeasurementServerBase extends FeaturedBase {
@@ -54,11 +60,22 @@ class ElectricalEnergyMeasurementServerBase extends FeaturedBase {
     });
 
     // Matter spec requires emitting cumulativeEnergyMeasured event
-    // when cumulative energy values change (see matter.js setMeasurement)
+    // when cumulative energy values change (see matter.js setMeasurement).
+    // Only when it moved: this reactor also runs for an entity change that left
+    // the reading alone, and since #467 that includes a registry refresh, so an
+    // unconditional emit reported energy a rename never measured.
+    //
+    // Tracked separately from the attribute, which starts at a declared 0
+    // placeholder: a first real reading of 0 writes nothing but is still a
+    // measurement and has to be reported.
+    if (lastEmitted.get(this.endpoint) === energyMwh) return;
     this.events.cumulativeEnergyMeasured?.emit(
       { energyImported, energyExported: undefined },
       this.context,
     );
+    // Recorded only once the event is out, so a throwing emit is retried on the
+    // next reading instead of suppressing this total for good.
+    lastEmitted.set(this.endpoint, energyMwh);
   }
 }
 

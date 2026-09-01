@@ -122,7 +122,7 @@ export class ServerModeServerNode extends ServerNode {
     device: HomeAssistantDeviceRegistry | undefined,
     mapping: EntityMappingConfig | undefined,
     friendlyName: string | undefined,
-  ): Promise<void> {
+  ): Promise<boolean> {
     const nodeLabel =
       trimToLength(mapping?.customName, 32, "...") ??
       trimToLength(friendlyName, 32, "...") ??
@@ -160,25 +160,31 @@ export class ServerModeServerNode extends ServerNode {
       softwareVersionString: trimToLength(device?.sw_version, 64, "..."),
     });
     if (Object.keys(basicInformation).length === 0) {
-      return;
+      return true;
     }
     try {
       await this.set({ basicInformation });
+      return true;
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       logger.warn(
         `Failed to apply server-mode identity for ${entityId}: ${msg}`,
       );
+      // Reported, not thrown: the caller keeps running but must not remember
+      // this identity as delivered, or it never retries (#467).
+      return false;
     }
   }
 
   // align the pairing device-type hint with the real device (default is vacuum)
-  async updateAdvertisedDeviceType(deviceType: DeviceTypeId): Promise<void> {
+  async updateAdvertisedDeviceType(deviceType: DeviceTypeId): Promise<boolean> {
     try {
       await this.set({ productDescription: { deviceType } });
+      return true;
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       logger.warn(`Failed to set server-mode device type: ${msg}`);
+      return false;
     }
   }
 

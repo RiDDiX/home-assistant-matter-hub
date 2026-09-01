@@ -1,4 +1,8 @@
-import type { HomeAssistantEntityState } from "@home-assistant-matter-hub/common";
+import type {
+  HomeAssistantDeviceRegistry,
+  HomeAssistantEntityRegistry,
+  HomeAssistantEntityState,
+} from "@home-assistant-matter-hub/common";
 import {
   DestroyedDependencyError,
   TransactionDestroyedError,
@@ -46,6 +50,66 @@ export function updateEntityState(
     next.catch(() => {}),
   );
   return next;
+}
+
+/**
+ * Push a fresh Home Assistant registry snapshot onto an endpoint, serialized on
+ * the same per-endpoint chain as the state writes.
+ *
+ * updateEntityState only replaces `state`, so `registry` and `deviceRegistry`
+ * stayed frozen at the values the endpoint was built with. A device renamed in
+ * Home Assistant, or its manufacturer, model or firmware version changing, then
+ * never reached the Matter attributes until the bridge restarted (#467).
+ *
+ * NodeLabel is writable and follows immediately. VendorName, ProductName,
+ * SerialNumber and the version strings are fixed quality, so a controller that
+ * cached them at pairing keeps its copy until it re-reads the node. The values
+ * are corrected here either way, deliberately without touching the node's
+ * configuration version: forcing every controller to re-enumerate the whole
+ * bridge over a renamed device costs more than the stale string it fixes.
+ */
+export function updateEntityRegistry(
+  endpoint: Endpoint,
+  registry: HomeAssistantEntityRegistry | undefined,
+  deviceRegistry: HomeAssistantDeviceRegistry | undefined,
+): Promise<void> {
+  const next = (chains.get(endpoint) ?? Promise.resolve()).then(() =>
+    writeRegistry(endpoint, registry, deviceRegistry),
+  );
+  chains.set(
+    endpoint,
+    next.catch(() => {}),
+  );
+  return next;
+}
+
+async function writeRegistry(
+  endpoint: Endpoint,
+  registry: HomeAssistantEntityRegistry | undefined,
+  deviceRegistry: HomeAssistantDeviceRegistry | undefined,
+): Promise<void> {
+  try {
+    await endpoint.construction.ready;
+  } catch {
+    return;
+  }
+  try {
+    const current = endpoint.stateOf(HomeAssistantEntityBehavior).entity;
+    // The registry hands out fresh objects on every reload, so compare by value
+    // or every poll would take the endpoint lock for an identical write.
+    if (
+      JSON.stringify(current.registry) === JSON.stringify(registry) &&
+      JSON.stringify(current.deviceRegistry) === JSON.stringify(deviceRegistry)
+    ) {
+      return;
+    }
+    await endpoint.setStateOf(HomeAssistantEntityBehavior, {
+      entity: { ...current, registry, deviceRegistry },
+    });
+  } catch (error) {
+    if (isDetachedEndpointError(error)) return;
+    throw error;
+  }
 }
 
 async function writeState(

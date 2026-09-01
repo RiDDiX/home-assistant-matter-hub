@@ -1,5 +1,9 @@
-import type { EventDeviceAttributes } from "@home-assistant-matter-hub/common";
+import type {
+  EventDeviceAttributes,
+  HomeAssistantEntityInformation,
+} from "@home-assistant-matter-hub/common";
 import { Logger } from "@matter/general";
+import type { Endpoint } from "@matter/main";
 import { SwitchServer as Base } from "@matter/main/behaviors";
 import { HomeAssistantEntityBehavior } from "./home-assistant-entity-behavior.js";
 
@@ -28,6 +32,45 @@ const FullBase = Base.with(
   "MomentarySwitchLongPress",
   "MomentarySwitchMultiPress",
 );
+
+// An entity$Changed only used to mean "the Home Assistant state moved", so
+// firing a press on every one of them was enough. It also fires now when only
+// the registry snapshot behind an endpoint is refreshed (#467), and a device
+// rename must not look like a button press to the controller. HA event entities
+// carry the event timestamp in `state`, so that plus the event type identifies
+// one press.
+//
+// Keyed on the endpoint, not the entity id: a behavior instance field is reset
+// on every transaction, while an entity-keyed module map would be shared by two
+// bridges exposing the same entity and would swallow the second one's press. A
+// rebuilt endpoint is a new key, so its first press always gets through.
+const lastFiredEvents = new WeakMap<Endpoint, string>();
+
+function eventKey(entity: HomeAssistantEntityInformation): string | undefined {
+  const eventType = (
+    entity?.state?.attributes as EventDeviceAttributes | undefined
+  )?.event_type;
+  if (!eventType) return undefined;
+  return `${entity.state.state} ${eventType}`;
+}
+
+function seedLastEvent(
+  endpoint: Endpoint,
+  entity: HomeAssistantEntityInformation,
+) {
+  const key = eventKey(entity);
+  if (key) {
+    lastFiredEvents.set(endpoint, key);
+  }
+}
+
+function isRepeatedEvent(endpoint: Endpoint, key: string): boolean {
+  if (lastFiredEvents.get(endpoint) === key) {
+    return true;
+  }
+  lastFiredEvents.set(endpoint, key);
+  return false;
+}
 
 function isLongPress(lower: string): boolean {
   return (
@@ -87,6 +130,10 @@ class HaGenericSwitchServerBase extends SimpleBase {
 
     logger.debug(`[${entityId}] GenericSwitch initialized (simple)`);
 
+    // The entity usually already carries the last event it saw. Claim it now,
+    // or the first entity change after mount replays it as a fresh press.
+    seedLastEvent(this.endpoint, homeAssistant.entity);
+
     this.reactTo(homeAssistant.onChange, this.handleEventChange, {
       lock: true,
     });
@@ -103,6 +150,10 @@ class HaGenericSwitchServerBase extends SimpleBase {
     if (!eventType) return;
 
     const entityId = homeAssistant.entityId;
+    const key = `${entity.state.state} ${eventType}`;
+    if (isRepeatedEvent(this.endpoint, key)) {
+      return;
+    }
     logger.debug(`[${entityId}] Event fired: ${eventType}`);
 
     this.triggerPress(eventType);
@@ -167,6 +218,10 @@ class HaGenericSwitchServerMultiBase extends FullBase {
 
     logger.debug(`[${entityId}] GenericSwitch initialized (multi)`);
 
+    // The entity usually already carries the last event it saw. Claim it now,
+    // or the first entity change after mount replays it as a fresh press.
+    seedLastEvent(this.endpoint, homeAssistant.entity);
+
     this.reactTo(homeAssistant.onChange, this.handleEventChange, {
       lock: true,
     });
@@ -183,6 +238,10 @@ class HaGenericSwitchServerMultiBase extends FullBase {
     if (!eventType) return;
 
     const entityId = homeAssistant.entityId;
+    const key = `${entity.state.state} ${eventType}`;
+    if (isRepeatedEvent(this.endpoint, key)) {
+      return;
+    }
     logger.debug(`[${entityId}] Event fired: ${eventType}`);
 
     this.triggerPress(eventType);

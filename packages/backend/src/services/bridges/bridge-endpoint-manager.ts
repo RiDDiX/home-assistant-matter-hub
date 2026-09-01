@@ -14,6 +14,7 @@ import {
 import { LegacyEndpoint } from "../../matter/endpoints/legacy/legacy-endpoint.js";
 import { getVacuumServiceAreas } from "../../matter/endpoints/legacy/vacuum/behaviors/vacuum-service-area-server.js";
 import { VacuumAreaSwitchEndpoint } from "../../matter/endpoints/legacy/vacuum/vacuum-area-switch.js";
+import { updateEntityRegistry } from "../../matter/endpoints/update-entity-state.js";
 import { validateEndpointType } from "../../matter/endpoints/validate-endpoint-type.js";
 import { BUILTIN_PLUGINS } from "../../plugins/builtin/index.js";
 import { PluginBasicInformationServer } from "../../plugins/plugin-basic-information-server.js";
@@ -56,6 +57,11 @@ const MAX_ENTITY_ID_LENGTH = 150;
 // well past a short grace, and deleting erases the persisted number, so
 // controllers drop groups (#438). Cost: a really removed entity lingers 5min.
 export const ENDPOINT_REMOVAL_GRACE_MS = 300_000;
+
+// How long a refresh waits for the registry snapshots to land on the endpoints
+// before moving on. Generous: the writes are only slow when they queue behind
+// pending state writes, and giving up early just defers them to the next poll.
+const REGISTRY_PUSH_TIMEOUT_MS = 10_000;
 
 // First absence stamp: removal also needs a fresh successful HA reload after
 // this, so the 65s recheck can never delete from the same stale snapshot.
@@ -880,6 +886,7 @@ export class BridgeEndpointManager extends Service {
     }
 
     const existingEndpoints: EntityEndpoint[] = [];
+    const registryPushes: Promise<void>[] = [];
     const now = Date.now();
     for (const endpoint of endpoints) {
       const present = this.entityIds.includes(endpoint.entityId);
@@ -1002,9 +1009,43 @@ export class BridgeEndpointManager extends Service {
           }
           this.mappingFingerprints.delete(endpoint.entityId);
         } else {
+          // The endpoint survives, so nothing rebuilds its Home Assistant
+          // registry snapshot. Push the current one, or a device renamed in
+          // Home Assistant (and its manufacturer, model or firmware version)
+          // would stay on the values it was created with until a restart
+          // (#467). No-op when nothing moved.
+          registryPushes.push(
+            updateEntityRegistry(
+              endpoint,
+              this.registry.entity(endpoint.entityId),
+              this.registry.deviceOf(endpoint.entityId),
+            ).catch((e) =>
+              this.log.warn(
+                `Failed to refresh the registry snapshot of ${endpoint.entityId}:`,
+                e,
+              ),
+            ),
+          );
           existingEndpoints.push(endpoint);
         }
       }
+    }
+
+    // Concurrently, and awaited so a caller that reads attributes right after a
+    // refresh sees the new snapshot. Each push returns before taking the
+    // endpoint lock when nothing changed, which is the normal case.
+    //
+    // Bounded: a push waits for construction and queues behind the pending
+    // state writes of its endpoint, and refreshDevices is also reached from the
+    // API and from bridge start. One endpoint that never settles must not stall
+    // the whole refresh, the next poll pushes the same snapshot again.
+    if (registryPushes.length > 0) {
+      await Promise.race([
+        Promise.all(registryPushes),
+        new Promise<void>((resolve) =>
+          setTimeout(resolve, REGISTRY_PUSH_TIMEOUT_MS).unref?.(),
+        ),
+      ]);
     }
 
     // A stop that landed mid-refresh wins: no timer on a stopped bridge.

@@ -99,8 +99,8 @@ function makeHarness(
     addDevice: vi.fn().mockResolvedValue(undefined),
     forgetDevice: vi.fn(),
     clearDevices: vi.fn(),
-    updateDeviceIdentity: vi.fn().mockResolvedValue(undefined),
-    updateAdvertisedDeviceType: vi.fn().mockResolvedValue(undefined),
+    updateDeviceIdentity: vi.fn().mockResolvedValue(true),
+    updateAdvertisedDeviceType: vi.fn().mockResolvedValue(true),
   };
   // Full registry keyed by entity_id, carrying entity_id so orphan tombstone
   // stamping can compute identity keys from it.
@@ -267,6 +267,51 @@ describe("ServerModeEndpointManager (#301)", () => {
 
     expect(legacyCreate).not.toHaveBeenCalled();
     expect(h.serverNode.updateDeviceIdentity).not.toHaveBeenCalled();
+  });
+
+  // #467: server mode keeps the identity on the root node, not on the child, so
+  // the bridge-mode registry snapshot refresh does not reach it. A rename
+  // changes no endpoint, so it must not be gated on a structural change.
+  it("pushes the identity again when the device was renamed", async () => {
+    const h = makeHarness(["light.one"]);
+    h.registry.deviceOf.mockReturnValue({ id: "d1", name: "Old" });
+    await h.manager.refreshDevices();
+    h.serverNode.updateDeviceIdentity.mockClear();
+
+    // unchanged refresh still does nothing
+    await h.manager.refreshDevices();
+    expect(h.serverNode.updateDeviceIdentity).not.toHaveBeenCalled();
+
+    h.registry.deviceOf.mockReturnValue({ id: "d1", name: "New" });
+    await h.manager.refreshDevices();
+
+    expect(h.serverNode.updateDeviceIdentity).toHaveBeenCalledTimes(1);
+    expect(h.serverNode.updateDeviceIdentity.mock.calls[0][1]).toMatchObject({
+      name: "New",
+    });
+  });
+
+  // The server node reports a failed identity write instead of throwing, so the
+  // manager must not remember it as delivered (#467).
+  it("retries the identity on the next refresh when the push failed", async () => {
+    const h = makeHarness(["light.one"]);
+    h.registry.deviceOf.mockReturnValue({ id: "d1", name: "Old" });
+    await h.manager.refreshDevices();
+
+    h.serverNode.updateDeviceIdentity.mockClear();
+    h.serverNode.updateDeviceIdentity.mockResolvedValue(false);
+    h.registry.deviceOf.mockReturnValue({ id: "d1", name: "New" });
+    await h.manager.refreshDevices();
+    expect(h.serverNode.updateDeviceIdentity).toHaveBeenCalledTimes(1);
+
+    // nothing else changed, but the rename never landed, so try again
+    h.serverNode.updateDeviceIdentity.mockResolvedValue(true);
+    await h.manager.refreshDevices();
+    expect(h.serverNode.updateDeviceIdentity).toHaveBeenCalledTimes(2);
+
+    // and once it landed, stop
+    await h.manager.refreshDevices();
+    expect(h.serverNode.updateDeviceIdentity).toHaveBeenCalledTimes(2);
   });
 
   it("creates one endpoint per entity with the primary first", async () => {

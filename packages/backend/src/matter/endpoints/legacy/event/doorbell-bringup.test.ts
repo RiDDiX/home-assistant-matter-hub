@@ -22,6 +22,7 @@ import type {
   HomeAssistantStates,
 } from "../../../../services/home-assistant/home-assistant-registry.js";
 import { AggregatorEndpoint } from "../../aggregator-endpoint.js";
+import { updateEntityRegistry } from "../../update-entity-state.js";
 import { createLegacyEndpointType } from "../create-legacy-endpoint-type.js";
 import { LegacyEndpoint } from "../legacy-endpoint.js";
 
@@ -99,9 +100,9 @@ function dataProvider(): BridgeDataProvider {
   } as any);
 }
 
-function registry(): BridgeRegistry {
+function registry(mountedEventType: string | null = null): BridgeRegistry {
   const states: Record<string, HomeAssistantEntityState> = {
-    [ENTITY]: state("2026-01-01T00:00:00", null),
+    [ENTITY]: state("2026-01-01T00:00:00", mountedEventType),
   };
   const haRegistry = {
     areas: new Map(),
@@ -142,8 +143,15 @@ afterEach(async () => {
 
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-async function mount(mapping: EntityMappingConfig) {
-  const endpoint = await LegacyEndpoint.create(registry(), ENTITY, mapping);
+async function mount(
+  mapping: EntityMappingConfig,
+  mountedEventType: string | null = null,
+) {
+  const endpoint = await LegacyEndpoint.create(
+    registry(mountedEventType),
+    ENTITY,
+    mapping,
+  );
   expect(endpoint).toBeDefined();
   server = await ServerNode.create({
     // biome-ignore lint/suspicious/noExplicitAny: env valid at runtime
@@ -206,6 +214,68 @@ describe("doorbell override bring-up (#419)", () => {
       event_type: "pressed",
       entity_id: ENTITY,
     });
+  });
+
+  // #467: refreshing the registry snapshot on a live endpoint writes the
+  // behavior state, which fires the same entity change a real press does. A
+  // device renamed in Home Assistant must not reach the controller as a button
+  // press, so the press is keyed on the event itself.
+  it("a registry refresh does not fire a press", async () => {
+    const endpoint = await mount({
+      entityId: ENTITY,
+      matterDeviceType: "doorbell",
+    });
+
+    const presses: number[] = [];
+    // biome-ignore lint/suspicious/noExplicitAny: runtime event access
+    (endpoint.events as any).switch.initialPress.on(
+      (e: { newPosition: number }) => presses.push(e.newPosition),
+    );
+
+    await endpoint.updateStates({
+      [ENTITY]: state("2026-01-01T00:00:01", "pressed"),
+    });
+    await delay(200);
+    expect(presses).toEqual([1]);
+    expect(firedEvents.filter((e) => e.type === "hamh_action")).toHaveLength(1);
+
+    // the device was renamed in HA, nothing about the event changed
+    await updateEntityRegistry(
+      endpoint,
+      { ...registryEntity(ENTITY), name: "Renamed" },
+      { id: DEVICE, name: "Renamed Doorbell" },
+    );
+    await delay(200);
+
+    expect(presses).toEqual([1]);
+    expect(firedEvents.filter((e) => e.type === "hamh_action")).toHaveLength(1);
+  });
+
+  // The endpoint is usually built from an entity that already carries the last
+  // event Home Assistant saw, so the dedup key has to be claimed at mount. This
+  // is the case the press-first test above cannot see.
+  it("a registry refresh does not replay the event the endpoint mounted with", async () => {
+    // mounted from an entity that already carries a past event
+    const endpoint = await mount(
+      { entityId: ENTITY, matterDeviceType: "doorbell" },
+      "pressed",
+    );
+
+    const presses: number[] = [];
+    // biome-ignore lint/suspicious/noExplicitAny: runtime event access
+    (endpoint.events as any).switch.initialPress.on(
+      (e: { newPosition: number }) => presses.push(e.newPosition),
+    );
+
+    await updateEntityRegistry(
+      endpoint,
+      { ...registryEntity(ENTITY), name: "Renamed" },
+      { id: DEVICE, name: "Renamed Doorbell" },
+    );
+    await delay(200);
+
+    expect(presses).toEqual([]);
+    expect(firedEvents.filter((e) => e.type === "hamh_action")).toHaveLength(0);
   });
 
   it("keeps the generic switch default without an override", async () => {

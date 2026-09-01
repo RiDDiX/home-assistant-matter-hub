@@ -576,6 +576,8 @@ interface Identity {
   uniqueId?: string;
   serialNumber?: string;
   nodeLabel?: string;
+  vendorName?: string;
+  productName?: string;
 }
 
 async function read(
@@ -595,6 +597,8 @@ async function read(
     out.uniqueId = s.uniqueId;
     out.serialNumber = s.serialNumber;
     out.nodeLabel = s.nodeLabel;
+    out.vendorName = s.vendorName;
+    out.productName = s.productName;
   });
   return out;
 }
@@ -1065,5 +1069,94 @@ describe("identity lifecycle through the matter API (#404)", () => {
       );
       expect(post.status).toBe(404);
     });
+  });
+});
+
+// #467: an endpoint that survives a refresh kept the Home Assistant registry
+// snapshot it was built with, so a device renamed in HA (and its manufacturer,
+// model or firmware version) only reached the Matter attributes after a
+// restart. The device name reaches nodeLabel through friendly_name, which the
+// state path already carried; these cover the registry-derived attributes and
+// the preferEntityRegistryName name source.
+describe("registry snapshot follows Home Assistant (#467)", () => {
+  function attachDevice(
+    ha: FakeHa,
+    entityId: string,
+    // biome-ignore lint/suspicious/noExplicitAny: minimal registry stub
+    device: Record<string, any>,
+  ) {
+    ha.entities[entityId].device_id = device.id;
+    ha.devices[device.id] = device;
+  }
+
+  it("a renamed device updates vendorName and productName without moving the endpoint", async () => {
+    const ha = makeHa();
+    setEntity(ha, "switch.oven", { unique_id: "U", platform: "hue" });
+    attachDevice(ha, "switch.oven", {
+      id: "d1",
+      name: "Old Oven",
+      manufacturer: "OldMfr",
+      model: "OldModel",
+    });
+    const manager = await buildManager(
+      ha,
+      makeProvider("bridge-467-device", {}),
+      new FakeMappingStorage(),
+      new FakeIdentityStorage(),
+    );
+
+    await manager.refreshDevices();
+    const before = await read(manager, "switch.oven");
+    expect(before).toBeDefined();
+    expect(before!.vendorName).toBe("OldMfr");
+    expect(before!.productName).toBe("OldModel");
+
+    // HA replaces the registry objects on every reload, it does not mutate them
+    ha.devices.d1 = {
+      id: "d1",
+      name: "New Oven",
+      manufacturer: "NewMfr",
+      model: "NewModel",
+    };
+    await manager.refreshDevices();
+
+    const after = await read(manager, "switch.oven");
+    expect(after).toBeDefined();
+    expect(after!.vendorName).toBe("NewMfr");
+    expect(after!.productName).toBe("NewModel");
+    // the accessory must not look like a new device to a controller
+    expect(after!.number).toBe(before!.number);
+    expect(after!.id).toBe(before!.id);
+    expect(after!.uniqueId).toBe(before!.uniqueId);
+    expect(after!.serialNumber).toBe(before!.serialNumber);
+  });
+
+  it("a renamed entity reaches nodeLabel with preferEntityRegistryName", async () => {
+    const ha = makeHa();
+    setEntity(ha, "switch.lamp", { unique_id: "U", platform: "hue" });
+    ha.entities["switch.lamp"].name = "Registry Old";
+    const manager = await buildManager(
+      ha,
+      makeProvider("bridge-467-entity", { preferEntityRegistryName: true }),
+      new FakeMappingStorage(),
+      new FakeIdentityStorage(),
+    );
+
+    await manager.refreshDevices();
+    const before = await read(manager, "switch.lamp");
+    expect(before!.nodeLabel).toBe("Registry Old");
+
+    ha.entities["switch.lamp"] = {
+      entity_id: "switch.lamp",
+      unique_id: "U",
+      platform: "hue",
+      name: "Registry New",
+    };
+    await manager.refreshDevices();
+
+    const after = await read(manager, "switch.lamp");
+    expect(after!.nodeLabel).toBe("Registry New");
+    expect(after!.number).toBe(before!.number);
+    expect(after!.id).toBe(before!.id);
   });
 });

@@ -136,6 +136,52 @@ describe("HomeAssistantRegistry", () => {
     expect(registry.snapshotGeneration).toBe(g0 + 1);
   });
 
+  // #467: onRefresh only runs when the fingerprint moved, so a field missing
+  // from the hash never reaches the endpoints at all.
+  it("notices a device manufacturer, model_id or firmware change (#467)", async () => {
+    const fake = makeConnection();
+    let devices: unknown[] = [
+      { id: "d1", name: "Oven", manufacturer: "OldMfr", sw_version: "1.0" },
+    ];
+    fake.connection.sendMessagePromise = vi.fn((message: { type: string }) =>
+      Promise.resolve(
+        message.type === "config/device_registry/list" ? devices : [],
+      ),
+    ) as unknown as Connection["sendMessagePromise"];
+    const client = {
+      connection: fake.connection,
+      haRunning: true,
+    } as unknown as HomeAssistantClient & { haRunning: boolean };
+    const registry = new HomeAssistantRegistry(client, defaultOptions);
+    const initPromise = registry.construction;
+    await vi.runAllTimersAsync();
+    await initPromise;
+
+    // same data, nothing to do
+    await expect(registry.reload()).resolves.toBe(false);
+
+    devices = [
+      { id: "d1", name: "Oven", manufacturer: "NewMfr", sw_version: "1.0" },
+    ];
+    await expect(registry.reload()).resolves.toBe(true);
+
+    devices = [
+      { id: "d1", name: "Oven", manufacturer: "NewMfr", sw_version: "2.0" },
+    ];
+    await expect(registry.reload()).resolves.toBe(true);
+
+    devices = [
+      {
+        id: "d1",
+        name: "Oven",
+        manufacturer: "NewMfr",
+        sw_version: "2.0",
+        model_id: "M2",
+      },
+    ];
+    await expect(registry.reload()).resolves.toBe(true);
+  });
+
   it("does not trust a snapshot fetched while HA was still starting, even if it turns RUNNING mid-fetch (#438)", async () => {
     const fake = makeConnection();
     const client = {
