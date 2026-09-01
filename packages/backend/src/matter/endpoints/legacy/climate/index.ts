@@ -8,6 +8,7 @@ import {
   RoomAirConditionerDevice,
   ThermostatDevice,
 } from "@matter/main/devices";
+import { toMatterTemp } from "../../../../utils/converters/temperature.js";
 import { InvalidDeviceError } from "../../../../utils/errors/invalid-device-error.js";
 import { testBit } from "../../../../utils/test-bit.js";
 import { BasicInformationServer } from "../../../behaviors/basic-information-server.js";
@@ -116,19 +117,6 @@ const ventilationOnlyModes: ClimateHvacMode[] = [
   ClimateHvacMode.fan_only,
   ClimateHvacMode.dry,
 ];
-
-/**
- * Convert HA temperature to Matter temperature (0.01°C units).
- * Returns undefined if value is null/undefined/invalid.
- */
-function toMatterTemp(
-  value: string | number | null | undefined,
-): number | undefined {
-  if (value == null) return undefined;
-  const num = typeof value === "string" ? parseFloat(value) : value;
-  if (Number.isNaN(num)) return undefined;
-  return Math.round(num * 100);
-}
 
 export function ClimateDevice(
   homeAssistantEntity: HomeAssistantEntityBehavior.State,

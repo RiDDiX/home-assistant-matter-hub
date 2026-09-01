@@ -53,6 +53,27 @@ function convertTemperature(
   return result;
 }
 
+// Matter rejects int16 overflow; -273.15 C is the floor (#470).
+const MATTER_TEMP_MIN = -27315;
+const MATTER_TEMP_MAX = 32767;
+
+export function clampMatterTemp(value: number): number {
+  return Math.min(
+    Math.max(Math.round(value), MATTER_TEMP_MIN),
+    MATTER_TEMP_MAX,
+  );
+}
+
+// Keep HA units until first update(). Clamp so a 500 F max can mount (#470).
+export function toMatterTemp(
+  value: string | number | null | undefined,
+): number | undefined {
+  if (value == null) return undefined;
+  const num = typeof value === "string" ? Number.parseFloat(value) : value;
+  if (Number.isNaN(num)) return undefined;
+  return clampMatterTemp(num * 100);
+}
+
 export class Temperature {
   public static withUnit(value: number, unit: TemperatureUnit) {
     if (Number.isNaN(value)) {
@@ -72,7 +93,7 @@ export class Temperature {
   celsius(matter?: boolean) {
     const celsius = convertTemperature(this.value, this.unit, "°C");
     if (matter) {
-      return Math.round(celsius * 100);
+      return clampMatterTemp(celsius * 100);
     }
     return celsius;
   }

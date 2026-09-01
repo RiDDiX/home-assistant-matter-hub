@@ -2,6 +2,7 @@ import type { WaterHeaterDeviceAttributes } from "@home-assistant-matter-hub/com
 import { Logger } from "@matter/general";
 import type { EndpointType } from "@matter/main";
 import { WaterHeaterDevice as MatterWaterHeaterDevice } from "@matter/main/devices";
+import { toMatterTemp } from "../../../../utils/converters/temperature.js";
 import { BasicInformationServer } from "../../../behaviors/basic-information-server.js";
 import { HomeAssistantEntityBehavior } from "../../../behaviors/home-assistant-entity-behavior.js";
 import { IdentifyServer } from "../../../behaviors/identify-server.js";
@@ -10,7 +11,6 @@ import { WaterHeaterBoostMemoryBehavior } from "./behaviors/water-heater-boost-m
 import { WaterHeaterManagementServer } from "./behaviors/water-heater-management-server.js";
 import { WaterHeaterModeServer } from "./behaviors/water-heater-mode-server.js";
 import { WaterHeaterThermostatServer } from "./behaviors/water-heater-thermostat-server.js";
-import { toMatterTemp } from "./index.js";
 import {
   buildModeMapping,
   currentMode,

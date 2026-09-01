@@ -401,16 +401,6 @@ export class ThermostatServerBase extends FullFeaturedBase {
       ? config.getRunningMode(entity.state, this.agent)
       : Thermostat.ThermostatRunningMode.Off;
 
-    // localTemperature: use actual current_temperature when available.
-    // Fall back to the target setpoint when unavailable so controllers
-    // don't display 0°C. The "Heating to…" vs "Heat to…" distinction
-    // comes from thermostatRunningState (derived from hvac_action).
-    const localTemperature =
-      typeof currentTemperature === "number" &&
-      !Number.isNaN(currentTemperature)
-        ? currentTemperature
-        : (targetHeatingTemperature ?? targetCoolingTemperature ?? null);
-
     // Temperature limit handling:
     // Use HA's actual min/max limits for ALL modes (single and dual).
     // minSetpointDeadBand: 0 for full HVAC devices (no gap between heat/cool setpoints).
@@ -453,6 +443,17 @@ export class ThermostatServerBase extends FullFeaturedBase {
       maxCoolLimit,
       "cool",
     );
+
+    // Avoid controller 0 C or out-of-range fallback values (#470).
+    const localTemperature =
+      typeof currentTemperature === "number" &&
+      !Number.isNaN(currentTemperature)
+        ? currentTemperature
+        : targetHeatingTemperature != null
+          ? clampedHeatingSetpoint
+          : targetCoolingTemperature != null
+            ? clampedCoolingSetpoint
+            : null;
 
     logger.debug(
       `update: limits heat=[${minHeatLimit}, ${maxHeatLimit}], cool=[${minCoolLimit}, ${maxCoolLimit}], systemMode=${systemMode}, runningMode=${runningMode}`,
