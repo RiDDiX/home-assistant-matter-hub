@@ -396,7 +396,7 @@ export class Bridge {
   async update(update: UpdateBridgeRequest) {
     try {
       this.dataProvider.update(update);
-      // the next priming report reads this live, no restart needed (#424)
+      // Read live, so changes need no restart (#424).
       this.server.hamhOmitEventsInPriming =
         this.dataProvider.featureFlags?.omitEventsInPriming === true;
       await this.refreshDevices();

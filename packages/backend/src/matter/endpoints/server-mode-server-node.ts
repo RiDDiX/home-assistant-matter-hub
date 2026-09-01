@@ -34,8 +34,7 @@ export class ServerModeServerNode extends ServerNode {
   private readonly deviceEndpoints = new Map<string, Endpoint>();
   private readonly featureFlags?: BridgeFeatureFlags;
   private readonly serialNumberSuffix?: string;
-  // Read by the patched matter.js ServerSubscription when it builds the
-  // priming report (#424), see patches/@matter__node@0.17.9.patch.
+  // Used by patched ServerSubscription for priming reports (#424).
   hamhOmitEventsInPriming: boolean;
 
   constructor(env: Environment, bridgeData: BridgeData) {

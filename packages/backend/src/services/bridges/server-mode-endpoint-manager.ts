@@ -212,11 +212,8 @@ export class ServerModeEndpointManager extends Service {
     }
   }
 
-  // An entity still in the full HA registry was dropped by the filter (or
-  // hidden/disabled in HA) on purpose, not by an outage: skip the #438 grace
-  // and unmount now so a filter edit takes effect without a restart (#468).
-  // close() keeps the number reserved for a later re-include (#404). Returns
-  // the ids genuinely absent from HA, which must still ride the grace.
+  // Filtered entities skip #438 grace; close() reserves numbers (#468, #404).
+  // Return only ids absent from HA.
   private async closeFilteredOut(candidateIds: string[]): Promise<string[]> {
     const fullEntities = this.registry.fullEntities;
     const absent: string[] = [];
