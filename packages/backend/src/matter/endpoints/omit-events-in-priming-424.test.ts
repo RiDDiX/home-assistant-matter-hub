@@ -22,18 +22,18 @@ function serverSubscriptionSource(variant: "esm" | "cjs"): string {
 }
 
 describe("omit events in priming (#424)", () => {
-  it.each(["esm", "cjs"] as const)(
-    "the installed @matter/node %s build carries the priming guard",
-    (variant) => {
-      const source = serverSubscriptionSource(variant);
-      expect(source).toContain(
-        "this.#context.node.hamhOmitEventsInPriming === true",
-      );
-      // the guard must not fire for an events-only subscription, or the
-      // priming would throw InvalidAction for having nothing to report
-      expect(source).toContain("validAttributes > 0 &&");
-    },
-  );
+  it.each([
+    "esm",
+    "cjs",
+  ] as const)("the installed @matter/node %s build carries the priming guard", (variant) => {
+    const source = serverSubscriptionSource(variant);
+    expect(source).toContain(
+      "this.#context.node.hamhOmitEventsInPriming === true",
+    );
+    // the guard must not fire for an events-only subscription, or the
+    // priming would throw InvalidAction for having nothing to report
+    expect(source).toContain("validAttributes > 0 &&");
+  });
 
   it("the flag lands on the node classes as hamhOmitEventsInPriming", async () => {
     const { BridgeServerNode } = await import("./bridge-server-node.js");
