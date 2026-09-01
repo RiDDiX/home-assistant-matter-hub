@@ -10,6 +10,7 @@ import { VendorId } from "@matter/main";
 import { ServerNode } from "@matter/main/node";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { EntityEndpoint } from "../../matter/endpoints/entity-endpoint.js";
+import { VacuumAreaSwitchEndpoint } from "../../matter/endpoints/legacy/vacuum/vacuum-area-switch.js";
 import {
   type HomeAssistantAction,
   HomeAssistantActions,
@@ -202,18 +203,27 @@ async function buildManager(ha: FakeHa, patterns: string[] = ["vacuum.*"]) {
   // biome-ignore lint/suspicious/noExplicitAny: minimal registry stub
   const registry = new BridgeRegistry(ha as any, provider);
   const client = { connection: {}, haRunning: true, runningSince: 0 };
+  const mapping = new FakeMappingStorage();
   const manager = new BridgeEndpointManager(
     // biome-ignore lint/suspicious/noExplicitAny: client only used for observing
     client as any,
     registry,
-    new FakeMappingStorage() as unknown as EntityMappingStorage,
+    mapping as unknown as EntityMappingStorage,
     new FakeIdentityStorage() as unknown as EntityIdentityStorage,
     provider.id,
     fakeLogger(),
   );
   managers.push(manager);
   await server.add(manager.root);
-  return { manager, provider };
+  return { manager, provider, mapping };
+}
+
+function switchNumbers(manager: BridgeEndpointManager): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const p of manager.root.parts) {
+    if (p instanceof VacuumAreaSwitchEndpoint) out[p.id] = p.number;
+  }
+  return out;
 }
 
 function mountedEntityIds(manager: BridgeEndpointManager): string[] {
@@ -290,5 +300,23 @@ describe("filter edits reconcile without the grace window (#468)", () => {
     )?.number;
     expect(mountedEntityIds(manager)).toEqual([OTHER, VACUUM].sort());
     expect(after).toBe(before);
+  });
+
+  it("takes a vacuum's room switches along and brings them back on their old numbers", async () => {
+    const ha = makeHa();
+    ha.states[VACUUM].attributes.rooms = { "16": "Kitchen", "17": "Bedroom" };
+    const { manager, provider, mapping } = await buildManager(ha);
+    mapping.put("bridge-468", { entityId: VACUUM, vacuumRoomSwitches: true });
+    await manager.refreshDevices();
+    const before = switchNumbers(manager);
+    expect(Object.keys(before)).toHaveLength(2);
+
+    setFilter(provider, ["vacuum.other"]);
+    await manager.refreshDevices();
+    expect(switchNumbers(manager)).toEqual({});
+
+    setFilter(provider, ["vacuum.*"]);
+    await manager.refreshDevices();
+    expect(switchNumbers(manager)).toEqual(before);
   });
 });

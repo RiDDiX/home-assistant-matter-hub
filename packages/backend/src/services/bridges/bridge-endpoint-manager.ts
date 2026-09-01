@@ -616,16 +616,20 @@ export class BridgeEndpointManager extends Service {
       this.pendingRemovals.delete(endpoint.entityId);
       this.mappingFingerprints.delete(endpoint.entityId);
       if (!(endpoint instanceof VacuumAreaSwitchEndpoint)) {
-        // An isolated vacuum takes its room switches along.
-        for (const sw of endpoints) {
-          if (!(sw instanceof VacuumAreaSwitchEndpoint)) continue;
-          if (sw.vacuumEndpointId !== endpoint.id) continue;
-          try {
-            await sw.close();
-          } catch (e) {
-            this.log.warn(`Failed to remove area switch ${sw.id}:`, e);
-          }
-        }
+        await this.closeAreaSwitchesOf(endpoint);
+      }
+    }
+  }
+
+  // Preserve room switch numbers across vacuum re-inclusion (#468).
+  private async closeAreaSwitchesOf(vacuum: EntityEndpoint): Promise<void> {
+    for (const sw of [...this.root.parts]) {
+      if (!(sw instanceof VacuumAreaSwitchEndpoint)) continue;
+      if (sw.vacuumEndpointId !== vacuum.id) continue;
+      try {
+        await sw.close();
+      } catch (e) {
+        this.log.warn(`Failed to remove area switch ${sw.id}:`, e);
       }
     }
   }
@@ -917,13 +921,8 @@ export class BridgeEndpointManager extends Service {
         this.pendingRemovals.delete(endpoint.entityId);
       }
       if (!present) {
-        // Still in the full HA registry means the filter (or a hide/disable
-        // in HA) dropped it deliberately, not an outage blip: the grace below
-        // protects against untrusted snapshots (#438), which this is not.
-        // Remove now so a filter edit takes effect without a restart (#468).
-        // close(), not delete(): the persisted number stays reserved, so
-        // re-including the entity brings the device back under its old
-        // identity and controllers keep their groups (#404).
+        // Filtered entities skip #438 grace; close() keeps number/groups
+        // across re-inclusion (#468, #404).
         if (fullEntities[endpoint.entityId] != null) {
           this.log.info(
             `Entity ${endpoint.entityId} is no longer exposed by the filter, removing endpoint ${endpoint.number}`,
@@ -936,6 +935,7 @@ export class BridgeEndpointManager extends Service {
               e,
             );
           }
+          await this.closeAreaSwitchesOf(endpoint);
           this.mappingFingerprints.delete(endpoint.entityId);
           this.pendingRemovals.delete(endpoint.entityId);
           continue;
