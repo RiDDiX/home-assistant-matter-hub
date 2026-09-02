@@ -201,7 +201,7 @@ Invoke « 0.operationalCredentials.attestationRequest attestationNonce: ...
 Invoke « 0.generalCommissioning.armFailSafe expiryLengthSeconds: 0 breadcrumb: 0
 ```
 
-`armFailSafe` with `expiryLengthSeconds: 0` is the controller cancelling. Since v2.1.0-alpha.883 HAMH also writes a plain warning when this happens, so you do not have to read the protocol trace.
+`armFailSafe` with `expiryLengthSeconds: 0` is the controller cancelling. Since v2.0.57 HAMH also writes a plain warning when this happens, so you do not have to read the protocol trace.
 
 Known cases: the **Philips Ambiscape** feature on Ambilight TVs ([#465](https://github.com/RiDDiX/home-assistant-matter-hub/issues/465)), which only lists CSA certified bulbs and hubs as compatible. There is no workaround. Pair such a controller with real Matter hardware, for example a Hue bridge, and control the rest through Home Assistant.
 

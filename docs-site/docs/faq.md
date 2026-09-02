@@ -249,8 +249,8 @@ Keep the custom names and entity mappings too: they are keyed by `entity_id`, an
 
 ## What's the difference between Stable and Alpha?
 
-- **Stable** (v2.0.49): Production-ready, recommended for daily use
-- **Alpha**: Currently level with Stable (v2.0.49); the next pre-release lands here first and may contain bugs
+- **Stable** (v2.0.57): Production-ready, recommended for daily use
+- **Alpha**: Currently level with Stable (v2.0.57); the next pre-release lands here first and may contain bugs
 
 See the [Alpha Features Guide](./guides/alpha-features.md) for details on alpha features.
 
@@ -304,7 +304,7 @@ Since v2.0.24, thermostats support **auto-resume**, when off and you set a tempe
 
 If not working:
 
-- Update to v2.0.36+ (current stable: v2.0.49)
+- Update to v2.0.36+ (current stable: v2.0.57)
 - Only works for single-temp mode (not range/auto)
 - Thermostat must be in "Off" state
 
