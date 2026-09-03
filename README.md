@@ -38,7 +38,7 @@ of port forwarding etc.
 | Channel | Branch | Current Version | Description |
 |---------|--------|-----------------|-------------|
 | **Stable** | `main` | v2.0.57 | Production-ready, recommended for most users |
-| **Alpha** | `alpha` | v2.1.0-alpha.888 | Ahead of Stable, carries the additions listed under Alpha Features |
+| **Alpha** | `alpha` | v2.1.0-alpha.889 | Ahead of Stable, carries the additions listed under Alpha Features |
 | **Testing** | `testing` | v4.1.0-testing.x | ⚠️ **Highly unstable!** Experimental features, may break |
 
 ### Which version should I use?
@@ -328,7 +328,10 @@ Re-assign the affected devices to their rooms after they reconnect. See the [doc
 </details>
 
 <details>
-<summary><strong>🧪 Alpha Features (v2.1.0-alpha.888)</strong> - Click to expand</summary>
+<summary><strong>🧪 Alpha Features (v2.1.0-alpha.889)</strong> - Click to expand</summary>
+
+**v2.1.0-alpha.889:**
+- 🔌 **A docked vacuum stops claiming it is charging**: with no charging signal of its own the bridge assumed a docked robot below 100% was charging, so Apple Home showed "Charging" for a robot that had long finished. If the vacuum's device has a charging sensor in Home Assistant (a `battery_charging` binary sensor, or a `..._charging_state` sensor as Xiaomi exposes), it is mapped automatically now and drives both the battery charge state and the status line. Devices without one keep the old assumption, and a charging sensor picked up this way still stays available as its own device ([#450](https://github.com/RiDDiX/home-assistant-matter-hub/issues/450))
 
 **v2.1.0-alpha.888:**
 - 🌡️ **The HAMH device cards follow Home Assistant's temperature unit**: a Fahrenheit install saw Celsius chips on every thermostat and temperature sensor, because the card printed the raw Matter value (Matter always carries 0.01 °C) with a hardcoded unit. The chips now read the unit out of the endpoint itself: thermostats and water heaters from their UI configuration cluster, sensors and weather from the entity's own `unit_of_measurement`. What the controllers show never changed, Apple Home and Alexa convert on their side ([#472](https://github.com/RiDDiX/home-assistant-matter-hub/issues/472))
