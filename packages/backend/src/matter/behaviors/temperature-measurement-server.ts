@@ -4,7 +4,11 @@ import type {
 } from "@home-assistant-matter-hub/common";
 import { TemperatureMeasurementServer as Base } from "@matter/main/behaviors";
 import { applyPatchState } from "../../utils/apply-patch-state.js";
-import type { Temperature } from "../../utils/converters/temperature.js";
+import {
+  MATTER_TEMP_MAX,
+  MATTER_TEMP_MIN,
+  type Temperature,
+} from "../../utils/converters/temperature.js";
 import { HomeAssistantEntityBehavior } from "./home-assistant-entity-behavior.js";
 import type { ValueGetter } from "./utils/cluster-config.js";
 
@@ -32,9 +36,12 @@ class TemperatureMeasurementServerBase extends Base {
     }
     applyPatchState(this.state, {
       measuredValue: this.getTemperature(entity.state) ?? null,
-      // min/max values in 0.01°C units: -40°C to 125°C (typical sensor range)
-      minMeasuredValue: -4000,
-      maxMeasuredValue: 12500,
+      // The window has to cover everything celsius(true) can hand us. A
+      // narrower "typical sensor" range makes matter.js reject an oven probe
+      // or a freezer reading, and the endpoint then keeps its last in-range
+      // value forever.
+      minMeasuredValue: MATTER_TEMP_MIN,
+      maxMeasuredValue: MATTER_TEMP_MAX,
     });
   }
 

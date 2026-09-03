@@ -54,8 +54,8 @@ function convertTemperature(
 }
 
 // Matter rejects int16 overflow; -273.15 C is the floor (#470).
-const MATTER_TEMP_MIN = -27315;
-const MATTER_TEMP_MAX = 32767;
+export const MATTER_TEMP_MIN = -27315;
+export const MATTER_TEMP_MAX = 32767;
 
 export function clampMatterTemp(value: number): number {
   return Math.min(
