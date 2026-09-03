@@ -22,9 +22,14 @@ Please follow the [reverse proxy guide](./guides/reverse-proxy.md).
 
 ## Changes on names and labels in Home Assistant have no effect in HAMH
 
-When performing changes on entities, like adding or removing a label or renaming your entity, you need to reload the
-affected bridge for the changes to take effect. This happens automatically every 30 seconds, but you can enforce it by
-editing the bridge (even without making changes), or when restarting the whole addon.
+Renames and other registry changes reach the bridge on the next registry refresh, every 60 seconds by default. Since
+v2.1.0-alpha.885 no bridge reload is needed for a rename; editing the bridge (even without changes) or restarting the
+add-on forces the refresh right away.
+
+What a controller does with the new name is its own choice. Alexa follows it. Apple Home reads the name once when the
+accessory is added and keeps its own copy, so a rename never reaches an accessory that is already in the Home app:
+rename it in the Home app, or the new name shows up on accessories you add after the rename
+([#467](https://github.com/RiDDiX/home-assistant-matter-hub/issues/467)).
 
 ## I added a label to my entities, but HAMH won't find any device
 
