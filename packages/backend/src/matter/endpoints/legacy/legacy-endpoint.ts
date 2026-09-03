@@ -96,7 +96,7 @@ export class LegacyEndpoint extends EntityEndpoint {
     let effectiveMapping = mapping;
     if (entity.device_id) {
       // 1. Auto-assign humidity entity to temperature sensors FIRST
-      // Only applies when autoHumidityMapping feature flag is enabled (default: false)
+      // Only applies when autoHumidityMapping feature flag is enabled (default: true)
       if (registry.isAutoHumidityMappingEnabled()) {
         const attrs = state.attributes as SensorDeviceAttributes;
         if (
