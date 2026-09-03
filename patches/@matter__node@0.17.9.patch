@@ -1,7 +1,25 @@
 diff --git a/dist/cjs/node/server/ServerSubscription.js b/dist/cjs/node/server/ServerSubscription.js
-index 97a786839b4daf262cb980e82f1b76c242a8c5df..7adb5b6adae5c7a01bd479fa1eb5a215867f7cd1 100644
+index 97a786839b4daf262cb980e82f1b76c242a8c5df..54472fc68ff4d45b3af5e44c5b22d3b8222758e5 100644
 --- a/dist/cjs/node/server/ServerSubscription.js
 +++ b/dist/cjs/node/server/ServerSubscription.js
+@@ -397,7 +397,7 @@ class ServerSubscription {
+             return;
+           }
+           this.#sendUpdateErrorCounter++;
+-          logger.info(
++          logger[this.#sendUpdateErrorCounter > 2 ? "warn" : "info"](
+             `Error sending subscription update message (error count=${this.#sendUpdateErrorCounter}):`,
+             error instanceof import_general.MatterError && error.message || error
+           );
+@@ -417,7 +417,7 @@ class ServerSubscription {
+               this.#outstandingEventsMinNumber = eventsMinNumber;
+             }
+           } else {
+-            logger.notice(
++            logger.warn(
+               `Giving up on subscription ${this.idStr} after 3 failed updates; the controller must subscribe again`
+             );
+             this.#sendNextUpdateImmediately = false;
 @@ -503,7 +503,7 @@ class ServerSubscription {
          }
          validAttributes = attributeReader.counts.existent;
@@ -27,9 +45,27 @@ index 97a786839b4daf262cb980e82f1b76c242a8c5df..7adb5b6adae5c7a01bd479fa1eb5a215
      if (exchange === void 0) {
        return false;
 diff --git a/dist/esm/node/server/ServerSubscription.js b/dist/esm/node/server/ServerSubscription.js
-index 77934d8fd3cdafa2d26ec2545224027e81d892ea..dbd4c54fd1f21433f6ee05c159d379d4322c038c 100644
+index 77934d8fd3cdafa2d26ec2545224027e81d892ea..31244df30edd83f07902c84c0d53621b868651b2 100644
 --- a/dist/esm/node/server/ServerSubscription.js
 +++ b/dist/esm/node/server/ServerSubscription.js
+@@ -403,7 +403,7 @@ class ServerSubscription {
+             return;
+           }
+           this.#sendUpdateErrorCounter++;
+-          logger.info(
++          logger[this.#sendUpdateErrorCounter > 2 ? "warn" : "info"](
+             `Error sending subscription update message (error count=${this.#sendUpdateErrorCounter}):`,
+             error instanceof MatterError && error.message || error
+           );
+@@ -423,7 +423,7 @@ class ServerSubscription {
+               this.#outstandingEventsMinNumber = eventsMinNumber;
+             }
+           } else {
+-            logger.notice(
++            logger.warn(
+               `Giving up on subscription ${this.idStr} after 3 failed updates; the controller must subscribe again`
+             );
+             this.#sendNextUpdateImmediately = false;
 @@ -509,7 +509,7 @@ class ServerSubscription {
          }
          validAttributes = attributeReader.counts.existent;
