@@ -175,6 +175,24 @@ export class LegacyEndpoint extends EntityEndpoint {
         }
       }
 
+      // A docked vacuum otherwise reports charging whenever it is below full,
+      // so take the device's own charging signal when it has one (#450).
+      if (isVacuum && !mapping?.chargingStateEntity) {
+        const chargingEntityId = registry.findChargingEntityForDevice(
+          entity.device_id,
+        );
+        if (chargingEntityId && chargingEntityId !== entityId) {
+          effectiveMapping = {
+            ...effectiveMapping,
+            entityId: effectiveMapping?.entityId ?? entityId,
+            chargingStateEntity: chargingEntityId,
+          };
+          logger.debug(
+            `Auto-assigned charging state ${chargingEntityId} to ${entityId}`,
+          );
+        }
+      }
+
       // 3b. Auto-assign a problem/safety sensor to smoke/CO alarms so it drives
       // hardwareFaultAlert (#408). Gated exactly like battery mapping above.
       const alarmDeviceClass = (state.attributes as { device_class?: string })

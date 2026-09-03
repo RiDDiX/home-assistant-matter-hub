@@ -74,6 +74,30 @@ export class ServerModeVacuumEndpoint extends EntityEndpoint {
         }
       }
 
+      // A docked vacuum otherwise reports charging whenever it is below full,
+      // so take the device's own charging signal when it has one (#450).
+      if (!effectiveMapping?.chargingStateEntity) {
+        const chargingEntityId = registry.findChargingEntityForDevice(
+          entity.device_id,
+        );
+        // mappedEntityIds is a claim on this node, so only take a charging
+        // sensor the node does not expose in its own right.
+        if (
+          chargingEntityId &&
+          chargingEntityId !== entityId &&
+          !registry.entityIds.includes(chargingEntityId)
+        ) {
+          effectiveMapping = {
+            ...effectiveMapping,
+            entityId: effectiveMapping?.entityId ?? entityId,
+            chargingStateEntity: chargingEntityId,
+          };
+          logger.info(
+            `${entityId}: Auto-assigned charging state ${chargingEntityId}`,
+          );
+        }
+      }
+
       // Auto-detect vacuum select entities (cleaning mode, suction, mop intensity)
       const vacuumEntities = registry.findVacuumSelectEntities(
         entity.device_id,

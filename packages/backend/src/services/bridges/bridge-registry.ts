@@ -773,6 +773,39 @@ export class BridgeRegistry {
   }
 
   /**
+   * Find a charging-state entity that belongs to the same HA device, so a
+   * docked vacuum reports what the robot actually does instead of the
+   * "docked and below full means charging" guess (#450).
+   */
+  findChargingEntityForDevice(deviceId: string): string | undefined {
+    const entities = values(this.registry.entities);
+    const sameDevice = entities.filter((e) => e.device_id === deviceId);
+
+    // Home Assistant's own charging class first.
+    for (const entity of sameDevice) {
+      if (!entity.entity_id.startsWith("binary_sensor.")) continue;
+      const state = this.registry.states[entity.entity_id];
+      if (!state) continue;
+      const attrs = state.attributes as { device_class?: string };
+      if (attrs.device_class === "battery_charging") {
+        return entity.entity_id;
+      }
+    }
+
+    // Integrations that expose the charger as a plain state sensor, e.g.
+    // Xiaomi's sensor.<robot>_charging_state. Values the mapper does not know
+    // resolve to null later, and the endpoint keeps its old inference.
+    for (const entity of sameDevice) {
+      if (!entity.entity_id.startsWith("sensor.")) continue;
+      if (!entity.entity_id.endsWith("_charging_state")) continue;
+      if (this.registry.states[entity.entity_id]) {
+        return entity.entity_id;
+      }
+    }
+    return undefined;
+  }
+
+  /**
    * Find a pressure sensor entity that belongs to the same HA device.
    * Returns the entity_id of the pressure sensor, or undefined if none found.
    */
