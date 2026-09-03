@@ -328,9 +328,12 @@ Home, ...) are not placed in the same network segment. Please make sure to revie
 </details>
 
 <details>
-<summary><strong>🧪 Alpha (v2.1.0-alpha.x)</strong></summary>
+<summary><strong>🧪 Alpha (v2.1.0-alpha.888)</strong></summary>
 
-**Alpha is currently level with Stable (v2.0.57).** All alpha work up to the latest pre-release has been promoted into v2.0.57. New alpha work continues from the next pre-release tag onward and will appear here as development progresses.
+**v2.1.0-alpha.888:**
+- 🌡️ **The HAMH device cards follow Home Assistant's temperature unit**: a Fahrenheit install saw Celsius chips on every thermostat and temperature sensor, because the card printed the raw Matter value (Matter always carries 0.01 °C) with a hardcoded unit. The chips now read the unit out of the endpoint itself: thermostats and water heaters from their UI configuration cluster, sensors and weather from the entity's own `unit_of_measurement`. What the controllers show never changed, Apple Home and Alexa convert on their side ([#472](https://github.com/RiDDiX/home-assistant-matter-hub/issues/472))
+- 🔔 **A controller that stops answering is logged as a warning**: the three "Error sending subscription update message" lines that precede a dropped subscription were logged at INFO, so a dying controller link was invisible to anyone filtering for warnings. The first two retries stay at INFO, the third one and the "Giving up on subscription" line are warnings now ([#471](https://github.com/RiDDiX/home-assistant-matter-hub/issues/471))
+- 🌡️ **A temperature sensor outside the usual range keeps updating**: the sensor endpoint declared a -40 to 125 °C measurement window while writing anything int16 could hold, so an oven probe, a grill thermometer or a deep freezer was rejected by matter.js and the endpoint kept its last in-range reading forever. The declared window now covers everything the bridge can send
 
 </details>
 

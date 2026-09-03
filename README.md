@@ -38,13 +38,13 @@ of port forwarding etc.
 | Channel | Branch | Current Version | Description |
 |---------|--------|-----------------|-------------|
 | **Stable** | `main` | v2.0.57 | Production-ready, recommended for most users |
-| **Alpha** | `alpha` | v2.1.0-alpha.x | Currently level with Stable; next pre-release lands here first |
+| **Alpha** | `alpha` | v2.1.0-alpha.888 | Ahead of Stable, carries the additions listed under Alpha Features |
 | **Testing** | `testing` | v4.1.0-testing.x | ⚠️ **Highly unstable!** Experimental features, may break |
 
 ### Which version should I use?
 
 - **Most users**: Use **Stable** (`main` branch) - thoroughly tested
-- **Early adopters**: Use **Alpha** (`alpha` branch) - currently level with Stable until the next pre-release lands
+- **Early adopters**: Use **Alpha** (`alpha` branch) - gets every fix and feature first, see Alpha Features below
 - **Developers/Testers**: Use **Testing** (`testing` branch) - bleeding edge, expect breakage
 
 ### Upgrading from 2.0.46
@@ -328,9 +328,12 @@ Re-assign the affected devices to their rooms after they reconnect. See the [doc
 </details>
 
 <details>
-<summary><strong>🧪 Alpha Features (v2.1.0-alpha.x)</strong> - Click to expand</summary>
+<summary><strong>🧪 Alpha Features (v2.1.0-alpha.888)</strong> - Click to expand</summary>
 
-**Alpha is currently level with Stable (v2.0.57).** All alpha work up to the latest pre-release has been promoted into v2.0.57. New alpha work continues from the next pre-release tag onward and will appear here as development progresses.
+**v2.1.0-alpha.888:**
+- 🌡️ **The HAMH device cards follow Home Assistant's temperature unit**: a Fahrenheit install saw Celsius chips on every thermostat and temperature sensor, because the card printed the raw Matter value (Matter always carries 0.01 °C) with a hardcoded unit. The chips now read the unit out of the endpoint itself: thermostats and water heaters from their UI configuration cluster, sensors and weather from the entity's own `unit_of_measurement`. What the controllers show never changed, Apple Home and Alexa convert on their side ([#472](https://github.com/RiDDiX/home-assistant-matter-hub/issues/472))
+- 🔔 **A controller that stops answering is logged as a warning**: the three "Error sending subscription update message" lines that precede a dropped subscription were logged at INFO, so a dying controller link was invisible to anyone filtering for warnings. The first two retries stay at INFO, the third one and the "Giving up on subscription" line are warnings now ([#471](https://github.com/RiDDiX/home-assistant-matter-hub/issues/471))
+- 🌡️ **A temperature sensor outside the usual range keeps updating**: the sensor endpoint declared a -40 to 125 °C measurement window while writing anything int16 could hold, so an oven probe, a grill thermometer or a deep freezer was rejected by matter.js and the endpoint kept its last in-range reading forever. The declared window now covers everything the bridge can send
 
 </details>
 

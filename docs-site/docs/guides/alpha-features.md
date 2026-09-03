@@ -31,7 +31,7 @@ docker run -d \
 
 ## Current Alpha Features
 
-Alpha is currently level with Stable (v2.0.57); there are no alpha-only features right now. Standalone Devices graduated to Stable in v2.0.47, see [Standalone Devices](../getting-started/standalone-devices.md).
+Alpha is ahead of Stable (v2.0.57): the HAMH device cards show temperatures in Home Assistant's unit instead of always Celsius ([#472](https://github.com/RiDDiX/home-assistant-matter-hub/issues/472)); a controller that stops answering its subscription is logged as a warning instead of INFO ([#471](https://github.com/RiDDiX/home-assistant-matter-hub/issues/471)); a temperature sensor outside -40 to 125 °C keeps updating instead of freezing at its last in-range reading (alpha.888). Standalone Devices graduated to Stable in v2.0.47, see [Standalone Devices](../getting-started/standalone-devices.md).
 
 For a complete list of all supported features and device types, see [Supported Device Types](../supported-device-types.md).
 
