@@ -6,6 +6,8 @@ import type { HomeAssistantStates } from "../../services/home-assistant/home-ass
 export abstract class EntityEndpoint extends Endpoint {
   readonly mappedEntityIds: string[];
   private lastMappedStates: Record<string, string> = {};
+  /** Mapped entities whose state changed in the last updateStates batch. */
+  protected changedMappedIds: string[] = [];
 
   protected constructor(
     type: EndpointType,
@@ -19,17 +21,17 @@ export abstract class EntityEndpoint extends Endpoint {
   }
 
   protected hasMappedEntityChanged(states: HomeAssistantStates): boolean {
-    let changed = false;
+    this.changedMappedIds = [];
     for (const mappedId of this.mappedEntityIds) {
       const mappedState = states[mappedId];
       if (!mappedState) continue;
       const fp = mappedState.state;
       if (fp !== this.lastMappedStates[mappedId]) {
         this.lastMappedStates[mappedId] = fp;
-        changed = true;
+        this.changedMappedIds.push(mappedId);
       }
     }
-    return changed;
+    return this.changedMappedIds.length > 0;
   }
 
   abstract updateStates(states: HomeAssistantStates): Promise<void>;

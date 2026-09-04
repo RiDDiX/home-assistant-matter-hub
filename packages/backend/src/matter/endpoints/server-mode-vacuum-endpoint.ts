@@ -340,7 +340,7 @@ export class ServerModeVacuumEndpoint extends EntityEndpoint {
     if (mappedChanged) {
       this.pendingMappedChange = true;
       logger.debug(
-        `Mapped entity change detected for ${this.entityId}, forcing update`,
+        `Mapped entity change detected for ${this.entityId} (${this.changedMappedIds.join(", ")}), forcing update`,
       );
     }
     logger.debug(
