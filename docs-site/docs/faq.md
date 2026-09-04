@@ -53,6 +53,14 @@ If you just can't get it working with your labels, try to delete your label and 
 
 See the [Robot Vacuum Guide](./devices/robot-vacuum.md) for full setup instructions.
 
+## Apple Home shows an old battery percentage
+
+Apple's Matter framework treats `PowerSource.BatPercentRemaining` as changes-omitted
+(`AttributeHasChangesOmittedQuality` in `MTRDevice_Concrete.mm`): subscription updates for it are
+not stored, only the value from pairing or from a read is. The Home app shows that value until it
+asks again. Charge state is not on that list and updates live. The bridge sends every change; a
+loopback subscription test in the repo proves it.
+
 ## How do I access the Health Dashboard?
 
 Click the heart icon (❤️) in the top navigation bar of the web UI, or navigate directly to `/health`.

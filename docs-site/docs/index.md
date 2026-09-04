@@ -328,7 +328,11 @@ Home, ...) are not placed in the same network segment. Please make sure to revie
 </details>
 
 <details>
-<summary><strong>🧪 Alpha (v2.1.0-alpha.893)</strong></summary>
+<summary><strong>🧪 Alpha (v2.1.0-alpha.894)</strong></summary>
+
+**v2.1.0-alpha.894:**
+- 🔋 **A short outage no longer blanks the battery**: a device marked unavailable for a moment (a missed Roborock poll, an HA restart) got a null percentage and a flipped charge state, then the old values back 15 s later. The bridge keeps what the controller has; only a battery never seen stays null ([#450](https://github.com/RiDDiX/home-assistant-matter-hub/issues/450))
+- 🧪 **Loopback subscription test**: a matter.js commissioner pairs with the vacuum node over loopback, subscribes, and checks that battery percentage and charge state arrive with the write. Off by default, `HAMH_LOOPBACK=1` runs it. This settled the Apple Home battery question: the bridge sends the value, Apple's framework treats `BatPercentRemaining` as changes-omitted and keeps only the value from pairing or from a read ([#450](https://github.com/RiDDiX/home-assistant-matter-hub/issues/450))
 
 **v2.1.0-alpha.893:**
 - 🔋 **Battery percentage goes out with the write**: the percentage is a quieter Matter attribute, and matter.js reported its change ten seconds after the write, on its own. The charge state went with the write, the percentage late or, on Apple Home, never. Both go together now ([#450](https://github.com/RiDDiX/home-assistant-matter-hub/issues/450))

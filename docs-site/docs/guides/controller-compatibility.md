@@ -56,6 +56,10 @@ Rows flagged with a footnote number link to the vendor source that establishes t
 ElectricalUtilityMeter (0x0511, Matter 1.4) is only used when you set the Matter device type to "Electrical Utility Meter (Meter Identification)" by hand. It adds the MeterIdentification cluster (meter serial number and point of delivery from the mapping, null when unset) on top of the same power/energy measurements as ElectricalMeter. SmartThings renders energy devices; the other mainstream controllers don't know the type yet. Consumption sensors keep defaulting to ElectricalMeter (0x0514), so existing pairings are untouched. See [mapping blueprints](./mapping-blueprints.md#electrical-utility-meter).
 :::
 
+:::note Apple Home refreshes battery percentages only on read
+Apple's framework lists `PowerSource.BatPercentRemaining` as changes-omitted: it stores the value from pairing or from a read and drops subscription updates for it, then re-reads on demand. Charge state updates live. See the [FAQ](../faq.md#apple-home-shows-an-old-battery-percentage).
+:::
+
 :::note EnergyEvse is opt-in and bridge-sensitive
 EnergyEvse (0x050C) is only used when you set the Matter device type to "EV Charger (EVSE)" by hand. Home Assistant and Aqara Home render it; SmartThings announced support but it is unconfirmed here. SmartThings sets the charge limit through EnableCharging and addresses modes by list position, so the bridge numbers its Manual mode 0. UserMaximumChargeCurrent is optional and not exposed. A bridged EVSE has been reported to break Alexa device recognition, so keep it off any bridge that Alexa pairs with. See [mapping blueprints](./mapping-blueprints.md#ev-charger-evse).
 :::
