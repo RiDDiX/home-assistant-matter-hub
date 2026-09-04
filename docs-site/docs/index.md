@@ -328,7 +328,10 @@ Home, ...) are not placed in the same network segment. Please make sure to revie
 </details>
 
 <details>
-<summary><strong>🧪 Alpha (v2.1.0-alpha.890)</strong></summary>
+<summary><strong>🧪 Alpha (v2.1.0-alpha.893)</strong></summary>
+
+**v2.1.0-alpha.893:**
+- 🔋 **Battery percentage goes out with the write**: the percentage is a quieter Matter attribute, and matter.js reported its change ten seconds after the write, on its own. The charge state went with the write, the percentage late or, on Apple Home, never. Both go together now ([#450](https://github.com/RiDDiX/home-assistant-matter-hub/issues/450))
 
 **v2.1.0-alpha.890:**
 - 🔌 **EV charger mode works from SmartThings**: SmartThings addresses EnergyEvseMode modes by list position, so the single Manual mode numbered 1 never showed and every mode change was refused. It is mode 0 now; a node that stored the old number still mounts. UserMaximumChargeCurrent is optional and read by no known controller, ModeSelect is not part of the EVSE device type, neither was added ([#475](https://github.com/RiDDiX/home-assistant-matter-hub/issues/475))

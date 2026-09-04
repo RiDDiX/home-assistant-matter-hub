@@ -38,7 +38,7 @@ of port forwarding etc.
 | Channel | Branch | Current Version | Description |
 |---------|--------|-----------------|-------------|
 | **Stable** | `main` | v2.0.57 | Production-ready, recommended for most users |
-| **Alpha** | `alpha` | v2.1.0-alpha.890 | Ahead of Stable, carries the additions listed under Alpha Features |
+| **Alpha** | `alpha` | v2.1.0-alpha.893 | Ahead of Stable, carries the additions listed under Alpha Features |
 | **Testing** | `testing` | v4.1.0-testing.x | ⚠️ **Highly unstable!** Experimental features, may break |
 
 ### Which version should I use?
@@ -328,7 +328,10 @@ Re-assign the affected devices to their rooms after they reconnect. See the [doc
 </details>
 
 <details>
-<summary><strong>🧪 Alpha Features (v2.1.0-alpha.890)</strong> - Click to expand</summary>
+<summary><strong>🧪 Alpha Features (v2.1.0-alpha.893)</strong> - Click to expand</summary>
+
+**v2.1.0-alpha.893:**
+- 🔋 **Battery percentage goes out with the write**: the percentage is a quieter Matter attribute, and matter.js reported its change ten seconds after the write, on its own. The charge state went with the write, the percentage late or, on Apple Home, never. Both go together now ([#450](https://github.com/RiDDiX/home-assistant-matter-hub/issues/450))
 
 **v2.1.0-alpha.890:**
 - 🔌 **EV charger mode works from SmartThings**: SmartThings addresses EnergyEvseMode modes by list position, so the single Manual mode numbered 1 never showed and every mode change was refused. It is mode 0 now; a node that stored the old number still mounts. UserMaximumChargeCurrent is optional and read by no known controller, ModeSelect is not part of the EVSE device type, neither was added ([#475](https://github.com/RiDDiX/home-assistant-matter-hub/issues/475))
