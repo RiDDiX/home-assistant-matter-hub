@@ -206,3 +206,85 @@ describe("battery percent reporting (#450)", () => {
     expect(reported).toContain(BAT_PERCENT_REMAINING);
   });
 });
+
+async function deliver(
+  // biome-ignore lint/suspicious/noExplicitAny: both endpoint classes
+  endpoint: any,
+  vacuum: HomeAssistantEntityState,
+  battery: HomeAssistantEntityState,
+) {
+  liveStates[VACUUM] = vacuum;
+  liveStates[BATTERY] = battery;
+  await endpoint.updateStates({ ...liveStates });
+  await delay(300);
+}
+
+// biome-ignore lint/suspicious/noExplicitAny: read cluster state off endpoint
+function chargeState(endpoint: any): number | undefined {
+  return endpoint.state.powerSource?.batChargeState;
+}
+
+// A 15 s integration blip used to write null and flip the charge state.
+describe("battery during a short unavailable (#450)", () => {
+  it("keeps the percentage when only the sensor blips", async () => {
+    const reg = makeRegistry();
+    const endpoint = await ServerModeVacuumEndpoint.create(reg, VACUUM);
+    const node = await newServer();
+    await node.add(endpoint!);
+    await delay(300);
+    expect(batPercent(endpoint)).toBe(192);
+
+    await deliver(endpoint, vacuumState(), state(BATTERY, "unavailable", {}));
+    expect(batPercent(endpoint)).toBe(192);
+
+    await deliverBatteryOnly(endpoint!, 90);
+    expect(batPercent(endpoint)).toBe(180);
+  });
+
+  it("keeps percentage and charge state when the whole entity blips", async () => {
+    const reg = makeRegistry();
+    const endpoint = await ServerModeVacuumEndpoint.create(reg, VACUUM);
+    const node = await newServer();
+    await node.add(endpoint!);
+    await delay(300);
+    const before = chargeState(endpoint);
+
+    await deliver(
+      endpoint,
+      state(VACUUM, "unavailable", vacuumState().attributes),
+      state(BATTERY, "unavailable", {}),
+    );
+    expect(batPercent(endpoint)).toBe(192);
+    expect(chargeState(endpoint)).toBe(before);
+
+    await deliverBatteryOnly(endpoint!, 85);
+    expect(batPercent(endpoint)).toBe(170);
+  });
+
+  it("takes a fresh sensor value while the entity itself is dark", async () => {
+    const reg = makeRegistry();
+    const endpoint = await ServerModeVacuumEndpoint.create(reg, VACUUM);
+    const node = await newServer();
+    await node.add(endpoint!);
+    await delay(300);
+    const before = chargeState(endpoint);
+
+    await deliver(
+      endpoint,
+      state(VACUUM, "unavailable", vacuumState().attributes),
+      batteryState(50),
+    );
+    expect(batPercent(endpoint)).toBe(100);
+    expect(chargeState(endpoint)).toBe(before);
+  });
+
+  it("stays null for a battery that was never seen", async () => {
+    const reg = makeRegistry();
+    liveStates[BATTERY] = state(BATTERY, "unavailable", {});
+    const endpoint = await ServerModeVacuumEndpoint.create(reg, VACUUM);
+    const node = await newServer();
+    await node.add(endpoint!);
+    await delay(300);
+    expect(batPercent(endpoint)).toBeNull();
+  });
+});
