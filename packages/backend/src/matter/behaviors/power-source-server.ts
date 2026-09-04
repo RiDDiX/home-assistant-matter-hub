@@ -118,6 +118,9 @@ class PowerSourceServerBase extends FeaturedBase {
       batChargeState = explicitChargeState;
     }
 
+    logger.debug(
+      `[${entity.entity_id}] battery=${batteryPercent ?? "n/a"} chargeState=${batChargeState}`,
+    );
     applyPatchState(this.state, {
       status: PowerSource.PowerSourceStatus.Active,
       batPercentRemaining,
