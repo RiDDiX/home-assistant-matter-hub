@@ -36,11 +36,11 @@ interface AllBridgeFeatureFlags {
    */
   readonly autoPressureMapping: boolean;
   /**
-   * Auto Composed Devices: master toggle for all auto-mapping features.
-   * When enabled, related entities from the same Home Assistant device are
-   * combined into a single Matter endpoint (battery, humidity, pressure,
-   * power, energy), one device in the controller app instead of five.
-   * Default: false (disabled)
+   * Auto Composed Devices: a temperature sensor with humidity/pressure becomes
+   * a parent with a sub-endpoint per reading, battery on the parent. Forces
+   * battery, humidity and pressure auto-mapping on; unlocks Composed
+   * Sub-Entities and air purifier grouping. Switch power/energy merging does
+   * not depend on it. Default: false
    */
   readonly autoComposedDevices: boolean;
   /**

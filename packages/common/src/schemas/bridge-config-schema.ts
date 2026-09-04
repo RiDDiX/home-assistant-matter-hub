@@ -225,8 +225,10 @@ const featureFlagSchema: JSONSchema7 = {
     autoComposedDevices: {
       title: "Auto Composed Devices",
       description:
-        "Master toggle: combine related entities from the same Home Assistant device into a single Matter endpoint. " +
-        "Turns on battery, humidity, pressure, power, and energy auto-mapping at once, a Shelly Plug shows up as one device with power monitoring instead of several siblings.",
+        "A temperature sensor with its humidity and pressure sensors becomes one device with a sub-device per reading, " +
+        "battery on the parent. Off, they share one endpoint and Apple Home shows no humidity. Also forces battery, " +
+        "humidity and pressure auto-mapping on and unlocks Composed Sub-Entities and air purifier grouping. " +
+        "Controllers see new devices; existing ones change shape after a bridge restart.",
       type: "boolean",
       default: false,
     },

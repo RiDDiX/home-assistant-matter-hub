@@ -123,7 +123,7 @@ const deviceTypeIdSupport: Record<number, DeviceTypeSupport> = {
     google: "no",
     alexa: "no",
     aqara: "yes",
-    note: "HA and Aqara render EnergyEvse; SmartThings announced support, unconfirmed. Bridged EVSE can break Alexa device recognition, keep it off Alexa bridges.",
+    note: "HA and Aqara render EnergyEvse; SmartThings announced support, unconfirmed (it sets the limit via EnableCharging and addresses modes by list position). Bridged EVSE can break Alexa device recognition, keep it off Alexa bridges.",
   },
   39: {
     apple: "no",
