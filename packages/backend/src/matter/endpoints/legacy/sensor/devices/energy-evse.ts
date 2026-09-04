@@ -264,15 +264,30 @@ const EvseStatusSeeded = EvseStatusServer.set({
 
 // EnergyEvseMode is mandatory. The server asserts a Manual mode tag, so seed a
 // single Manual mode and select it. Features stay off (no charging preferences).
-const EvseModeSeeded = EvseModeBase.set({
+// Modes count from 0: SmartThings addresses them by list position (#475).
+class EvseModeServer extends EvseModeBase {
+  override async initialize() {
+    // A persisted currentMode from before the renumbering would fail the mount.
+    const modes = this.state.supportedModes;
+    if (
+      modes.length > 0 &&
+      !modes.some((m) => m.mode === this.state.currentMode)
+    ) {
+      this.state.currentMode = modes[0].mode;
+    }
+    await super.initialize();
+  }
+}
+
+const EvseModeSeeded = EvseModeServer.set({
   supportedModes: [
     {
       label: "Manual",
-      mode: 1,
+      mode: 0,
       modeTags: [{ value: EnergyEvseMode.ModeTag.Manual }],
     },
   ],
-  currentMode: 1,
+  currentMode: 0,
 });
 
 // The EnergyEvse device type mandates a PowerSource. A wallbox is mains-powered,
