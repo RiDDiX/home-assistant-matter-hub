@@ -37,6 +37,13 @@ class PowerSourceServerBase extends FeaturedBase {
   override async initialize() {
     await super.initialize();
 
+    // Quieter attribute, matter.js would report it ten seconds after the
+    // write (#450).
+    const percentChanged = this.events.batPercentRemaining$Changed;
+    if (percentChanged !== undefined) {
+      percentChanged.quiet.suppressionEnabled = false;
+    }
+
     const homeAssistant = await this.agent.load(HomeAssistantEntityBehavior);
     const entityId = homeAssistant.entityId;
 
