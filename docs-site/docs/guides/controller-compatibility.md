@@ -57,7 +57,7 @@ ElectricalUtilityMeter (0x0511, Matter 1.4) is only used when you set the Matter
 :::
 
 :::note EnergyEvse is opt-in and bridge-sensitive
-EnergyEvse (0x050C) is only used when you set the Matter device type to "EV Charger (EVSE)" by hand. Home Assistant and Aqara Home render it; SmartThings announced support but it is unconfirmed here. A bridged EVSE has been reported to break Alexa device recognition, so keep it off any bridge that Alexa pairs with. See [mapping blueprints](./mapping-blueprints.md#ev-charger-evse).
+EnergyEvse (0x050C) is only used when you set the Matter device type to "EV Charger (EVSE)" by hand. Home Assistant and Aqara Home render it; SmartThings announced support but it is unconfirmed here. SmartThings sets the charge limit through EnableCharging and addresses modes by list position, so the bridge numbers its Manual mode 0. UserMaximumChargeCurrent is optional and not exposed. A bridged EVSE has been reported to break Alexa device recognition, so keep it off any bridge that Alexa pairs with. See [mapping blueprints](./mapping-blueprints.md#ev-charger-evse).
 :::
 
 :::note The Matter 1.4 water heater is opt-in

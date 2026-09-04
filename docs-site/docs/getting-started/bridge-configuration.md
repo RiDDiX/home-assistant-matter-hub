@@ -296,7 +296,7 @@ Feature flags control advanced behavior of the bridge. Configure them in the **B
 
 | Feature Flag | Description | Default |
 |--------------|-------------|---------|
-| `autoComposedDevices` | Master toggle: combines related entities (battery, humidity, pressure, power, energy) into single Matter endpoints. **WARNING: Breaking change - see above.** | `false` |
+| `autoComposedDevices` | A temperature sensor with its humidity and pressure sensors becomes one device with a sub-device per reading, battery on the parent (off: one endpoint, no humidity in Apple Home). Forces battery, humidity and pressure auto-mapping on, unlocks Composed Sub-Entities and air purifier grouping. **WARNING: Breaking change - see above.** | `false` |
 | `autoBatteryMapping` | Automatically combines battery sensors with their parent device | `false` |
 | `autoHumidityMapping` | Automatically combines humidity sensors with temperature sensors | `true` |
 | `autoPressureMapping` | Automatically combines pressure sensors with temperature sensors | `true` |

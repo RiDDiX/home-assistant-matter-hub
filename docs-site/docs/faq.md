@@ -338,13 +338,17 @@ Refreshes every 15 seconds.
 
 ## What is "Auto Composed Devices"?
 
-**Auto Composed Devices** (`autoComposedDevices` feature flag, since v2.0.20) combines related entities from the same HA device into one Matter endpoint:
+**Auto Composed Devices** (`autoComposedDevices`, since v2.0.20) changes the shape of a temperature sensor that has
+humidity or pressure sensors on the same device:
 
-- Temperature + Humidity + Pressure + Battery = one device
-- Switches/Lights with power/energy monitoring show consumption in one device
-- Uses real Matter Composed Devices with sub-endpoints for proper controller display
+- Off: one endpoint carries all readings. Apple Home shows no humidity on that shape.
+- On: a parent device with a sub-device per reading, battery on the parent. Apple Home shows humidity; pressure only
+  where the compatibility matrix lists it; SmartThings does not look into sub-devices.
+- On also forces battery, humidity and pressure auto-mapping on and unlocks Composed Sub-Entities and air purifier
+  grouping.
 
-Enable in Bridge Settings → Feature Flags.
+Switch power/energy merging does not depend on it (lights need a manual mapping). Grouped devices show up as new
+devices; existing devices change shape after a bridge restart. The stored key stays `autoComposedDevices`.
 
 ## I changed the device type in Entity Mapping but nothing happened
 

@@ -328,7 +328,11 @@ Home, ...) are not placed in the same network segment. Please make sure to revie
 </details>
 
 <details>
-<summary><strong>🧪 Alpha (v2.1.0-alpha.889)</strong></summary>
+<summary><strong>🧪 Alpha (v2.1.0-alpha.890)</strong></summary>
+
+**v2.1.0-alpha.890:**
+- 🔌 **EV charger mode works from SmartThings**: SmartThings addresses EnergyEvseMode modes by list position, so the single Manual mode numbered 1 never showed and every mode change was refused. It is mode 0 now; a node that stored the old number still mounts. UserMaximumChargeCurrent is optional and read by no known controller, ModeSelect is not part of the EVSE device type, neither was added ([#475](https://github.com/RiDDiX/home-assistant-matter-hub/issues/475))
+- 🧩 **Auto Composed Devices says what it does**: the description claimed a master toggle merging power and energy; those never depended on it. It changes the shape of a temperature sensor with humidity/pressure sensors (one device with a sub-device per reading), forces battery, humidity and pressure auto-mapping on and unlocks Composed Sub-Entities. Stored key unchanged ([#474](https://github.com/RiDDiX/home-assistant-matter-hub/issues/474))
 
 **v2.1.0-alpha.889:**
 - 🔌 **A docked vacuum stops claiming it is charging**: with no charging signal of its own the bridge assumed a docked robot below 100% was charging, so Apple Home showed "Charging" for a robot that had long finished. If the vacuum's device has a charging sensor in Home Assistant (a `battery_charging` binary sensor, or a `..._charging_state` sensor as Xiaomi exposes), it is mapped automatically now and drives both the battery charge state and the status line. Devices without one keep the old assumption, and a charging sensor picked up this way still stays available as its own device ([#450](https://github.com/RiDDiX/home-assistant-matter-hub/issues/450))
