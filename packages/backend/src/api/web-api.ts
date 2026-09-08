@@ -151,6 +151,9 @@ export class WebApi extends Service {
           this.haRegistry,
           this.props.version,
           this.startTime,
+          this.logger,
+          this.props.mdnsInterface,
+          this.props.mdnsIpv4 ?? true,
         ),
       )
       .use(

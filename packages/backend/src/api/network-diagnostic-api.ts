@@ -67,7 +67,7 @@ function getNetworkInterfaces(): NetworkInterfaceInfo[] {
   return result;
 }
 
-function runDiagnostics(
+export function runDiagnostics(
   mdnsInterface: string | undefined,
   mdnsIpv4: boolean,
 ): NetworkDiagnosticResult {

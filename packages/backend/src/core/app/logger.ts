@@ -29,6 +29,11 @@ export const MATTER_TRAFFIC_FACILITIES = new Set([
   // Rejected invokes (UnsupportedEndpoint and friends) log here at INFO; a
   // controller aiming at a stale endpoint number is invisible without it (#423).
   "CommandInvokeResponse",
+  // Pairing and session setup, so the export shows whether a controller ever
+  // tried (#477, #478). Commissioning stays out, it logs the passcode.
+  "CaseServer",
+  "PaseServer",
+  "FailsafeContext",
 ]);
 
 export function categoryFor(facility: string): string | undefined {
@@ -76,6 +81,7 @@ export interface LoggerServiceProps {
 
 export class LoggerService {
   private readonly _level: LogLevel = MatterLogLevel.INFO;
+  private readonly _protocolLevel: LogLevel;
   private readonly _jsonOutput: boolean;
   private readonly customLogLevelMapping: Record<
     CustomLogLevel,
@@ -92,6 +98,7 @@ export class LoggerService {
       (this._level as MatterLogLevel);
     // quiet matter.js packet-payload facilities unless explicitly asked for
     const protocolLevel = logLevelFromString(options.protocolLevel ?? "info");
+    this._protocolLevel = protocolLevel;
     const resolvedProtocolLevel =
       this.customLogLevelMapping[protocolLevel as CustomLogLevel] ??
       (protocolLevel as MatterLogLevel);
@@ -124,6 +131,14 @@ export class LoggerService {
         });
       },
     });
+  }
+
+  get level(): string {
+    return logLevelToString(this._level);
+  }
+
+  get protocolLevel(): string {
+    return logLevelToString(this._protocolLevel);
   }
 
   get(name: string): BetterLogger;

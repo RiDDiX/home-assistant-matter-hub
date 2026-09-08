@@ -1,15 +1,23 @@
 import os from "node:os";
 import type { Endpoint } from "@matter/main";
 import express from "express";
+import type { LoggerService } from "../core/app/logger.js";
 import type { BridgeService } from "../services/bridges/bridge-service.js";
 import type { HomeAssistantClient } from "../services/home-assistant/home-assistant-client.js";
 import type { HomeAssistantRegistry } from "../services/home-assistant/home-assistant-registry.js";
+import type { FabricSessionSummary, SessionInfo } from "./health-api.js";
 import { type LogEntry, logBuffer } from "./logs-api.js";
+import {
+  type NetworkDiagnosticResult,
+  runDiagnostics,
+} from "./network-diagnostic-api.js";
 
 interface DiagnosticReport {
   generatedAt: string;
   version: string;
   uptime: number;
+  logLevel: string;
+  protocolLogLevel: string;
   system: {
     platform: string;
     arch: string;
@@ -51,7 +59,14 @@ interface DiagnosticReport {
       reason: string;
     }>;
     endpointTree?: DiagnosticEndpointNode;
+    sessions: {
+      sessions: SessionInfo[];
+      totalSessions: number;
+      totalSubscriptions: number;
+      fabrics: FabricSessionSummary[];
+    };
   }>;
+  network: NetworkDiagnosticResult;
   recentLogs: Array<{
     timestamp: string;
     level: string;
@@ -123,12 +138,59 @@ function anonymizeLogMessage(message: string): string {
   return result;
 }
 
+// Keep the address kind, drop the value.
+function addressLabel(ip: string): string {
+  if (!ip.includes(":")) return "[IP]";
+  const v6 = ip.toLowerCase();
+  if (/^fe[89ab]/.test(v6)) return "[IPv6 link-local]";
+  if (v6.startsWith("fd") || v6.startsWith("fc")) return "[IPv6 ULA]";
+  if (v6.startsWith("2") || v6.startsWith("3")) return "[IPv6 GUA]";
+  return "[IPv6]";
+}
+
+function anonymizeNetwork(
+  result: NetworkDiagnosticResult,
+): NetworkDiagnosticResult {
+  const labels: Array<[string, string]> = [];
+  for (const i of result.interfaces) {
+    for (const ip of [...i.ipv4, ...i.ipv6])
+      labels.push([ip, addressLabel(ip)]);
+    // enx names carry the MAC
+    if (/^enx[0-9a-f]{12}$/i.test(i.name)) labels.push([i.name, "enx[MAC]"]);
+  }
+  // Exact swaps, the log regex lets short forms like fe80::1 through.
+  labels.sort((a, b) => b[0].length - a[0].length);
+  const scrub = (text: string) => {
+    let out = text;
+    for (const [ip, label] of labels) out = out.split(ip).join(label);
+    return anonymizeLogMessage(out);
+  };
+  return {
+    ...result,
+    interfaces: result.interfaces.map((i) => ({
+      ...i,
+      name: scrub(i.name),
+      ipv4: i.ipv4.map(addressLabel),
+      ipv6: i.ipv6.map(addressLabel),
+      mac: "[MAC]",
+    })),
+    checks: result.checks.map((c) => ({
+      ...c,
+      message: scrub(c.message),
+      detail: c.detail ? scrub(c.detail) : c.detail,
+    })),
+  };
+}
+
 export function diagnosticApi(
   bridgeService: BridgeService,
   haClient: HomeAssistantClient,
   haRegistry: HomeAssistantRegistry,
   version: string,
   startTime: number,
+  logger: LoggerService,
+  mdnsInterface: string | undefined,
+  mdnsIpv4: boolean,
 ): express.Router {
   const router = express.Router();
 
@@ -142,6 +204,7 @@ export function diagnosticApi(
     const memUsage = process.memoryUsage();
     const bridges = bridgeService.bridges;
     const haConnected = haClient.connection?.connected ?? false;
+    const network = runDiagnostics(mdnsInterface, mdnsIpv4);
 
     const bridgeDetails = bridges.map((b) => {
       const data = b.data;
@@ -177,6 +240,7 @@ export function diagnosticApi(
             return undefined;
           }
         })(),
+        sessions: b.getSessionInfo(),
       };
     });
 
@@ -193,6 +257,8 @@ export function diagnosticApi(
       generatedAt: new Date().toISOString(),
       version,
       uptime: Math.floor((Date.now() - startTime) / 1000),
+      logLevel: logger.level,
+      protocolLogLevel: logger.protocolLevel,
       system: {
         platform: os.platform(),
         arch: os.arch(),
@@ -212,6 +278,7 @@ export function diagnosticApi(
         deviceCount: Object.keys(haRegistry.devices).length,
       },
       bridges: bridgeDetails,
+      network: anonymize ? anonymizeNetwork(network) : network,
       recentLogs,
     };
 
