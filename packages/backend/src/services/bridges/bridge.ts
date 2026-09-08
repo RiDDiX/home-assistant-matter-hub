@@ -412,12 +412,27 @@ export class Bridge {
     }
   }
 
+  private resetInFlight?: Promise<void>;
+
   async factoryReset() {
+    // A second request mid reset joins the first, it must not erase again.
+    if (this.resetInFlight) {
+      return this.resetInFlight;
+    }
     if (this.status.code !== BridgeStatus.Running) {
       return;
     }
+    this.resetInFlight = this.runFactoryReset().finally(() => {
+      this.resetInFlight = undefined;
+    });
+    return this.resetInFlight;
+  }
+
+  private async runFactoryReset() {
+    // Regular stop first, or the restart rejects every plugin as already
+    // registered (#477, #478).
+    await this.stop(BridgeStatus.Stopped, "Factory reset");
     await this.server.factoryReset();
-    this.setStatus({ code: BridgeStatus.Stopped });
     await this.start();
   }
 

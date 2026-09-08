@@ -244,12 +244,25 @@ export class ServerModeBridge {
     }
   }
 
+  private resetInFlight?: Promise<void>;
+
   async factoryReset(): Promise<void> {
+    if (this.resetInFlight) {
+      return this.resetInFlight;
+    }
     if (this.status.code !== BridgeStatus.Running) {
       return;
     }
+    this.resetInFlight = this.runFactoryReset().finally(() => {
+      this.resetInFlight = undefined;
+    });
+    return this.resetInFlight;
+  }
+
+  private async runFactoryReset() {
+    // Regular stop first, same as the aggregator bridge.
+    await this.stop(BridgeStatus.Stopped, "Factory reset");
     await this.server.factoryReset();
-    this.setStatus({ code: BridgeStatus.Stopped });
     await this.start();
   }
 
