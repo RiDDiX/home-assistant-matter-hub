@@ -328,7 +328,11 @@ Home, ...) are not placed in the same network segment. Please make sure to revie
 </details>
 
 <details>
-<summary><strong>🧪 Alpha (v2.1.0-alpha.894)</strong></summary>
+<summary><strong>🧪 Alpha (v2.1.0-alpha.895)</strong></summary>
+
+**v2.1.0-alpha.895:**
+- 🔎 **Diagnostic export shows the connection attempts**: the export now keeps the PASE and CASE session setup lines and the failsafe expiry, lists every open session with its subscriptions, the host's network interfaces and mDNS settings (addresses replaced by their kind when anonymized), and the log levels it was taken at. A controller that never connects, or connects and never subscribes, is readable from the file instead of a debug log ([#477](https://github.com/RiDDiX/home-assistant-matter-hub/issues/477), [#478](https://github.com/RiDDiX/home-assistant-matter-hub/issues/478))
+- 🧹 **Factory reset goes through the stop path**: the reset restarted the bridge without stopping it first, so the built-in plugins stayed registered and every reset logged "Plugin camera is already registered" ([#477](https://github.com/RiDDiX/home-assistant-matter-hub/issues/477), [#478](https://github.com/RiDDiX/home-assistant-matter-hub/issues/478))
 
 **v2.1.0-alpha.894:**
 - 🔋 **A short outage no longer blanks the battery**: a device marked unavailable for a moment (a missed Roborock poll, an HA restart) got a null percentage and a flipped charge state, then the old values back 15 s later. The bridge keeps what the controller has; only a battery never seen stays null ([#450](https://github.com/RiDDiX/home-assistant-matter-hub/issues/450))
