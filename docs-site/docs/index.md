@@ -311,9 +311,32 @@ Home, ...) are not placed in the same network segment. Please make sure to revie
 </details>
 
 <details>
-<summary><strong>🧪 Alpha (v2.1.0-alpha.x)</strong></summary>
+<summary><strong>🧪 Alpha (v2.1.0-alpha.895)</strong></summary>
 
 **Alpha is ahead of Stable (v2.0.56).** Everything below ships in the alpha channel now and lands in the next stable promote, grouped by the pre-release tag it first appeared in.
+
+**v2.1.0-alpha.895:**
+- 🔎 **Diagnostic export shows the connection attempts**: the export now keeps the PASE and CASE session setup lines and the failsafe expiry, lists every open session with its subscriptions, the host's network interfaces and mDNS settings (addresses replaced by their kind when anonymized), and the log levels it was taken at. A controller that never connects, or connects and never subscribes, is readable from the file instead of a debug log ([#477](https://github.com/RiDDiX/home-assistant-matter-hub/issues/477), [#478](https://github.com/RiDDiX/home-assistant-matter-hub/issues/478))
+- 🧹 **Factory reset goes through the stop path**: the reset restarted the bridge without stopping it first, so the built-in plugins stayed registered and every reset logged "Plugin camera is already registered" ([#477](https://github.com/RiDDiX/home-assistant-matter-hub/issues/477), [#478](https://github.com/RiDDiX/home-assistant-matter-hub/issues/478))
+
+**v2.1.0-alpha.894:**
+- 🔋 **A short outage no longer blanks the battery**: a device marked unavailable for a moment (a missed Roborock poll, an HA restart) got a null percentage and a flipped charge state, then the old values back 15 s later. The bridge keeps what the controller has; only a battery never seen stays null ([#450](https://github.com/RiDDiX/home-assistant-matter-hub/issues/450))
+- 🧪 **Loopback subscription test**: a matter.js commissioner pairs with the vacuum node over loopback, subscribes, and checks that battery percentage and charge state arrive with the write. Off by default, `HAMH_LOOPBACK=1` runs it. This settled the Apple Home battery question: the bridge sends the value, Apple's framework treats `BatPercentRemaining` as changes-omitted and keeps only the value from pairing or from a read ([#450](https://github.com/RiDDiX/home-assistant-matter-hub/issues/450))
+
+**v2.1.0-alpha.893:**
+- 🔋 **Battery percentage goes out with the write**: the percentage is a quieter Matter attribute, and matter.js reported its change ten seconds after the write, on its own. The charge state went with the write, the percentage late or, on Apple Home, never. Both go together now ([#450](https://github.com/RiDDiX/home-assistant-matter-hub/issues/450))
+
+**v2.1.0-alpha.890:**
+- 🔌 **EV charger mode works from SmartThings**: SmartThings addresses EnergyEvseMode modes by list position, so the single Manual mode numbered 1 never showed and every mode change was refused. It is mode 0 now; a node that stored the old number still mounts. UserMaximumChargeCurrent is optional and read by no known controller, ModeSelect is not part of the EVSE device type, neither was added ([#475](https://github.com/RiDDiX/home-assistant-matter-hub/issues/475))
+- 🧩 **Auto Composed Devices says what it does**: the description claimed a master toggle merging power and energy; those never depended on it. It changes the shape of a temperature sensor with humidity/pressure sensors (one device with a sub-device per reading), forces battery, humidity and pressure auto-mapping on and unlocks Composed Sub-Entities. Stored key unchanged ([#474](https://github.com/RiDDiX/home-assistant-matter-hub/issues/474))
+
+**v2.1.0-alpha.889:**
+- 🔌 **A docked vacuum stops claiming it is charging**: with no charging signal of its own the bridge assumed a docked robot below 100% was charging, so Apple Home showed "Charging" for a robot that had long finished. If the vacuum's device has a charging sensor in Home Assistant (a `battery_charging` binary sensor, or a `..._charging_state` sensor as Xiaomi exposes), it is mapped automatically now and drives both the battery charge state and the status line. Devices without one keep the old assumption, and a charging sensor picked up this way still stays available as its own device ([#450](https://github.com/RiDDiX/home-assistant-matter-hub/issues/450))
+
+**v2.1.0-alpha.888:**
+- 🌡️ **The HAMH device cards follow Home Assistant's temperature unit**: a Fahrenheit install saw Celsius chips on every thermostat and temperature sensor, because the card printed the raw Matter value (Matter always carries 0.01 °C) with a hardcoded unit. The chips now read the unit out of the endpoint itself: thermostats and water heaters from their UI configuration cluster, sensors and weather from the entity's own `unit_of_measurement`. What the controllers show never changed, Apple Home and Alexa convert on their side ([#472](https://github.com/RiDDiX/home-assistant-matter-hub/issues/472))
+- 🔔 **A controller that stops answering is logged as a warning**: the three "Error sending subscription update message" lines that precede a dropped subscription were logged at INFO, so a dying controller link was invisible to anyone filtering for warnings. The first two retries stay at INFO, the third one and the "Giving up on subscription" line are warnings now ([#471](https://github.com/RiDDiX/home-assistant-matter-hub/issues/471))
+- 🌡️ **A temperature sensor outside the usual range keeps updating**: the sensor endpoint declared a -40 to 125 °C measurement window while writing anything int16 could hold, so an oven probe, a grill thermometer or a deep freezer was rejected by matter.js and the endpoint kept its last in-range reading forever. The declared window now covers everything the bridge can send
 
 **v2.1.0-alpha.887:**
 - 🍳 **An oven exposed as a climate entity mounts in a Fahrenheit install**: a template climate with `max_temp: 500` (or any setpoint above 327 degrees) failed with "Value 50000 is above the int16 maximum" and the endpoint never appeared, because registration multiplied the raw Fahrenheit number by 100 before the unit conversion had a chance to run. Registration values are clamped into the Matter range now and the thermostat converts them in its first update as before, so the oven shows up with its real 37.8 to 260 C limits. Temperatures that cannot exist in Matter at all (above 327.67 C, a kiln) are pinned to the ceiling instead of failing every update, and a missing current temperature falls back to the clamped setpoint instead of a raw one ([#470](https://github.com/RiDDiX/home-assistant-matter-hub/issues/470))

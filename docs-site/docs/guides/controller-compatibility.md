@@ -56,8 +56,12 @@ Rows flagged with a footnote number link to the vendor source that establishes t
 ElectricalUtilityMeter (0x0511, Matter 1.4) is only used when you set the Matter device type to "Electrical Utility Meter (Meter Identification)" by hand. It adds the MeterIdentification cluster (meter serial number and point of delivery from the mapping, null when unset) on top of the same power/energy measurements as ElectricalMeter. SmartThings renders energy devices; the other mainstream controllers don't know the type yet. Consumption sensors keep defaulting to ElectricalMeter (0x0514), so existing pairings are untouched. See [mapping blueprints](./mapping-blueprints.md#electrical-utility-meter).
 :::
 
+:::note Apple Home refreshes battery percentages only on read
+Apple's framework lists `PowerSource.BatPercentRemaining` as changes-omitted: it stores the value from pairing or from a read and drops subscription updates for it, then re-reads on demand. Charge state updates live. See the [FAQ](../faq.md#apple-home-shows-an-old-battery-percentage).
+:::
+
 :::note EnergyEvse is opt-in and bridge-sensitive
-EnergyEvse (0x050C) is only used when you set the Matter device type to "EV Charger (EVSE)" by hand. Home Assistant and Aqara Home render it; SmartThings announced support but it is unconfirmed here. A bridged EVSE has been reported to break Alexa device recognition, so keep it off any bridge that Alexa pairs with. See [mapping blueprints](./mapping-blueprints.md#ev-charger-evse).
+EnergyEvse (0x050C) is only used when you set the Matter device type to "EV Charger (EVSE)" by hand. Home Assistant and Aqara Home render it; SmartThings announced support but it is unconfirmed here. SmartThings sets the charge limit through EnableCharging and addresses modes by list position, so the bridge numbers its Manual mode 0. UserMaximumChargeCurrent is optional and not exposed. A bridged EVSE has been reported to break Alexa device recognition, so keep it off any bridge that Alexa pairs with. See [mapping blueprints](./mapping-blueprints.md#ev-charger-evse).
 :::
 
 :::note The Matter 1.4 water heater is opt-in
@@ -131,6 +135,16 @@ HAMH includes built-in controller profiles that pre-configure feature flags for 
 | **Multi-Controller** | `autoForceSync: true`, `autoComposedDevices: true`, `autoBatteryMapping: true`, `autoHumidityMapping: true`, `autoPressureMapping: true` |
 
 See [Bridge Configuration](../getting-started/bridge-configuration.md) for details on how to select a profile.
+
+## Controllers that cannot pair at all
+
+A controller that only accepts CSA certified devices rejects HAMH during the attestation step of pairing and never gets as far as the device list above. HAMH serves the development attestation matter.js generates by default (test vendor `0xFFF1`, "Matter Test PAA", certification type "test"), because an uncertified bridge has no CSA issued Certification Declaration to offer. Nothing in the bridge configuration changes it.
+
+| Controller | State | Note |
+|---|---|---|
+| **Philips Ambiscape** (Ambilight TVs) | ❌ | Pairing fails with "Failed", the TV aborts right after `attestationRequest`. Its compatible list is CSA certified bulbs and hubs only ([#465](https://github.com/RiDDiX/home-assistant-matter-hub/issues/465)) |
+
+See [Connectivity Issues](./connectivity-issues.md#controllers-that-only-pair-with-csa-certified-products) for how to recognise this in the log.
 
 ## Official Controller Documentation
 

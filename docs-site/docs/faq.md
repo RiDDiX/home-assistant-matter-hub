@@ -22,9 +22,14 @@ Please follow the [reverse proxy guide](./guides/reverse-proxy.md).
 
 ## Changes on names and labels in Home Assistant have no effect in HAMH
 
-When performing changes on entities, like adding or removing a label or renaming your entity, you need to reload the
-affected bridge for the changes to take effect. This happens automatically every 30 seconds, but you can enforce it by
-editing the bridge (even without making changes), or when restarting the whole addon.
+Renames and other registry changes reach the bridge on the next registry refresh, every 60 seconds by default. Since
+v2.1.0-alpha.885 no bridge reload is needed for a rename; editing the bridge (even without changes) or restarting the
+add-on forces the refresh right away.
+
+What a controller does with the new name is its own choice. Alexa follows it. Apple Home reads the name once when the
+accessory is added and keeps its own copy, so a rename never reaches an accessory that is already in the Home app:
+rename it in the Home app, or the new name shows up on accessories you add after the rename
+([#467](https://github.com/RiDDiX/home-assistant-matter-hub/issues/467)).
 
 ## I added a label to my entities, but HAMH won't find any device
 
@@ -47,6 +52,14 @@ If you just can't get it working with your labels, try to delete your label and 
 3. **Re-pair**, After enabling Server Mode, remove the old accessory and pair the new bridge.
 
 See the [Robot Vacuum Guide](./devices/robot-vacuum.md) for full setup instructions.
+
+## Apple Home shows an old battery percentage
+
+Apple's Matter framework treats `PowerSource.BatPercentRemaining` as changes-omitted
+(`AttributeHasChangesOmittedQuality` in `MTRDevice_Concrete.mm`): subscription updates for it are
+not stored, only the value from pairing or from a read is. The Home app shows that value until it
+asks again. Charge state is not on that list and updates live. The bridge sends every change; a
+loopback subscription test in the repo proves it.
 
 ## How do I access the Health Dashboard?
 
@@ -85,14 +98,14 @@ See [Temperature & Humidity Sensor](./devices/temperature-humidity-sensor.md) fo
 
 ## The app keeps crashing or restarting on my HA Yellow / Raspberry Pi / VM
 
-Low-resource devices (1-2 GB RAM) or VMs with limited memory allocation can run out of memory. Since v2.0.25, HAMH dynamically sizes the Node.js heap to 25% of your system RAM (clamped between 256 MB and 1024 MB). The startup log shows the calculated value: `System RAM: 2048MB → Node.js heap: 512MB`. The total process memory (including matter.js cluster definitions, SQLite, and V8 overhead) can reach 400-600 MB even before bridges start.
+Low-resource devices (1-2 GB RAM) or VMs with limited memory allocation can run out of memory. HAMH dynamically sizes the Node.js heap to 50% of the available system memory (clamped between 256 MB and 2048 MB), and the add-on takes a `heap_size_mb` option to override that. The startup log shows the calculated value: `Memory: total=4096MB, available=1024MB, cgroup=noneMB → heap: 512MB`. The total process memory (including matter.js cluster definitions, SQLite, and V8 overhead) can reach 400-600 MB even before bridges start.
 
 The telltale sign of an OOM kill is the log showing `Killed` with no error message or stack trace, this means the Linux kernel terminated the process.
 
 If crashes persist:
 
 1. Reduce the number of devices per bridge
-2. Split large bridges into smaller ones (e.g. per room)
+2. Raise `heap_size_mb` if the machine has the memory or swap for it. Splitting entities across more bridges does not reduce memory, everything runs in one process
 3. Stop other memory-heavy add-ons (Frigate, Whisper, Piper, Music Assistant, Python Matter Server)
 4. For VMs (`qemux86-64`): increase RAM allocation to at least 4 GB
 5. Consider using a device with more RAM
@@ -249,8 +262,8 @@ Keep the custom names and entity mappings too: they are keyed by `entity_id`, an
 
 ## What's the difference between Stable and Alpha?
 
-- **Stable** (v2.0.49): Production-ready, recommended for daily use
-- **Alpha**: Currently level with Stable (v2.0.49); the next pre-release lands here first and may contain bugs
+- **Stable** (v2.0.56): Production-ready, recommended for daily use
+- **Alpha** (v2.1.0-alpha.895): ahead of Stable, see the Alpha Features list in the README; the next pre-release lands here first and may contain bugs
 
 See the [Alpha Features Guide](./guides/alpha-features.md) for details on alpha features.
 
@@ -304,7 +317,7 @@ Since v2.0.24, thermostats support **auto-resume**, when off and you set a tempe
 
 If not working:
 
-- Update to v2.0.36+ (current stable: v2.0.49)
+- Update to v2.0.36+ (current stable: v2.0.56)
 - Only works for single-temp mode (not range/auto)
 - Thermostat must be in "Off" state
 
@@ -333,13 +346,17 @@ Refreshes every 15 seconds.
 
 ## What is "Auto Composed Devices"?
 
-**Auto Composed Devices** (`autoComposedDevices` feature flag, since v2.0.20) combines related entities from the same HA device into one Matter endpoint:
+**Auto Composed Devices** (`autoComposedDevices`, since v2.0.20) changes the shape of a temperature sensor that has
+humidity or pressure sensors on the same device:
 
-- Temperature + Humidity + Pressure + Battery = one device
-- Switches/Lights with power/energy monitoring show consumption in one device
-- Uses real Matter Composed Devices with sub-endpoints for proper controller display
+- Off: one endpoint carries all readings. Apple Home shows no humidity on that shape.
+- On: a parent device with a sub-device per reading, battery on the parent. Apple Home shows humidity; pressure only
+  where the compatibility matrix lists it; SmartThings does not look into sub-devices.
+- On also forces battery, humidity and pressure auto-mapping on and unlocks Composed Sub-Entities and air purifier
+  grouping.
 
-Enable in Bridge Settings → Feature Flags.
+Switch power/energy merging does not depend on it (lights need a manual mapping). Grouped devices show up as new
+devices; existing devices change shape after a bridge restart. The stored key stays `autoComposedDevices`.
 
 ## I changed the device type in Entity Mapping but nothing happened
 

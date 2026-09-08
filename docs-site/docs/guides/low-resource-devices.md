@@ -15,13 +15,13 @@ HAMH loads Matter.js cluster definitions, the Home Assistant entity registry, an
 
 ### Dynamic Heap Sizing
 
-Since v2.0.25, HAMH automatically sizes the Node.js heap to **25% of available system memory**, clamped between 256 MB and 1024 MB. The calculated value is logged at startup:
+HAMH automatically sizes the Node.js heap to **50% of available system memory**, clamped between 256 MB and 2048 MB. The calculated value is logged at startup:
 
 ```
-Memory: total=4096MB, available=3200MB, cgroup=noneMB -> heap: 800MB
+Memory: total=4096MB, available=3200MB, cgroup=noneMB -> heap: 1600MB
 ```
 
-On a 2 GB system this gives ~512 MB of heap, tight for large bridge configurations.
+On a 2 GB system with about 1 GB free this gives ~512 MB of heap, tight for large bridge configurations.
 
 ## Recommended Configuration by RAM
 
@@ -46,7 +46,7 @@ On a 2 GB system this gives ~512 MB of heap, tight for large bridge configuratio
 
 ### 1. Reduce entities per bridge
 
-Each Matter endpoint uses 1-3 MB of memory. Fewer entities = less memory. Split large bridges into smaller ones (e.g. per room or per domain).
+Each Matter endpoint uses 1-3 MB of memory. Fewer entities = less memory. Splitting the same entities across several bridges does not help here: all bridges run in one process, and each one adds its own Matter node on top. What counts is the total number of exposed entities.
 
 ### 2. Stop memory-heavy add-ons
 
@@ -60,9 +60,15 @@ These add-ons can consume significant RAM alongside HAMH:
 
 ### 3. Override the heap size
 
-If the automatic 25% calculation is too low or too high, override it:
+If the automatic calculation is too low or too high, override it:
 
-**Home Assistant Add-on:** Not directly configurable, the entrypoint script sets it automatically.
+**Home Assistant Add-on:** set the `heap_size_mb` option (0 keeps the automatic sizing):
+
+```yaml
+heap_size_mb: 1024
+```
+
+A value above the free memory of the machine only works if there is swap to back it.
 
 **Standalone Docker:**
 

@@ -157,6 +157,7 @@ The `@matter/*` packages are pinned to a specific version in `packages/backend/p
 | `create-legacy-endpoint-type.ts` | `MutableEndpoint.with()` | Behavior composition for all device types |
 | `bridge-server-node.ts` | `ServerNode` subclass | Bridge server lifecycle |
 | `mdns.ts` | `MdnsService` | mDNS configuration |
+| `attestation-warning.ts` | `OperationalCredentialsServer.attestationRequest()`, `.csrRequest()` | Spot a controller that rejects the device attestation (#465) |
 
 ---
 
