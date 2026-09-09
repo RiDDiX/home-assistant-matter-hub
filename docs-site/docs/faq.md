@@ -112,6 +112,8 @@ If crashes persist:
 
 See the [Low-Resource Devices Guide](./guides/low-resource-devices.md) for detailed setup recommendations, and [#190](https://github.com/RiDDiX/home-assistant-matter-hub/issues/190) and [#141](https://github.com/RiDDiX/home-assistant-matter-hub/issues/141) for details.
 
+A crash that ends with `# Fatal error in , line 0`, `# unreachable code` and `Trace/breakpoint trap` is not an OOM kill. The abort happens inside the V8 engine and HAMH cannot catch it; what triggers it is not known yet, and the Alpine-based add-on prints no native stack frames after it. Turn on the add-on's **Watchdog** switch so the Supervisor restarts it automatically, and report it with the log lines from just before the crash, see [#479](https://github.com/RiDDiX/home-assistant-matter-hub/issues/479).
+
 ## Alexa loses connection after a few hours
 
 This is typically caused by stale sessions, Alexa goes offline but the bridge keeps the old session alive, blocking new subscriptions. The bridge includes an automatic force-sync mechanism that periodically pushes state updates to all connected controllers. If you still experience this:
