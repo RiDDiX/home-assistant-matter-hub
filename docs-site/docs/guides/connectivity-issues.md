@@ -120,7 +120,7 @@ HAMH flags this in two places: the **Network Diagnostics** card on the **Health 
 - **HA OS add-on:** set the `mdns_network_interface` option to the LAN NIC (e.g. `end0`, `eth0`, `enp0s3`), not `docker0`, `hassio`, `veth*`, or `wpan0`.
 - **Plain container:** pass `--mdns-network-interface eth1` (your LAN NIC on `192.168.x`), not the Docker bridge (e.g. `eth0` on `172.16.x`), or run the container with `--network=host` (recommended for Matter).
 
-If your LAN interface also carries a global IPv6 that controllers cannot reach, drop it from what mDNS advertises with `mdns_strip_global_ipv6` (add-on, both channels; stable from the next release) or `--mdns-strip-global-ipv6` (container). This keeps only the link-local and ULA addresses. It does **not** remove a Thread `fd::` address, since that is a ULA; for Thread interfaces, bind the LAN interface instead.
+If your LAN interface also carries a global IPv6 that controllers cannot reach, drop it from what mDNS advertises with `mdns_strip_global_ipv6` (add-on, both channels) or `--mdns-strip-global-ipv6` (container). This drops the global IPv6 addresses and keeps the link-local and ULA ones (when an interface has neither, nothing is dropped); the IPv4 address and the rest of the advertisement stay unchanged. It does **not** remove a Thread `fd::` address, since that is a ULA; for Thread interfaces, bind the LAN interface instead.
 
 If the advertised IPv4 address is unroutable (for example podman without host networking behind an avahi reflector), force controllers onto IPv6 with `mdns_disable_ipv4` (add-on) or `--mdns-disable-ipv4` (container). This stops mDNS advertising IPv4 so only IPv6 is used. Only reach for it when IPv4 is the problem: an IPv6-only advertisement leaves controllers without IPv6 connectivity (some older Alexa or Google Home hubs) unable to discover the bridge.
 
@@ -169,7 +169,8 @@ See [Discussion #388](https://github.com/RiDDiX/home-assistant-matter-hub/discus
 
 ### Alexa
 
-- **IPv6 Address Type (GUA vs ULA)**: Alexa requires a locally reachable IPv6 address. If your Home Assistant host has both a **GUA** (Global Unicast, `2xxx::/3`) and a **ULA** (`fd00::/8`) IPv6 address, mDNS may advertise the GUA which Alexa cannot reach on the local network. Remove the GUA from the interface or ensure ULA is configured, then **reboot HAOS** (not just the add-on) so the mDNS service picks up the correct addresses. See [#283](https://github.com/RiDDiX/home-assistant-matter-hub/issues/283).
+- **Port 5540**: Alexa only completes pairing with a bridge on port `5540`. On any other port the pairing rolls back about 20 seconds after AddNOC, see [#401](https://github.com/RiDDiX/home-assistant-matter-hub/issues/401). Keep the bridge Alexa pairs with on `5540`.
+- **IPv6 Address Type (GUA vs ULA)**: Alexa requires a locally reachable IPv6 address. If your Home Assistant host has both a **GUA** (Global Unicast, `2000::/3`, starting with `2` or `3`) and a **ULA** (`fc00::/7`, starting with `fc` or `fd`) IPv6 address, mDNS advertises the GUA as well, which Alexa may not reach on the local network. Set `mdns_strip_global_ipv6` (add-on) or `--mdns-strip-global-ipv6` (container) so only the link-local and ULA addresses are advertised, then restart the add-on. See [#283](https://github.com/RiDDiX/home-assistant-matter-hub/issues/283).
 - **Device Limitations**: Alexa cannot pair with a bridge if too many devices (around 80-100) are already attached.
   Remove unused devices to resolve this limitation.
 - **Amazon Device Requirement**: Ensure at least one Amazon device supporting Matter is connected. Third-party
