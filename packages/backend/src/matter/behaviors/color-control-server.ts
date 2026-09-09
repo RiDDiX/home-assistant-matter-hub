@@ -78,26 +78,36 @@ export class ColorControlServerBase extends FeaturedBase {
       const defaultMaxMireds = 500; // ~2000K
       const defaultMireds = 250; // ~4000K (neutral white)
 
-      if (
-        this.state.colorTempPhysicalMinMireds == null ||
-        this.state.colorTempPhysicalMinMireds === 0
-      ) {
-        this.state.colorTempPhysicalMinMireds = defaultMinMireds;
-      }
-      if (
-        this.state.colorTempPhysicalMaxMireds == null ||
-        this.state.colorTempPhysicalMaxMireds === 0
-      ) {
-        this.state.colorTempPhysicalMaxMireds = defaultMaxMireds;
-      }
+      // The physical range is not persisted, the current and start-up
+      // values are. A light that ran above 6800K (135 mireds, #477) came
+      // back after a restart with a persisted value below the default
+      // minimum, and coupleColorTempToLevelMinMireds must sit between the
+      // minimum and the current value. Widen the range to cover whatever
+      // was persisted, update() narrows it to the HA range right after.
+      const persisted = [
+        this.state.colorTemperatureMireds,
+        this.state.startUpColorTemperatureMireds,
+      ].filter((v): v is number => v != null && v > 0);
+      const minMireds = Math.min(
+        this.state.colorTempPhysicalMinMireds || defaultMinMireds,
+        ...persisted,
+      );
+      const maxMireds = Math.max(
+        this.state.colorTempPhysicalMaxMireds || defaultMaxMireds,
+        ...persisted,
+      );
+      const clampedDefault = Math.max(
+        Math.min(defaultMireds, maxMireds),
+        minMireds,
+      );
+      this.state.colorTempPhysicalMinMireds = minMireds;
+      this.state.colorTempPhysicalMaxMireds = maxMireds;
       if (this.state.colorTemperatureMireds == null) {
-        this.state.colorTemperatureMireds = defaultMireds;
+        this.state.colorTemperatureMireds = clampedDefault;
       }
-      if (this.state.coupleColorTempToLevelMinMireds == null) {
-        this.state.coupleColorTempToLevelMinMireds = defaultMinMireds;
-      }
+      this.state.coupleColorTempToLevelMinMireds = minMireds;
       if (this.state.startUpColorTemperatureMireds == null) {
-        this.state.startUpColorTemperatureMireds = defaultMireds;
+        this.state.startUpColorTemperatureMireds = clampedDefault;
       }
 
       logger.debug(
