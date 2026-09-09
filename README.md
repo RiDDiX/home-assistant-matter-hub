@@ -38,7 +38,7 @@ of port forwarding etc.
 | Channel | Branch | Current Version | Description |
 |---------|--------|-----------------|-------------|
 | **Stable** | `main` | v2.0.57 | Production-ready, recommended for most users |
-| **Alpha** | `alpha` | v2.1.0-alpha.895 | Ahead of Stable, carries the additions listed under Alpha Features |
+| **Alpha** | `alpha` | v2.1.0-alpha.896 | Ahead of Stable, carries the additions listed under Alpha Features |
 | **Testing** | `testing` | v4.1.0-testing.x | ⚠️ **Highly unstable!** Experimental features, may break |
 
 ### Which version should I use?
@@ -328,7 +328,10 @@ Re-assign the affected devices to their rooms after they reconnect. See the [doc
 </details>
 
 <details>
-<summary><strong>🧪 Alpha Features (v2.1.0-alpha.895)</strong> - Click to expand</summary>
+<summary><strong>🧪 Alpha Features (v2.1.0-alpha.896)</strong> - Click to expand</summary>
+
+**v2.1.0-alpha.896:**
+- 💡 **Cool white lights load again after a restart**: a light that ran above 6800 K kept its color temperature in storage, and on the next start the bridge's default range no longer covered it, so matter.js refused the endpoint and the light was missing until the value changed. The range now widens around the stored value first ([#477](https://github.com/RiDDiX/home-assistant-matter-hub/issues/477)).
 
 **v2.1.0-alpha.895:**
 - 🔎 **Diagnostic export shows the connection attempts**: the export now keeps the PASE and CASE session setup lines and the failsafe expiry, lists every open session with its subscriptions, the host's network interfaces and mDNS settings (addresses replaced by their kind when anonymized), and the log levels it was taken at. A controller that never connects, or connects and never subscribes, is readable from the file instead of a debug log ([#477](https://github.com/RiDDiX/home-assistant-matter-hub/issues/477), [#478](https://github.com/RiDDiX/home-assistant-matter-hub/issues/478))
