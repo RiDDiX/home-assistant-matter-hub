@@ -1,17 +1,31 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   type HomeAssistantEntityState,
   HomeAssistantMatcherType,
 } from "@home-assistant-matter-hub/common";
-import { Logger } from "@matter/general";
-import { describe, expect, it } from "vitest";
+import { Environment, Logger, VariableService } from "@matter/general";
+import { VendorId } from "@matter/main";
+import { ServerNode } from "@matter/main/node";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { BridgeDataProvider } from "../../../services/bridges/bridge-data-provider.js";
 import { BridgeRegistry } from "../../../services/bridges/bridge-registry.js";
 import { EntityMappingSync } from "../../../services/bridges/entity-mapping-sync.js";
+import { EntityStateProvider } from "../../../services/bridges/entity-state-provider.js";
+import { HomeAssistantActions } from "../../../services/home-assistant/home-assistant-actions.js";
+import { HomeAssistantConfig } from "../../../services/home-assistant/home-assistant-config.js";
 import type {
   HomeAssistantRegistry,
   HomeAssistantStates,
 } from "../../../services/home-assistant/home-assistant-registry.js";
+import { AggregatorEndpoint } from "../aggregator-endpoint.js";
+import { updateEntityState } from "../update-entity-state.js";
 import { ComposedAirPurifierEndpoint } from "./composed-air-purifier-endpoint.js";
+
+vi.mock("../update-entity-state.js", () => ({
+  updateEntityState: vi.fn(async () => {}),
+}));
 
 // #461: a Mi Air Purifier burned 26% CPU because the composed endpoint was
 // rebuilt many times per second. Two causes: the filter life sensor (17%,
@@ -74,8 +88,8 @@ function haRegistry(withBattery: boolean): HomeAssistantRegistry {
   } as any;
 }
 
-function bridgeRegistry(withBattery = false): BridgeRegistry {
-  const dataProvider = new BridgeDataProvider({
+function dataProvider(): BridgeDataProvider {
+  return new BridgeDataProvider({
     id: "b",
     name: "b",
     port: 0,
@@ -96,7 +110,74 @@ function bridgeRegistry(withBattery = false): BridgeRegistry {
     } as any,
     // biome-ignore lint/suspicious/noExplicitAny: test fixture
   } as any);
-  return new BridgeRegistry(haRegistry(withBattery), dataProvider);
+}
+
+function bridgeRegistry(withBattery = false): BridgeRegistry {
+  return new BridgeRegistry(haRegistry(withBattery), dataProvider());
+}
+
+let dir: string;
+let env: Environment;
+let server: ServerNode | undefined;
+let counter = 0;
+
+beforeEach(() => {
+  dir = mkdtempSync(join(tmpdir(), "hamh-purifier461-"));
+  env = new Environment("test", Environment.default);
+  env.get(VariableService).set("storage.path", dir);
+  env.set(BridgeDataProvider, dataProvider());
+  env.set(HomeAssistantActions, {
+    call() {},
+    fireEvent() {},
+    // biome-ignore lint/suspicious/noExplicitAny: test stub
+  } as any);
+  env.set(HomeAssistantConfig, {
+    unitSystem: { temperature: "°C" },
+    // biome-ignore lint/suspicious/noExplicitAny: test stub
+  } as any);
+  env.set(EntityStateProvider, {
+    getState: () => undefined,
+    getNumericState: () => undefined,
+    getBatteryPercent: () => null,
+    // biome-ignore lint/suspicious/noExplicitAny: test stub
+  } as any);
+});
+
+afterEach(async () => {
+  await server?.close().catch(() => {});
+  server = undefined;
+  rmSync(dir, { recursive: true, force: true });
+});
+
+async function mount(endpoint: ComposedAirPurifierEndpoint) {
+  server = await ServerNode.create({
+    // biome-ignore lint/suspicious/noExplicitAny: env valid at runtime
+    environment: env as any,
+    id: `purifier461-node-${counter++}`,
+    network: { port: 0 },
+    commissioning: { passcode: 20202021, discriminator: 3840 },
+    basicInformation: { vendorId: VendorId(0xfff1), productId: 0x8000 },
+  });
+  const aggregator = new AggregatorEndpoint("aggregator");
+  await server.add(aggregator);
+  await aggregator.add(endpoint);
+}
+
+const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+async function mountedPurifier() {
+  const registry = bridgeRegistry(true);
+  const endpoint = await ComposedAirPurifierEndpoint.create({
+    registry,
+    primaryEntityId: FAN,
+    temperatureEntityId: TEMPERATURE,
+    batteryEntityId: BATTERY,
+    mapping: { entityId: FAN, batteryEntity: BATTERY },
+  });
+  expect(endpoint).toBeDefined();
+  await mount(endpoint!);
+  vi.mocked(updateEntityState).mockClear();
+  return endpoint!;
 }
 
 describe("#461 air purifier rebuild loop", () => {
@@ -132,5 +213,25 @@ describe("#461 air purifier rebuild loop", () => {
     expect(
       sync.fingerprintAsBuilt(mapping, FAN, endpoint!.mappedEntityIds),
     ).toBe(sync.computeFingerprint(mapping, FAN));
+  });
+
+  // a rebuild goes through close(), the queued flush used to land on the closed endpoint
+  it("flushes a queued update while the endpoint is open", async () => {
+    const endpoint = await mountedPurifier();
+    await endpoint.updateStates({
+      [FAN]: state(FAN, "on", { supported_features: 56, percentage: 40 }),
+    });
+    await delay(200);
+    expect(updateEntityState).toHaveBeenCalled();
+  });
+
+  it("drops a queued update when the endpoint is closed", async () => {
+    const endpoint = await mountedPurifier();
+    await endpoint.updateStates({
+      [FAN]: state(FAN, "on", { supported_features: 56, percentage: 40 }),
+    });
+    await endpoint.close();
+    await delay(200);
+    expect(updateEntityState).not.toHaveBeenCalled();
   });
 });

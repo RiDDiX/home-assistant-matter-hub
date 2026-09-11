@@ -214,10 +214,20 @@ export class ComposedClimateFanEndpoint extends Endpoint {
     await updateEntityState(endpoint, state);
   }
 
+  // a rebuild goes through close(), the queued flush must not outlive it (#461)
+  override async close() {
+    this.clearPendingUpdates();
+    await super.close();
+  }
+
   override async delete() {
+    this.clearPendingUpdates();
+    await super.delete();
+  }
+
+  private clearPendingUpdates() {
     for (const fn of this.debouncedUpdates.values()) {
       fn.clear();
     }
-    await super.delete();
   }
 }
