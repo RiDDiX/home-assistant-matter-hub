@@ -209,7 +209,10 @@ export class ServerModeBridge {
       await this.server.cancel();
     } catch (e) {
       const errorMessage = e instanceof Error ? e.message : String(e);
-      if (!errorMessage.includes("mutex-closed")) {
+      if (
+        !errorMessage.includes("mutex-closed") &&
+        !errorMessage.includes("mutex is closed")
+      ) {
         this.log.warn("Error stopping server mode bridge:", e);
       }
     }
