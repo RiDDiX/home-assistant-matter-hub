@@ -601,6 +601,7 @@ export class ServerModeEndpointManager extends Service {
           device: this.registry.deviceOf(primary),
           friendlyName:
             this.registry.initialState(primary)?.attributes?.friendly_name,
+          registryName: this.registryName(primary),
           mapping: primaryMapping,
           deviceType: primaryEndpoint?.type?.deviceType,
         });
@@ -657,6 +658,15 @@ export class ServerModeEndpointManager extends Service {
     }
   }
 
+  // bridge mode reads the flag in BasicInformationServer, server mode did not (#276)
+  private registryName(entityId: string): string | undefined {
+    if (this.dataProvider.featureFlags?.preferEntityRegistryName !== true) {
+      return undefined;
+    }
+    const entry = this.registry.entity(entityId);
+    return entry?.name ?? entry?.original_name ?? undefined;
+  }
+
   private async updateServerNodeIdentity(
     entityId: string,
     mapping: EntityMappingConfig | undefined,
@@ -669,7 +679,7 @@ export class ServerModeEndpointManager extends Service {
       entityId,
       device,
       mapping,
-      friendlyName,
+      this.registryName(entityId) ?? friendlyName,
     );
     const deviceType = endpoint?.type?.deviceType;
     if (deviceType != null) {

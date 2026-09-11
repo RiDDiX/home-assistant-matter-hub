@@ -86,7 +86,7 @@ interface HarnessOptions {
   flags?: Record<string, unknown>;
   entities?: Record<
     string,
-    { unique_id?: string; platform?: string; device_id?: string }
+    { unique_id?: string; platform?: string; device_id?: string; name?: string }
   >;
 }
 
@@ -289,6 +289,33 @@ describe("ServerModeEndpointManager (#301)", () => {
     expect(h.serverNode.updateDeviceIdentity.mock.calls[0][1]).toMatchObject({
       name: "New",
     });
+  });
+
+  // #276: server mode ignored preferEntityRegistryName
+  it("hands the registry name to the root node with preferEntityRegistryName", async () => {
+    const flagged = makeHarness(["light.one"], undefined, {
+      flags: { preferEntityRegistryName: true },
+      entities: { "light.one": { name: "Registry Name" } },
+    });
+    flagged.registry.initialState.mockReturnValue({
+      attributes: { friendly_name: "Friendly" },
+    });
+    await flagged.manager.refreshDevices();
+    expect(flagged.serverNode.updateDeviceIdentity).toHaveBeenCalledTimes(1);
+    expect(flagged.serverNode.updateDeviceIdentity.mock.calls[0][3]).toBe(
+      "Registry Name",
+    );
+
+    const plain = makeHarness(["light.one"], undefined, {
+      entities: { "light.one": { name: "Registry Name" } },
+    });
+    plain.registry.initialState.mockReturnValue({
+      attributes: { friendly_name: "Friendly" },
+    });
+    await plain.manager.refreshDevices();
+    expect(plain.serverNode.updateDeviceIdentity.mock.calls[0][3]).toBe(
+      "Friendly",
+    );
   });
 
   // The server node reports a failed identity write instead of throwing, so the
