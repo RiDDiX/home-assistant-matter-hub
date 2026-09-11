@@ -412,14 +412,15 @@ const featureFlagSchema: JSONSchema7 = {
     },
 
     wedgeWatchdog: {
-      title: "Wedge Watchdog (Apple 'Updating' workaround)",
+      title: "Wedge Watchdog (stuck controller workaround)",
       description:
         "Rotate the one session that looks wedged, subscriptions still alive " +
         "but no inbound request from the controller for about 45 minutes, " +
         "earlier than the blind session rotation. Targets Apple Home tiles " +
-        "stuck on 'Updating' where the controller keeps acking but stops " +
-        "consuming data. A false positive only triggers a transparent " +
-        "reconnect, the same as normal rotation. Default off.",
+        "stuck on 'Updating' and Alexa bridges whose devices all go " +
+        "unresponsive while the session keeps acking. A false positive only " +
+        "triggers a transparent reconnect, the same as normal rotation. " +
+        "Default off.",
       type: "boolean",
       default: false,
     },

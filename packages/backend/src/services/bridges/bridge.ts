@@ -476,7 +476,7 @@ export class Bridge {
 
     if (isHeapUnderPressure()) {
       this.log.warn(
-        "Force sync skipped: heap under pressure, reduce entities or raise NODE_OPTIONS=--max-old-space-size",
+        "Force sync skipped: heap under pressure, reduce entities or raise the heap (add-on: heap_size_mb, container: NODE_OPTIONS=--max-old-space-size)",
       );
       return 0;
     }

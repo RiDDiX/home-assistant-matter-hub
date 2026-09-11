@@ -811,7 +811,7 @@ export class SessionSupervisor {
         const port = this.dataProvider.port;
         if (alexaPairingPortProblem(fabric.rootVendorId, port)) {
           this.log.warn(
-            `Fabric added by Amazon Alexa (vendor ${fabric.rootVendorId}) on port ${port}. Alexa only completes pairing on port 5540, this attempt will roll back about 20s after AddNOC. Recreate the bridge on port 5540 (#401)`,
+            `Fabric added by Amazon Alexa (vendor ${fabric.rootVendorId}) on port ${port}. Alexa reliably completes pairing only on port 5540, this attempt will most likely roll back about 20s after AddNOC. Recreate the bridge on port 5540 (#401)`,
           );
         }
       };

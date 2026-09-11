@@ -1087,7 +1087,7 @@ export class BridgeEndpointManager extends Service {
         memoryLimitReached = true;
         this.log.error(
           "Memory pressure detected, skipping remaining entities to prevent OOM crash. " +
-            "Reduce the number of entities in this bridge or increase the Node.js heap size (NODE_OPTIONS=--max-old-space-size=1024).",
+            "Reduce the number of entities in this bridge or raise the heap (add-on: heap_size_mb option, container: NODE_OPTIONS=--max-old-space-size=1024).",
         );
       }
       if (memoryLimitReached) {
