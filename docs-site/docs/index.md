@@ -328,7 +328,15 @@ Home, ...) are not placed in the same network segment. Please make sure to revie
 </details>
 
 <details>
-<summary><strong>🧪 Alpha (v2.1.0-alpha.896)</strong></summary>
+<summary><strong>🧪 Alpha (v2.1.0-alpha.897)</strong></summary>
+
+**v2.1.0-alpha.897:**
+- 🔐 **The devices API keeps the camera's Home Assistant token to itself**: the WebRTC bridge lives in the camera endpoint's state, and the devices JSON behind the endpoint inspector printed its `haUrl` and `haToken`. The credentials are a private field now, and any key named token, secret or password is redacted in that output ([#155](https://github.com/RiDDiX/home-assistant-matter-hub/issues/155), [#373](https://github.com/RiDDiX/home-assistant-matter-hub/issues/373))
+- 🏷️ **Prefer Entity Registry Name applies in server mode**: only bridged devices read the flag, a standalone device kept the friendly name ([#276](https://github.com/RiDDiX/home-assistant-matter-hub/issues/276))
+- 🚫 **Water Leak Detector is marked unsupported on Alexa**: the mapping dialog warns before you pick the type that took a whole Alexa bridge offline ([#365](https://github.com/RiDDiX/home-assistant-matter-hub/issues/365))
+- 🧹 **A rebuilt composed device drops its pending update**: after a mapping change the old endpoint was closed with a 50 ms update still queued, which then failed on the closed endpoint ([#461](https://github.com/RiDDiX/home-assistant-matter-hub/issues/461))
+- 🔇 **Deleting a bridge no longer logs a mutex warning**: the shutdown guard looked for a message matter.js never sends
+- 📖 **Docs**: the vacuum "Updating" section describes the Wedge Watchdog and the 60 s report interval ([#287](https://github.com/RiDDiX/home-assistant-matter-hub/issues/287)), the Alexa section covers the 11-digit manual code, the Echo models that stop after the certification prompt and the Unique ID Suffix ([#478](https://github.com/RiDDiX/home-assistant-matter-hub/issues/478), [#449](https://github.com/RiDDiX/home-assistant-matter-hub/issues/449), [#385](https://github.com/RiDDiX/home-assistant-matter-hub/issues/385)), heap warnings name the add-on's `heap_size_mb` option ([#459](https://github.com/RiDDiX/home-assistant-matter-hub/issues/459))
 
 **v2.1.0-alpha.896:**
 - 💡 **Cool white lights load again after a restart**: a light that ran above 6800 K kept its color temperature in storage, and on the next start the bridge's default range no longer covered it, so matter.js refused the endpoint and the light was missing until the value changed. The range now widens around the stored value first ([#477](https://github.com/RiDDiX/home-assistant-matter-hub/issues/477)).
