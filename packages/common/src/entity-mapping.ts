@@ -862,9 +862,9 @@ export const matterDeviceTypeControllerSupport: Record<
   water_leak_detector: {
     apple: "yes",
     google: "no",
-    alexa: "yes",
+    alexa: "no",
     aqara: "yes",
-    note: "Apple added leak sensors in iOS 18.4.",
+    note: "Apple added leak sensors in iOS 18.4. Alexa has no capability for it and the 1.4 type can take the whole bridge offline there (issue #365).",
   },
   water_heater: { apple: "no", google: "no", alexa: "unknown", aqara: "yes" },
   water_heater_management: {
