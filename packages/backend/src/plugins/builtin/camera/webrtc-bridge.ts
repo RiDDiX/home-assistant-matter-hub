@@ -70,26 +70,29 @@ interface BridgeSession {
 }
 
 export class WebRtcBridge {
-  private connection?: Connection;
-  private readonly sessions = new Map<number, BridgeSession>();
+  // private fields: the devices API dumps every enumerable key of the camera state (#155)
+  #connection?: Connection;
+  readonly #sessions = new Map<number, BridgeSession>();
+  readonly #config: WebRtcBridgeConfig;
+  readonly #deps: WebRtcBridgeDeps;
 
-  constructor(
-    private readonly config: WebRtcBridgeConfig,
-    private readonly deps: WebRtcBridgeDeps = {},
-  ) {}
+  constructor(config: WebRtcBridgeConfig, deps: WebRtcBridgeDeps = {}) {
+    this.#config = config;
+    this.#deps = deps;
+  }
 
   private async ha(): Promise<Connection> {
-    if (this.connection) return this.connection;
-    if (this.deps.connect) {
-      this.connection = await this.deps.connect(this.config);
+    if (this.#connection) return this.#connection;
+    if (this.#deps.connect) {
+      this.#connection = await this.#deps.connect(this.#config);
     } else {
       const auth = createLongLivedTokenAuth(
-        this.config.haUrl,
-        this.config.haToken,
+        this.#config.haUrl,
+        this.#config.haToken,
       );
-      this.connection = await createConnection({ auth });
+      this.#connection = await createConnection({ auth });
     }
-    return this.connection;
+    return this.#connection;
   }
 
   // We offer to the controller; it answers. Pulls HA media first, then forwards.
@@ -119,7 +122,7 @@ export class WebRtcBridge {
     // Re-offer on an existing id: tear down the prior peers before replacing so
     // we do not leak werift connections.
     await this.closeExistingPeers(matterSessionId);
-    this.sessions.set(matterSessionId, { entityId, haPeer, controllerPeer });
+    this.#sessions.set(matterSessionId, { entityId, haPeer, controllerPeer });
 
     try {
       // 1) Offer to HA so HA answers and starts sending media to us.
@@ -134,7 +137,7 @@ export class WebRtcBridge {
         haOfferSdp,
         haPeer,
       );
-      const session = this.sessions.get(matterSessionId);
+      const session = this.#sessions.get(matterSessionId);
       if (session) {
         session.haSessionId = sessionId;
         session.haUnsubscribe = unsubscribe;
@@ -193,7 +196,7 @@ export class WebRtcBridge {
     // Re-offer on an existing id: tear down the prior peers before replacing so
     // we do not leak werift connections.
     await this.closeExistingPeers(matterSessionId);
-    this.sessions.set(matterSessionId, { entityId, haPeer, controllerPeer });
+    this.#sessions.set(matterSessionId, { entityId, haPeer, controllerPeer });
 
     try {
       // Pull media from HA (we offer, HA answers).
@@ -208,7 +211,7 @@ export class WebRtcBridge {
         haOfferSdp,
         haPeer,
       );
-      const session = this.sessions.get(matterSessionId);
+      const session = this.#sessions.get(matterSessionId);
       if (session) {
         session.haSessionId = sessionId;
         session.haUnsubscribe = unsubscribe;
@@ -241,7 +244,7 @@ export class WebRtcBridge {
     matterSessionId: number,
     sdp: string,
   ): Promise<void> {
-    const session = this.sessions.get(matterSessionId);
+    const session = this.#sessions.get(matterSessionId);
     if (!session) return;
     logger.debug(`controller answer applied for ${session.entityId}`);
     await session.controllerPeer.setRemoteDescription({ type: "answer", sdp });
@@ -254,7 +257,7 @@ export class WebRtcBridge {
     sdpMid: string | null,
     sdpMLineIndex?: number | null,
   ): Promise<void> {
-    const session = this.sessions.get(matterSessionId);
+    const session = this.#sessions.get(matterSessionId);
     if (!session) return;
     logger.debug(
       `controller ICE candidate for ${session.entityId}: ${candidate}`,
@@ -269,7 +272,7 @@ export class WebRtcBridge {
   // Close the peers of a session we are about to overwrite. Leaves no map
   // entry; the caller replaces it with fresh peers under the same id.
   private async closeExistingPeers(matterSessionId: number): Promise<void> {
-    const prior = this.sessions.get(matterSessionId);
+    const prior = this.#sessions.get(matterSessionId);
     if (!prior) return;
     logger.info(
       `replacing session ${matterSessionId} (${prior.entityId}), closing prior peers`,
@@ -286,10 +289,10 @@ export class WebRtcBridge {
   }
 
   async endSession(matterSessionId: number): Promise<void> {
-    const session = this.sessions.get(matterSessionId);
+    const session = this.#sessions.get(matterSessionId);
     if (!session) return;
     logger.info(`ending session ${matterSessionId} (${session.entityId})`);
-    this.sessions.delete(matterSessionId);
+    this.#sessions.delete(matterSessionId);
     if (session.haUnsubscribe) {
       await Promise.resolve(session.haUnsubscribe()).catch((err) =>
         logger.debug(`HA unsubscribe failed: ${errText(err)}`),
@@ -317,11 +320,11 @@ export class WebRtcBridge {
 
   // Grab a still JPEG via HA's camera proxy (for CaptureSnapshot).
   async snapshot(entityId: string): Promise<Uint8Array> {
-    const url = `${this.config.haUrl}/api/camera_proxy/${entityId}`;
+    const url = `${this.#config.haUrl}/api/camera_proxy/${entityId}`;
     let res: Response;
     try {
       res = await fetch(url, {
-        headers: { Authorization: `Bearer ${this.config.haToken}` },
+        headers: { Authorization: `Bearer ${this.#config.haToken}` },
       });
     } catch (err) {
       logger.info(`snapshot fetch failed for ${entityId}: ${errText(err)}`);
@@ -337,11 +340,11 @@ export class WebRtcBridge {
   }
 
   async close(): Promise<void> {
-    for (const id of [...this.sessions.keys()]) {
+    for (const id of [...this.#sessions.keys()]) {
       await this.endSession(id);
     }
-    this.connection?.close();
-    this.connection = undefined;
+    this.#connection?.close();
+    this.#connection = undefined;
   }
 
   // Forward every track HA sends into the matching pre-added controller sender.
