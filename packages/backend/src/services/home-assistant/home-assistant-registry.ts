@@ -222,7 +222,7 @@ export class HomeAssistantRegistry extends Service {
     const hash = createHash("md5");
     for (const e of entityRegistry) {
       hash.update(
-        `${e.entity_id}\0${e.device_id ?? ""}\0${e.disabled_by ?? ""}\0${e.hidden_by ?? ""}\0${e.area_id ?? ""}\0${(e.labels ?? []).join(",")}\0${e.platform ?? ""}\0${e.entity_category ?? ""}\n`,
+        `${e.entity_id}\0${e.device_id ?? ""}\0${e.disabled_by ?? ""}\0${e.hidden_by ?? ""}\0${e.area_id ?? ""}\0${(e.labels ?? []).join(",")}\0${e.platform ?? ""}\0${e.entity_category ?? ""}\0${e.name ?? ""}\0${e.original_name ?? ""}\n`,
       );
     }
     for (const s of statesList) {
@@ -230,7 +230,7 @@ export class HomeAssistantRegistry extends Service {
     }
     for (const d of deviceRegistry) {
       hash.update(
-        `${d.id}\0${(d.labels ?? []).join(",")}\0${d.area_id ?? ""}\0${d.name_by_user ?? ""}\0${d.name ?? ""}\0${d.model ?? ""}\n`,
+        `${d.id}\0${(d.labels ?? []).join(",")}\0${d.area_id ?? ""}\0${d.name_by_user ?? ""}\0${d.name ?? ""}\0${d.model ?? ""}\0${d.model_id ?? ""}\0${d.manufacturer ?? ""}\0${d.hw_version ?? ""}\0${d.sw_version ?? ""}\0${d.serial_number ?? ""}\n`,
       );
     }
     for (const l of labels) hash.update(`${l.label_id}\n`);

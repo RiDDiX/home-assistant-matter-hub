@@ -30,7 +30,7 @@ You can access the bridge configuration by opening the web UI:
 > See [this guide](../guides/connect-multiple-fabrics.md) for details how to set this up.
 
 > [!WARNING]
-> Alexa only completes pairing on port `5540`. On any other port the pairing rolls back about 20 seconds after AddNOC (#401), so only the bridge currently on `5540` can complete Alexa pairing.
+> Alexa reliably completes pairing only on port `5540`. On another port the pairing usually rolls back about 20 seconds after AddNOC (#401); a few setups paired on other ports, so treat `5540` as the safe choice for the bridge Alexa uses.
 >
 > Recommended multi-bridge setup: keep one bridge on `5540`, widen its filters to cover every entity Alexa should see, and pair Alexa with it. Other controllers are not limited to `5540`, so they can pair the other bridges or join the `5540` bridge as an extra fabric (see [this guide](../guides/connect-multiple-fabrics.md)).
 >

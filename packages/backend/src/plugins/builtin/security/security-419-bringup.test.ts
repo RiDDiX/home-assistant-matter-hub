@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { Environment, Logger, VariableService } from "@matter/general";
 import type { Endpoint } from "@matter/main";
 import { VendorId } from "@matter/main";
+import { BasicInformationServer } from "@matter/main/behaviors";
 import {
   ContactSensorDevice,
   OnOffPlugInUnitDevice,
@@ -83,6 +84,11 @@ async function bringUp() {
     manager,
   );
   await server.add(bem.root);
+  bem.setTopologyChangeHandler(async (change) => {
+    await server!.act("plugin topology change", (agent) =>
+      agent.get(BasicInformationServer).increaseConfigurationVersion(change),
+    );
+  });
   // Production order (bridge.ts runStart): the node starts before the plugins
   // register, so behavior events exist when the endpoint wiring attaches.
   await server.start();
@@ -114,11 +120,23 @@ describe("security plugin bring-up (#419)", () => {
     const { manager, endpoints } = await bringUp();
 
     expect([...endpoints.keys()]).toEqual([...MODE_IDS, "alarm"]);
-    for (const id of MODE_IDS) {
+    for (const [id, name] of [
+      ["mode_home", "Home"],
+      ["mode_away", "Away"],
+      ["mode_night", "Night"],
+      ["mode_vacation", "Vacation"],
+    ] as const) {
       expect(endpoints.get(id)!.type.deviceType).toBe(
         OnOffPlugInUnitDevice.deviceType,
       );
       expect(stateOf(endpoints.get(id)!).onOff.onOff).toBe(false);
+      expect(
+        stateOf(endpoints.get(id)!).bridgedDeviceBasicInformation,
+      ).toMatchObject({
+        nodeLabel: name,
+        productName: name,
+        productLabel: name,
+      });
     }
     expect(endpoints.get("alarm")!.type.deviceType).toBe(
       ContactSensorDevice.deviceType,
@@ -193,6 +211,178 @@ describe("security plugin bring-up (#419)", () => {
     expect([...bem.root.parts].length).toBe(5);
     expect(manager.getMetadata()[0].enabled).toBe(true);
 
+    await manager.shutdownAll();
+  });
+
+  it("increments the root configuration version when plugin endpoints change", async () => {
+    const { manager, bem } = await bringUp();
+
+    expect(server!.stateOf(BasicInformationServer).configurationVersion).toBe(
+      6,
+    );
+
+    await bem.disablePlugin("security");
+    expect(server!.stateOf(BasicInformationServer).configurationVersion).toBe(
+      11,
+    );
+
+    await manager.shutdownAll();
+  });
+
+  it("stays silent when a restart brings back the same devices", async () => {
+    const { manager, bem } = await bringUp();
+    const afterStart = server!.stateOf(
+      BasicInformationServer,
+    ).configurationVersion;
+    const devices = [...bem.root.parts]
+      .map((part) => part.id)
+      .filter((id) => id.startsWith("plugin_"))
+      .map((id) => ({
+        id: id.replace(/^plugin_/, ""),
+        name: id,
+        deviceType:
+          id === "plugin_alarm" ? "contact_sensor" : "on_off_plugin_unit",
+        clusters: [],
+      }));
+    const registered = (
+      manager as unknown as {
+        onDeviceRegistered?: (plugin: string, device: unknown) => Promise<void>;
+      }
+    ).onDeviceRegistered;
+    const batch = (
+      bem as unknown as {
+        duringPluginBatch(
+          run: () => Promise<void>,
+          announce: boolean,
+        ): Promise<void>;
+      }
+    ).duringPluginBatch.bind(bem);
+
+    await bem.stopPlugins();
+    await batch(async () => {
+      for (const device of devices) await registered?.("security", device);
+    }, true);
+
+    // Same devices, same numbers: controllers must not be told to re-discover.
+    expect(server!.stateOf(BasicInformationServer).configurationVersion).toBe(
+      afterStart,
+    );
+    await manager.shutdownAll();
+  });
+
+  it("announces a restart that brings back a different device set", async () => {
+    const { manager, bem } = await bringUp();
+    const afterStart = server!.stateOf(
+      BasicInformationServer,
+    ).configurationVersion;
+    const registered = (
+      manager as unknown as {
+        onDeviceRegistered?: (plugin: string, device: unknown) => Promise<void>;
+      }
+    ).onDeviceRegistered;
+    const batch = (
+      bem as unknown as {
+        duringPluginBatch(
+          run: () => Promise<void>,
+          announce: boolean,
+        ): Promise<void>;
+      }
+    ).duringPluginBatch.bind(bem);
+
+    // A plugin installed while the bridge was down shows up in the next start
+    // batch; controllers have to hear about it exactly once, not once a device.
+    await batch(async () => {
+      for (const id of ["late_one", "late_two"]) {
+        await registered?.("security", {
+          id,
+          name: id,
+          deviceType: "on_off_plugin_unit",
+          clusters: [],
+        });
+      }
+    }, true);
+
+    expect(server!.stateOf(BasicInformationServer).configurationVersion).toBe(
+      afterStart + 1,
+    );
+    await manager.shutdownAll();
+  });
+
+  it("announces a finished batch while another batch is still open", async () => {
+    const { manager, bem } = await bringUp();
+    const afterStart = server!.stateOf(
+      BasicInformationServer,
+    ).configurationVersion;
+    const registered = (
+      manager as unknown as {
+        onDeviceRegistered?: (plugin: string, device: unknown) => Promise<void>;
+      }
+    ).onDeviceRegistered;
+    const batch = (
+      bem as unknown as {
+        duringPluginBatch(
+          run: () => Promise<void>,
+          announce: boolean,
+        ): Promise<void>;
+      }
+    ).duringPluginBatch.bind(bem);
+
+    let releaseSilent: () => void = () => {};
+    const silent = batch(
+      () =>
+        new Promise<void>((resolve) => {
+          releaseSilent = resolve;
+        }),
+      false,
+    );
+    await batch(async () => {
+      await registered?.("security", {
+        id: "overlap_device",
+        name: "Overlap Device",
+        deviceType: "on_off_plugin_unit",
+        clusters: [],
+      });
+    }, true);
+
+    expect(server!.stateOf(BasicInformationServer).configurationVersion).toBe(
+      afterStart + 1,
+    );
+    releaseSilent();
+    await silent;
+    await manager.shutdownAll();
+  });
+
+  it("keeps parallel device registrations from dropping an endpoint", async () => {
+    const { manager, bem } = await bringUp();
+    const before = bem.root.parts.size;
+    // The path a plugin takes when it registers two devices concurrently.
+    const registered = (
+      manager as unknown as {
+        onDeviceRegistered?: (plugin: string, device: unknown) => Promise<void>;
+      }
+    ).onDeviceRegistered;
+
+    await Promise.all([
+      registered?.("security", {
+        id: "parallel_a",
+        name: "Parallel A",
+        deviceType: "on_off_plugin_unit",
+        clusters: [],
+      }),
+      registered?.("security", {
+        id: "parallel_b",
+        name: "Parallel B",
+        deviceType: "on_off_plugin_unit",
+        clusters: [],
+      }),
+    ]);
+
+    expect(bem.root.parts.size).toBe(before + 2);
+    const tracked = (
+      bem as unknown as { pluginEndpoints: Map<string, unknown> }
+    ).pluginEndpoints;
+    expect(tracked.has("parallel_a")).toBe(true);
+    expect(tracked.has("parallel_b")).toBe(true);
     await manager.shutdownAll();
   });
 

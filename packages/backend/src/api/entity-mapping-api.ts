@@ -86,6 +86,7 @@ export function entityMappingApi(
       disableClimateOnOff: body.disableClimateOnOff,
       disableClimateFanControl: body.disableClimateFanControl,
       climateKeepModeOnIdle: body.climateKeepModeOnIdle,
+      climateForceTurnOn: body.climateForceTurnOn,
       climateExposeFan: body.climateExposeFan,
       climateAutoMode: body.climateAutoMode,
       composedEntities: body.composedEntities,

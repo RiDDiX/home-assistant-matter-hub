@@ -204,8 +204,9 @@ export class BridgeRegistry {
     }
 
     // Fallback: enum-like HA battery sensors such as Overkiz full/normal/low.
-    // A classless sensor needs a real battery hint (unit "%" or "batt" in the
-    // id), otherwise things like last_clean_area=27 get mistaken for a battery.
+    // A classless sensor needs "batt" in its id, otherwise any percentage on
+    // the device gets mistaken for a battery: filter life, tank level,
+    // last_clean_area (#461).
     for (const entity of sameDevice) {
       if (!entity.entity_id.startsWith("sensor.")) continue;
 
@@ -216,9 +217,7 @@ export class BridgeRegistry {
         device_class?: string;
         unit_of_measurement?: string;
       };
-      const looksLikeBattery =
-        attrs.unit_of_measurement === "%" ||
-        entity.entity_id.toLowerCase().includes("batt");
+      const looksLikeBattery = entity.entity_id.toLowerCase().includes("batt");
       if (
         (attrs.device_class === "enum" ||
           (attrs.device_class == null && looksLikeBattery)) &&
@@ -305,6 +304,15 @@ export class BridgeRegistry {
    */
   isAutoComposedDevicesEnabled(): boolean {
     return this.dataProvider.featureFlags?.autoComposedDevices === true;
+  }
+
+  /**
+   * Check if the primary entity of a composed device lives on the parent
+   * endpoint instead of on its own sub-endpoint (#469). Off by default: it
+   * rewrites the endpoint tree of already commissioned composed devices.
+   */
+  isComposedPrimaryOnParentEnabled(): boolean {
+    return this.dataProvider.featureFlags?.composedPrimaryOnParent === true;
   }
 
   /**
@@ -762,6 +770,39 @@ export class BridgeRegistry {
       );
       return [];
     }
+  }
+
+  /**
+   * Find a charging-state entity that belongs to the same HA device, so a
+   * docked vacuum reports what the robot actually does instead of the
+   * "docked and below full means charging" guess (#450).
+   */
+  findChargingEntityForDevice(deviceId: string): string | undefined {
+    const entities = values(this.registry.entities);
+    const sameDevice = entities.filter((e) => e.device_id === deviceId);
+
+    // Home Assistant's own charging class first.
+    for (const entity of sameDevice) {
+      if (!entity.entity_id.startsWith("binary_sensor.")) continue;
+      const state = this.registry.states[entity.entity_id];
+      if (!state) continue;
+      const attrs = state.attributes as { device_class?: string };
+      if (attrs.device_class === "battery_charging") {
+        return entity.entity_id;
+      }
+    }
+
+    // Integrations that expose the charger as a plain state sensor, e.g.
+    // Xiaomi's sensor.<robot>_charging_state. Values the mapper does not know
+    // resolve to null later, and the endpoint keeps its old inference.
+    for (const entity of sameDevice) {
+      if (!entity.entity_id.startsWith("sensor.")) continue;
+      if (!entity.entity_id.endsWith("_charging_state")) continue;
+      if (this.registry.states[entity.entity_id]) {
+        return entity.entity_id;
+      }
+    }
+    return undefined;
   }
 
   /**

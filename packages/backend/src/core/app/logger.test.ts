@@ -39,4 +39,14 @@ describe("MATTER_TRAFFIC_FACILITIES", () => {
     // hides a controller aiming at a stale endpoint number.
     expect(categoryFor("CommandInvokeResponse")).toBe("matter-traffic");
   });
+
+  it("surfaces session establishment (#477, #478)", () => {
+    expect(categoryFor("CaseServer")).toBe("matter-traffic");
+    expect(categoryFor("PaseServer")).toBe("matter-traffic");
+    expect(categoryFor("FailsafeContext")).toBe("matter-traffic");
+  });
+
+  it("keeps the passcode-carrying Commissioning facility out", () => {
+    expect(categoryFor("Commissioning")).toBeUndefined();
+  });
 });

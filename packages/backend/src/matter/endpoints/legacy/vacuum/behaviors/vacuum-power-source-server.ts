@@ -13,12 +13,18 @@ export const VacuumPowerSourceServer = PowerSourceServer({
     // Vacuum is typically charging when docked
     return state === VacuumState.docked;
   },
-  getChargeState(_, agent) {
+  getChargeState(entity, agent) {
     const signal = getVacuumChargingState(agent);
     if (signal === "charging") return PowerSource.BatChargeState.IsCharging;
     if (signal === "full") return PowerSource.BatChargeState.IsAtFullCharge;
-    if (signal === "not_charging")
-      return PowerSource.BatChargeState.IsNotCharging;
+    if (signal === "not_charging") {
+      // A plain charging sensor only says on or off, so a robot that finished
+      // on its dock would drop from full to not charging (#206).
+      const percent = getVacuumBatteryPercent(entity, agent);
+      return percent != null && percent >= 100
+        ? PowerSource.BatChargeState.IsAtFullCharge
+        : PowerSource.BatChargeState.IsNotCharging;
+    }
     return null;
   },
 });

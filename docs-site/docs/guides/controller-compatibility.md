@@ -36,7 +36,7 @@ Rows flagged with a footnote number link to the vendor source that establishes t
 | `binary_sensor` | ContactSensor | ✅ | ✅ [¹](#sources) | ✅ [²](#sources) | ✅ [⁴](#sources) | ✅ |
 | `binary_sensor` | OccupancySensor | ✅ | ✅ [¹](#sources) | ✅ [²](#sources) | ✅ [⁴](#sources) | ✅ |
 | `binary_sensor` | SmokeCoAlarm | ✅ [⁵](#sources) | ✅ | ✅ [²](#sources) | ✅ [⁴](#sources) | ✅ |
-| `binary_sensor` (override) | WaterLeakDetector | ✅ [⁵](#sources) | ❌ [¹](#sources) | ⚠️ [²](#sources) | ✅ [⁴](#sources) | ❓ |
+| `binary_sensor` (override) | WaterLeakDetector | ✅ [⁵](#sources) | ❌ [¹](#sources) | ❌ [²](#sources) | ✅ [⁴](#sources) | ❓ |
 | `binary_sensor` (override) | WaterFreezeDetector | ❌ [⁵](#sources) | ❌ [¹](#sources) | ❌ [²](#sources) | ✅ [⁴](#sources) | ❓ |
 | `media_player` | Speaker | ❌ [⁵](#sources) | ✅ [¹](#sources) | ❌ [²](#sources) | ✅ [⁴](#sources) | ❓ |
 | `media_player` | BasicVideoPlayer | ❌ [⁵](#sources) | ❓ | ❓ | ✅ [⁴](#sources) | ❓ |

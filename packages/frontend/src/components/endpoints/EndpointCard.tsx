@@ -141,6 +141,10 @@ interface HomeAssistantEntityState {
     entity_id?: string;
     state?: {
       state?: string;
+      attributes?: {
+        unit_of_measurement?: string;
+        temperature_unit?: string;
+      };
     };
   };
   mapping?: {
@@ -178,6 +182,30 @@ const formatClusterValue = (value: unknown): string => {
     return keys.length === 0 ? "{}" : `{${keys.length} keys}`;
   }
   return String(value);
+};
+
+// Matter carries temperatures in 0.01 C. Show them in the unit Home Assistant
+// is set to: thermostats and water heaters carry it in the UI config cluster,
+// sensors and weather in their own attributes (#472).
+export const formatTemperature = (
+  centiCelsius: number,
+  state: Record<string, unknown>,
+): string => {
+  const displayMode = (
+    state.thermostatUserInterfaceConfiguration as
+      | { temperatureDisplayMode?: number }
+      | undefined
+  )?.temperatureDisplayMode;
+  const attributes = (
+    state.homeAssistantEntity as HomeAssistantEntityState | undefined
+  )?.entity?.state?.attributes;
+  const unit = attributes?.unit_of_measurement ?? attributes?.temperature_unit;
+  const celsius = centiCelsius / 100;
+  // 1 is Fahrenheit in ThermostatUserInterfaceConfiguration
+  if (displayMode === 1 || unit === "°F" || unit === "F") {
+    return `${(celsius * (9 / 5) + 32).toFixed(1)}°F`;
+  }
+  return `${celsius.toFixed(1)}°C`;
 };
 
 export interface EndpointCardProps {
@@ -423,8 +451,7 @@ export const EndpointCard = ({
 
     // Thermostat
     if (thermo?.localTemperature != null) {
-      const t = thermo.localTemperature / 100;
-      chips.push({ label: `${t.toFixed(1)}°C` });
+      chips.push({ label: formatTemperature(thermo.localTemperature, s) });
     }
     if (thermo?.systemMode !== undefined) {
       const modes: Record<number, string> = {
@@ -446,8 +473,7 @@ export const EndpointCard = ({
 
     // Temperature sensor
     if (temp?.measuredValue != null) {
-      const t = temp.measuredValue / 100;
-      chips.push({ label: `${t.toFixed(1)}°C` });
+      chips.push({ label: formatTemperature(temp.measuredValue, s) });
     }
 
     // Humidity sensor

@@ -8,18 +8,13 @@ import {
   ClimateDeviceFeature,
   SensorDeviceClass,
 } from "@home-assistant-matter-hub/common";
-import {
-  DestroyedDependencyError,
-  Logger,
-  TransactionDestroyedError,
-} from "@matter/general";
+import { Logger } from "@matter/general";
 import type { EndpointType } from "@matter/main";
 import debounce from "debounce";
 import { isEqual } from "lodash-es";
 import type { BridgeRegistry } from "../../../services/bridges/bridge-registry.js";
 import type { HomeAssistantStates } from "../../../services/home-assistant/home-assistant-registry.js";
 import { throttleLatest } from "../../../utils/throttle-latest.js";
-import { HomeAssistantEntityBehavior } from "../../behaviors/home-assistant-entity-behavior.js";
 import {
   EntityEndpoint,
   getMappedEntityIds,
@@ -29,6 +24,7 @@ import { ComposedClimateFanEndpoint } from "../composed/composed-climate-fan-end
 import { ComposedSensorEndpoint } from "../composed/composed-sensor-endpoint.js";
 import { UserComposedEndpoint } from "../composed/user-composed-endpoint.js";
 import { asStandaloneEndpointType } from "../standalone-endpoint-type.js";
+import { updateEntityState } from "../update-entity-state.js";
 import { createLegacyEndpointType } from "./create-legacy-endpoint-type.js";
 import { supportsCleaningModes } from "./vacuum/behaviors/vacuum-rvc-clean-mode-server.js";
 import type { VacuumEffectiveConfig } from "./vacuum/behaviors/vacuum-service-area-server.js";
@@ -100,7 +96,7 @@ export class LegacyEndpoint extends EntityEndpoint {
     let effectiveMapping = mapping;
     if (entity.device_id) {
       // 1. Auto-assign humidity entity to temperature sensors FIRST
-      // Only applies when autoHumidityMapping feature flag is enabled (default: false)
+      // Only applies when autoHumidityMapping feature flag is enabled (default: true)
       if (registry.isAutoHumidityMappingEnabled()) {
         const attrs = state.attributes as SensorDeviceAttributes;
         if (
@@ -175,6 +171,24 @@ export class LegacyEndpoint extends EntityEndpoint {
           registry.markBatteryEntityUsed(batteryEntityId);
           logger.debug(
             `Auto-assigned battery ${batteryEntityId} to ${entityId}`,
+          );
+        }
+      }
+
+      // A docked vacuum otherwise reports charging whenever it is below full,
+      // so take the device's own charging signal when it has one (#450).
+      if (isVacuum && !mapping?.chargingStateEntity) {
+        const chargingEntityId = registry.findChargingEntityForDevice(
+          entity.device_id,
+        );
+        if (chargingEntityId && chargingEntityId !== entityId) {
+          effectiveMapping = {
+            ...effectiveMapping,
+            entityId: effectiveMapping?.entityId ?? entityId,
+            chargingStateEntity: chargingEntityId,
+          };
+          logger.debug(
+            `Auto-assigned charging state ${chargingEntityId} to ${entityId}`,
           );
         }
       }
@@ -627,7 +641,6 @@ export class LegacyEndpoint extends EntityEndpoint {
     (state: HomeAssistantEntityState): void;
     clear(): void;
   };
-  private eventUpdateChain: Promise<void> = Promise.resolve();
 
   override async delete() {
     // Clear any pending debounce timers to prevent callbacks firing after deletion
@@ -659,7 +672,7 @@ export class LegacyEndpoint extends EntityEndpoint {
     if (mappedChanged) {
       this.pendingMappedChange = true;
       logger.debug(
-        `Mapped entity change detected for ${this.entityId}, forcing update`,
+        `Mapped entity change detected for ${this.entityId} (${this.changedMappedIds.join(", ")}), forcing update`,
       );
     }
     logger.debug(
@@ -670,71 +683,24 @@ export class LegacyEndpoint extends EntityEndpoint {
     // Event entities (buttons, doorbells) fire rapid sequential updates
     // (e.g. press_long then press_long_release 4ms later). The 50ms debounce
     // coalesces them, losing intermediate event_types. Process each update
-    // immediately and sequentially instead.
+    // immediately instead, updateEntityState keeps them in order.
     if (this.entityId.startsWith("event.")) {
-      this.eventUpdateChain = this.eventUpdateChain.then(() =>
-        this.flushPendingUpdate(state),
-      );
+      void this.flushPendingUpdate(state);
       return;
     }
     this.flushUpdate(state);
   }
 
   private async flushPendingUpdate(state: HomeAssistantEntityState) {
-    // Wait for endpoint to finish initializing before attempting state updates.
-    // During startup, factory reset, or device re-pairing, HA may send state
-    // updates while endpoints are still being constructed. Attempting setStateOf
-    // during initialization causes UninitializedDependencyError crashes.
-    try {
-      await this.construction.ready;
-    } catch {
-      // If construction fails, endpoint is unusable, skip the update
-      return;
+    // When only a mapped entity changed (e.g. battery sensor), the primary
+    // entity state is structurally identical. matter.js uses isDeepEqual on
+    // setStateOf, so the entity$Changed event would never fire. Bump
+    // last_updated to force a structural difference.
+    let effectiveState = state;
+    if (this.pendingMappedChange) {
+      this.pendingMappedChange = false;
+      effectiveState = { ...state, last_updated: new Date().toISOString() };
     }
-
-    try {
-      const current = this.stateOf(HomeAssistantEntityBehavior).entity;
-      // When only a mapped entity changed (e.g. battery sensor), the primary
-      // entity state is structurally identical. matter.js uses isDeepEqual on
-      // setStateOf, so the entity$Changed event would never fire. Bump
-      // last_updated to force a structural difference.
-      let effectiveState = state;
-      if (this.pendingMappedChange) {
-        this.pendingMappedChange = false;
-        effectiveState = { ...state, last_updated: new Date().toISOString() };
-      }
-      await this.setStateOf(HomeAssistantEntityBehavior, {
-        entity: { ...current, state: effectiveState },
-      });
-    } catch (error) {
-      const errorMessage =
-        error instanceof Error ? error.message : String(error);
-      // Suppress errors that are expected during normal shutdown:
-      // - TransactionDestroyedError: Transaction context destroyed after shutdown
-      // - DestroyedDependencyError: Endpoint was destroyed/deleted
-      // All other errors (crashes, invalid states, etc.) should propagate
-      if (
-        error instanceof TransactionDestroyedError ||
-        error instanceof DestroyedDependencyError
-      ) {
-        return;
-      }
-      // Suppress transient Matter.js errors that can happen while an endpoint is
-      // still being constructed/attached to a node (or during bridge refresh).
-      if (
-        errorMessage.includes(
-          "Endpoint storage inaccessible because endpoint is not a node and is not owned by another endpoint",
-        )
-      ) {
-        return;
-      }
-      // A closed or rebuilt endpoint has its behaviors detached, a late flush
-      // against it is moot. Rethrowing lands in the unawaited update chain and
-      // becomes an unhandled rejection (#450 CI).
-      if (errorMessage.includes("is not present on this endpoint")) {
-        return;
-      }
-      throw error;
-    }
+    await updateEntityState(this, effectiveState);
   }
 }

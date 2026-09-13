@@ -4,11 +4,7 @@ import type {
   HomeAssistantEntityInformation,
   HomeAssistantEntityState,
 } from "@home-assistant-matter-hub/common";
-import {
-  DestroyedDependencyError,
-  Logger,
-  TransactionDestroyedError,
-} from "@matter/general";
+import { Logger } from "@matter/general";
 import { Endpoint, type EndpointType } from "@matter/main";
 import { FixedLabelServer } from "@matter/main/behaviors";
 import { FanDevice } from "@matter/main/devices";
@@ -25,6 +21,7 @@ import {
 } from "../legacy/climate/behaviors/climate-companion-fan-control-server.js";
 import { climateSupportsAutoFanMode } from "../legacy/climate/behaviors/climate-fan-control-server.js";
 import { ClimateDevice } from "../legacy/climate/index.js";
+import { updateEntityState } from "../update-entity-state.js";
 
 const logger = Logger.get("ComposedClimateFanEndpoint");
 
@@ -74,7 +71,7 @@ export interface ComposedClimateFanConfig {
  */
 export class ComposedClimateFanEndpoint extends Endpoint {
   readonly entityId: string;
-  readonly mappedEntityIds: string[] = [];
+  readonly mappedEntityIds: string[];
   private subEndpointList: Endpoint[] = [];
   private lastStates = new Map<string, string>();
   private debouncedUpdates = new Map<
@@ -157,6 +154,12 @@ export class ComposedClimateFanEndpoint extends Endpoint {
       primaryEntityId,
       endpointId,
       [climateSub, fanSub],
+      // The mapping fingerprint only counts a battery as built when the
+      // endpoint maps it, otherwise the auto-map retry rebuilds this endpoint
+      // on every sensor update (#461).
+      mapping.batteryEntity && !mapping.disableBatteryMapping
+        ? [mapping.batteryEntity]
+        : [],
     );
     logger.info(`Created composed climate+fan endpoint ${primaryEntityId}`);
     return endpoint;
@@ -167,10 +170,12 @@ export class ComposedClimateFanEndpoint extends Endpoint {
     entityId: string,
     id: string,
     parts: Endpoint[],
+    mappedEntityIds: string[],
   ) {
     super(type, { id, parts });
     this.entityId = entityId;
     this.subEndpointList = parts;
+    this.mappedEntityIds = mappedEntityIds;
   }
 
   async updateStates(states: HomeAssistantStates): Promise<void> {
@@ -206,39 +211,23 @@ export class ComposedClimateFanEndpoint extends Endpoint {
     endpoint: Endpoint,
     state: HomeAssistantEntityState,
   ) {
-    try {
-      await endpoint.construction.ready;
-    } catch {
-      return;
-    }
-    try {
-      const current = endpoint.stateOf(HomeAssistantEntityBehavior).entity;
-      await endpoint.setStateOf(HomeAssistantEntityBehavior, {
-        entity: { ...current, state },
-      });
-    } catch (error) {
-      if (
-        error instanceof TransactionDestroyedError ||
-        error instanceof DestroyedDependencyError
-      ) {
-        return;
-      }
-      const message = error instanceof Error ? error.message : String(error);
-      if (
-        message.includes(
-          "Endpoint storage inaccessible because endpoint is not a node and is not owned by another endpoint",
-        )
-      ) {
-        return;
-      }
-      throw error;
-    }
+    await updateEntityState(endpoint, state);
+  }
+
+  // a rebuild goes through close(), the queued flush must not outlive it (#461)
+  override async close() {
+    this.clearPendingUpdates();
+    await super.close();
   }
 
   override async delete() {
+    this.clearPendingUpdates();
+    await super.delete();
+  }
+
+  private clearPendingUpdates() {
     for (const fn of this.debouncedUpdates.values()) {
       fn.clear();
     }
-    await super.delete();
   }
 }

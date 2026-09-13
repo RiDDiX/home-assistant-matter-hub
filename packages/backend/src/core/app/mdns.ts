@@ -3,7 +3,10 @@ import { Logger } from "@matter/general";
 import { type Environment, Network } from "@matter/main";
 import { MdnsService } from "@matter/main/protocol";
 import { FilteredNetwork } from "./filtered-network.js";
-import { selectMdnsInterface } from "./select-mdns-interface.js";
+import {
+  describeInterface,
+  selectMdnsInterface,
+} from "./select-mdns-interface.js";
 
 const logger = Logger.get("Mdns");
 
@@ -38,8 +41,9 @@ function warnAboutAdvertising(options: MdnsOptions) {
   if (options.networkInterface) {
     return;
   }
-  const suggestion = choice.selected
-    ? ` Likely LAN interface: ${choice.selected}.`
+  const picked = choice.candidates.find((i) => i.name === choice.selected);
+  const suggestion = picked
+    ? ` Likely LAN interface: ${describeInterface(picked)}.`
     : "";
   if (choice.hasThreadInterface) {
     logger.warn(
@@ -49,10 +53,8 @@ function warnAboutAdvertising(options: MdnsOptions) {
   if (!choice.suspicious) {
     return;
   }
-  const list = choice.external
-    .map((i) => `${i.name} (${i.ipv4[0] ?? i.ipv6[0] ?? "?"})`)
-    .join(", ");
+  const list = choice.candidates.map(describeInterface).join(", ");
   logger.warn(
-    `Matter mDNS is advertising on several interfaces including likely Docker-internal ones, so controllers may show devices as offline (#361). Set mdns-network-interface to your LAN interface.${suggestion} Interfaces: ${list}.`,
+    `Matter mDNS is advertising on several interfaces including likely Docker-internal ones, so controllers may show devices as offline (#361). If devices work, nothing to do; otherwise set mdns-network-interface to your LAN interface.${suggestion} Candidates: ${list}.`,
   );
 }

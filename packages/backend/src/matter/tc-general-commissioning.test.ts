@@ -64,12 +64,16 @@ async function mount(flags: Record<string, unknown>) {
 const gc = (node: ServerNode) => (node.state as any).generalCommissioning;
 
 describe("supportTermsAndConditions (#449)", () => {
-  it("picks the plain root endpoint with the flag off", () => {
-    expect(rootEndpointType({})).toBe(ServerNode.RootEndpoint);
-    expect(rootEndpointType(undefined)).toBe(ServerNode.RootEndpoint);
-    expect(rootEndpointType({ supportTermsAndConditions: true })).not.toBe(
-      ServerNode.RootEndpoint,
+  it("picks the plain commissioning server with the flag off", () => {
+    const plain = ServerNode.RootEndpoint.behaviors.generalCommissioning;
+    expect(rootEndpointType({}).behaviors.generalCommissioning).toBe(plain);
+    expect(rootEndpointType(undefined).behaviors.generalCommissioning).toBe(
+      plain,
     );
+    expect(
+      rootEndpointType({ supportTermsAndConditions: true }).behaviors
+        .generalCommissioning,
+    ).not.toBe(plain);
   });
 
   it("keeps TC off the wire without the flag", async () => {

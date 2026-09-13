@@ -112,6 +112,8 @@ If crashes persist:
 
 See the [Low-Resource Devices Guide](./guides/low-resource-devices.md) for detailed setup recommendations, and [#190](https://github.com/RiDDiX/home-assistant-matter-hub/issues/190) and [#141](https://github.com/RiDDiX/home-assistant-matter-hub/issues/141) for details.
 
+A crash that ends with `# Fatal error in , line 0`, `# unreachable code` and `Trace/breakpoint trap` is not an OOM kill. The abort happens inside the V8 engine and HAMH cannot catch it; what triggers it is not known yet, and the Alpine-based add-on prints no native stack frames after it. Turn on the add-on's **Watchdog** switch so the Supervisor restarts it automatically, and report it with the log lines from just before the crash, see [#479](https://github.com/RiDDiX/home-assistant-matter-hub/issues/479).
+
 ## Alexa loses connection after a few hours
 
 This is typically caused by stale sessions, Alexa goes offline but the bridge keeps the old session alive, blocking new subscriptions. The bridge includes an automatic force-sync mechanism that periodically pushes state updates to all connected controllers. If you still experience this:
@@ -262,8 +264,8 @@ Keep the custom names and entity mappings too: they are keyed by `entity_id`, an
 
 ## What's the difference between Stable and Alpha?
 
-- **Stable** (v2.0.56): Production-ready, recommended for daily use
-- **Alpha** (v2.1.0-alpha.895): ahead of Stable, see the Alpha Features list in the README; the next pre-release lands here first and may contain bugs
+- **Stable** (v2.0.57): Production-ready, recommended for daily use
+- **Alpha**: Currently level with Stable (v2.0.57); the next pre-release lands here first and may contain bugs
 
 See the [Alpha Features Guide](./guides/alpha-features.md) for details on alpha features.
 
@@ -317,7 +319,7 @@ Since v2.0.24, thermostats support **auto-resume**, when off and you set a tempe
 
 If not working:
 
-- Update to v2.0.36+ (current stable: v2.0.56)
+- Update to v2.0.36+ (current stable: v2.0.57)
 - Only works for single-temp mode (not range/auto)
 - Thermostat must be in "Off" state
 

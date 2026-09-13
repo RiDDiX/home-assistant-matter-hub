@@ -129,8 +129,7 @@ export class SessionSupervisor {
     private readonly defaultMaxAgeHours: number,
   ) {}
 
-  // after server.start(); wireSessionDiagnostics self-unwires first because
-  // factoryReset restarts without going through stop()
+  // after server.start(); rewiring is idempotent
   start(): void {
     this.wireSessionDiagnostics();
     this.wireFabricWarnings();
@@ -273,9 +272,8 @@ export class SessionSupervisor {
   }
 
   private wireSessionDiagnostics() {
-    // Drop any existing listener first. Factory reset restarts the bridge
-    // without going through stop(), so without this the old handler leaks and
-    // every session close is logged twice.
+    // Drop any existing listener first, or a restart stacks a second handler
+    // and every session close is logged twice.
     this.unwireSessionDiagnostics();
     try {
       const sessionManager = this.server.env.get(SessionManager);
@@ -805,7 +803,7 @@ export class SessionSupervisor {
   // completes AddNOC but never CASEs, so the fabric rolls back on failsafe
   // expiry ~20s later and the committed-fabric warning path never sees it (#401).
   private wireFabricWarnings() {
-    // Drop the old listener first so factory-reset restarts do not double-register.
+    // Drop the old listener first so a restart does not double-register.
     this.unwireFabricWarnings();
     try {
       const fabrics = this.server.env.get(FabricManager);
@@ -813,7 +811,7 @@ export class SessionSupervisor {
         const port = this.dataProvider.port;
         if (alexaPairingPortProblem(fabric.rootVendorId, port)) {
           this.log.warn(
-            `Fabric added by Amazon Alexa (vendor ${fabric.rootVendorId}) on port ${port}. Alexa only completes pairing on port 5540, this attempt will roll back about 20s after AddNOC. Recreate the bridge on port 5540 (#401)`,
+            `Fabric added by Amazon Alexa (vendor ${fabric.rootVendorId}) on port ${port}. Alexa reliably completes pairing only on port 5540, this attempt will most likely roll back about 20s after AddNOC. Recreate the bridge on port 5540 (#401)`,
           );
         }
       };

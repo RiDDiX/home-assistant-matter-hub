@@ -9,6 +9,7 @@ import { CommissioningServer } from "@matter/main/node";
 import { SessionManager } from "@matter/main/protocol";
 import type { LoggerService } from "../../core/app/logger.js";
 import type { ServerModeServerNode } from "../../matter/endpoints/server-mode-server-node.js";
+import { updateEntityState } from "../../matter/endpoints/update-entity-state.js";
 import {
   applyLegacySpecSessionParameters,
   specVersionValues,
@@ -208,7 +209,10 @@ export class ServerModeBridge {
       await this.server.cancel();
     } catch (e) {
       const errorMessage = e instanceof Error ? e.message : String(e);
-      if (!errorMessage.includes("mutex-closed")) {
+      if (
+        !errorMessage.includes("mutex-closed") &&
+        !errorMessage.includes("mutex is closed")
+      ) {
         this.log.warn("Error stopping server mode bridge:", e);
       }
     }
@@ -226,6 +230,9 @@ export class ServerModeBridge {
   async update(update: UpdateBridgeRequest): Promise<void> {
     try {
       this.dataProvider.update(update);
+      // Read live, so changes need no restart (#424).
+      this.server.hamhOmitEventsInPriming =
+        this.dataProvider.featureFlags?.omitEventsInPriming === true;
       await this.refreshDevices();
       // Re-evaluate auto force sync setting after config update
       if (this.status.code === BridgeStatus.Running) {
@@ -240,12 +247,25 @@ export class ServerModeBridge {
     }
   }
 
+  private resetInFlight?: Promise<void>;
+
   async factoryReset(): Promise<void> {
+    if (this.resetInFlight) {
+      return this.resetInFlight;
+    }
     if (this.status.code !== BridgeStatus.Running) {
       return;
     }
+    this.resetInFlight = this.runFactoryReset().finally(() => {
+      this.resetInFlight = undefined;
+    });
+    return this.resetInFlight;
+  }
+
+  private async runFactoryReset() {
+    // Regular stop first, same as the aggregator bridge.
+    await this.stop(BridgeStatus.Stopped, "Factory reset");
     await this.server.factoryReset();
-    this.setStatus({ code: BridgeStatus.Stopped });
     await this.start();
   }
 
@@ -338,12 +358,10 @@ export class ServerModeBridge {
         const behavior = device.stateOf(HomeAssistantEntityBehavior);
         const currentEntity = behavior.entity;
         if (currentEntity?.state) {
-          await device.setStateOf(HomeAssistantEntityBehavior, {
-            entity: {
-              ...currentEntity,
-              state: makeWarmStartState(currentEntity.state),
-            },
-          });
+          await updateEntityState(
+            device,
+            makeWarmStartState(currentEntity.state),
+          );
           pushed++;
         }
       } catch (e) {
@@ -403,12 +421,7 @@ export class ServerModeBridge {
 
           if (stateJson !== this.lastSyncedStates.get(device.entityId)) {
             // State has changed since last sync, push update
-            await device.setStateOf(HomeAssistantEntityBehavior, {
-              entity: {
-                ...currentEntity,
-                state: { ...currentEntity.state },
-              },
-            });
+            await updateEntityState(device, { ...currentEntity.state });
             this.lastSyncedStates.set(device.entityId, stateJson);
             synced++;
           }

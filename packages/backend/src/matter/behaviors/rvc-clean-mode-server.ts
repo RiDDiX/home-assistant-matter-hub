@@ -41,7 +41,10 @@ class RvcCleanModeServerBase extends Base {
     this.update(homeAssistant.entity);
     // offline: true so reactor writes commit independently and emit
     // subscription reports, matching the sibling RVC behaviors.
-    this.reactTo(homeAssistant.onChange, this.update, { offline: true });
+    this.reactTo(homeAssistant.onChange, this.update, {
+      offline: true,
+      lock: true,
+    });
   }
 
   private update(entity: HomeAssistantEntityInformation) {

@@ -10,6 +10,7 @@ import { CommissioningServer } from "@matter/main/node";
 import { SessionManager } from "@matter/main/protocol";
 import type { BetterLogger, LoggerService } from "../../core/app/logger.js";
 import { BridgeServerNode } from "../../matter/endpoints/bridge-server-node.js";
+import { updateEntityState } from "../../matter/endpoints/update-entity-state.js";
 import {
   applyLegacySpecSessionParameters,
   specVersionValues,
@@ -198,6 +199,15 @@ export class Bridge {
       this.endpointManager.root,
       this.serverOptions,
     );
+    this.endpointManager.setTopologyChangeHandler(async (change) => {
+      await this.server.act("plugin topology change", (agent) =>
+        agent.get(BasicInformationServer).increaseConfigurationVersion(change),
+      );
+      this.log.debugCtx("Matter topology configuration version increased", {
+        configurationVersion: this.server.stateOf(BasicInformationServer)
+          .configurationVersion,
+      });
+    });
     // rotation is opt-in on an aggregator bridge, one controller session
     // holds many devices
     this.sessions = new SessionSupervisor(
@@ -343,7 +353,10 @@ export class Bridge {
       // Ignore mutex-closed errors during shutdown - this is expected
       // when the environment is being disposed
       const errorMessage = e instanceof Error ? e.message : String(e);
-      if (!errorMessage.includes("mutex-closed")) {
+      if (
+        !errorMessage.includes("mutex-closed") &&
+        !errorMessage.includes("mutex is closed")
+      ) {
         this.log.warn("Error stopping bridge server:", e);
       }
     }
@@ -386,6 +399,9 @@ export class Bridge {
   async update(update: UpdateBridgeRequest) {
     try {
       this.dataProvider.update(update);
+      // Read live, so changes need no restart (#424).
+      this.server.hamhOmitEventsInPriming =
+        this.dataProvider.featureFlags?.omitEventsInPriming === true;
       await this.refreshDevices();
       // Re-evaluate auto force sync and session rotation after config update
       if (this.status.code === BridgeStatus.Running) {
@@ -399,12 +415,27 @@ export class Bridge {
     }
   }
 
+  private resetInFlight?: Promise<void>;
+
   async factoryReset() {
+    // A second request mid reset joins the first, it must not erase again.
+    if (this.resetInFlight) {
+      return this.resetInFlight;
+    }
     if (this.status.code !== BridgeStatus.Running) {
       return;
     }
+    this.resetInFlight = this.runFactoryReset().finally(() => {
+      this.resetInFlight = undefined;
+    });
+    return this.resetInFlight;
+  }
+
+  private async runFactoryReset() {
+    // Regular stop first, or the restart rejects every plugin as already
+    // registered (#477, #478).
+    await this.stop(BridgeStatus.Stopped, "Factory reset");
     await this.server.factoryReset();
-    this.setStatus({ code: BridgeStatus.Stopped });
     await this.start();
   }
 
@@ -445,7 +476,7 @@ export class Bridge {
 
     if (isHeapUnderPressure()) {
       this.log.warn(
-        "Force sync skipped: heap under pressure, reduce entities or raise NODE_OPTIONS=--max-old-space-size",
+        "Force sync skipped: heap under pressure, reduce entities or raise the heap (add-on: heap_size_mb, container: NODE_OPTIONS=--max-old-space-size)",
       );
       return 0;
     }
@@ -492,12 +523,7 @@ export class Bridge {
 
           if (stateJson !== lastJson) {
             // State has changed since last sync, push update
-            await endpoint.setStateOf(HomeAssistantEntityBehavior, {
-              entity: {
-                ...currentEntity,
-                state: { ...currentEntity.state },
-              },
-            });
+            await updateEntityState(endpoint, { ...currentEntity.state });
             this.lastSyncedStates.set(entityId, stateJson);
             syncedCount++;
           } else {

@@ -497,15 +497,19 @@ Since v2.0.27, HAMH reports the `IsCharging` state when the vacuum is docked and
 
 ### iPhone shows "Updating" but iPad works fine
 
-This one comes from [#287](https://github.com/RiDDiX/home-assistant-matter-hub/issues/287). On some iPhones running iOS 26.4.x, the vacuum tile gets stuck on "Updating" after roughly 5 days of normal use. The same vacuum on the same hub still works on iPad and via Siri, so the bridge itself is doing its job. The iPhone's HomeKit daemon stops renewing the Matter subscription after a while and never recovers on its own.
+This one comes from [#287](https://github.com/RiDDiX/home-assistant-matter-hub/issues/287). On some iPhones (reported from iOS 26.4 up to the iOS 27 beta), the vacuum tile gets stuck on "Updating" after a few days of normal use, sometimes right after a network drop. The same vacuum on the same hub still works on iPad and via Siri, so the bridge itself is doing its job. The iPhone's HomeKit daemon stops renewing the Matter subscription after a while and never recovers on its own.
 
 Rebooting the iPhone clears it for a few minutes. Pressing "Locate" in the Home app also unsticks the tile briefly, but it slips back as soon as you close the Home app again.
 
-This one sits on Apple's side. HAMH already pushes a keepalive every 55 seconds and forces fresh subscription reports for exactly this kind of stale tile. The bridge is sending data correctly, the iPhone just stops listening once the subscription has expired.
+This one sits on Apple's side, the matter.js maintainer confirmed the same behaviour independently. HAMH keeps the subscription's report interval at 60 seconds, so a fresh report goes out about once a minute even when nothing changed. The bridge is sending data correctly, the iPhone just stops listening once the subscription has expired.
+
+#### Wedge Watchdog
+
+The most targeted fix is **Bridge Settings → Wedge Watchdog** (Stable since v2.0.51, off by default). It watches every session and rotates only the one that keeps acknowledging reports but has not sent a single request for about 45 minutes, which is exactly what a stuck iPhone looks like. The phone re-establishes the session and the tile comes back without a reboot. Turn it on, then look for `Wedge watchdog: rotating session` lines in the log the next time the tile sticks. If the tile still sticks with the watchdog on, post that log window in [#287](https://github.com/RiDDiX/home-assistant-matter-hub/issues/287).
 
 #### Built-in session rotation
 
-Recent alpha builds rotate matter sessions automatically. Every 5 minutes the bridge looks for sessions older than the configured max age that still hold subscriptions, and gracefully closes them. The iPhone reacts by re-establishing CASE and re-subscribing, which clears the "Updating" tile without you doing anything.
+The bridge also rotates Matter sessions by age (Stable since v2.0.44 for Server Mode, on every bridge since v2.0.47). Every 5 minutes the bridge looks for sessions older than the configured max age that still hold subscriptions, and gracefully closes them. The iPhone reacts by re-establishing CASE and re-subscribing, which clears the "Updating" tile without you doing anything.
 
 Tune the threshold per bridge under **Bridge Settings → Session Rotation Max Age (hours)**. Default is 4. Set a smaller value if your tile gets stuck faster than that, or `0` to disable rotation entirely and rely on the manual workaround below. The change applies live, no add-on or Docker restart needed. Look for `Rotating session` lines in the logs to confirm the timer fired.
 

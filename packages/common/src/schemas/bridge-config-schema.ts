@@ -225,8 +225,10 @@ const featureFlagSchema: JSONSchema7 = {
     autoComposedDevices: {
       title: "Auto Composed Devices",
       description:
-        "Master toggle: combine related entities from the same Home Assistant device into a single Matter endpoint. " +
-        "Turns on battery, humidity, pressure, power, and energy auto-mapping at once, a Shelly Plug shows up as one device with power monitoring instead of several siblings.",
+        "A temperature sensor with its humidity and pressure sensors becomes one device with a sub-device per reading, " +
+        "battery on the parent. Off, they share one endpoint and Apple Home shows no humidity. Also forces battery, " +
+        "humidity and pressure auto-mapping on and unlocks Composed Sub-Entities and air purifier grouping. " +
+        "Controllers see new devices; existing ones change shape after a bridge restart.",
       type: "boolean",
       default: false,
     },
@@ -385,6 +387,18 @@ const featureFlagSchema: JSONSchema7 = {
       default: false,
     },
 
+    omitEventsInPriming: {
+      title: "Omit Events From Priming (Google offline workaround)",
+      description:
+        "Omit stored StartUp and BootReason events from priming reports. " +
+        "Some Google controllers ack chunks but do not answer the final event " +
+        "chunk, aborting the subscription and leaving the device offline " +
+        "(#424). Live events still work. Off-spec; enable only for affected " +
+        "Google fabrics. Applies to the next subscription. Default off.",
+      type: "boolean",
+      default: false,
+    },
+
     stableIdentity: {
       title: "Stable Device Identity",
       description:
@@ -398,14 +412,35 @@ const featureFlagSchema: JSONSchema7 = {
     },
 
     wedgeWatchdog: {
-      title: "Wedge Watchdog (Apple 'Updating' workaround)",
+      title: "Wedge Watchdog (stuck controller workaround)",
       description:
         "Rotate the one session that looks wedged, subscriptions still alive " +
         "but no inbound request from the controller for about 45 minutes, " +
         "earlier than the blind session rotation. Targets Apple Home tiles " +
-        "stuck on 'Updating' where the controller keeps acking but stops " +
-        "consuming data. A false positive only triggers a transparent " +
-        "reconnect, the same as normal rotation. Default off.",
+        "stuck on 'Updating' and Alexa bridges whose devices all go " +
+        "unresponsive while the session keeps acking. A false positive only " +
+        "triggers a transparent reconnect, the same as normal rotation. " +
+        "Default off.",
+      type: "boolean",
+      default: false,
+    },
+
+    composedPrimaryOnParent: {
+      title: "Composed Devices: Primary Entity On The Parent Endpoint",
+      description:
+        "For devices you group yourself with Composed Sub-Entities, needs " +
+        "autoComposedDevices on as well. Puts the primary entity on the parent " +
+        "endpoint instead of on an extra sub-endpoint, so the device advertises " +
+        "its own type (light, switch, ...) the way an uncomposed device does. " +
+        "Automatically composed sensors, air purifiers and climate/fan devices " +
+        "are not affected. Apple " +
+        "Home otherwise has no type to read on the parent and labels the whole " +
+        "accessory after one of the grouped entities, for example an outlet " +
+        "icon for a composed light. Takes effect after the bridge restarts, " +
+        "and changes the endpoint layout, so composed devices have to be " +
+        "removed and added again in your controller. Try it on one bridge " +
+        "first: Apple Home has been seen to stop listing the grouped entities " +
+        "once the parent carries its own device type. Default off.",
       type: "boolean",
       default: false,
     },

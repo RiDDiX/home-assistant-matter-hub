@@ -4,11 +4,7 @@ import type {
   HomeAssistantEntityState,
   SensorDeviceAttributes,
 } from "@home-assistant-matter-hub/common";
-import {
-  DestroyedDependencyError,
-  Logger,
-  TransactionDestroyedError,
-} from "@matter/general";
+import { Logger } from "@matter/general";
 import { Endpoint, type EndpointType } from "@matter/main";
 import { FixedLabelServer } from "@matter/main/behaviors";
 import {
@@ -43,6 +39,7 @@ import {
   type TemperatureMeasurementConfig,
   TemperatureMeasurementServer,
 } from "../../behaviors/temperature-measurement-server.js";
+import { updateEntityState } from "../update-entity-state.js";
 
 const logger = Logger.get("ComposedSensorEndpoint");
 
@@ -297,6 +294,7 @@ export class ComposedSensorEndpoint extends Endpoint {
     // Expose non-primary sub-entity IDs so bridge-endpoint-manager subscribes
     // to their state changes via WebSocket.
     const mappedIds: string[] = [];
+    if (config.batteryEntityId) mappedIds.push(config.batteryEntityId);
     if (config.humidityEntityId) mappedIds.push(config.humidityEntityId);
     if (config.pressureEntityId) mappedIds.push(config.pressureEntityId);
     if (config.powerEntityId) mappedIds.push(config.powerEntityId);
@@ -384,41 +382,23 @@ export class ComposedSensorEndpoint extends Endpoint {
     endpoint: Endpoint,
     state: HomeAssistantEntityState,
   ) {
-    try {
-      await endpoint.construction.ready;
-    } catch {
-      return;
-    }
+    await updateEntityState(endpoint, state);
+  }
 
-    try {
-      const current = endpoint.stateOf(HomeAssistantEntityBehavior).entity;
-      await endpoint.setStateOf(HomeAssistantEntityBehavior, {
-        entity: { ...current, state },
-      });
-    } catch (error) {
-      if (
-        error instanceof TransactionDestroyedError ||
-        error instanceof DestroyedDependencyError
-      ) {
-        return;
-      }
-      const errorMessage =
-        error instanceof Error ? error.message : String(error);
-      if (
-        errorMessage.includes(
-          "Endpoint storage inaccessible because endpoint is not a node and is not owned by another endpoint",
-        )
-      ) {
-        return;
-      }
-      throw error;
-    }
+  // a rebuild goes through close(), the queued flush must not outlive it (#461)
+  override async close() {
+    this.clearPendingUpdates();
+    await super.close();
   }
 
   override async delete() {
+    this.clearPendingUpdates();
+    await super.delete();
+  }
+
+  private clearPendingUpdates() {
     for (const fn of this.debouncedUpdates.values()) {
       fn.clear();
     }
-    await super.delete();
   }
 }

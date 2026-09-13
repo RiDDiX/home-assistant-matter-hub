@@ -2,6 +2,7 @@ import type { WaterHeaterDeviceAttributes } from "@home-assistant-matter-hub/com
 import { Logger } from "@matter/general";
 import type { EndpointType } from "@matter/main";
 import { ThermostatDevice } from "@matter/main/devices";
+import { toMatterTemp } from "../../../../utils/converters/temperature.js";
 import { BasicInformationServer } from "../../../behaviors/basic-information-server.js";
 import { HomeAssistantEntityBehavior } from "../../../behaviors/home-assistant-entity-behavior.js";
 import { IdentifyServer } from "../../../behaviors/identify-server.js";
@@ -17,19 +18,6 @@ const WaterHeaterDeviceType = ThermostatDevice.with(
   WaterHeaterThermostatServer,
   ThermostatUiConfigServer,
 );
-
-/**
- * Convert HA temperature to Matter temperature (0.01°C units).
- * Returns undefined if value is null/undefined/invalid.
- */
-export function toMatterTemp(
-  value: string | number | null | undefined,
-): number | undefined {
-  if (value == null) return undefined;
-  const num = typeof value === "string" ? Number.parseFloat(value) : value;
-  if (Number.isNaN(num)) return undefined;
-  return Math.round(num * 100);
-}
 
 export function WaterHeaterDevice(
   homeAssistantEntity: HomeAssistantEntityBehavior.State,

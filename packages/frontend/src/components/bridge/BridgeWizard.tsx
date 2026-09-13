@@ -95,9 +95,9 @@ interface FlagOption {
 const wizardFlags: FlagOption[] = [
   {
     key: "autoComposedDevices",
-    label: "Auto Compose Devices",
+    label: "Auto Composed Devices",
     description:
-      "Combine related entities (battery, humidity, pressure, power, energy) from the same HA device into a single Matter endpoint.",
+      "Temperature, humidity and pressure sensors of one device as one device with a sub-device per reading. Forces battery, humidity and pressure auto-mapping on. Controllers see new devices.",
   },
   {
     key: "autoForceSync",

@@ -6,11 +6,7 @@ import type {
   SensorDeviceAttributes,
 } from "@home-assistant-matter-hub/common";
 import { FanDeviceFeature } from "@home-assistant-matter-hub/common";
-import {
-  DestroyedDependencyError,
-  Logger,
-  TransactionDestroyedError,
-} from "@matter/general";
+import { Logger } from "@matter/general";
 import { Endpoint, type EndpointType } from "@matter/main";
 import { FixedLabelServer } from "@matter/main/behaviors";
 import type { FanControl } from "@matter/main/clusters";
@@ -48,6 +44,7 @@ import {
 import { AirPurifierHepaFilterMonitoringServer } from "../legacy/air-purifier/behaviors/air-purifier-hepa-filter-monitoring-server.js";
 import { FanFanControlServer } from "../legacy/fan/behaviors/fan-fan-control-server.js";
 import { FanOnOffServer } from "../legacy/fan/behaviors/fan-on-off-server.js";
+import { updateEntityState } from "../update-entity-state.js";
 
 const logger = Logger.get("ComposedAirPurifierEndpoint");
 
@@ -358,8 +355,12 @@ export class ComposedAirPurifierEndpoint extends Endpoint {
     });
 
     // Expose non-primary entity IDs so bridge-endpoint-manager subscribes to
-    // their state changes via WebSocket.
+    // their state changes via WebSocket. The battery belongs in here too: the
+    // mapping fingerprint only counts a battery as built when the endpoint
+    // maps it, otherwise the auto-map retry rebuilds this endpoint on every
+    // sensor update (#461).
     const mappedIds: string[] = [];
+    if (config.batteryEntityId) mappedIds.push(config.batteryEntityId);
     if (config.temperatureEntityId) mappedIds.push(config.temperatureEntityId);
     if (config.humidityEntityId) mappedIds.push(config.humidityEntityId);
     if (config.mapping?.filterLifeEntity)
@@ -460,41 +461,23 @@ export class ComposedAirPurifierEndpoint extends Endpoint {
     endpoint: Endpoint,
     state: HomeAssistantEntityState,
   ) {
-    try {
-      await endpoint.construction.ready;
-    } catch {
-      return;
-    }
+    await updateEntityState(endpoint, state);
+  }
 
-    try {
-      const current = endpoint.stateOf(HomeAssistantEntityBehavior).entity;
-      await endpoint.setStateOf(HomeAssistantEntityBehavior, {
-        entity: { ...current, state },
-      });
-    } catch (error) {
-      if (
-        error instanceof TransactionDestroyedError ||
-        error instanceof DestroyedDependencyError
-      ) {
-        return;
-      }
-      const errorMessage =
-        error instanceof Error ? error.message : String(error);
-      if (
-        errorMessage.includes(
-          "Endpoint storage inaccessible because endpoint is not a node and is not owned by another endpoint",
-        )
-      ) {
-        return;
-      }
-      throw error;
-    }
+  // a rebuild goes through close(), the queued flush must not outlive it (#461)
+  override async close() {
+    this.clearPendingUpdates();
+    await super.close();
   }
 
   override async delete() {
+    this.clearPendingUpdates();
+    await super.delete();
+  }
+
+  private clearPendingUpdates() {
     for (const fn of this.debouncedUpdates.values()) {
       fn.clear();
     }
-    await super.delete();
   }
 }

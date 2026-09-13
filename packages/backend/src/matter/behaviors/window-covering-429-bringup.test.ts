@@ -825,3 +825,54 @@ describe("#328 the tick that starts a movement withholds current", () => {
     expect(cap.currents.length).toBeGreaterThan(0);
   });
 });
+
+// The attribute list a controller reads at commissioning has to stay the list
+// it sees later. matter.js counts every movement in numberOfActuationsLift, a
+// persisted attribute that starts undefined, so a cover that has moved comes
+// back after a restart advertising attribute 0x0005 that it did not have when
+// the controller paired it (#456).
+describe("#456 attribute list stays stable across a restart", () => {
+  const attributeList = (endpoint: Endpoint) =>
+    (
+      (endpoint.state as Record<string, Record<string, unknown>>).windowCovering
+        .attributeList as number[]
+    )
+      .slice()
+      .sort((a, b) => a - b);
+
+  async function bootNode(nodeId: string) {
+    server = await ServerNode.create({
+      // biome-ignore lint/suspicious/noExplicitAny: env valid at runtime
+      environment: env as any,
+      id: nodeId,
+      network: { port: 0 },
+      commissioning: { passcode: 20202021, discriminator: 3840 },
+      basicInformation: { vendorId: VendorId(0xfff1), productId: 0x8000 },
+    });
+    const aggregator = new AggregatorEndpoint("aggregator");
+    await server.add(aggregator);
+    const endpoint = new Endpoint(
+      CoverDevice({ entity: coverEntity("open", 100) } as never),
+      { id: "blind" },
+    );
+    await aggregator.add(endpoint);
+    return endpoint;
+  }
+
+  it("keeps the lift attribute list identical after a move and a restart", async () => {
+    const nodeId = `cover456-node-${counter++}`;
+    const first = await bootNode(nodeId);
+    const before = attributeList(first);
+
+    await goToLift(first, 5000);
+    await drive(first, "open", 50);
+    await downOrClose(first);
+    await drive(first, "closed", 0);
+
+    await server?.close();
+    server = undefined;
+    const second = await bootNode(nodeId);
+
+    expect(attributeList(second)).toEqual(before);
+  });
+});

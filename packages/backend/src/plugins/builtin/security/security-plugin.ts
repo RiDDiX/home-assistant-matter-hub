@@ -4,7 +4,9 @@ import {
   callService,
   createConnection,
   createLongLivedTokenAuth,
+  type HassEntity,
 } from "home-assistant-js-websocket";
+import { sendHaMessage } from "../../../utils/send-ha-message.js";
 import type {
   MatterHubPlugin,
   PluginConfigSchema,
@@ -15,6 +17,7 @@ import {
   type ArmMode,
   alertsForTier,
   isPerimeterTrigger,
+  type ObservedSecurityState,
   type ResolvedSecurityLists,
   resolveSecurityLists,
   type SecurityEffects,
@@ -28,6 +31,7 @@ import {
 interface SecurityConfig {
   haUrl?: string;
   haToken?: string;
+  sourceAlarmPanel?: string;
   exitDelaySeconds?: number;
   entryDelaySeconds?: number;
   triggerTimeSeconds?: number;
@@ -92,6 +96,9 @@ const RETRY_MAX_MS = 60_000;
 // A service call that has not settled by then counts as failed, so a hung
 // socket cannot wedge the effect queue.
 const CALL_DEADLINE_MS = 10_000;
+// A source panel that swallows a write without any state change (Alarmo open
+// sensor refusal, missing entity) sends no event; reconcile the endpoints then.
+const SOURCE_WRITE_RECONCILE_MS = 5_000;
 
 // The machine snapshot plus the alert entities the current trip turned on.
 interface StoredSecurityState extends SecuritySnapshot {
@@ -112,9 +119,9 @@ type EffectTask = (
 // The state machine itself is pure, see security-state-machine.ts; this class
 // wires it to the plugin devices and to Home Assistant.
 //
-// Independent by design: this runs its own state machine in plugin storage.
-// Bridging an alarm_control_panel entity (Alarmo etc.) alongside it against
-// the same sensors gives two alarms that do not know about each other.
+// By default this runs its own state machine in plugin storage. When a source
+// alarm panel is configured, Home Assistant owns the alarm state: this plugin
+// mirrors that panel and forwards Matter mode writes back to it.
 export class SecurityPlugin implements MatterHubPlugin {
   readonly name = "security";
   readonly version = "0.1.0";
@@ -134,6 +141,14 @@ export class SecurityPlugin implements MatterHubPlugin {
   // Bumped on every teardown and bring-up; queued tasks from an older
   // generation never dispatch.
   private effectGeneration = 0;
+
+  // The mode a Matter write asked the source panel to arm; HA's arming and
+  // pending states carry no mode, this keeps the chosen switch on meanwhile.
+  private pendingArmMode: ArmMode | null = null;
+  private sourceWriteReconcile?: ReturnType<typeof setTimeout>;
+  // Bumped per source write; a settling call acts only when it is still the
+  // latest, so an old write cannot clear a newer write's pending mode.
+  private sourceWriteSeq = 0;
 
   private connection?: Connection;
   private unsubscribeEvents?: () => Promise<void> | void;
@@ -156,11 +171,11 @@ export class SecurityPlugin implements MatterHubPlugin {
     const stored = await context.storage.get<SecurityConfig>(CONFIG_KEY);
     this.config = { ...this.config, ...(stored ?? {}) };
     this.applyLists();
-    // Without a single trigger the alarm can never trip, so an untouched
-    // install must not spill five endpoints onto the bridge (#439).
+    // Without a trigger or source panel the alarm can never change, so an
+    // untouched install must not spill five endpoints onto the bridge (#439).
     if (!this.isConfigured()) {
       this.log.info(
-        "no trigger entities configured, the security devices stay unregistered",
+        "no trigger entities or source alarm panel configured, the security devices stay unregistered",
       );
       return;
     }
@@ -168,7 +183,7 @@ export class SecurityPlugin implements MatterHubPlugin {
   }
 
   private isConfigured(): boolean {
-    return this.watched.size > 0;
+    return this.watched.size > 0 || this.sourceAlarmPanel() != null;
   }
 
   private async bringUp(): Promise<void> {
@@ -180,29 +195,45 @@ export class SecurityPlugin implements MatterHubPlugin {
       this.effects(),
     );
     await this.registerDevices();
-    // A restart mid-armed comes back armed, see restore() for the resolution
-    // of interrupted delays.
     const state = await context.storage.get<StoredSecurityState>(STATE_KEY);
-    this.machine.restore(state);
-    // The resolved snapshot goes to disk before any of its effects dispatch.
-    await context.storage.flush?.();
-    if (state?.phase === "triggered") {
-      // The pre-restart trip's alert set travels in the snapshot. Old
-      // snapshots without it fall back to anything any tier could have
-      // started.
-      const known = state.activeAlerts;
-      if (this.machine.snapshot.phase === "triggered") {
-        // Still triggered: arm the first clear.
-        this.activeAlerts = known ?? this.allSilenceableAlerts();
-      } else {
-        // A finite trigger time resolved the restore out of triggered, so no
-        // disarm will ever clear the pre-restart sirens. Silence them now.
-        const candidates = (known ?? this.allSilenceableAlerts()).filter((id) =>
-          SILENCEABLE_ALERT_DOMAINS.has(id.split(".")[0]),
-        );
-        this.enqueueSilence(candidates);
+    if (this.sourceAlarmPanel()) {
+      if (state) {
+        this.machine.applyObservedState({
+          mode: state.mode,
+          phase: state.phase,
+        });
+      }
+      // Anything the local machine switched on has no owner in mirror mode;
+      // sweep it off instead of stranding a live siren.
+      const orphaned = [
+        ...new Set([...this.activeAlerts, ...(state?.activeAlerts ?? [])]),
+      ].filter((id) => SILENCEABLE_ALERT_DOMAINS.has(id.split(".")[0]));
+      if (orphaned.length > 0) this.enqueueSilence(orphaned);
+      this.activeAlerts = [];
+    } else {
+      // A restart mid-armed comes back armed, see restore() for the resolution
+      // of interrupted delays.
+      this.machine.restore(state);
+      if (state?.phase === "triggered") {
+        // The pre-restart trip's alert set travels in the snapshot. Old
+        // snapshots without it fall back to anything any tier could have
+        // started.
+        const known = state.activeAlerts;
+        if (this.machine.snapshot.phase === "triggered") {
+          // Still triggered: arm the first clear.
+          this.activeAlerts = known ?? this.allSilenceableAlerts();
+        } else {
+          // A finite trigger time resolved the restore out of triggered, so no
+          // disarm will ever clear the pre-restart sirens. Silence them now.
+          const candidates = (known ?? this.allSilenceableAlerts()).filter(
+            (id) => SILENCEABLE_ALERT_DOMAINS.has(id.split(".")[0]),
+          );
+          this.enqueueSilence(candidates);
+        }
       }
     }
+    // The resolved snapshot goes to disk before any of its effects dispatch.
+    await context.storage.flush?.();
     this.pushDeviceStates();
     this.startConnection();
   }
@@ -221,18 +252,26 @@ export class SecurityPlugin implements MatterHubPlugin {
   }
 
   async onConfigChanged(config: Record<string, unknown>): Promise<void> {
+    const previousSource = this.sourceAlarmPanel();
     this.config = config as SecurityConfig;
     await this.context?.storage.set(CONFIG_KEY, this.config);
     this.applyLists();
     if (!this.isConfigured()) {
       if (this.machine) {
-        this.log.info("trigger lists emptied, removing the security devices");
+        this.log.info(
+          "security config has no trigger entities or source alarm panel, removing the security devices",
+        );
         await this.tearDown();
       }
       return;
     }
     if (!this.machine) {
       // First real config: the devices mount now, no bridge restart needed.
+      await this.bringUp();
+      return;
+    }
+    if (previousSource !== this.sourceAlarmPanel()) {
+      await this.tearDown();
       await this.bringUp();
       return;
     }
@@ -288,6 +327,14 @@ export class SecurityPlugin implements MatterHubPlugin {
             "How long the alarm stays triggered before returning to the " +
             "state it was tripped from. 0 keeps it triggered until disarm.",
           default: 120,
+          required: false,
+        },
+        sourceAlarmPanel: {
+          type: "string",
+          title: "Source alarm panel",
+          description:
+            "Existing alarm_control_panel.* entity to mirror. When set, " +
+            "Home Assistant owns the state and Matter mode changes call its alarm services.",
           required: false,
         },
         homeSetters: entityList(
@@ -381,6 +428,7 @@ export class SecurityPlugin implements MatterHubPlugin {
     state: string,
     deviceClass?: string,
   ): void {
+    if (this.sourceAlarmPanel()) return;
     if (state !== "on" && state !== "open") return;
     if (!this.watched.has(entityId)) return;
     this.machine?.handleEntityOn(
@@ -395,6 +443,12 @@ export class SecurityPlugin implements MatterHubPlugin {
       (message) => this.log.warn(message),
     );
     this.watched = watchedTriggerEntities(this.lists);
+    const source = this.config.sourceAlarmPanel?.trim();
+    if (source && !source.startsWith("alarm_control_panel.")) {
+      this.log.warn(
+        `source alarm panel ignored, expected alarm_control_panel.* but got ${source}`,
+      );
+    }
   }
 
   private machineConfig(): SecurityMachineConfig {
@@ -486,6 +540,10 @@ export class SecurityPlugin implements MatterHubPlugin {
         clusters: [{ clusterId: "onOff", attributes: { onOff: false } }],
         onAttributeWrite: async (clusterId, attribute, value) => {
           if (clusterId !== "onOff" || attribute !== "onOff") return;
+          if (this.sourceAlarmPanel()) {
+            await this.handleSourceModeWrite(mode, value === true);
+            return;
+          }
           this.machine?.handleModeSwitch(mode, value === true);
         },
       });
@@ -499,6 +557,16 @@ export class SecurityPlugin implements MatterHubPlugin {
         { clusterId: "booleanState", attributes: { stateValue: true } },
       ],
     });
+  }
+
+  private sourceAlarmPanel(): string | undefined {
+    const raw = this.config.sourceAlarmPanel;
+    const source = typeof raw === "string" ? raw.trim() : undefined;
+    // Full-id match: HA treats a comma list as multiple targets, so a loose
+    // prefix check would let one setting fan writes out to several entities.
+    return source && /^alarm_control_panel\.[a-z0-9_]+$/.test(source)
+      ? source
+      : undefined;
   }
 
   // Reflect the restored snapshot onto the endpoints.
@@ -684,6 +752,14 @@ export class SecurityPlugin implements MatterHubPlugin {
   // Ran after every (re)connect: sirens first, then any setter batch a gap
   // swallowed, but only if the machine still stands where it did.
   private async flushAfterConnect(): Promise<void> {
+    if (this.sourceAlarmPanel()) {
+      // A silence left pending from local-mode operation still has to run,
+      // only the mode setters are void once a source panel owns the state.
+      await this.flushPendingSilence();
+      await this.context?.storage.delete(PENDING_SETTERS_KEY);
+      await this.syncSourceAlarmState();
+      return;
+    }
     await this.flushPendingSilence();
     const storage = this.context?.storage;
     if (!storage) return;
@@ -727,7 +803,7 @@ export class SecurityPlugin implements MatterHubPlugin {
   private async callWithDeadline(
     connection: Connection,
     domain: string,
-    service: "turn_on" | "turn_off",
+    service: string,
     entityId: string,
   ): Promise<void> {
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -809,7 +885,11 @@ export class SecurityPlugin implements MatterHubPlugin {
         return;
       }
       this.unsubscribeEvents = unsubscribe;
-      this.log.info(`watching ${this.watched.size} trigger entities`);
+      const source = this.sourceAlarmPanel();
+      this.log.info(
+        `watching ${this.watched.size} trigger entities` +
+          (source ? ` and source alarm panel ${source}` : ""),
+      );
       this.enqueueReconnect();
     } catch (e) {
       // Close the half-open socket before any retry.
@@ -849,6 +929,167 @@ export class SecurityPlugin implements MatterHubPlugin {
     this.connection?.close();
     this.connection = undefined;
     this.backoffMs = RETRY_BASE_MS;
+    if (this.sourceWriteReconcile) {
+      clearTimeout(this.sourceWriteReconcile);
+      this.sourceWriteReconcile = undefined;
+    }
+    // Invalidate in-flight source writes: a call resolving after this point
+    // fails the token check and cannot revive a timer or clear a pending mode
+    // that belongs to the next connection or source panel.
+    this.pendingArmMode = null;
+    this.sourceWriteSeq++;
+  }
+
+  private async syncSourceAlarmState(): Promise<void> {
+    const source = this.sourceAlarmPanel();
+    const connection = this.connection;
+    if (!source || !connection?.connected) return;
+    const generation = this.effectGeneration;
+    const writeSeq = this.sourceWriteSeq;
+    try {
+      const states = await sendHaMessage<HassEntity[]>(
+        connection,
+        { type: "get_states" },
+        CALL_DEADLINE_MS,
+      );
+      // A teardown or source change while the read was in flight makes the
+      // response stale; applying it would overwrite the successor machine.
+      // A write racing the read outranks it: the panel's answer to the write
+      // or the reconcile timer will carry the newer truth.
+      if (
+        generation !== this.effectGeneration ||
+        source !== this.sourceAlarmPanel() ||
+        connection !== this.connection ||
+        writeSeq !== this.sourceWriteSeq
+      ) {
+        return;
+      }
+      const sourceState = states.find((state) => state.entity_id === source);
+      if (!sourceState) {
+        this.log.warn(`source alarm panel ${source} was not found`);
+        return;
+      }
+      await this.mirrorSourceAlarmState(source, sourceState.state);
+    } catch (e) {
+      this.log.warn(`failed to read source alarm panel ${source}:`, e);
+    }
+  }
+
+  private async mirrorSourceAlarmState(
+    entityId: string,
+    state: string,
+  ): Promise<void> {
+    const observed = this.observedStateFromAlarmPanel(state);
+    if (!observed) {
+      this.log.debug(`source alarm panel ${entityId} state ignored: ${state}`);
+      return;
+    }
+    // disarmed keeps the timer running: it may be a stale read racing an arm
+    // write, and the timer is what clears the pending mode if nothing else
+    // settles the write.
+    if (this.sourceWriteReconcile && state !== "disarmed") {
+      clearTimeout(this.sourceWriteReconcile);
+      this.sourceWriteReconcile = undefined;
+    }
+    this.machine?.applyObservedState(observed);
+    this.pushDeviceStates();
+    await this.context?.storage.flush?.();
+  }
+
+  private observedStateFromAlarmPanel(
+    state: string,
+  ): ObservedSecurityState | undefined {
+    switch (state) {
+      case "disarmed":
+        // Deliberately keeps pendingArmMode: a stale connect-time read can
+        // deliver disarmed after an arm write; the arming event consumes the
+        // pending mode, the reconcile timer clears an unconsumed one.
+        return { mode: null, phase: "disarmed" };
+      case "armed_home":
+        this.pendingArmMode = null;
+        return { mode: "home", phase: "armed" };
+      case "armed_away":
+        this.pendingArmMode = null;
+        return { mode: "away", phase: "armed" };
+      case "armed_night":
+        this.pendingArmMode = null;
+        return { mode: "night", phase: "armed" };
+      case "armed_vacation":
+        this.pendingArmMode = null;
+        return { mode: "vacation", phase: "armed" };
+      case "arming":
+      case "pending": {
+        // No mode on the wire during entry and exit delays; a Matter-initiated
+        // arm knows the requested mode, keep that switch on instead of
+        // collapsing to disarmed for the whole delay. Consumed on first use so
+        // a keypad arm minutes later cannot inherit it; the machine snapshot
+        // carries the mode across later phase-only updates.
+        const pending = this.pendingArmMode;
+        this.pendingArmMode = null;
+        return pending ? { mode: pending, phase: state } : { phase: state };
+      }
+      case "triggered":
+        return { phase: state };
+      default:
+        return undefined;
+    }
+  }
+
+  private async handleSourceModeWrite(
+    mode: ArmMode,
+    on: boolean,
+  ): Promise<void> {
+    const source = this.sourceAlarmPanel();
+    const connection = this.connection;
+    if (!source || !connection?.connected) {
+      this.log.warn(
+        "source alarm panel write skipped, Home Assistant is not connected",
+      );
+      this.pushDeviceStates();
+      return;
+    }
+
+    const snapshot = this.machine?.snapshot;
+    // Off on the active mode disarms. A triggered panel with no known mode
+    // (panic trigger, restart while triggered) must stay disarmable, so any
+    // switch-off works there, same escape the local machine has.
+    const service = on
+      ? `alarm_arm_${mode}`
+      : (snapshot?.mode === mode && snapshot.phase !== "disarmed") ||
+          (snapshot?.mode == null && snapshot?.phase === "triggered")
+        ? "alarm_disarm"
+        : undefined;
+    if (!service) {
+      this.pushDeviceStates();
+      return;
+    }
+    this.pendingArmMode = on ? mode : null;
+    const token = ++this.sourceWriteSeq;
+
+    try {
+      await this.callWithDeadline(
+        connection,
+        "alarm_control_panel",
+        service,
+        source,
+      );
+      if (token !== this.sourceWriteSeq) return;
+      // The call resolving proves nothing: HA answers success even when the
+      // panel refuses (open sensor, missing entity) and then no state event
+      // ever arrives. Reconcile to the snapshot unless an event lands first.
+      if (this.sourceWriteReconcile) clearTimeout(this.sourceWriteReconcile);
+      this.sourceWriteReconcile = setTimeout(() => {
+        this.sourceWriteReconcile = undefined;
+        if (token !== this.sourceWriteSeq) return;
+        this.pendingArmMode = null;
+        this.pushDeviceStates();
+      }, SOURCE_WRITE_RECONCILE_MS);
+    } catch (e) {
+      this.log.warn(`${service} failed for source alarm panel ${source}:`, e);
+      if (token !== this.sourceWriteSeq) return;
+      this.pendingArmMode = null;
+      this.pushDeviceStates();
+    }
   }
 
   private handleStateChanged(event: HaStateChangedEvent): void {
@@ -858,6 +1099,10 @@ export class SecurityPlugin implements MatterHubPlugin {
     // state_changed also fires on attribute-only updates; only a real state
     // entry counts.
     if (event.data?.old_state?.state === newState.state) return;
+    if (entityId === this.sourceAlarmPanel()) {
+      void this.mirrorSourceAlarmState(entityId, newState.state);
+      return;
+    }
     this.handleTriggerEvent(
       entityId,
       newState.state,

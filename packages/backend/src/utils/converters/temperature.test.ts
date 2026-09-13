@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { Temperature } from "./temperature.js";
+import { Temperature, toMatterTemp } from "./temperature.js";
 
 describe("Temperature", () => {
   describe("withUnit", () => {
@@ -88,5 +88,21 @@ describe("Temperature", () => {
       const a = Temperature.celsius(100)!;
       expect(a.equals(undefined)).toBe(false);
     });
+  });
+});
+
+describe("matter clamp (#470)", () => {
+  it("pins celsius(true) to the int16 range", () => {
+    expect(Temperature.fahrenheit(900)!.celsius(true)).toBe(32767);
+    expect(Temperature.celsius(-300)!.celsius(true)).toBe(-27315);
+    expect(Temperature.fahrenheit(500)!.celsius(true)).toBe(26000);
+  });
+
+  it("clamps registration values without converting them", () => {
+    expect(toMatterTemp(500)).toBe(32767);
+    expect(toMatterTemp("-999")).toBe(-27315);
+    expect(toMatterTemp(21.5)).toBe(2150);
+    expect(toMatterTemp(null)).toBeUndefined();
+    expect(toMatterTemp("abc")).toBeUndefined();
   });
 });

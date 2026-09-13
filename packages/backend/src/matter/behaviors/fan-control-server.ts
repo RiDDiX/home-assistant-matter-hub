@@ -226,7 +226,13 @@ export class FanControlServerBase extends FeaturedBase {
 
     const homeAssistant = await this.agent.load(HomeAssistantEntityBehavior);
     this.update(homeAssistant.entity);
-    this.reactTo(homeAssistant.onChange, this.update);
+    // update() persists the remembered speed through the memory behavior, so
+    // that one has to be locked too or its write still gets dropped (#464).
+    this.reactTo(homeAssistant.onChange, this.update, {
+      lock: this.agent.has(FanSpeedMemoryBehavior)
+        ? [this, this.agent.get(FanSpeedMemoryBehavior)]
+        : true,
+    });
     this.reactTo(
       this.events.percentSetting$Changed,
       this.targetPercentSettingChanged,

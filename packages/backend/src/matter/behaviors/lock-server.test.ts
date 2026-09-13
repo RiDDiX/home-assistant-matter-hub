@@ -89,6 +89,7 @@ function makeEnv(storage: FakeStorage) {
 }
 
 const ENTITY = "lock.front_door";
+const PIN_LENGTHS = { min: 4, max: 8 };
 
 describe("normalizeSupportedIndex", () => {
   it("maps 0 (allocate any free slot) to the single supported slot", () => {
@@ -130,6 +131,7 @@ describe("applySetCredential", () => {
         userType: null,
       },
       3,
+      PIN_LENGTHS,
     );
 
     expect(response.status).toBe(0x00);
@@ -138,6 +140,54 @@ describe("applySetCredential", () => {
     const stored = storage.getCredential(ENTITY);
     expect(stored?.creatorFabricIndex).toBe(3);
     expect(stored?.lastModifiedFabricIndex).toBe(3);
+  });
+
+  // A zero length Uint8Array is truthy, so the empty PIN used to be stored and
+  // then satisfied the very PIN check it switched on.
+  it("rejects an empty PIN", async () => {
+    const response = await applySetCredential(
+      makeEnv(storage),
+      ENTITY,
+      {
+        operationType: DoorLock.DataOperationType.Add,
+        credential: {
+          credentialType: DoorLock.CredentialType.Pin,
+          credentialIndex: 1,
+        },
+        credentialData: new Uint8Array(0),
+        userIndex: 1,
+        userStatus: null,
+        userType: null,
+      },
+      3,
+      PIN_LENGTHS,
+    );
+
+    expect(response.status).not.toBe(0x00);
+    expect(storage.hasCredential(ENTITY)).toBe(false);
+  });
+
+  it("rejects a PIN longer than the advertised maximum", async () => {
+    const response = await applySetCredential(
+      makeEnv(storage),
+      ENTITY,
+      {
+        operationType: DoorLock.DataOperationType.Add,
+        credential: {
+          credentialType: DoorLock.CredentialType.Pin,
+          credentialIndex: 1,
+        },
+        credentialData: new TextEncoder().encode("123456789"),
+        userIndex: 1,
+        userStatus: null,
+        userType: null,
+      },
+      3,
+      PIN_LENGTHS,
+    );
+
+    expect(response.status).not.toBe(0x00);
+    expect(storage.hasCredential(ENTITY)).toBe(false);
   });
 
   it("also accepts credentialIndex 1", async () => {
@@ -156,6 +206,7 @@ describe("applySetCredential", () => {
         userType: null,
       },
       undefined,
+      PIN_LENGTHS,
     );
     expect(response.status).toBe(0x00);
     expect(response.userIndex).toBe(1);
@@ -177,6 +228,7 @@ describe("applySetCredential", () => {
         userType: null,
       },
       undefined,
+      PIN_LENGTHS,
     );
     expect(response.status).toBe(0x01);
     expect(response.userIndex).toBeNull();
@@ -199,6 +251,7 @@ describe("applySetCredential", () => {
         userType: null,
       },
       undefined,
+      PIN_LENGTHS,
     );
     expect(response.status).toBe(0x01);
   });
@@ -219,6 +272,7 @@ describe("applySetCredential", () => {
         userType: null,
       },
       undefined,
+      PIN_LENGTHS,
     );
     expect(response.status).toBe(0x01);
   });
@@ -405,6 +459,7 @@ describe("Apple Home setup flow parity", () => {
         userType: null,
       },
       5,
+      PIN_LENGTHS,
     );
 
     expect(setCredentialResponse.status).toBe(0x00);
@@ -509,5 +564,204 @@ describe("usercode passthrough builders (#418)", () => {
       action: "zha.clear_lock_user_code",
       data: { code_slot: 2 },
     });
+  });
+});
+
+describe("SetCredential ownership rules", () => {
+  let storage: FakeStorage;
+
+  beforeEach(() => {
+    storage = new FakeStorage();
+  });
+
+  async function add(fabric: number, pin = "1234") {
+    return applySetCredential(
+      makeEnv(storage),
+      ENTITY,
+      {
+        operationType: DoorLock.DataOperationType.Add,
+        credential: {
+          credentialType: DoorLock.CredentialType.Pin,
+          credentialIndex: 1,
+        },
+        credentialData: new TextEncoder().encode(pin),
+        userIndex: 1,
+        userStatus: null,
+        userType: null,
+      } as never,
+      fabric,
+      PIN_LENGTHS,
+    );
+  }
+
+  async function modify(fabric: number, pin = "5678") {
+    return applySetCredential(
+      makeEnv(storage),
+      ENTITY,
+      {
+        operationType: DoorLock.DataOperationType.Modify,
+        credential: {
+          credentialType: DoorLock.CredentialType.Pin,
+          credentialIndex: 1,
+        },
+        credentialData: new TextEncoder().encode(pin),
+        userIndex: 1,
+        userStatus: null,
+        userType: null,
+      } as never,
+      fabric,
+      PIN_LENGTHS,
+    );
+  }
+
+  it("refuses to Add over an occupied slot", async () => {
+    expect((await add(3)).status).toBe(0x00);
+    expect((await add(3)).status).not.toBe(0x00);
+    expect(storage.getCredential(ENTITY)?.pinCodeHash).toBe("hash:1234");
+  });
+
+  it("refuses to Modify a slot that has no PIN", async () => {
+    expect((await modify(3)).status).not.toBe(0x00);
+  });
+
+  it("refuses a Modify from another fabric", async () => {
+    await add(3);
+    expect((await modify(4)).status).not.toBe(0x00);
+    expect(storage.getCredential(ENTITY)?.pinCodeHash).toBe("hash:1234");
+  });
+
+  it("lets the creating fabric Modify", async () => {
+    await add(3);
+    expect((await modify(3)).status).toBe(0x00);
+    expect(storage.getCredential(ENTITY)?.pinCodeHash).toBe("hash:5678");
+  });
+
+  it("still allows Add after SetUser reserved the slot without a PIN", async () => {
+    await applySetUser(
+      makeEnv(storage),
+      ENTITY,
+      {
+        operationType: DoorLock.DataOperationType.Add,
+        userIndex: 1,
+        userName: "Front",
+        userUniqueId: 1,
+        userStatus: null,
+        userType: null,
+        credentialRule: null,
+      } as never,
+      3,
+    );
+    expect((await add(3)).status).toBe(0x00);
+  });
+});
+
+describe("SetUser ownership rules", () => {
+  let storage: FakeStorage;
+
+  beforeEach(() => {
+    storage = new FakeStorage();
+  });
+
+  function request(op: "Add" | "Modify", userName: string | null) {
+    return {
+      operationType: DoorLock.DataOperationType[op],
+      userIndex: 1,
+      userName,
+      userUniqueId: null,
+      userStatus: null,
+      userType: null,
+      credentialRule: null,
+    } as never;
+  }
+
+  it("refuses to Add over an occupied user slot", async () => {
+    await applySetUser(makeEnv(storage), ENTITY, request("Add", "Front"), 3);
+    await expect(
+      applySetUser(makeEnv(storage), ENTITY, request("Add", "Other"), 3),
+    ).rejects.toThrow();
+  });
+
+  it("refuses to Modify a user slot that does not exist", async () => {
+    await expect(
+      applySetUser(makeEnv(storage), ENTITY, request("Modify", "Front"), 3),
+    ).rejects.toThrow();
+  });
+
+  it("refuses a rename from another fabric", async () => {
+    await applySetUser(makeEnv(storage), ENTITY, request("Add", "Front"), 3);
+    await expect(
+      applySetUser(makeEnv(storage), ENTITY, request("Modify", "Theirs"), 4),
+    ).rejects.toThrow();
+    expect(storage.getCredential(ENTITY)?.userName).toBe("Front");
+  });
+});
+
+describe("physical programming failures", () => {
+  let storage: FakeStorage;
+
+  beforeEach(() => {
+    storage = new FakeStorage();
+  });
+
+  const failing = {
+    service: "zha.set_lock_user_code",
+    slot: 1,
+    program: async () => {
+      throw new Error("lock said no");
+    },
+  };
+
+  it("does not store a PIN the lock refused", async () => {
+    const response = await applySetCredential(
+      makeEnv(storage),
+      ENTITY,
+      {
+        operationType: DoorLock.DataOperationType.Add,
+        credential: {
+          credentialType: DoorLock.CredentialType.Pin,
+          credentialIndex: 1,
+        },
+        credentialData: new TextEncoder().encode("1234"),
+        userIndex: 1,
+        userStatus: null,
+        userType: null,
+      } as never,
+      3,
+      PIN_LENGTHS,
+      failing,
+    );
+
+    expect(response.status).not.toBe(0x00);
+    expect(storage.hasCredential(ENTITY)).toBe(false);
+  });
+
+  it("keeps the PIN when the lock could not clear it", async () => {
+    await applySetCredential(
+      makeEnv(storage),
+      ENTITY,
+      {
+        operationType: DoorLock.DataOperationType.Add,
+        credential: {
+          credentialType: DoorLock.CredentialType.Pin,
+          credentialIndex: 1,
+        },
+        credentialData: new TextEncoder().encode("1234"),
+        userIndex: 1,
+        userStatus: null,
+        userType: null,
+      } as never,
+      3,
+      PIN_LENGTHS,
+    );
+
+    await expect(
+      applyClearCredential(
+        makeEnv(storage),
+        ENTITY,
+        { credential: null } as never,
+        failing,
+      ),
+    ).rejects.toThrow();
+    expect(storage.hasCredential(ENTITY)).toBe(true);
   });
 });

@@ -229,3 +229,112 @@ describe("operational state with unknown battery (#450)", () => {
     ).toBe(OperationalState.Charging);
   });
 });
+
+// A docked vacuum reported charging whenever it sat below full. When the device
+// has its own charging signal, that entity is mapped automatically now (#450).
+
+function chargingRegistry(
+  chargingEntityId: string,
+  chargingState: string,
+  attributes: Record<string, unknown>,
+): { reg: BridgeRegistry; states: Record<string, HomeAssistantEntityState> } {
+  const chargingAttributes = chargingEntityId.startsWith("binary_sensor.")
+    ? { device_class: "battery_charging" }
+    : {};
+  const states: Record<string, HomeAssistantEntityState> = {
+    [VACUUM]: vacuumState(attributes),
+    [chargingEntityId]: {
+      entity_id: chargingEntityId,
+      state: chargingState,
+      attributes: chargingAttributes,
+      context: { id: "ctx" },
+      last_changed: "2026-01-01T00:00:00",
+      last_updated: "2026-01-01T00:00:00",
+    },
+  };
+  const haRegistry = {
+    areas: new Map(),
+    devices: { [DEVICE]: { id: DEVICE, name: "Robot" } },
+    entities: {
+      [VACUUM]: registryEntity(VACUUM),
+      [chargingEntityId]: registryEntity(chargingEntityId),
+    },
+    labels: [],
+    states,
+  } as unknown as HomeAssistantRegistry;
+  return { reg: new BridgeRegistry(haRegistry, dataProvider()), states };
+}
+
+async function mountWithCharging(
+  chargingEntityId: string,
+  chargingState: string,
+  attributes: Record<string, unknown>,
+): Promise<LegacyEndpoint> {
+  const { reg, states } = chargingRegistry(
+    chargingEntityId,
+    chargingState,
+    attributes,
+  );
+  env.set(EntityStateProvider, {
+    getState: (id: string) => states[id],
+    getNumericState: () => null,
+    getBatteryPercent: () => null,
+    // biome-ignore lint/suspicious/noExplicitAny: test stub
+  } as any);
+  return mount(reg);
+}
+
+describe("charging entity auto assignment (#450)", () => {
+  it("takes a battery_charging binary sensor over the docked guess", async () => {
+    const endpoint = await mountWithCharging(
+      "binary_sensor.robot_charging",
+      "off",
+      { battery_level: 96 },
+    );
+    expect(endpoint.mappedEntityIds).toContain("binary_sensor.robot_charging");
+    expect(chargeState(endpoint)).toBe(
+      PowerSource.BatChargeState.IsNotCharging,
+    );
+  });
+
+  it("reports charging when that sensor says so", async () => {
+    // 100% so the docked guess would say IsAtFullCharge, only the sensor
+    // can produce IsCharging here
+    const endpoint = await mountWithCharging(
+      "binary_sensor.robot_charging",
+      "on",
+      { battery_level: 100 },
+    );
+    expect(endpoint.mappedEntityIds).toContain("binary_sensor.robot_charging");
+    expect(chargeState(endpoint)).toBe(PowerSource.BatChargeState.IsCharging);
+  });
+
+  it("keeps IsAtFullCharge when a full robot sits on the dock", async () => {
+    const endpoint = await mountWithCharging(
+      "binary_sensor.robot_charging",
+      "off",
+      { battery_level: 100 },
+    );
+    expect(chargeState(endpoint)).toBe(
+      PowerSource.BatChargeState.IsAtFullCharge,
+    );
+  });
+
+  it("takes a charging_state sensor as well", async () => {
+    const endpoint = await mountWithCharging(
+      "sensor.robot_charging_state",
+      "not_charging",
+      { battery_level: 96 },
+    );
+    expect(endpoint.mappedEntityIds).toContain("sensor.robot_charging_state");
+    expect(chargeState(endpoint)).toBe(
+      PowerSource.BatChargeState.IsNotCharging,
+    );
+  });
+
+  it("keeps the docked guess when the device has no charging entity", async () => {
+    const endpoint = await mount(registry({ battery_level: 96 }));
+    expect(endpoint.mappedEntityIds).toEqual([]);
+    expect(chargeState(endpoint)).toBe(PowerSource.BatChargeState.IsCharging);
+  });
+});

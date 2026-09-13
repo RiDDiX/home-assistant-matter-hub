@@ -8,7 +8,10 @@ import {
   StatusCode,
   StatusResponseError,
 } from "@matter/main/types";
-import type { HomeAssistantAction } from "../../services/home-assistant/home-assistant-actions.js";
+import {
+  type HomeAssistantAction,
+  HomeAssistantActions,
+} from "../../services/home-assistant/home-assistant-actions.js";
 import { LockCredentialStorage } from "../../services/storage/lock-credential-storage.js";
 import { applyPatchState } from "../../utils/apply-patch-state.js";
 import { HomeAssistantEntityBehavior } from "./home-assistant-entity-behavior.js";
@@ -46,7 +49,12 @@ export function normalizeSupportedIndex(
 export interface UsercodePassthrough {
   service: string;
   slot: number;
-  callAction: (action: HomeAssistantAction) => void;
+  /**
+   * Programs the physical lock and settles with it. The debounced fire and
+   * forget path reported success to the controller while the lock had rejected
+   * the code, which for a clear leaves a working keypad code behind.
+   */
+  program: (action: HomeAssistantAction) => Promise<void>;
 }
 
 // zha names the PIN field user_code, z-wave calls it usercode.
@@ -80,7 +88,15 @@ function usercodePassthroughFrom(
   return {
     service,
     slot: homeAssistant.state.mapping?.lockUsercodeSlot ?? 1,
-    callAction: (action) => homeAssistant.callAction(action),
+    program: async (action) => {
+      homeAssistant.assertAvailable();
+      const [domain, name] = action.action.split(".");
+      await homeAssistant.env
+        .get(HomeAssistantActions)
+        .callAction(domain, name, action.data, {
+          entity_id: homeAssistant.entityId,
+        });
+    },
   };
 }
 
@@ -125,6 +141,16 @@ type EnvLike = {
   get: (type: typeof LockCredentialStorage) => LockCredentialStorage;
 };
 
+// Test stubs provide a bare storage object, so both the lookup and the signal
+// are optional here.
+function credentialChangesOf(env: EnvLike) {
+  try {
+    return env.get(LockCredentialStorage)?.changed;
+  } catch {
+    return undefined;
+  }
+}
+
 function asFabricIndex(value: number | undefined): FabricIndex | null {
   return value === undefined || value === 0 ? null : FabricIndex(value);
 }
@@ -139,14 +165,31 @@ function hasStoredCredentialHelper(env: EnvLike, entityId: string): boolean {
   }
 }
 
-function verifyStoredPinHelper(
+/**
+ * Whether a remote unlock has to carry a PIN. Read live from storage, not from
+ * requirePinForRemoteOperation: that attribute is written by update(), which
+ * only runs on a Home Assistant state change, so a PIN added or cleared through
+ * a controller or the web API would not have been enforced until the entity
+ * happened to change.
+ */
+function pinIsRequired(
+  env: EnvLike,
+  homeAssistant: HomeAssistantEntityBehavior,
+): boolean {
+  if (homeAssistant.state.mapping?.disableLockPin === true) {
+    return false;
+  }
+  return hasStoredCredentialHelper(env, homeAssistant.entityId);
+}
+
+async function verifyStoredPinHelper(
   env: EnvLike,
   entityId: string,
   pin: string,
-): boolean {
+): Promise<boolean> {
   try {
     const storage = env.get(LockCredentialStorage);
-    return storage.verifyPin(entityId, pin);
+    return await storage.verifyPin(entityId, pin);
   } catch {
     return false;
   }
@@ -255,6 +298,7 @@ export async function applySetCredential(
   entityId: string,
   request: DoorLock.SetCredentialRequest,
   fabricIndex: number | undefined,
+  pinLengths: { min: number; max: number },
   passthrough?: UsercodePassthrough,
 ): Promise<DoorLock.SetCredentialResponse> {
   if (
@@ -275,9 +319,75 @@ export async function applySetCredential(
       nextCredentialIndex: null,
     };
   }
+  // Add and Modify were treated the same, so Add silently overwrote an occupied
+  // slot and any fabric could replace a PIN another fabric had created while
+  // creatorFabricIndex kept naming the original one. Same statuses matter.js
+  // uses in its own DoorLockServer.
+  const storage = env.get(LockCredentialStorage);
+  const existing = storage.getCredential(entityId);
+  const slotTaken = !!existing?.pinCodeHash;
+  if (request.operationType === DoorLock.DataOperationType.Add && slotTaken) {
+    return {
+      status: Status.Failure,
+      userIndex: null,
+      nextCredentialIndex: null,
+    };
+  }
+  if (request.operationType === DoorLock.DataOperationType.Modify) {
+    if (!slotTaken) {
+      return {
+        status: Status.InvalidCommand,
+        userIndex: null,
+        nextCredentialIndex: null,
+      };
+    }
+    if (
+      existing?.creatorFabricIndex !== undefined &&
+      fabricIndex !== existing.creatorFabricIndex
+    ) {
+      return {
+        status: Status.InvalidCommand,
+        userIndex: null,
+        nextCredentialIndex: null,
+      };
+    }
+  }
   if (request.credentialData) {
+    // An empty Uint8Array is truthy, so without this a controller could store a
+    // zero length PIN. That PIN makes hasCredential true, which turns
+    // requirePinForRemoteOperation on, and the empty PIN then satisfies it.
+    // Check the octet count against the lengths this lock advertises.
+    const length = request.credentialData.byteLength;
+    if (length < pinLengths.min || length > pinLengths.max) {
+      return {
+        status: Status.InvalidCommand,
+        userIndex: null,
+        nextCredentialIndex: null,
+      };
+    }
     const pinCode = new TextDecoder().decode(request.credentialData);
-    const storage = env.get(LockCredentialStorage);
+    // Program the physical lock before storing, so a lock that rejects the code
+    // fails the command instead of leaving a PIN the keypad does not know.
+    if (passthrough) {
+      try {
+        await passthrough.program(
+          buildUsercodeSetAction(
+            passthrough.service,
+            passthrough.slot,
+            pinCode,
+          ),
+        );
+      } catch (error) {
+        logger.warn(
+          `Programming the PIN on ${entityId} failed, credential not stored: ${error instanceof Error ? error.message : String(error)}`,
+        );
+        return {
+          status: Status.Failure,
+          userIndex: null,
+          nextCredentialIndex: null,
+        };
+      }
+    }
     await storage.setCredential({
       entityId,
       pinCode,
@@ -285,10 +395,6 @@ export async function applySetCredential(
       lastModifiedFabricIndex: fabricIndex,
       creatorFabricIndex: fabricIndex,
     });
-    // Fire and forget: a failed physical program still reports success.
-    passthrough?.callAction(
-      buildUsercodeSetAction(passthrough.service, passthrough.slot, pinCode),
-    );
   }
   return {
     status: Status.Success,
@@ -312,6 +418,33 @@ export async function applySetUser(
     throw new StatusResponseError("Invalid user index", StatusCode.Failure);
   }
   const storage = env.get(LockCredentialStorage);
+  const existing = storage.getCredential(entityId);
+  if (request.operationType === DoorLock.DataOperationType.Add && existing) {
+    throw new StatusResponseError("User slot is occupied", StatusCode.Failure);
+  }
+  if (request.operationType === DoorLock.DataOperationType.Modify) {
+    if (!existing) {
+      throw new StatusResponseError(
+        "User slot is available",
+        StatusCode.InvalidCommand,
+      );
+    }
+    // Only the fabric that created the slot may rename it, the same rule
+    // matter.js applies.
+    const renaming =
+      (request.userName !== null && request.userName !== undefined) ||
+      (request.userUniqueId !== null && request.userUniqueId !== undefined);
+    if (
+      renaming &&
+      existing.creatorFabricIndex !== undefined &&
+      fabricIndex !== existing.creatorFabricIndex
+    ) {
+      throw new StatusResponseError(
+        "Cannot modify a user of a different fabric",
+        StatusCode.InvalidCommand,
+      );
+    }
+  }
   await storage.setUser({
     entityId,
     userName: request.userName ?? undefined,
@@ -327,23 +460,43 @@ export async function applyClearCredential(
   passthrough?: UsercodePassthrough,
 ): Promise<void> {
   if (request.credential === null) {
-    const storage = env.get(LockCredentialStorage);
-    await storage.deleteCredential(entityId);
-    passthrough?.callAction(
-      buildUsercodeClearAction(passthrough.service, passthrough.slot),
-    );
+    await clearStoredAndPhysical(env, entityId, passthrough);
     return;
   }
   if (
     request.credential.credentialType === DoorLock.CredentialType.Pin &&
     normalizeSupportedIndex(request.credential.credentialIndex) !== null
   ) {
-    const storage = env.get(LockCredentialStorage);
-    await storage.deleteCredential(entityId);
-    passthrough?.callAction(
-      buildUsercodeClearAction(passthrough.service, passthrough.slot),
-    );
+    await clearStoredAndPhysical(env, entityId, passthrough);
   }
+}
+
+/**
+ * Clear the keypad code first and only forget the stored one once that worked.
+ * Reporting success on a failed clear leaves a code that still opens the door.
+ */
+async function clearStoredAndPhysical(
+  env: EnvLike,
+  entityId: string,
+  passthrough: UsercodePassthrough | undefined,
+): Promise<void> {
+  if (passthrough) {
+    try {
+      await passthrough.program(
+        buildUsercodeClearAction(passthrough.service, passthrough.slot),
+      );
+    } catch (error) {
+      logger.warn(
+        `Clearing the PIN on ${entityId} failed, credential kept: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      throw new StatusResponseError(
+        "Could not clear the PIN on the lock",
+        StatusCode.Failure,
+      );
+    }
+  }
+  const storage = env.get(LockCredentialStorage);
+  await storage.deleteCredential(entityId);
 }
 
 /**
@@ -363,12 +516,11 @@ export async function applyClearUser(
   }
   const storage = env.get(LockCredentialStorage);
   const hadCredential = storage.hasCredential(entityId);
-  await storage.deleteCredential(entityId);
-  if (hadCredential) {
-    passthrough?.callAction(
-      buildUsercodeClearAction(passthrough.service, passthrough.slot),
-    );
-  }
+  await clearStoredAndPhysical(
+    env,
+    entityId,
+    hadCredential ? passthrough : undefined,
+  );
 }
 
 /**
@@ -383,7 +535,7 @@ class LockServerBase extends Base {
     await super.initialize();
     const homeAssistant = await this.agent.load(HomeAssistantEntityBehavior);
     this.update(homeAssistant.entity);
-    this.reactTo(homeAssistant.onChange, this.update);
+    this.reactTo(homeAssistant.onChange, this.update, { lock: true });
   }
 
   private update(entity: HomeAssistantEntityInformation) {
@@ -488,7 +640,28 @@ class LockServerWithPinBase extends PinCredentialBase {
     await super.initialize();
     const homeAssistant = await this.agent.load(HomeAssistantEntityBehavior);
     this.update(homeAssistant.entity);
-    this.reactTo(homeAssistant.onChange, this.update);
+    this.reactTo(homeAssistant.onChange, this.update, { lock: true });
+    this.reactToCredentialChanges();
+  }
+
+  private reactToCredentialChanges() {
+    const changed = credentialChangesOf(this.env);
+    if (changed) {
+      this.reactTo(changed, this.credentialsChanged, {
+        offline: true,
+        lock: true,
+      });
+    }
+  }
+
+  private credentialsChanged(entityId: string) {
+    const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);
+    if (entityId !== homeAssistant.entityId) {
+      return;
+    }
+    applyPatchState(this.state, {
+      requirePinForRemoteOperation: pinIsRequired(this.env, homeAssistant),
+    });
   }
 
   private update(entity: HomeAssistantEntityInformation) {
@@ -497,11 +670,7 @@ class LockServerWithPinBase extends PinCredentialBase {
     }
 
     const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);
-    const isPinDisabledByMapping =
-      homeAssistant.state.mapping?.disableLockPin === true;
-    const hasPinConfigured =
-      !isPinDisabledByMapping &&
-      hasStoredCredentialHelper(this.env, homeAssistant.entityId);
+    const hasPinConfigured = pinIsRequired(this.env, homeAssistant);
     const pinLengths = effectivePinCodeLengths(homeAssistant);
 
     applyPatchState(this.state, {
@@ -551,7 +720,7 @@ class LockServerWithPinBase extends PinCredentialBase {
     homeAssistant.callAction(action);
   }
 
-  override unlockDoor(request: DoorLock.UnlockDoorRequest) {
+  override async unlockDoor(request: DoorLock.UnlockDoorRequest) {
     const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);
     const action = this.state.config.unlock(void 0, this.agent);
 
@@ -560,7 +729,7 @@ class LockServerWithPinBase extends PinCredentialBase {
       `unlockDoor called for ${homeAssistant.entityId}, PIN provided: ${hasPinProvided}, requirePin: ${this.state.requirePinForRemoteOperation}`,
     );
 
-    if (this.state.requirePinForRemoteOperation) {
+    if (pinIsRequired(this.env, homeAssistant)) {
       if (!request.pinCode) {
         logger.info(
           `unlockDoor REJECTED for ${homeAssistant.entityId} - no PIN provided`,
@@ -572,7 +741,11 @@ class LockServerWithPinBase extends PinCredentialBase {
       }
       const providedPin = new TextDecoder().decode(request.pinCode);
       if (
-        !verifyStoredPinHelper(this.env, homeAssistant.entityId, providedPin)
+        !(await verifyStoredPinHelper(
+          this.env,
+          homeAssistant.entityId,
+          providedPin,
+        ))
       ) {
         logger.info(
           `unlockDoor REJECTED for ${homeAssistant.entityId} - invalid PIN`,
@@ -624,6 +797,7 @@ class LockServerWithPinBase extends PinCredentialBase {
       homeAssistant.entityId,
       request,
       this.context.fabric,
+      effectivePinCodeLengths(homeAssistant),
       usercodePassthroughFrom(homeAssistant),
     );
   }
@@ -721,7 +895,28 @@ class LockServerWithPinAndUnboltBase extends PinCredentialUnboltBase {
     await super.initialize();
     const homeAssistant = await this.agent.load(HomeAssistantEntityBehavior);
     this.update(homeAssistant.entity);
-    this.reactTo(homeAssistant.onChange, this.update);
+    this.reactTo(homeAssistant.onChange, this.update, { lock: true });
+    this.reactToCredentialChanges();
+  }
+
+  private reactToCredentialChanges() {
+    const changed = credentialChangesOf(this.env);
+    if (changed) {
+      this.reactTo(changed, this.credentialsChanged, {
+        offline: true,
+        lock: true,
+      });
+    }
+  }
+
+  private credentialsChanged(entityId: string) {
+    const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);
+    if (entityId !== homeAssistant.entityId) {
+      return;
+    }
+    applyPatchState(this.state, {
+      requirePinForRemoteOperation: pinIsRequired(this.env, homeAssistant),
+    });
   }
 
   private update(entity: HomeAssistantEntityInformation) {
@@ -729,11 +924,7 @@ class LockServerWithPinAndUnboltBase extends PinCredentialUnboltBase {
       return;
     }
     const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);
-    const isPinDisabledByMapping =
-      homeAssistant.state.mapping?.disableLockPin === true;
-    const hasPinConfigured =
-      !isPinDisabledByMapping &&
-      hasStoredCredentialHelper(this.env, homeAssistant.entityId);
+    const hasPinConfigured = pinIsRequired(this.env, homeAssistant);
     const pinLengths = effectivePinCodeLengths(homeAssistant);
 
     applyPatchState(this.state, {
@@ -775,7 +966,7 @@ class LockServerWithPinAndUnboltBase extends PinCredentialUnboltBase {
     homeAssistant.callAction(action);
   }
 
-  override unlockDoor(request: DoorLock.UnlockDoorRequest) {
+  override async unlockDoor(request: DoorLock.UnlockDoorRequest) {
     const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);
     // Use unlatch action if available (lock.open = unlock + unlatch on most
     // locks), Apple Home's unlock then also unlatches, matching Google Home.
@@ -787,7 +978,7 @@ class LockServerWithPinAndUnboltBase extends PinCredentialUnboltBase {
     logger.debug(
       `unlockDoor called for ${homeAssistant.entityId}, PIN provided: ${hasPinProvided}, requirePin: ${this.state.requirePinForRemoteOperation}, usingUnlatch: ${!!unlatchConfig}`,
     );
-    if (this.state.requirePinForRemoteOperation) {
+    if (pinIsRequired(this.env, homeAssistant)) {
       if (!request.pinCode) {
         logger.info(
           `unlockDoor REJECTED for ${homeAssistant.entityId} - no PIN provided`,
@@ -799,7 +990,11 @@ class LockServerWithPinAndUnboltBase extends PinCredentialUnboltBase {
       }
       const providedPin = new TextDecoder().decode(request.pinCode);
       if (
-        !verifyStoredPinHelper(this.env, homeAssistant.entityId, providedPin)
+        !(await verifyStoredPinHelper(
+          this.env,
+          homeAssistant.entityId,
+          providedPin,
+        ))
       ) {
         logger.info(
           `unlockDoor REJECTED for ${homeAssistant.entityId} - invalid PIN`,
@@ -812,7 +1007,7 @@ class LockServerWithPinAndUnboltBase extends PinCredentialUnboltBase {
     homeAssistant.callAction(action);
   }
 
-  override unboltDoor(request: DoorLock.UnboltDoorRequest) {
+  override async unboltDoor(request: DoorLock.UnboltDoorRequest) {
     const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);
     // Unbolt pulls the bolt but not the latch, so unlock, not open (#397).
     const action = this.state.config.unlock(void 0, this.agent);
@@ -820,7 +1015,7 @@ class LockServerWithPinAndUnboltBase extends PinCredentialUnboltBase {
     logger.debug(
       `unboltDoor called for ${homeAssistant.entityId}, PIN provided: ${hasPinProvided}, requirePin: ${this.state.requirePinForRemoteOperation}`,
     );
-    if (this.state.requirePinForRemoteOperation) {
+    if (pinIsRequired(this.env, homeAssistant)) {
       if (!request.pinCode) {
         logger.info(
           `unboltDoor REJECTED for ${homeAssistant.entityId} - no PIN provided`,
@@ -832,7 +1027,11 @@ class LockServerWithPinAndUnboltBase extends PinCredentialUnboltBase {
       }
       const providedPin = new TextDecoder().decode(request.pinCode);
       if (
-        !verifyStoredPinHelper(this.env, homeAssistant.entityId, providedPin)
+        !(await verifyStoredPinHelper(
+          this.env,
+          homeAssistant.entityId,
+          providedPin,
+        ))
       ) {
         logger.info(
           `unboltDoor REJECTED for ${homeAssistant.entityId} - invalid PIN`,
@@ -883,6 +1082,7 @@ class LockServerWithPinAndUnboltBase extends PinCredentialUnboltBase {
       homeAssistant.entityId,
       request,
       this.context.fabric,
+      effectivePinCodeLengths(homeAssistant),
       usercodePassthroughFrom(homeAssistant),
     );
   }

@@ -46,7 +46,10 @@ class WaterHeaterModeServerBase extends Base {
     this.update(homeAssistant.entity);
     // offline: true runs the reactor in its own transaction, otherwise writes
     // land after the parent transaction finalized and never reach subscribers.
-    this.reactTo(homeAssistant.onChange, this.update, { offline: true });
+    this.reactTo(homeAssistant.onChange, this.update, {
+      offline: true,
+      lock: true,
+    });
   }
 
   private update(entity: HomeAssistantEntityInformation) {

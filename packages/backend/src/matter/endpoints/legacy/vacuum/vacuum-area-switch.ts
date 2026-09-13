@@ -2,10 +2,6 @@ import type {
   HomeAssistantEntityInformation,
   VacuumDeviceAttributes,
 } from "@home-assistant-matter-hub/common";
-import {
-  DestroyedDependencyError,
-  TransactionDestroyedError,
-} from "@matter/general";
 import type { EndpointType } from "@matter/main";
 import { OnOffPlugInUnitDevice } from "@matter/main/devices";
 import type { HomeAssistantStates } from "../../../../services/home-assistant/home-assistant-registry.js";
@@ -14,6 +10,7 @@ import { HomeAssistantEntityBehavior } from "../../../behaviors/home-assistant-e
 import { IdentifyServer } from "../../../behaviors/identify-server.js";
 import { OnOffServer } from "../../../behaviors/on-off-server.js";
 import { EntityEndpoint } from "../../entity-endpoint.js";
+import { updateEntityState } from "../../update-entity-state.js";
 import { dispatchRoomClean } from "./behaviors/vacuum-rvc-run-mode-server.js";
 import type {
   VacuumArea,
@@ -117,28 +114,6 @@ export class VacuumAreaSwitchEndpoint extends EntityEndpoint {
   async updateStates(states: HomeAssistantStates): Promise<void> {
     const state = states[this.entityId];
     if (!state) return;
-    try {
-      await this.construction.ready;
-    } catch {
-      return;
-    }
-    try {
-      const current = this.stateOf(HomeAssistantEntityBehavior).entity;
-      await this.setStateOf(HomeAssistantEntityBehavior, {
-        entity: { ...current, state },
-      });
-    } catch (error) {
-      if (
-        error instanceof TransactionDestroyedError ||
-        error instanceof DestroyedDependencyError
-      ) {
-        return;
-      }
-      const message = error instanceof Error ? error.message : String(error);
-      if (message.includes("Endpoint storage inaccessible")) {
-        return;
-      }
-      throw error;
-    }
+    await updateEntityState(this, state);
   }
 }

@@ -75,7 +75,7 @@ class OnOffServerBase extends Base {
     await super.initialize();
     const homeAssistant = await this.agent.load(HomeAssistantEntityBehavior);
     this.update(homeAssistant.entity);
-    this.reactTo(homeAssistant.onChange, this.update);
+    this.reactTo(homeAssistant.onChange, this.update, { lock: true });
   }
 
   protected update(entity: HomeAssistantEntityInformation) {

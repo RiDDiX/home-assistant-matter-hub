@@ -78,7 +78,10 @@ function haRegistry(): HomeAssistantRegistry {
   } as any;
 }
 
-function dataProvider(includePrimaryOnly: boolean): BridgeDataProvider {
+function dataProvider(
+  includePrimaryOnly: boolean,
+  primaryOnParent = false,
+): BridgeDataProvider {
   const include = includePrimaryOnly
     ? [{ type: HomeAssistantMatcherType.Pattern, value: "binary_sensor.*" }]
     : [];
@@ -87,7 +90,10 @@ function dataProvider(includePrimaryOnly: boolean): BridgeDataProvider {
     name: "b",
     port: 0,
     filter: { include, exclude: [], includeMode: "any" },
-    featureFlags: { autoComposedDevices: true },
+    featureFlags: {
+      autoComposedDevices: true,
+      composedPrimaryOnParent: primaryOnParent,
+    },
     basicInformation: {
       vendorId: 0xfff1,
       vendorName: "t",
@@ -101,8 +107,14 @@ function dataProvider(includePrimaryOnly: boolean): BridgeDataProvider {
   } as any);
 }
 
-function bridgeRegistry(includePrimaryOnly: boolean): BridgeRegistry {
-  return new BridgeRegistry(haRegistry(), dataProvider(includePrimaryOnly));
+function bridgeRegistry(
+  includePrimaryOnly: boolean,
+  primaryOnParent = false,
+): BridgeRegistry {
+  return new BridgeRegistry(
+    haRegistry(),
+    dataProvider(includePrimaryOnly, primaryOnParent),
+  );
 }
 
 const composedEntities = [
@@ -403,5 +415,155 @@ describe("user composed device battery and room label (#408)", () => {
       label: "room",
       value: "Living Room",
     });
+  });
+});
+
+// #469: a bare BridgedNodeEndpoint parent publishes deviceTypeList [0x0013]
+// only, so Apple Home has no application device type on the accessory endpoint
+// and derives the accessory category from one of the children (a composed light
+// gets an outlet icon). With composedPrimaryOnParent the primary sits on the
+// parent and the parent carries its device type, like an uncomposed entity.
+describe("composed primary on the parent endpoint (#469)", () => {
+  it("keeps the bare BridgedNode parent when the flag is off", async () => {
+    const endpoint = await create(bridgeRegistry(true));
+    expect(endpoint).toBeDefined();
+    await mount(endpoint!);
+
+    // biome-ignore lint/suspicious/noExplicitAny: read cluster state off parent
+    const types = (endpoint!.state as any).descriptor.deviceTypeList;
+    expect(types.map((t: { deviceType: number }) => t.deviceType)).toEqual([
+      0x0013,
+    ]);
+    expect(endpoint!.behaviors.has("occupancySensing")).toBe(false);
+    expect([...endpoint!.parts].length).toBe(3);
+  });
+
+  it("puts the primary device type and clusters on the parent when on", async () => {
+    const endpoint = await create(bridgeRegistry(true, true));
+    expect(endpoint).toBeDefined();
+    await mount(endpoint!);
+
+    // biome-ignore lint/suspicious/noExplicitAny: read cluster state off parent
+    const types = (endpoint!.state as any).descriptor.deviceTypeList;
+    const ids = types.map((t: { deviceType: number }) => t.deviceType);
+    // OccupancySensor (0x0107) for the binary_sensor primary, plus BridgedNode
+    expect(ids).toEqual([0x0107, 0x0013]);
+    // the primary's cluster moved up to the parent, no _primary sub is left
+    expect(endpoint!.behaviors.has("occupancySensing")).toBe(true);
+    expect([...endpoint!.parts].length).toBe(2);
+    expect(
+      [...endpoint!.parts].some(
+        (p) =>
+          p.stateOf(HomeAssistantEntityBehavior).entity.entity_id === PRIMARY,
+      ),
+    ).toBe(false);
+    // the parent still tracks the primary entity
+    expect(
+      endpoint!.stateOf(HomeAssistantEntityBehavior).entity.entity_id,
+    ).toBe(PRIMARY);
+    // and the grouped entities keep their own device types, which is the whole
+    // point: the accessory reads as the primary, the children stay what they
+    // are. LightSensor (0x0106) and TemperatureSensor (0x0302).
+    const partTypes = [...endpoint!.parts].map((p) =>
+      // biome-ignore lint/suspicious/noExplicitAny: read cluster state off part
+      (p.state as any).descriptor.deviceTypeList.map(
+        (t: { deviceType: number }) => t.deviceType,
+      ),
+    );
+    expect(partTypes).toEqual([[0x0106], [0x0302]]);
+  });
+
+  it("keeps live updates flowing to the merged parent", async () => {
+    const endpoint = await create(bridgeRegistry(true, true));
+    expect(endpoint).toBeDefined();
+    await mount(endpoint!);
+
+    await endpoint!.updateStates({
+      [PRIMARY]: state(PRIMARY, "off", "occupancy"),
+      [ILLUMINANCE]: state(ILLUMINANCE, "42", "illuminance", "lx"),
+      [TEMPERATURE]: state(TEMPERATURE, "21.5", "temperature", "°C"),
+    });
+    await delay(200);
+
+    expect(
+      endpoint!.stateOf(HomeAssistantEntityBehavior).entity.state.state,
+    ).toBe("off");
+    // biome-ignore lint/suspicious/noExplicitAny: read cluster state off parent
+    expect((endpoint!.state as any).occupancySensing.occupancy.occupied).toBe(
+      false,
+    );
+  });
+
+  it("keeps the mapped battery on the merged parent", async () => {
+    env.set(EntityStateProvider, {
+      getState: () => undefined,
+      getNumericState: () => undefined,
+      getBatteryPercent: (id: string) => (id === BATTERY ? 80 : null),
+      // biome-ignore lint/suspicious/noExplicitAny: test stub
+    } as any);
+
+    const registry = new BridgeRegistry(
+      haRegistryWithBattery(),
+      dataProvider(true, true),
+    );
+    const endpoint = await createWithBattery(registry);
+    expect(endpoint).toBeDefined();
+    await mount(endpoint!);
+    await delay(50);
+
+    // biome-ignore lint/suspicious/noExplicitAny: read cluster state off parent
+    expect((endpoint!.state as any).powerSource.batPercentRemaining).toBe(160);
+  });
+
+  // A vacuum brings its own PowerSource, which knows how to read the charge
+  // state. Attaching the default one on top would replace it by behavior id.
+  it("keeps a PowerSource the merged primary already brought", async () => {
+    env.set(EntityStateProvider, {
+      getState: () => undefined,
+      getNumericState: () => undefined,
+      getBatteryPercent: (id: string) => (id === BATTERY ? 80 : null),
+      // biome-ignore lint/suspicious/noExplicitAny: test stub
+    } as any);
+
+    const endpoint = await UserComposedEndpoint.create({
+      registry: new BridgeRegistry(
+        haRegistryWithBattery(),
+        dataProvider(true, true),
+      ),
+      primaryEntityId: PRIMARY,
+      mapping: {
+        entityId: PRIMARY,
+        matterDeviceType: "robot_vacuum_cleaner",
+        batteryEntity: BATTERY,
+      },
+      composedEntities,
+    });
+    expect(endpoint).toBeDefined();
+    await mount(endpoint!);
+    await delay(50);
+
+    // biome-ignore lint/suspicious/noExplicitAny: read cluster state off parent
+    const powerSource = (endpoint!.state as any).powerSource;
+    // only the vacuum config carries isCharging, the default one is battery only
+    expect(typeof powerSource.config.isCharging).toBe("function");
+    expect(powerSource.batPercentRemaining).toBe(160);
+  });
+
+  it("skips a sub-entity that repeats the primary or another sub", async () => {
+    const endpoint = await UserComposedEndpoint.create({
+      registry: bridgeRegistry(true, true),
+      primaryEntityId: PRIMARY,
+      mapping: { entityId: PRIMARY },
+      composedEntities: [
+        { entityId: ILLUMINANCE, matterDeviceType: "light_sensor" },
+        // both are duplicates: the primary itself and a repeated sub
+        { entityId: PRIMARY },
+        { entityId: ILLUMINANCE, matterDeviceType: "light_sensor" },
+      ],
+    });
+
+    expect(endpoint).toBeDefined();
+    // the primary is the parent, so only the illuminance sub is left
+    expect([...endpoint!.parts].length).toBe(1);
   });
 });

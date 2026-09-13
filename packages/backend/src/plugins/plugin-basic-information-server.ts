@@ -18,7 +18,8 @@ export class PluginBasicInformationServer extends BridgedDeviceBasicInformationS
     applyPatchState(this.state, {
       vendorId: VendorId(basicInformation.vendorId),
       vendorName: truncate(32, pluginDevice.pluginName),
-      productName: truncate(32, device.deviceType ?? device.name),
+      productName: truncate(32, device.name),
+      productLabel: truncate(64, device.name),
       nodeLabel: truncate(32, device.name),
       serialNumber: crypto
         .createHash("md5")

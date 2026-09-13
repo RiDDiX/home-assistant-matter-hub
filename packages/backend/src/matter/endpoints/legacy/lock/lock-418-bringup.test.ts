@@ -71,6 +71,11 @@ beforeEach(() => {
     call(action: HomeAssistantAction) {
       calls.push(action);
     },
+    // Credential programming waits for Home Assistant now, so it goes through
+    // callAction instead of the debounced call.
+    async callAction(domain: string, name: string, data: object) {
+      calls.push({ action: `${domain}.${name}`, data } as HomeAssistantAction);
+    },
     // biome-ignore lint/suspicious/noExplicitAny: test stub
   } as any);
   env.set(LockCredentialStorage, new FakeStorage() as never);

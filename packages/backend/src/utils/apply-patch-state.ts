@@ -68,8 +68,12 @@ function applyPatch<T extends object>(
         );
         return actualPatch;
       }
-      // Transaction conflict, all remaining writes will also fail
-      if (errorMessage.includes("synchronous-transaction-conflict")) {
+      // Transaction conflict, all remaining writes will also fail. matter.js
+      // words it either way depending on where the lock is taken (#464).
+      if (
+        errorMessage.includes("synchronous-transaction-conflict") ||
+        errorMessage.includes("synchronously")
+      ) {
         logger.warn(
           `Transaction conflict, state update DROPPED: ${JSON.stringify(actualPatch)}`,
         );

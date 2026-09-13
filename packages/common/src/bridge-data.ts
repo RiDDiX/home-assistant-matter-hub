@@ -36,11 +36,11 @@ interface AllBridgeFeatureFlags {
    */
   readonly autoPressureMapping: boolean;
   /**
-   * Auto Composed Devices: master toggle for all auto-mapping features.
-   * When enabled, related entities from the same Home Assistant device are
-   * combined into a single Matter endpoint (battery, humidity, pressure,
-   * power, energy), one device in the controller app instead of five.
-   * Default: false (disabled)
+   * Auto Composed Devices: a temperature sensor with humidity/pressure becomes
+   * a parent with a sub-endpoint per reading, battery on the parent. Forces
+   * battery, humidity and pressure auto-mapping on; unlocks Composed
+   * Sub-Entities and air purifier grouping. Switch power/energy merging does
+   * not depend on it. Default: false
    */
   readonly autoComposedDevices: boolean;
   /**
@@ -122,6 +122,12 @@ interface AllBridgeFeatureFlags {
    * Default: false (disabled)
    */
   readonly fastSessionRecovery: boolean;
+  /**
+   * Omit stored events that break Google priming subscriptions (#424).
+   * Live events still work. Off-spec; opt in per bridge.
+   * Default: false (disabled)
+   */
+  readonly omitEventsInPriming: boolean;
   /** Advertise Matter 1.5.1 instead of 1.6.0, pairing diagnostic for older Alexa stacks (#449). */
   readonly advertiseSpecVersion151: boolean;
   /** Accept SetTcAcknowledgements instead of rejecting it, pairing experiment for Echo stalls (#449). */
@@ -146,6 +152,19 @@ interface AllBridgeFeatureFlags {
    * Default: false (disabled)
    */
   readonly wedgeWatchdog: boolean;
+  /**
+   * Composed devices: put the primary entity on the parent endpoint instead of
+   * on a sub-endpoint, so the parent advertises [<app device type>, 0x0013]
+   * like a standalone device does. Without it the parent is a bare Bridged Node
+   * and Apple Home has no device type to derive the accessory category from, so
+   * it picks one of the children (#469). Changes the endpoint tree of an
+   * existing composed device, which means it has to be removed and re-added in
+   * the controller. Opt-in because #218 saw Apple Home stop listing the
+   * sub-endpoints of a composed device once the parent had its own application
+   * device type.
+   * Default: false (disabled)
+   */
+  readonly composedPrimaryOnParent: boolean;
 }
 
 export type BridgeFeatureFlags = Partial<AllBridgeFeatureFlags>;

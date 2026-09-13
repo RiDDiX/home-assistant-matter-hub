@@ -407,6 +407,12 @@ export interface EntityMappingConfig {
    */
   readonly climateKeepModeOnIdle?: boolean;
   /**
+   * Optional: Send climate.turn_on for every Matter On command, even while HA
+   * already reports the entity as on. IR controlled ACs are one way, so the HA
+   * state can disagree with the real device and the skip leaves it off (#462).
+   */
+  readonly climateForceTurnOn?: boolean;
+  /**
    * Optional: Expose a second Matter Fan device alongside this climate AC,
    * bound to the same HA entity. Apple Home does not surface a thermostat
    * fan / fan_only mode, so this companion Fan tile turns the AC's fan_only
@@ -526,6 +532,7 @@ export interface EntityMappingRequest {
   readonly disableClimateOnOff?: boolean;
   readonly disableClimateFanControl?: boolean;
   readonly climateKeepModeOnIdle?: boolean;
+  readonly climateForceTurnOn?: boolean;
   readonly climateExposeFan?: boolean;
   readonly climateAutoMode?: ClimateAutoMode;
   readonly composedEntities?: ComposedSubEntity[];
@@ -855,9 +862,9 @@ export const matterDeviceTypeControllerSupport: Record<
   water_leak_detector: {
     apple: "yes",
     google: "no",
-    alexa: "yes",
+    alexa: "no",
     aqara: "yes",
-    note: "Apple added leak sensors in iOS 18.4.",
+    note: "Apple added leak sensors in iOS 18.4. Alexa has no capability for it and the 1.4 type can take the whole bridge offline there (issue #365).",
   },
   water_heater: { apple: "no", google: "no", alexa: "unknown", aqara: "yes" },
   water_heater_management: {

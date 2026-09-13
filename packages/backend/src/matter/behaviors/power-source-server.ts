@@ -37,6 +37,13 @@ class PowerSourceServerBase extends FeaturedBase {
   override async initialize() {
     await super.initialize();
 
+    // Quieter attribute, matter.js would report it ten seconds after the
+    // write (#450).
+    const percentChanged = this.events.batPercentRemaining$Changed;
+    if (percentChanged !== undefined) {
+      percentChanged.quiet.suppressionEnabled = false;
+    }
+
     const homeAssistant = await this.agent.load(HomeAssistantEntityBehavior);
     const entityId = homeAssistant.entityId;
 
@@ -66,7 +73,10 @@ class PowerSourceServerBase extends FeaturedBase {
     }
 
     this.update(homeAssistant.entity);
-    this.reactTo(homeAssistant.onChange, this.update, { offline: true });
+    this.reactTo(homeAssistant.onChange, this.update, {
+      offline: true,
+      lock: true,
+    });
   }
 
   private update(entity: HomeAssistantEntityInformation) {
@@ -75,21 +85,28 @@ class PowerSourceServerBase extends FeaturedBase {
     }
     const config = this.state.config;
     const batteryPercent = this.getBatteryPercent(config, entity.state);
+    const known = this.state.batPercentRemaining;
+    if (known != null) {
+      // Sensor blip: keep what the controller has (#450).
+      if (batteryPercent == null) {
+        return;
+      }
+      // Entity dark, sensor still reporting: take the percentage, keep the charge state.
+      if (!this.agent.get(HomeAssistantEntityBehavior).isAvailable) {
+        applyPatchState(this.state, {
+          batPercentRemaining: Math.round(batteryPercent * 2),
+          batChargeLevel: this.getChargeLevel(batteryPercent),
+        });
+        return;
+      }
+    }
     const isCharging = this.getIsCharging(config, entity.state);
 
     // batPercentRemaining is in half-percent units (0-200)
     const batPercentRemaining =
       batteryPercent != null ? Math.round(batteryPercent * 2) : null;
 
-    // Determine charge level based on percentage
-    let batChargeLevel = PowerSource.BatChargeLevel.Ok;
-    if (batteryPercent != null) {
-      if (batteryPercent <= 10) {
-        batChargeLevel = PowerSource.BatChargeLevel.Critical;
-      } else if (batteryPercent <= 20) {
-        batChargeLevel = PowerSource.BatChargeLevel.Warning;
-      }
-    }
+    const batChargeLevel = this.getChargeLevel(batteryPercent);
 
     // Determine charge state
     let batChargeState = PowerSource.BatChargeState.Unknown;
@@ -115,12 +132,25 @@ class PowerSourceServerBase extends FeaturedBase {
       batChargeState = explicitChargeState;
     }
 
+    logger.debug(
+      `[${entity.entity_id}] battery=${batteryPercent ?? "n/a"} chargeState=${batChargeState}`,
+    );
     applyPatchState(this.state, {
       status: PowerSource.PowerSourceStatus.Active,
       batPercentRemaining,
       batChargeLevel,
       batChargeState,
     });
+  }
+
+  private getChargeLevel(batteryPercent: number | null) {
+    if (batteryPercent != null && batteryPercent <= 10) {
+      return PowerSource.BatChargeLevel.Critical;
+    }
+    if (batteryPercent != null && batteryPercent <= 20) {
+      return PowerSource.BatChargeLevel.Warning;
+    }
+    return PowerSource.BatChargeLevel.Ok;
   }
 
   private getBatteryPercent(

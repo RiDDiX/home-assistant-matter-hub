@@ -222,6 +222,45 @@ describe("SecurityStateMachine", () => {
     expect(rec.disarmed).toBe(1);
   });
 
+  it("mirrors an observed mode without running local alarm effects", () => {
+    const { m, rec, sched } = machine();
+
+    const changed = m.applyObservedState({ mode: "away", phase: "armed" });
+
+    expect(changed).toBe(true);
+    expect(m.snapshot).toEqual({ mode: "away", phase: "armed" });
+    expect(rec.switches.at(-1)).toEqual({ ...allOff, away: true });
+    expect(rec.reached).toEqual([]);
+    expect(rec.disarmed).toBe(0);
+    expect(rec.tripped).toEqual([]);
+    expect(rec.cleared).toBe(0);
+    expect(sched.live()).toEqual([]);
+  });
+
+  it("preserves the observed mode across phase-only updates", () => {
+    const { m, rec } = machine();
+    m.applyObservedState({ mode: "night", phase: "armed" });
+
+    m.applyObservedState({ phase: "triggered" });
+
+    expect(m.snapshot).toEqual({ mode: "night", phase: "triggered" });
+    expect(rec.switches.at(-1)).toEqual({ ...allOff, night: true });
+    expect(rec.tripped).toEqual([]);
+  });
+
+  it("mirrors an observed disarm without running off setters", () => {
+    const { m, rec } = machine({ exitDelaySeconds: 0 });
+    m.handleModeSwitch("home", true);
+    rec.reached = [];
+
+    m.applyObservedState({ mode: null, phase: "disarmed" });
+
+    expect(m.snapshot).toEqual({ mode: null, phase: "disarmed" });
+    expect(rec.switches.at(-1)).toEqual(allOff);
+    expect(rec.reached).toEqual([]);
+    expect(rec.disarmed).toBe(0);
+  });
+
   it("does not re-run setters when the armed switch is set on again", () => {
     const { m, rec } = machine({ exitDelaySeconds: 0 });
     m.handleModeSwitch("home", true);

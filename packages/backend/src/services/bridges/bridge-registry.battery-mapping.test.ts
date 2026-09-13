@@ -254,3 +254,69 @@ describe("batteryFingerprintFor (#450)", () => {
     );
   });
 });
+
+describe("BridgeRegistry charging entity lookup (#450)", () => {
+  it("takes the battery_charging binary sensor on the same device", () => {
+    const registry = sut({
+      "binary_sensor.robot_charging": state(
+        "binary_sensor.robot_charging",
+        "off",
+        { device_class: "battery_charging" },
+      ),
+    });
+
+    expect(registry.findChargingEntityForDevice(deviceId)).toBe(
+      "binary_sensor.robot_charging",
+    );
+  });
+
+  it("falls back to a charging_state sensor", () => {
+    const registry = sut({
+      "sensor.robot_charging_state": state(
+        "sensor.robot_charging_state",
+        "not_charging",
+        {},
+      ),
+    });
+
+    expect(registry.findChargingEntityForDevice(deviceId)).toBe(
+      "sensor.robot_charging_state",
+    );
+  });
+
+  it("prefers the binary sensor over the state sensor", () => {
+    const registry = sut({
+      "sensor.robot_charging_state": state(
+        "sensor.robot_charging_state",
+        "charging",
+        {},
+      ),
+      "binary_sensor.robot_charging": state(
+        "binary_sensor.robot_charging",
+        "on",
+        { device_class: "battery_charging" },
+      ),
+    });
+
+    expect(registry.findChargingEntityForDevice(deviceId)).toBe(
+      "binary_sensor.robot_charging",
+    );
+  });
+
+  it("ignores unrelated sensors", () => {
+    const registry = sut({
+      "binary_sensor.robot_problem": state(
+        "binary_sensor.robot_problem",
+        "off",
+        { device_class: "problem" },
+      ),
+      "sensor.robot_charging_power": state(
+        "sensor.robot_charging_power",
+        "12",
+        {},
+      ),
+    });
+
+    expect(registry.findChargingEntityForDevice(deviceId)).toBeUndefined();
+  });
+});

@@ -1,6 +1,9 @@
 import * as os from "node:os";
 import express from "express";
-import { selectMdnsInterface } from "../core/app/select-mdns-interface.js";
+import {
+  describeInterface,
+  selectMdnsInterface,
+} from "../core/app/select-mdns-interface.js";
 
 export interface NetworkInterfaceInfo {
   name: string;
@@ -67,7 +70,7 @@ function getNetworkInterfaces(): NetworkInterfaceInfo[] {
   return result;
 }
 
-function runDiagnostics(
+export function runDiagnostics(
   mdnsInterface: string | undefined,
   mdnsIpv4: boolean,
 ): NetworkDiagnosticResult {
@@ -196,11 +199,12 @@ function runDiagnostics(
   if (!mdnsInterface) {
     const choice = selectMdnsInterface(os.networkInterfaces());
     if (choice.suspicious || choice.external.length > 1) {
-      const suggestion = choice.selected
-        ? `Bind to "${choice.selected}" via mdns-network-interface.`
-        : `Set mdns-network-interface to your LAN interface (${choice.external
-            .map((i) => i.name)
-            .join(", ")}).`;
+      const picked = choice.candidates.find((i) => i.name === choice.selected);
+      const suggestion = picked
+        ? `set mdns-network-interface to ${describeInterface(picked)}, your LAN interface.`
+        : `set mdns-network-interface to your LAN interface, one of ${choice.candidates
+            .map(describeInterface)
+            .join(", ")}.`;
       checks.push({
         name: "multiple_interfaces",
         status: "warn",
@@ -208,7 +212,7 @@ function runDiagnostics(
           ? "mDNS is advertising on Docker-internal or extra interfaces, which can make controllers show devices as offline"
           : `${choice.external.length} external interfaces detected without explicit binding`,
         detail: choice.suspicious
-          ? `Matter bakes every interface address into its operational records, so controllers may pick an unreachable one. ${suggestion}`
+          ? `Matter puts every interface address into its records, so a controller may pick one it cannot reach. If your devices work, nothing to do. If a controller shows them offline, ${suggestion}`
           : `mDNS will broadcast on all interfaces. If controllers are on a specific VLAN, ${suggestion}`,
       });
     }

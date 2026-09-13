@@ -9,6 +9,9 @@ This deletes **all** smart home devices from your Alexa account, not just those 
 After deletion, run "Alexa, discover devices" to re-add devices from your active skills and bridges.
 :::
 
+If the stale entries come from one HAMH bridge in standard bridge mode, you can also give that bridge a **Unique ID Suffix**
+in its settings before you run discovery again. Alexa then sees every device on it as new instead of reusing its old records.
+
 ## Prerequisites
 
 - A web browser (Chrome, Firefox, Edge, etc.)

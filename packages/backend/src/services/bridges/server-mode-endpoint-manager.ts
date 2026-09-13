@@ -58,6 +58,9 @@ export class ServerModeEndpointManager extends Service {
   private observingRequested = false;
   private _failedEntities: FailedEntity[] = [];
   private readonly endpoints = new Map<string, ManagedEndpoint>();
+  // Identity inputs of the primary entity as last pushed to the root node,
+  // so a rename re-runs it and an unchanged refresh does not (#467).
+  private lastServerNodeIdentity?: string;
   private readonly mappingSync: EntityMappingSync;
   // Same grace as the aggregator manager: server mode deleted on the FIRST
   // refresh an entity was absent, so one partial HA snapshot re-minted the
@@ -209,6 +212,25 @@ export class ServerModeEndpointManager extends Service {
     }
   }
 
+  // Filtered entities skip #438 grace; close() reserves numbers (#468, #404).
+  // Return only ids absent from HA.
+  private async closeFilteredOut(candidateIds: string[]): Promise<string[]> {
+    const fullEntities = this.registry.fullEntities;
+    const absent: string[] = [];
+    for (const id of candidateIds) {
+      if (fullEntities[id] == null) {
+        absent.push(id);
+        continue;
+      }
+      this.log.info(
+        `Entity ${id} is no longer exposed by the filter, removing endpoint`,
+      );
+      await this.closeEndpoint(id);
+      this.pendingRemovals.delete(id);
+    }
+    return absent;
+  }
+
   // Absence-driven removals wait out the grace window AND a fresh successful
   // HA reload, so restarts and stale snapshots never erase numbers (#438).
   // Returns the ids whose absence is confirmed, ready for removeEndpoints.
@@ -315,9 +337,8 @@ export class ServerModeEndpointManager extends Service {
 
       if (this.entityIds.length === 0) {
         this.log.warn("Server mode bridge has no entities configured");
-        await this.removeEndpoints(
-          this.removableAfterGrace([...this.endpoints.keys()]),
-        );
+        const absent = await this.closeFilteredOut([...this.endpoints.keys()]);
+        await this.removeEndpoints(this.removableAfterGrace(absent));
         // surface the empty node in the UI instead of running silently
         this._failedEntities.push({
           entityId:
@@ -395,9 +416,12 @@ export class ServerModeEndpointManager extends Service {
           genuinelyRemoved.push(oldId);
         }
       }
-      const confirmedRemoved = this.removableAfterGrace(genuinelyRemoved);
+      const absent = await this.closeFilteredOut(genuinelyRemoved);
+      const confirmedRemoved = this.removableAfterGrace(absent);
       let structureChanged =
-        removed.length > genuinelyRemoved.length || confirmedRemoved.length > 0;
+        removed.length > genuinelyRemoved.length ||
+        genuinelyRemoved.length > absent.length ||
+        confirmedRemoved.length > 0;
       await this.removeEndpoints(confirmedRemoved);
 
       // Reserve every disabled entity's id up front: an active entity that
@@ -497,7 +521,7 @@ export class ServerModeEndpointManager extends Service {
         if (isHeapUnderPressure()) {
           this.log.error(
             "Memory pressure detected, cannot create device endpoint. " +
-              "Reduce entities on other bridges or increase the Node.js heap size (NODE_OPTIONS=--max-old-space-size=1024).",
+              "Reduce entities on other bridges or raise the heap (add-on: heap_size_mb option, container: NODE_OPTIONS=--max-old-space-size=1024).",
           );
           this._failedEntities.push({
             entityId,
@@ -562,15 +586,37 @@ export class ServerModeEndpointManager extends Service {
         }
       }
 
-      // identity and advertised type follow the primary entity only
-      if (structureChanged) {
-        const primary = orderedIds.find((id) => this.endpoints.has(id));
-        if (primary) {
-          await this.updateServerNodeIdentity(
+      // Identity and advertised type follow the primary entity only. Also run
+      // when the structure held but the identity itself moved: a device renamed
+      // in Home Assistant changes no endpoint, and the root node kept the old
+      // name, manufacturer and model until a restart (#467). Server mode has no
+      // BridgedDeviceBasicInformation on the child, the identity lives on the
+      // root node, so the bridge-mode snapshot refresh does not cover this.
+      const primary = orderedIds.find((id) => this.endpoints.has(id));
+      if (primary) {
+        const primaryMapping = this.getEntityMapping(primary);
+        const primaryEndpoint = this.endpoints.get(primary)?.endpoint;
+        const identity = JSON.stringify({
+          primary,
+          device: this.registry.deviceOf(primary),
+          friendlyName:
+            this.registry.initialState(primary)?.attributes?.friendly_name,
+          registryName: this.registryName(primary),
+          mapping: primaryMapping,
+          deviceType: primaryEndpoint?.type?.deviceType,
+        });
+        if (structureChanged || identity !== this.lastServerNodeIdentity) {
+          // Only remember it once it landed. The server node reports a failed
+          // update instead of throwing, so recording it regardless would skip
+          // the retry on the next poll.
+          const pushed = await this.updateServerNodeIdentity(
             primary,
-            this.getEntityMapping(primary),
-            this.endpoints.get(primary)?.endpoint,
+            primaryMapping,
+            primaryEndpoint,
           );
+          if (pushed) {
+            this.lastServerNodeIdentity = identity;
+          }
         }
       }
     } finally {
@@ -612,24 +658,34 @@ export class ServerModeEndpointManager extends Service {
     }
   }
 
+  // bridge mode reads the flag in BasicInformationServer, server mode did not (#276)
+  private registryName(entityId: string): string | undefined {
+    if (this.dataProvider.featureFlags?.preferEntityRegistryName !== true) {
+      return undefined;
+    }
+    const entry = this.registry.entity(entityId);
+    return entry?.name ?? entry?.original_name ?? undefined;
+  }
+
   private async updateServerNodeIdentity(
     entityId: string,
     mapping: EntityMappingConfig | undefined,
     endpoint: EntityEndpoint | undefined,
-  ): Promise<void> {
+  ): Promise<boolean> {
     const device = this.registry.deviceOf(entityId);
     const state = this.registry.initialState(entityId);
     const friendlyName = state?.attributes?.friendly_name as string | undefined;
-    await this.serverNode.updateDeviceIdentity(
+    let ok = await this.serverNode.updateDeviceIdentity(
       entityId,
       device,
       mapping,
-      friendlyName,
+      this.registryName(entityId) ?? friendlyName,
     );
     const deviceType = endpoint?.type?.deviceType;
     if (deviceType != null) {
-      await this.serverNode.updateAdvertisedDeviceType(deviceType);
+      ok = (await this.serverNode.updateAdvertisedDeviceType(deviceType)) && ok;
     }
+    return ok;
   }
 
   /**
