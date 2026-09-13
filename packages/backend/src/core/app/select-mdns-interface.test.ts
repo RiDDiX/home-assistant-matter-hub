@@ -24,13 +24,14 @@ describe("selectMdnsInterface", () => {
     );
   });
 
-  it("stays ambiguous on a plain bridged container (mwdle) but flags it", () => {
+  it("prefers the non-Docker-range NIC on a plain bridged container (mwdle)", () => {
     const choice = selectMdnsInterface({
       lo: [v4("127.0.0.1", true)],
       eth0: [v4("172.16.20.3")],
       eth1: [v4("192.168.0.4"), v6("fe80::1775:a8db:7db:e108")],
     });
-    expect(choice.selected).toBeUndefined();
+    // eth0 sits on the Docker range, so eth1 is the only LAN candidate (#482)
+    expect(choice.selected).toBe("eth1");
     expect(choice.suspicious).toBe(true);
     expect(choice.external.map((i) => i.name)).toEqual(["eth0", "eth1"]);
   });
@@ -43,6 +44,30 @@ describe("selectMdnsInterface", () => {
     expect(choice.selected).toBe("eth0");
     expect(choice.suspicious).toBe(false);
     expect(choice.dockerLike).toEqual([]);
+  });
+
+  it("drops a compose bridge on a Docker range from the candidates (#482)", () => {
+    const choice = selectMdnsInterface({
+      lo: [v4("127.0.0.1", true)],
+      eth0: [v4("192.168.5.161"), v6("fe80::780e:cd13:a01d:59b4")],
+      "br-8fed16961e78": [v4("172.24.0.1"), v6("fe80::4c75:c6ff:fecb:63e4")],
+      docker0: [v4("172.17.0.1"), v6("fe80::d0fb:edff:fe3d:3bac")],
+      vethdda556c: [v6("fe80::8cda:6eff:feb0:d620")],
+      veth78b8287: [v6("fe80::684d:46ff:fe46:664c")],
+    });
+    expect(choice.selected).toBe("eth0");
+    expect(choice.candidates.map((i) => i.name)).toEqual(["eth0"]);
+    expect(choice.suspicious).toBe(true);
+  });
+
+  it("lists the Docker interfaces when nothing else exists", () => {
+    const choice = selectMdnsInterface({
+      lo: [v4("127.0.0.1", true)],
+      hassio: [v4("172.30.32.1")],
+      docker0: [v4("172.17.0.1")],
+    });
+    expect(choice.selected).toBeUndefined();
+    expect(choice.candidates.map((i) => i.name)).toEqual(["hassio", "docker0"]);
   });
 
   it("does not auto-pick when two real LAN NICs are present", () => {

@@ -11,9 +11,13 @@ export interface MdnsInterfaceAddrs {
 }
 
 export interface MdnsInterfaceChoice {
-  // The likely LAN interface, when exactly one routable non-Docker interface
-  // exists. Only a suggestion for the warning, never bound automatically.
+  // The likely LAN interface, when exactly one candidate is left. Only a
+  // suggestion for the warning, never bound automatically.
   readonly selected?: string;
+  // LAN candidates: external interfaces that are not Docker or Thread by name;
+  // with more than one, those on a Docker IPv4 range drop out (#482). Falls
+  // back to every external interface when nothing else is left.
+  readonly candidates: readonly MdnsInterfaceAddrs[];
   // Routable (non-loopback, non-link-local) external interfaces.
   readonly external: readonly MdnsInterfaceAddrs[];
   // Interfaces whose name looks Docker-internal.
@@ -62,6 +66,11 @@ export function isLinkLocalOrUla(address: string): boolean {
   return /^fe[89ab]/.test(a) || /^f[cd]/.test(a);
 }
 
+// "eth0 (192.168.5.161)", so the reader can match it with what they know
+export function describeInterface(i: MdnsInterfaceAddrs): string {
+  return `${i.name} (${i.ipv4[0] ?? i.ipv6[0] ?? "?"})`;
+}
+
 export function selectMdnsInterface(raw: RawInterfaces): MdnsInterfaceChoice {
   const external: MdnsInterfaceAddrs[] = [];
   const dockerLike: string[] = [];
@@ -85,7 +94,16 @@ export function selectMdnsInterface(raw: RawInterfaces): MdnsInterfaceChoice {
   const lan = external.filter(
     (i) => !DOCKER_NAME.test(i.name) && !THREAD_NAME.test(i.name),
   );
-  const selected = lan.length === 1 ? lan[0].name : undefined;
+  // a compose bridge is named br-<hash> like a real LAN bridge, its 172.x
+  // address gives it away once there is another candidate (#482)
+  const offDockerRange = lan.filter((i) => !i.ipv4.some(inDockerRange));
+  const candidates =
+    lan.length > 1 && offDockerRange.length > 0
+      ? offDockerRange
+      : lan.length > 0
+        ? lan
+        : external;
+  const selected = candidates.length === 1 ? candidates[0].name : undefined;
   const suspicious =
     dockerLike.length > 0 || external.some((i) => i.ipv4.some(inDockerRange));
   const hasGlobalIpv6 = external.some((i) =>
@@ -94,6 +112,7 @@ export function selectMdnsInterface(raw: RawInterfaces): MdnsInterfaceChoice {
   const hasThreadInterface = threadLike.length > 0;
   return {
     selected,
+    candidates,
     external,
     dockerLike,
     suspicious,
