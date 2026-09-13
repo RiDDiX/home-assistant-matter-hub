@@ -38,7 +38,7 @@ of port forwarding etc.
 | Channel | Branch | Current Version | Description |
 |---------|--------|-----------------|-------------|
 | **Stable** | `main` | v2.0.57 | Production-ready, recommended for most users |
-| **Alpha** | `alpha` | v2.1.0-alpha.897 | Ahead of Stable, carries the additions listed under Alpha Features |
+| **Alpha** | `alpha` | v2.1.0-alpha.898 | Ahead of Stable, carries the additions listed under Alpha Features |
 | **Testing** | `testing` | v4.1.0-testing.x | ⚠️ **Highly unstable!** Experimental features, may break |
 
 ### Which version should I use?
@@ -328,7 +328,11 @@ Re-assign the affected devices to their rooms after they reconnect. See the [doc
 </details>
 
 <details>
-<summary><strong>🧪 Alpha Features (v2.1.0-alpha.897)</strong> - Click to expand</summary>
+<summary><strong>🧪 Alpha Features (v2.1.0-alpha.898)</strong> - Click to expand</summary>
+
+**v2.1.0-alpha.898:**
+- 🧭 **The interface warning names your LAN interface**: on a Docker host the Network Diagnostics card and the startup log listed every interface, Docker bridges included, and left the choice to you. A compose bridge on a 172.x address no longer counts as a candidate, the suggestion reads "eth0 (192.168.5.161)", and the text says the warning only matters when a controller shows devices offline ([#482](https://github.com/RiDDiX/home-assistant-matter-hub/issues/482))
+- 📖 **Docs**: the Alexa "never connects" entry lists the checks that helped in [#478](https://github.com/RiDDiX/home-assistant-matter-hub/issues/478) (firewall on UDP 5540, manual code, fresh bridge) instead of a theory
 
 **v2.1.0-alpha.897:**
 - 🔐 **The devices API keeps the camera's Home Assistant token to itself**: the WebRTC bridge lives in the camera endpoint's state, and the devices JSON behind the endpoint inspector printed its `haUrl` and `haToken`. The credentials are a private field now, and any key named token, secret or password is redacted in that output ([#155](https://github.com/RiDDiX/home-assistant-matter-hub/issues/155), [#373](https://github.com/RiDDiX/home-assistant-matter-hub/issues/373))
