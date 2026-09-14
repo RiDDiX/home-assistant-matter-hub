@@ -94,6 +94,7 @@ export class BackupService {
       const archive = archiver("zip", { zlib: { level: 9 } });
 
       output.on("close", () => resolve());
+      output.on("error", (err) => reject(err));
       archive.on("error", (err) => reject(err));
       archive.pipe(output);
 
@@ -148,6 +149,9 @@ export class BackupService {
       }
 
       archive.finalize();
+    }).catch((e) => {
+      fs.rmSync(tmpPath, { force: true });
+      throw e;
     });
 
     fs.renameSync(tmpPath, filepath);
@@ -243,7 +247,9 @@ export class BackupService {
   private enforceRetention(): void {
     const settings = this.settingsStorage.backupSettings;
     const maxCount = settings.backupRetentionCount;
-    if (maxCount <= 0) return;
+    // A non-numeric stored value would make slice() below return every
+    // backup, so anything but a positive integer means "keep all".
+    if (!Number.isInteger(maxCount) || maxCount <= 0) return;
 
     const backups = this.listBackups();
     if (backups.length <= maxCount) return;
