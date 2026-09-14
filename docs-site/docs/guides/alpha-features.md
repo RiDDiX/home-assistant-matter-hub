@@ -31,7 +31,7 @@ docker run -d \
 
 ## Current Alpha Features
 
-Alpha is currently level with Stable (v2.0.57); there are no alpha-only features right now. Standalone Devices graduated to Stable in v2.0.47, see [Standalone Devices](../getting-started/standalone-devices.md).
+Alpha is ahead of Stable (v2.0.57): old backups are deleted again when a shutdown backup gets cut off, and the backup settings are checked ([#483](https://github.com/RiDDiX/home-assistant-matter-hub/issues/483)) (alpha.899). Standalone Devices graduated to Stable in v2.0.47, see [Standalone Devices](../getting-started/standalone-devices.md).
 
 For a complete list of all supported features and device types, see [Supported Device Types](../supported-device-types.md).
 
