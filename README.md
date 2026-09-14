@@ -38,13 +38,13 @@ of port forwarding etc.
 | Channel | Branch | Current Version | Description |
 |---------|--------|-----------------|-------------|
 | **Stable** | `main` | v2.0.57 | Production-ready, recommended for most users |
-| **Alpha** | `alpha` | v2.1.0-alpha.x | Currently level with Stable; next pre-release lands here first |
+| **Alpha** | `alpha` | v2.1.0-alpha.899 | Ahead of Stable, carries the additions listed under Alpha Features |
 | **Testing** | `testing` | v4.1.0-testing.x | ⚠️ **Highly unstable!** Experimental features, may break |
 
 ### Which version should I use?
 
 - **Most users**: Use **Stable** (`main` branch) - thoroughly tested
-- **Early adopters**: Use **Alpha** (`alpha` branch) - currently level with Stable until the next pre-release lands
+- **Early adopters**: Use **Alpha** (`alpha` branch) - gets every fix and feature first, see Alpha Features below
 - **Developers/Testers**: Use **Testing** (`testing` branch) - bleeding edge, expect breakage
 
 ### Upgrading from 2.0.46
@@ -348,9 +348,11 @@ Re-assign the affected devices to their rooms after they reconnect. See the [doc
 </details>
 
 <details>
-<summary><strong>🧪 Alpha Features (v2.1.0-alpha.x)</strong> - Click to expand</summary>
+<summary><strong>🧪 Alpha Features (v2.1.0-alpha.899)</strong> - Click to expand</summary>
 
-**Alpha is currently level with Stable (v2.0.57).** All alpha work up to the latest pre-release has been promoted into v2.0.57. New alpha work continues from the next pre-release tag onward and will appear here as development progresses.
+**v2.1.0-alpha.899:**
+- 🗂️ **Old backups get deleted again**: the automatic backup only runs while HAMH shuts down, and the add-on gets a few seconds to stop, so the backup could be cut off before it reached the cleanup. Every restart left one more half-written backup in the list. Old backups are now also cleaned up at startup, and a backup keeps a temporary name until it is complete, so a cut-off one never shows up ([#483](https://github.com/RiDDiX/home-assistant-matter-hub/issues/483))
+- 🛡️ **Backup settings are checked**: the settings endpoint only takes a keep count from 1 to 100, and a failed write (a full disk, for example) fails that backup instead of crashing the app. The Turkish, Portuguese (Brazil) and Traditional Chinese texts no longer promise a scheduled backup
 
 </details>
 
