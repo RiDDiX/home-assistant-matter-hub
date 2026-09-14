@@ -353,6 +353,7 @@ Re-assign the affected devices to their rooms after they reconnect. See the [doc
 **v2.1.0-alpha.899:**
 - 🗂️ **Old backups get deleted again**: the automatic backup only runs while HAMH shuts down, and the add-on gets a few seconds to stop, so the backup could be cut off before it reached the cleanup. Every restart left one more half-written backup in the list. Old backups are now also cleaned up at startup, and a backup keeps a temporary name until it is complete, so a cut-off one never shows up ([#483](https://github.com/RiDDiX/home-assistant-matter-hub/issues/483))
 - 🛡️ **Backup settings are checked**: the settings endpoint only takes a keep count from 1 to 100, and a failed write (a full disk, for example) fails that backup instead of crashing the app. The Turkish, Portuguese (Brazil) and Traditional Chinese texts no longer promise a scheduled backup
+- 📖 **Docs**: the Alexa "never connects" entry drops the fresh bridge advice, a new bridge did not help in [#478](https://github.com/RiDDiX/home-assistant-matter-hub/issues/478), and says how to tell from the log whether the Echo reached the bridge
 
 </details>
 
