@@ -533,9 +533,9 @@
     "confirmDeleteMessage": "Tem certeza de que deseja excluir \"{{filename}}\"? Esta ação não pode ser desfeita.",
     "settings": "Configurações",
     "autoBackupLabel": "Backups Automáticos",
-    "autoBackupDesc": "Criar snapshots automáticos periodicamente",
+    "autoBackupDesc": "Cria automaticamente um backup completo quando o aplicativo é encerrado ou reiniciado.",
     "retentionCount": "Limite de Retenção",
-    "retentionCountDesc": "Quantidade máxima de backups automáticos a manter guardados"
+    "retentionCountDesc": "Quantidade de backups a manter (os mais antigos são excluídos automaticamente)"
   },
   "networkMap": {
     "title": "Mapa de Rede",

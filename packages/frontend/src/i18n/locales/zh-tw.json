@@ -533,9 +533,9 @@
     "confirmDeleteMessage": "確定要刪除「{{filename}}」嗎？此操作無法復原。",
     "settings": "備份設定",
     "autoBackupLabel": "自動備份",
-    "autoBackupDesc": "每天自動建立快照",
+    "autoBackupDesc": "在應用程式關閉或重新啟動時自動建立完整備份。",
     "retentionCount": "保留數量",
-    "retentionCountDesc": "要保留的快照份數"
+    "retentionCountDesc": "要保留的備份數量（最舊的會自動刪除）"
   },
   "networkMap": {
     "title": "網路拓撲圖",
