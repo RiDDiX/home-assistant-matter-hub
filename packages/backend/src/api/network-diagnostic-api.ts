@@ -1,3 +1,4 @@
+import * as net from "node:net";
 import * as os from "node:os";
 import express from "express";
 import {
@@ -36,8 +37,8 @@ export function networkDiagnosticApi(
 ): express.Router {
   const router = express.Router();
 
-  router.get("/", (_, res) => {
-    const result = runDiagnostics(mdnsInterface, mdnsIpv4);
+  router.get("/", async (_, res) => {
+    const result = await runDiagnostics(mdnsInterface, mdnsIpv4);
     res.json(result);
   });
 
@@ -70,10 +71,30 @@ function getNetworkInterfaces(): NetworkInterfaceInfo[] {
   return result;
 }
 
-export function runDiagnostics(
+// Two setups tracked an Alexa pairing failure down to another service holding
+// TCP 80 on the Home Assistant host: HA's own UI moved to port 80, and the
+// Emulated Hue integration (#449, #478). Nothing in Matter uses port 80 and
+// nobody has explained the mechanism, so this only reports what it sees.
+// A refused connection means free, anything else means unknown, and only a
+// completed connection warns.
+async function isPort80Taken(host: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    const socket = net.connect({ host, port: 80 });
+    const done = (taken: boolean) => {
+      socket.destroy();
+      resolve(taken);
+    };
+    socket.setTimeout(500);
+    socket.once("connect", () => done(true));
+    socket.once("timeout", () => done(false));
+    socket.once("error", () => done(false));
+  });
+}
+
+export async function runDiagnostics(
   mdnsInterface: string | undefined,
   mdnsIpv4: boolean,
-): NetworkDiagnosticResult {
+): Promise<NetworkDiagnosticResult> {
   const interfaces = getNetworkInterfaces();
   const checks: NetworkDiagnosticCheck[] = [];
 
@@ -216,6 +237,29 @@ export function runDiagnostics(
           : `mDNS will broadcast on all interfaces. If controllers are on a specific VLAN, ${suggestion}`,
       });
     }
+  }
+
+  // Check 7: port 80 held on this host. Loopback covers host networking, the
+  // advertised LAN address covers a container that has its own loopback.
+  const probeHosts = [
+    "127.0.0.1",
+    ...(mdnsInterface
+      ? (interfaces.find((i) => i.name === mdnsInterface)?.ipv4 ?? [])
+      : (external.find((i) => i.ipv4.length > 0)?.ipv4 ?? [])
+    ).slice(0, 1),
+  ].filter((h, i, all) => all.indexOf(h) === i);
+  const taken = await Promise.all(probeHosts.map(isPort80Taken));
+  const busy = probeHosts.filter((_, i) => taken[i]);
+  if (busy.length > 0) {
+    checks.push({
+      name: "port_80_in_use",
+      status: "warn",
+      message: "Something is listening on TCP port 80 on this host",
+      detail:
+        `Answering on ${busy.join(", ")}. Matter does not use port 80 and this breaks nothing by itself, so a reverse proxy or a UI on port 80 is not a misconfiguration. ` +
+        "It is listed because two setups only got Alexa to finish pairing after freeing it, one with the Home Assistant UI moved to port 80, one with the Emulated Hue integration (#449, #478). " +
+        "Nobody has explained why. If Alexa pairing keeps failing, stop whatever holds port 80 long enough to pair, then put it back.",
+    });
   }
 
   return {

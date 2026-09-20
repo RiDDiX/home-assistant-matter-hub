@@ -194,7 +194,7 @@ export function diagnosticApi(
 ): express.Router {
   const router = express.Router();
 
-  router.get("/export", (req, res) => {
+  router.get("/export", async (req, res) => {
     const anonymize = req.query.anonymize !== "false";
     const logLimit = Math.min(
       500,
@@ -204,7 +204,7 @@ export function diagnosticApi(
     const memUsage = process.memoryUsage();
     const bridges = bridgeService.bridges;
     const haConnected = haClient.connection?.connected ?? false;
-    const network = runDiagnostics(mdnsInterface, mdnsIpv4);
+    const network = await runDiagnostics(mdnsInterface, mdnsIpv4);
 
     const bridgeDetails = bridges.map((b) => {
       const data = b.data;
