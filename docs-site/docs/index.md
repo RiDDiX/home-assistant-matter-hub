@@ -348,7 +348,12 @@ Home, ...) are not placed in the same network segment. Please make sure to revie
 </details>
 
 <details>
-<summary><strong>🧪 Alpha (v2.1.0-alpha.899)</strong></summary>
+<summary><strong>🧪 Alpha (v2.1.0-alpha.900)</strong></summary>
+
+**v2.1.0-alpha.900:**
+- 🔌 **Port 80 shows up in the network check**: two setups only got Alexa to finish pairing after freeing TCP port 80 on the Home Assistant host, once with the Home Assistant UI moved there, once with the Emulated Hue integration. Nothing in Matter uses port 80 and nobody has explained the link, so the Health Dashboard's network diagnostics now only points it out when something answers there ([#449](https://github.com/RiDDiX/home-assistant-matter-hub/issues/449), [#478](https://github.com/RiDDiX/home-assistant-matter-hub/issues/478))
+- 💡 **Wattage for a light in Apple Home**: Apple Home puts a live wattage reading only on the tile of an outlet, so a light with a mapped power sensor never showed one. Lights can now be set to On/Off Plug-in Unit in the Entity Mapping dialog, which keeps the power and energy mapping and gives Apple the tile. It costs brightness and color, so the dialog says so before you pick it ([#484](https://github.com/RiDDiX/home-assistant-matter-hub/issues/484))
+- 📖 **Docs**: what Apple Home does and does not show for power since iOS/tvOS 27, and the port 80 note in the Alexa troubleshooting section
 
 **v2.1.0-alpha.899:**
 - 🗂️ **Old backups get deleted again**: the automatic backup only runs while HAMH shuts down, and the add-on gets a few seconds to stop, so the backup could be cut off before it reached the cleanup. Every restart left one more half-written backup in the list. Old backups are now also cleaned up at startup, and a backup keeps a temporary name until it is complete, so a cut-off one never shows up ([#483](https://github.com/RiDDiX/home-assistant-matter-hub/issues/483))
