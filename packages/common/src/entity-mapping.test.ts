@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   type ControllerSupport,
+  domainToDefaultMatterTypes,
   matterDeviceTypeControllerSupport,
   matterDeviceTypeLabels,
 } from "./entity-mapping.js";
@@ -49,5 +50,23 @@ describe("matterDeviceTypeControllerSupport", () => {
       "yes",
     );
     expect(matterDeviceTypeControllerSupport.speaker.aqara).toBe("yes");
+  });
+});
+
+describe("domainToDefaultMatterTypes", () => {
+  it("only suggests known device types", () => {
+    for (const [domain, types] of Object.entries(domainToDefaultMatterTypes)) {
+      for (const type of types ?? []) {
+        expect(matterDeviceTypeLabels, `${domain}: ${type}`).toHaveProperty(
+          type,
+        );
+      }
+    }
+  });
+
+  // #484: Apple Home puts live wattage only on an outlet tile, so a light with
+  // a mapped power sensor has to be offered On/Off Plug-in Unit to get one.
+  it("offers the outlet type for lights", () => {
+    expect(domainToDefaultMatterTypes.light).toContain("on_off_plugin_unit");
   });
 });

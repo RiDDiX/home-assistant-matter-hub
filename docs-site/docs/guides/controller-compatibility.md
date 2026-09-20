@@ -52,6 +52,15 @@ Rows flagged with a footnote number link to the vendor source that establishes t
 | `dishwasher` (override) | Dishwasher | ❌ [³](#sources) | ✅ [¹](#sources) | ✅ [²](#sources) | ❓ | ✅ |
 | `weather` | TemperatureSensor (+Humidity, +Pressure) | ⚠️**** | ⚠️**** | ⚠️**** | ❓ | ❓ |
 
+:::note Apple Home and power readings (iOS/tvOS 27)
+iOS/tvOS 27 is the first version that shows Matter power and energy readings in the Home app. Apple's own protocol map gained ElectricalSensor (0x0510) and ElectricalMeter (0x0514) as natively handled device types there, where iOS 26 listed neither. Two limits survive that:
+
+- A live wattage reading appears only on the tile of an accessory whose Matter device type is an **outlet** (On/Off Plug-in Unit, 0x010A). Matter light and switch device types publish the same measurements and show nothing. The `switch` domain already maps to On/Off Plug-in Unit, so it is covered; a metered light has to be set to that type by hand, see [Light](../devices/light.md#apple-home-shows-wattage-only-on-outlets).
+- The Energy view lists individual accessories only when they are paired directly with Apple Home. Bridged accessories, HAMH included, count towards the whole-home total but get no per-device entry, independent of accessory type, power topology or endpoint layout.
+
+Tracked in [#484](https://github.com/RiDDiX/home-assistant-matter-hub/issues/484) and [discussion #410](https://github.com/RiDDiX/home-assistant-matter-hub/discussions/410).
+:::
+
 :::note ElectricalUtilityMeter is opt-in
 ElectricalUtilityMeter (0x0511, Matter 1.4) is only used when you set the Matter device type to "Electrical Utility Meter (Meter Identification)" by hand. It adds the MeterIdentification cluster (meter serial number and point of delivery from the mapping, null when unset) on top of the same power/energy measurements as ElectricalMeter. SmartThings renders energy devices; the other mainstream controllers don't know the type yet. Consumption sensors keep defaulting to ElectricalMeter (0x0514), so existing pairings are untouched. See [mapping blueprints](./mapping-blueprints.md#electrical-utility-meter).
 :::

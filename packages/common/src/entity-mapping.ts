@@ -952,6 +952,10 @@ export const domainToDefaultMatterTypes: Partial<
     "dimmable_light",
     "extended_color_light",
     "on_off_light",
+    // Apple Home only puts live wattage on the tile of an outlet, so a metered
+    // light has to become On/Off Plug-in Unit (0x010A) to show it. Dimming is
+    // lost, and "Show As -> Light" restores the look (#484).
+    "on_off_plugin_unit",
   ],
   lock: ["door_lock"],
   media_player: ["basic_video_player", "on_off_switch", "speaker"],
