@@ -293,6 +293,16 @@ export class BridgeService extends Service {
     }
   }
 
+  async refreshStatesAll() {
+    for (const bridge of this.bridges) {
+      try {
+        await bridge.refreshStates();
+      } catch (e) {
+        this.log.error(`Failed to refresh bridge states ${bridge.id}:`, e);
+      }
+    }
+  }
+
   get(id: string): Bridge | undefined {
     return this.bridges.find((bridge) => bridge.id === id);
   }

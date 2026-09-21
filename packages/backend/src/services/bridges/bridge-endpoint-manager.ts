@@ -519,6 +519,20 @@ export class BridgeEndpointManager extends Service {
     this.unsubscribe = undefined;
   }
 
+  async refreshStatesFromRegistry(): Promise<void> {
+    const states: HomeAssistantStates = {};
+    const changed = new Set<string>();
+    for (const entityId of this.collectSubscriptionEntityIds()) {
+      const state = this.registry.initialStateIncludingUnfiltered(entityId);
+      if (state) {
+        states[entityId] = state;
+        changed.add(entityId);
+      }
+    }
+    if (changed.size === 0) return;
+    await this.updateStates(states, changed);
+  }
+
   async refreshDevices() {
     this.registry.refresh();
     this._failedEntities = [];

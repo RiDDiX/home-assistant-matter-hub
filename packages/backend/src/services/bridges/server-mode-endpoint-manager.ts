@@ -140,6 +140,18 @@ export class ServerModeEndpointManager extends Service {
     this.unsubscribe = undefined;
   }
 
+  async refreshStatesFromRegistry(): Promise<void> {
+    const states: HomeAssistantStates = {};
+    for (const entityId of this.collectSubscriptionEntityIds()) {
+      const state = this.registry.initialStateIncludingUnfiltered(entityId);
+      if (state) {
+        states[entityId] = state;
+      }
+    }
+    if (Object.keys(states).length === 0) return;
+    await this.updateStates(states);
+  }
+
   /** Primary first (the entity the first include matcher tests true for). */
   private orderEntityIds(ids: string[]): string[] {
     const firstMatcher = this.dataProvider.filter?.include?.[0];

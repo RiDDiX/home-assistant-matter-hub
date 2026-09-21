@@ -68,6 +68,7 @@ interface Harness {
     deviceOf: ReturnType<typeof vi.fn>;
     entity: ReturnType<typeof vi.fn>;
     initialState: ReturnType<typeof vi.fn>;
+    initialStateIncludingUnfiltered: ReturnType<typeof vi.fn>;
     mergeExternalStates: ReturnType<typeof vi.fn>;
   };
   mappingStorage: { getMapping: ReturnType<typeof vi.fn> };
@@ -107,6 +108,11 @@ function makeHarness(
     // biome-ignore lint/suspicious/noExplicitAny: registry stub
     entity: vi.fn((id: string) => (opts?.entities as any)?.[id]),
     initialState: vi.fn(() => undefined),
+    initialStateIncludingUnfiltered: vi.fn((id: string) => ({
+      entity_id: id,
+      state: "on",
+      attributes: { friendly_name: id },
+    })),
     mergeExternalStates: vi.fn(),
     fullEntities,
   };
@@ -349,6 +355,43 @@ describe("ServerModeEndpointManager (#301)", () => {
         reason: "Endpoint id collides with light.a. Set distinct custom names.",
       },
     ]);
+  });
+
+
+  it("reconciles endpoint states from the latest registry snapshot", async () => {
+    const h = makeHarness(["light.a", "light.b"], "light.a");
+    h.registry.initialStateIncludingUnfiltered.mockImplementation(
+      (id: string) =>
+        id === "light.a"
+          ? {
+              entity_id: id,
+              state: "on",
+              attributes: { friendly_name: "A" },
+            }
+          : undefined,
+    );
+    await h.manager.refreshDevices();
+    const endpoints = h.serverNode.addDevice.mock.calls.map(
+      (c) => c[0] as EntityEndpoint,
+    );
+    for (const endpoint of endpoints) {
+      vi.mocked(endpoint.updateStates).mockClear();
+    }
+    h.registry.mergeExternalStates.mockClear();
+
+    await h.manager.refreshStatesFromRegistry();
+
+    const expected = {
+      "light.a": {
+        entity_id: "light.a",
+        state: "on",
+        attributes: { friendly_name: "A" },
+      },
+    };
+    expect(h.registry.mergeExternalStates).toHaveBeenCalledWith(expected);
+    for (const endpoint of endpoints) {
+      expect(endpoint.updateStates).toHaveBeenCalledWith(expected);
+    }
   });
 
   it("fans state updates out to every endpoint after merging states", async () => {

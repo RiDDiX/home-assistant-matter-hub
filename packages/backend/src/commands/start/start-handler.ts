@@ -175,7 +175,12 @@ export async function startHandler(
 
   const enableAutoRefresh = initBridges
     .then(() => registry$)
-    .then((r) => r.enableAutoRefresh(() => bridgeService.refreshAll()));
+    .then((r) =>
+      r.enableAutoRefresh(
+        () => bridgeService.refreshAll(),
+        () => bridgeService.refreshStatesAll(),
+      ),
+    );
 
   await Promise.all([initBridges, initApi, enableAutoRefresh]);
 }

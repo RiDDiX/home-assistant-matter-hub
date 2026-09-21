@@ -341,6 +341,11 @@ export class ServerModeBridge {
 
   async refreshDevices(): Promise<void> {
     await this.endpointManager.refreshDevices();
+    await this.endpointManager.refreshStatesFromRegistry();
+  }
+
+  async refreshStates(): Promise<void> {
+    await this.endpointManager.refreshStatesFromRegistry();
   }
 
   private setStatus(status: BridgeServerStatus) {

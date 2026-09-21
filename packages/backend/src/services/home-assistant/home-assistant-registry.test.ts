@@ -103,6 +103,43 @@ describe("HomeAssistantRegistry", () => {
     expect(fake.connection.sendMessagePromise).toHaveBeenCalled();
   });
 
+
+  it("updates states when reload sees no registry-structure change", async () => {
+    const fake = makeConnection();
+    let position = 40;
+    fake.connection.sendMessagePromise = vi.fn((message: { type: string }) => {
+      if (message.type === "get_states") {
+        return Promise.resolve([
+          {
+            entity_id: "cover.blind",
+            state: "open",
+            attributes: {
+              device_class: "shade",
+              current_position: position,
+            },
+          },
+        ]);
+      }
+      return Promise.resolve([]);
+    }) as unknown as Connection["sendMessagePromise"];
+    const client = { connection: fake.connection } as HomeAssistantClient;
+    const registry = new HomeAssistantRegistry(client, defaultOptions);
+    const initPromise = registry.construction;
+    await vi.runAllTimersAsync();
+    await initPromise;
+
+    position = 100;
+    const reloadPromise = registry.reload();
+    await vi.runAllTimersAsync();
+    const changed = await reloadPromise;
+
+    expect(changed).toBe(false);
+    expect(
+      (registry.states["cover.blind"]?.attributes as { current_position?: number })
+        .current_position,
+    ).toBe(100);
+  });
+
   it("times out a hung get_states query instead of blocking Promise.all forever", async () => {
     const fake = makeConnection();
     fake.connection.sendMessagePromise = vi.fn((message: { type: string }) => {
