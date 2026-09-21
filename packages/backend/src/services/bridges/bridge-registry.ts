@@ -17,6 +17,7 @@ import { Logger } from "@matter/general";
 import { callService } from "home-assistant-js-websocket";
 import { keys, pickBy, values } from "lodash-es";
 import { sendHaMessage } from "../../utils/send-ha-message.js";
+import { trailingIndex } from "../../utils/trailing-index.js";
 import type { HomeAssistantClient } from "../home-assistant/home-assistant-client.js";
 import type {
   HomeAssistantDevices,
@@ -844,11 +845,23 @@ export class BridgeRegistry {
   }
 
   /**
-   * Find a power sensor entity (device_class: power) on the same HA device.
+   * Find a matching sensor entity (by device_class) on the same HA device.
+   *
+   * A device may expose several matching sensors: a multi-outlet power strip
+   * reports one power (and energy) sensor per outlet, all under one device id.
+   * Returning the first match then attributes a single outlet's reading to
+   * every outlet (#488). When several candidates exist, pair them to the
+   * requesting entity by trailing index (`switch_2` -> `power_2`); fall back to
+   * the first match when there is no index to pair on. Single-sensor devices
+   * keep the previous behaviour.
    */
-  findPowerEntityForDevice(deviceId: string): string | undefined {
-    const entities = values(this.registry.entities);
-    for (const entity of entities) {
+  private findSensorEntityForDevice(
+    deviceId: string,
+    deviceClass: SensorDeviceClass,
+    forEntityId?: string,
+  ): string | undefined {
+    const candidates: string[] = [];
+    for (const entity of values(this.registry.entities)) {
       if (entity.device_id !== deviceId) continue;
       if (!entity.entity_id.startsWith("sensor.")) continue;
 
@@ -856,31 +869,50 @@ export class BridgeRegistry {
       if (!state) continue;
 
       const attrs = state.attributes as SensorDeviceAttributes;
-      if (attrs.device_class === SensorDeviceClass.power) {
-        return entity.entity_id;
+      if (attrs.device_class === deviceClass) {
+        candidates.push(entity.entity_id);
       }
     }
-    return undefined;
+
+    if (candidates.length <= 1) return candidates[0];
+
+    const wantedIndex =
+      forEntityId != null ? trailingIndex(forEntityId) : undefined;
+    if (wantedIndex != null) {
+      const matched = candidates.find(
+        (id) => trailingIndex(id) === wantedIndex,
+      );
+      if (matched) return matched;
+    }
+    return candidates[0];
+  }
+
+  /**
+   * Find a power sensor entity (device_class: power) on the same HA device.
+   */
+  findPowerEntityForDevice(
+    deviceId: string,
+    forEntityId?: string,
+  ): string | undefined {
+    return this.findSensorEntityForDevice(
+      deviceId,
+      SensorDeviceClass.power,
+      forEntityId,
+    );
   }
 
   /**
    * Find an energy sensor entity (device_class: energy) on the same HA device.
    */
-  findEnergyEntityForDevice(deviceId: string): string | undefined {
-    const entities = values(this.registry.entities);
-    for (const entity of entities) {
-      if (entity.device_id !== deviceId) continue;
-      if (!entity.entity_id.startsWith("sensor.")) continue;
-
-      const state = this.registry.states[entity.entity_id];
-      if (!state) continue;
-
-      const attrs = state.attributes as SensorDeviceAttributes;
-      if (attrs.device_class === SensorDeviceClass.energy) {
-        return entity.entity_id;
-      }
-    }
-    return undefined;
+  findEnergyEntityForDevice(
+    deviceId: string,
+    forEntityId?: string,
+  ): string | undefined {
+    return this.findSensorEntityForDevice(
+      deviceId,
+      SensorDeviceClass.energy,
+      forEntityId,
+    );
   }
 
   markPowerEntityUsed(entityId: string): void {
@@ -1030,14 +1062,20 @@ export class BridgeRegistry {
       const domain = entity.entity_id.split(".")[0];
       if (domain !== "switch" && domain !== "light") continue;
 
-      const powerEntityId = this.findPowerEntityForDevice(entity.device_id);
+      const powerEntityId = this.findPowerEntityForDevice(
+        entity.device_id,
+        entity.entity_id,
+      );
       if (powerEntityId && powerEntityId !== entity.entity_id) {
         if (!this._usedPowerEntities.has(powerEntityId)) {
           this._usedPowerEntities.add(powerEntityId);
         }
       }
 
-      const energyEntityId = this.findEnergyEntityForDevice(entity.device_id);
+      const energyEntityId = this.findEnergyEntityForDevice(
+        entity.device_id,
+        entity.entity_id,
+      );
       if (energyEntityId && energyEntityId !== entity.entity_id) {
         if (!this._usedEnergyEntities.has(energyEntityId)) {
           this._usedEnergyEntities.add(energyEntityId);

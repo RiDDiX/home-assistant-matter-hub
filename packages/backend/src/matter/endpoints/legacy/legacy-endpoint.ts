@@ -229,6 +229,7 @@ export class LegacyEndpoint extends EntityEndpoint {
         if (domain === "switch") {
           const powerEntityId = registry.findPowerEntityForDevice(
             entity.device_id,
+            entityId,
           );
           if (powerEntityId && powerEntityId !== entityId) {
             effectiveMapping = {
@@ -249,6 +250,7 @@ export class LegacyEndpoint extends EntityEndpoint {
         if (domain === "switch") {
           const energyEntityId = registry.findEnergyEntityForDevice(
             entity.device_id,
+            entityId,
           );
           if (energyEntityId && energyEntityId !== entityId) {
             effectiveMapping = {
