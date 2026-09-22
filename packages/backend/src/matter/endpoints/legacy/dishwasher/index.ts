@@ -9,6 +9,12 @@ import { HomeAssistantEntityBehavior } from "../../../behaviors/home-assistant-e
 import { IdentifyServer } from "../../../behaviors/identify-server.js";
 import { OnOffServer } from "../../../behaviors/on-off-server.js";
 
+// Plain switch words, plus the vocabularies the integrations that actually
+// expose a dishwasher use. Home Connect's operation state sensor reports
+// inactive/ready/delayedstart/run/pause/actionrequired/finished/error/aborting
+// (home_connect/sensor.py), and SmartThings reports run/pause/stop. Only
+// "finished" used to match, so a running Home Connect machine read as Stopped
+// and the Error state was unreachable (#486).
 const haStateToDishwasherState: Record<
   string,
   OperationalState.OperationalStateEnum
@@ -24,6 +30,18 @@ const haStateToDishwasherState: Record<
   paused: OperationalState.OperationalStateEnum.Paused,
   complete: OperationalState.OperationalStateEnum.Stopped,
   finished: OperationalState.OperationalStateEnum.Stopped,
+  // Home Connect
+  inactive: OperationalState.OperationalStateEnum.Stopped,
+  ready: OperationalState.OperationalStateEnum.Stopped,
+  delayedstart: OperationalState.OperationalStateEnum.Stopped,
+  run: OperationalState.OperationalStateEnum.Running,
+  pause: OperationalState.OperationalStateEnum.Paused,
+  // Halted waiting for the user, which is a pause rather than a failure.
+  actionrequired: OperationalState.OperationalStateEnum.Paused,
+  aborting: OperationalState.OperationalStateEnum.Running,
+  error: OperationalState.OperationalStateEnum.Error,
+  // SmartThings
+  stop: OperationalState.OperationalStateEnum.Stopped,
 };
 
 class DishwasherOperationalStateServer extends Base {
@@ -56,7 +74,11 @@ class DishwasherOperationalStateServer extends Base {
     applyPatchState(this.state, {
       operationalState: newState,
       operationalError: {
-        errorStateId: OperationalState.ErrorState.NoError,
+        // Error is only meaningful with an error state to go with it.
+        errorStateId:
+          newState === OperationalState.OperationalStateEnum.Error
+            ? OperationalState.ErrorState.UnableToCompleteOperation
+            : OperationalState.ErrorState.NoError,
       },
     });
   }

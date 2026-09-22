@@ -701,10 +701,10 @@ export const matterDeviceTypeControllerSupport: Record<
   },
   dishwasher: {
     apple: "no",
-    google: "no",
-    alexa: "unknown",
+    google: "yes",
+    alexa: "yes",
     aqara: "unknown",
-    note: "Appliance types have little controller support today.",
+    note: "Google and Alexa both list Dishwasher; Apple does not render it yet.",
   },
   speaker: {
     apple: "no",
