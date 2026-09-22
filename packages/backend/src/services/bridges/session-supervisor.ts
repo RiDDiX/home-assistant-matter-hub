@@ -519,6 +519,7 @@ export class SessionSupervisor {
           const type = message?.payloadHeader?.messageType;
           if (type === MessageType.SubscribeRequest) {
             this.pushWedgeRing(this.subscribeTimesMs, session, now);
+            this.armSubscribeWatchdog(session);
           } else if (type != null && commandMessageTypes.includes(type)) {
             this.lastCommandImAt.set(session, now);
           }
@@ -595,6 +596,39 @@ export class SessionSupervisor {
         `wedge v2 give-up recorded sub=${(sub as { subscriptionId?: number })?.subscriptionId}`,
       );
     });
+  }
+
+  /**
+   * Watch a session that asked to subscribe until the subscription exists.
+   *
+   * matter.js only adds a subscription to the session once its initial data
+   * reports finished (ServerSubscription.activate). One aborted in that
+   * window is deleted from a set it never joined, so no subscriptionsChanged
+   * is emitted, and both recovery paths hang off that event: the session was
+   * never reaped and the operational advertisement, stopped when the session
+   * opened, never came back. The node went silently unreachable until a
+   * restart (#487).
+   *
+   * Armed on the SubscribeRequest rather than on session open, so a
+   * command-only session that never subscribes is left alone. That leaves one
+   * narrow gap: a subscription that both starts and aborts in the window
+   * between server.start() and the supervisor wiring is never seen. Arming
+   * every session already present at wiring time would close that, but it
+   * would also close an idle command-only session, so it is not worth it. A subscription
+   * that establishes clears the timer through the subscriptionsChanged
+   * handler, and closeStaleSession keeps anything still talking.
+   */
+  private armSubscribeWatchdog(session: { id?: unknown }) {
+    const sessionId = session.id;
+    if (typeof sessionId !== "number") return;
+    if (this.staleSessionTimers.has(sessionId)) return;
+    this.staleSessionTimers.set(
+      sessionId,
+      setTimeout(() => {
+        this.staleSessionTimers.delete(sessionId);
+        this.closeStaleSession(sessionId, PRIMING_GRACE_MS);
+      }, replacedSessionTimeoutMs(this.dataProvider.featureFlags)),
+    );
   }
 
   private closeStaleSession(sessionId: number, minQuietMs = 0) {
