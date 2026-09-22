@@ -348,7 +348,14 @@ Home, ...) are not placed in the same network segment. Please make sure to revie
 </details>
 
 <details>
-<summary><strong>🧪 Alpha (v2.1.0-alpha.900)</strong></summary>
+<summary><strong>🧪 Alpha (v2.1.0-alpha.902)</strong></summary>
+
+**v2.1.0-alpha.902:**
+- 🔁 **A bridge that went quiet now comes back on its own**: if a controller's subscription died while the bridge was still sending it the first batch of data, nothing noticed. The session was never cleaned up and the bridge stopped advertising itself, so every device read offline until the add-on was restarted. One report sat like that for 39 minutes. The bridge now watches a session from the moment it asks to subscribe ([#487](https://github.com/RiDDiX/home-assistant-matter-hub/issues/487))
+- 🧽 **Dishwashers report what they are actually doing**: the states were only matched against generic on/off words, so a Home Connect machine looked stopped even while running, and the error state was never reachable. The words Home Connect and SmartThings really use are understood now ([#486](https://github.com/RiDDiX/home-assistant-matter-hub/issues/486))
+
+**v2.1.0-alpha.901:**
+- 🔌 **Each outlet of a power strip reports its own power**: a multi-outlet device showed the same wattage on all of its outlets, because every outlet was handed the first power sensor on the device. Outlets are now paired to their own power and energy sensor ([#488](https://github.com/RiDDiX/home-assistant-matter-hub/issues/488), thanks to @barnabasbusa)
 
 **v2.1.0-alpha.900:**
 - 🔌 **Port 80 shows up in the network check**: two setups only got Alexa to finish pairing after freeing TCP port 80 on the Home Assistant host, once with the Home Assistant UI moved there, once with the Emulated Hue integration. Nothing in Matter uses port 80 and nobody has explained the link, so the Health Dashboard's network diagnostics now only points it out when something answers there ([#449](https://github.com/RiDDiX/home-assistant-matter-hub/issues/449), [#478](https://github.com/RiDDiX/home-assistant-matter-hub/issues/478))
