@@ -17,7 +17,7 @@ import { Logger } from "@matter/general";
 import { callService } from "home-assistant-js-websocket";
 import { keys, pickBy, values } from "lodash-es";
 import { sendHaMessage } from "../../utils/send-ha-message.js";
-import { trailingIndex } from "../../utils/trailing-index.js";
+import { pairingIndex } from "../../utils/trailing-index.js";
 import type { HomeAssistantClient } from "../home-assistant/home-assistant-client.js";
 import type {
   HomeAssistantDevices,
@@ -851,9 +851,10 @@ export class BridgeRegistry {
    * reports one power (and energy) sensor per outlet, all under one device id.
    * Returning the first match then attributes a single outlet's reading to
    * every outlet (#488). When several candidates exist, pair them to the
-   * requesting entity by trailing index (`switch_2` -> `power_2`); fall back to
-   * the first match when there is no index to pair on. Single-sensor devices
-   * keep the previous behaviour.
+   * requesting entity by the index that tells the two ids apart
+   * (`switch_2` -> `power_2`); fall back to the first match when nothing pairs,
+   * so an unpairable device keeps the reading it had before. Single-sensor
+   * devices keep the previous behaviour.
    */
   private findSensorEntityForDevice(
     deviceId: string,
@@ -876,13 +877,14 @@ export class BridgeRegistry {
 
     if (candidates.length <= 1) return candidates[0];
 
-    const wantedIndex =
-      forEntityId != null ? trailingIndex(forEntityId) : undefined;
-    if (wantedIndex != null) {
-      const matched = candidates.find(
-        (id) => trailingIndex(id) === wantedIndex,
-      );
-      if (matched) return matched;
+    if (forEntityId != null) {
+      const matched = candidates.filter((id) => {
+        const wanted = pairingIndex(forEntityId, id);
+        return wanted != null && pairingIndex(id, forEntityId) === wanted;
+      });
+      // Exactly one, or the index does not identify an outlet and guessing
+      // would be worse than the shared reading every outlet got before.
+      if (matched.length === 1) return matched[0];
     }
     return candidates[0];
   }

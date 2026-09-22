@@ -102,3 +102,109 @@ describe("BridgeRegistry multi-outlet power/energy mapping (#488)", () => {
     );
   });
 });
+
+describe("BridgeRegistry multi-outlet pairing edge cases (#489 review)", () => {
+  // The real ids Home Assistant generates for this device: both the switch and
+  // the power sensor carry the same Matter endpoint id.
+  const haMatter: Record<string, HomeAssistantEntityState> = {};
+  for (let i = 1; i <= 4; i++) {
+    haMatter[`sensor.kitchen_shelly_power_strip_4_power_${i}`] = state(
+      `sensor.kitchen_shelly_power_strip_4_power_${i}`,
+      SensorDeviceClass.power,
+    );
+  }
+
+  it("pairs the real Home Assistant ids for the #488 device", () => {
+    const registry = sut(haMatter);
+    for (let i = 1; i <= 4; i++) {
+      expect(
+        registry.findPowerEntityForDevice(
+          deviceId,
+          `switch.kitchen_shelly_power_strip_4_switch_${i}`,
+        ),
+      ).toBe(`sensor.kitchen_shelly_power_strip_4_power_${i}`);
+    }
+  });
+
+  // A device whose own name ends in a digit must not have that digit read as
+  // an outlet index, or the first outlet silently gets the fourth one's meter.
+  it("does not treat a number in the device name as an outlet index", () => {
+    const registry = sut(haMatter);
+    // Falls back to the first candidate, which is what every outlet got
+    // before the pairing existed, instead of the fourth outlet's meter.
+    expect(
+      registry.findPowerEntityForDevice(
+        deviceId,
+        "switch.kitchen_shelly_power_strip_4",
+      ),
+    ).toBe("sensor.kitchen_shelly_power_strip_4_power_1");
+  });
+
+  // Home Assistant's collision suffixes start at _2, the first entity has none.
+  it("pairs Home Assistant collision suffixes", () => {
+    const collision: Record<string, HomeAssistantEntityState> = {
+      "sensor.strip_power": state(
+        "sensor.strip_power",
+        SensorDeviceClass.power,
+      ),
+    };
+    for (const i of [2, 3, 4]) {
+      collision[`sensor.strip_power_${i}`] = state(
+        `sensor.strip_power_${i}`,
+        SensorDeviceClass.power,
+      );
+    }
+    const registry = sut(collision);
+    for (const i of [2, 3, 4]) {
+      expect(
+        registry.findPowerEntityForDevice(deviceId, `switch.strip_${i}`),
+      ).toBe(`sensor.strip_power_${i}`);
+    }
+  });
+
+  // An index nothing matches must not pick a neighbour at random.
+  it("falls back rather than guessing when the index matches nothing", () => {
+    const gaps: Record<string, HomeAssistantEntityState> = {};
+    for (const i of [1, 2, 4]) {
+      gaps[`sensor.strip_power_${i}`] = state(
+        `sensor.strip_power_${i}`,
+        SensorDeviceClass.power,
+      );
+    }
+    const registry = sut(gaps);
+    expect(
+      registry.findPowerEntityForDevice(deviceId, "switch.strip_switch_3"),
+    ).toBe("sensor.strip_power_1");
+    expect(
+      registry.findPowerEntityForDevice(deviceId, "switch.strip_switch_4"),
+    ).toBe("sensor.strip_power_4");
+  });
+
+  // A whole-device total sitting next to per-outlet sensors must not be handed
+  // to an outlet that does pair.
+  it("keeps an unindexed aggregate sensor away from a paired outlet", () => {
+    const mixed: Record<string, HomeAssistantEntityState> = {
+      "sensor.strip_energy_total": state(
+        "sensor.strip_energy_total",
+        SensorDeviceClass.energy,
+      ),
+    };
+    for (let i = 1; i <= 4; i++) {
+      mixed[`sensor.strip_energy_${i}`] = state(
+        `sensor.strip_energy_${i}`,
+        SensorDeviceClass.energy,
+      );
+    }
+    const registry = sut(mixed);
+    expect(
+      registry.findEnergyEntityForDevice(deviceId, "switch.strip_switch_2"),
+    ).toBe("sensor.strip_energy_2");
+  });
+
+  it("keeps the pre-pairing result when no requester is given", () => {
+    const registry = sut(haMatter);
+    expect(registry.findPowerEntityForDevice(deviceId)).toBe(
+      "sensor.kitchen_shelly_power_strip_4_power_1",
+    );
+  });
+});
