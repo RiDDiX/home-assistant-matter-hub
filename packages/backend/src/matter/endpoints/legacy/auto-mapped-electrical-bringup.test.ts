@@ -16,14 +16,8 @@ import { HomeAssistantConfig } from "../../../services/home-assistant/home-assis
 import { AggregatorEndpoint } from "../aggregator-endpoint.js";
 import { createLegacyEndpointType } from "./create-legacy-endpoint-type.js";
 
-// #484 asked whether an auto-mapped power/energy sensor leaves the switch or
-// light endpoint without the ElectricalSensor device type. It does not:
-// matter.js adds 0x0510 itself once PowerTopology sits next to a measurement
-// cluster. This pins that, because the descriptor is what a controller reads.
-//
-// The mappings are passed in directly. Where they come from (auto-assigned for
-// the switch domain in legacy-endpoint, by hand for a light since #374) makes
-// no difference once createLegacyEndpointType has them.
+// #484: matter.js adds ElectricalSensor (0x0510) itself once PowerTopology
+// sits next to a measurement cluster.
 
 const ON_OFF_PLUG_IN_UNIT = 0x010a;
 const ON_OFF_LIGHT = 0x0100;
@@ -168,8 +162,6 @@ describe("auto-mapped power/energy bring-up (#484)", () => {
     ]);
     expect(snapshot.serverList).toContain(ELECTRICAL_POWER_MEASUREMENT);
     expect(snapshot.serverList).toContain(ELECTRICAL_ENERGY_MEASUREMENT);
-    // ElectricalSensor mandates PowerTopology, and it is what makes matter.js
-    // add the device type in the first place.
     expect(snapshot.serverList).toContain(POWER_TOPOLOGY);
     // 42 W -> mW, 7.5 kWh -> mWh
     expect(snapshot.activePower).toBe(42_000);
@@ -192,9 +184,7 @@ describe("auto-mapped power/energy bring-up (#484)", () => {
     expect(snapshot.cumulativeEnergy).toBe(7_500_000);
   });
 
-  // #484: Apple Home shows live wattage only on an outlet tile, so a metered
-  // light has to be exposed as On/Off Plug-in Unit to get one. The override has
-  // to keep the measurements it was chosen for.
+  // Apple only shows wattage on outlets (#484)
   it("keeps the measurements when a light is exposed as an outlet", async () => {
     const snapshot = await bringUp("light.lamp", {
       entityId: "light.lamp",

@@ -711,15 +711,12 @@ export function EntityMappingDialog({
               {controllerSupportWarning(matterDeviceType)}
             </Alert>
           )}
-        {/* Offered for lights so Apple Home can show wattage (#484), but it is
-            an on/off type and every controller sees the change, not only Apple. */}
         {currentDomain === "light" &&
           matterDeviceType === "on_off_plugin_unit" && (
             <Alert severity="warning" sx={{ mt: 1 }}>
-              This exposes the light as an outlet to every controller, not just
-              Apple Home. Brightness and color are dropped, and scenes keep
-              on/off only. Pick it when you want Apple Home to show the wattage
-              of a light you have mapped a power sensor to.
+              Every controller will see this light as a plain outlet, with no
+              brightness or color. Only worth it to get a light's wattage into
+              Apple Home.
             </Alert>
           )}
 

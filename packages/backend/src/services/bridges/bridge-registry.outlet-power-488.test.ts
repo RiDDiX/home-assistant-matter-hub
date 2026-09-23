@@ -104,8 +104,7 @@ describe("BridgeRegistry multi-outlet power/energy mapping (#488)", () => {
 });
 
 describe("BridgeRegistry multi-outlet pairing edge cases (#489 review)", () => {
-  // The real ids Home Assistant generates for this device: both the switch and
-  // the power sensor carry the same Matter endpoint id.
+  // the ids HA generates, both carry the Matter endpoint id
   const haMatter: Record<string, HomeAssistantEntityState> = {};
   for (let i = 1; i <= 4; i++) {
     haMatter[`sensor.kitchen_shelly_power_strip_4_power_${i}`] = state(
@@ -126,12 +125,9 @@ describe("BridgeRegistry multi-outlet pairing edge cases (#489 review)", () => {
     }
   });
 
-  // A device whose own name ends in a digit must not have that digit read as
-  // an outlet index, or the first outlet silently gets the fourth one's meter.
   it("does not treat a number in the device name as an outlet index", () => {
     const registry = sut(haMatter);
-    // Falls back to the first candidate, which is what every outlet got
-    // before the pairing existed, instead of the fourth outlet's meter.
+    // falls back to the first candidate
     expect(
       registry.findPowerEntityForDevice(
         deviceId,
@@ -140,7 +136,7 @@ describe("BridgeRegistry multi-outlet pairing edge cases (#489 review)", () => {
     ).toBe("sensor.kitchen_shelly_power_strip_4_power_1");
   });
 
-  // Home Assistant's collision suffixes start at _2, the first entity has none.
+  // HA's collision suffixes start at _2
   it("pairs Home Assistant collision suffixes", () => {
     const collision: Record<string, HomeAssistantEntityState> = {
       "sensor.strip_power": state(
@@ -162,7 +158,6 @@ describe("BridgeRegistry multi-outlet pairing edge cases (#489 review)", () => {
     }
   });
 
-  // An index nothing matches must not pick a neighbour at random.
   it("falls back rather than guessing when the index matches nothing", () => {
     const gaps: Record<string, HomeAssistantEntityState> = {};
     for (const i of [1, 2, 4]) {
@@ -180,8 +175,6 @@ describe("BridgeRegistry multi-outlet pairing edge cases (#489 review)", () => {
     ).toBe("sensor.strip_power_4");
   });
 
-  // A whole-device total sitting next to per-outlet sensors must not be handed
-  // to an outlet that does pair.
   it("keeps an unindexed aggregate sensor away from a paired outlet", () => {
     const mixed: Record<string, HomeAssistantEntityState> = {
       "sensor.strip_energy_total": state(

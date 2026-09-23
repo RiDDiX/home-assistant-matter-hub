@@ -64,8 +64,7 @@ describe("domainToDefaultMatterTypes", () => {
     }
   });
 
-  // #484: Apple Home puts live wattage only on an outlet tile, so a light with
-  // a mapped power sensor has to be offered On/Off Plug-in Unit to get one.
+  // Apple only shows wattage on outlets (#484)
   it("offers the outlet type for lights", () => {
     expect(domainToDefaultMatterTypes.light).toContain("on_off_plugin_unit");
   });

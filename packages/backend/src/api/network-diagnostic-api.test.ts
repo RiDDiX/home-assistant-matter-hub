@@ -5,9 +5,7 @@ import {
   runDiagnostics,
 } from "./network-diagnostic-api.js";
 
-// #449/#478: a service holding TCP 80 on the host correlates with Alexa
-// pairing never completing. The check probes for a real listener, so the test
-// starts one instead of stubbing the socket.
+// #478: probes a live listener on port 80
 
 let listener: net.Server | undefined;
 
@@ -24,8 +22,7 @@ function port80Check(checks: NetworkDiagnosticCheck[]) {
 
 type BindResult = "free" | "busy" | "denied";
 
-// Both cases below only mean something when this runner can own port 80, so
-// each one starts by finding out and skips rather than asserting on luck.
+// both tests skip when this runner can't own port 80
 async function bind80(): Promise<BindResult> {
   const server = net.createServer();
   try {
@@ -45,7 +42,6 @@ async function bind80(): Promise<BindResult> {
 
 describe("network diagnostics port 80 check", () => {
   it("stays quiet when nothing answers on port 80", async (ctx) => {
-    // Holding the port proves it is free, then release it before probing.
     if ((await bind80()) !== "free") {
       ctx.skip();
       return;

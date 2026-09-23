@@ -6,12 +6,8 @@ import {
   STALE_SESSION_QUIET_WINDOW_MS,
 } from "./session-rotation.js";
 
-// #487: matter.js only adds a subscription to session.subscriptions once its
-// initial data reports finished (ServerSubscription.activate). One aborted in
-// that window is deleted from a set it never joined, so no subscriptionsChanged
-// is emitted. Both recovery paths hung off that event, so the session was never
-// reaped and the operational advertisement never resumed. The reporter's node
-// stayed silently unreachable for 39 minutes until a manual restart.
+// #487: a subscription that died during its first reports left the session
+// wedged, nothing reaped it or re-announced until a restart.
 
 type Handler = (session: never) => void;
 
@@ -27,7 +23,6 @@ interface FakeSession {
   initiateForceClose: ReturnType<typeof vi.fn>;
 }
 
-// A fresh session, exactly as one looks the moment it opens.
 function fakeSession(id: number): FakeSession {
   return {
     id,
@@ -83,14 +78,12 @@ function makeBridge(sessions: FakeSession[], featureFlags: object = {}) {
   );
   const supervisor = (bridge as unknown as { sessions: unknown })
     .sessions as unknown as { wireSessionDiagnostics(): void };
-  // Capture the wrapper the supervisor installs over onNewExchange.
   const before = interactionServer.onNewExchange;
   supervisor.wireSessionDiagnostics();
   const wrapped = interactionServer.onNewExchange;
   onNewExchange = () => {};
   void before;
 
-  // Drive a real SubscribeRequest through the interaction server.
   const subscribeRequest = (session: FakeSession) =>
     wrapped(
       { session } as never,
@@ -102,8 +95,7 @@ function makeBridge(sessions: FakeSession[], featureFlags: object = {}) {
   return { handlers, subscribeRequest, restartAdvertisement };
 }
 
-// Past the 5 minute quiet window a wedged session must cross, with room for
-// the 60s re-arm cycle inside closeStaleSession.
+// past the 5 min quiet window plus a 60s re-arm
 const PAST_QUIET_MS =
   STALE_SESSION_QUIET_WINDOW_MS + PRIMING_GRACE_MS + 120_000;
 
@@ -121,7 +113,6 @@ describe("subscription aborted during initial data reports (#487)", () => {
     const { subscribeRequest } = makeBridge([session]);
 
     subscribeRequest(session);
-    // The abort emits nothing, so nothing else happens on its own.
     expect(session.initiateClose).not.toHaveBeenCalled();
 
     await vi.advanceTimersByTimeAsync(PAST_QUIET_MS);
@@ -129,9 +120,6 @@ describe("subscription aborted during initial data reports (#487)", () => {
     expect(session.initiateClose).toHaveBeenCalled();
   });
 
-  // Closing the wedged session is only half of it: the operational
-  // advertisement stopped when the session opened has to come back, or the
-  // controller has no address to rediscover the node through.
   it("re-announces once the wedged session is closed", async () => {
     const session = fakeSession(10885);
     const { subscribeRequest, restartAdvertisement } = makeBridge([session]);
@@ -147,7 +135,6 @@ describe("subscription aborted during initial data reports (#487)", () => {
     const { handlers, subscribeRequest } = makeBridge([session]);
 
     subscribeRequest(session);
-    // Subscribe successful: the subscription joins the session's set.
     session.subscriptions.size = 1;
     handlers.subscriptionsChanged?.(session as never);
 
@@ -156,8 +143,6 @@ describe("subscription aborted during initial data reports (#487)", () => {
     expect(session.initiateClose).not.toHaveBeenCalled();
   });
 
-  // A controller may hold a session for reads, writes and invokes without ever
-  // subscribing. Arming on session open would have closed those.
   it("never touches a session that did not ask to subscribe", async () => {
     const session = fakeSession(30000);
     const { handlers } = makeBridge([session]);
@@ -168,13 +153,12 @@ describe("subscription aborted during initial data reports (#487)", () => {
     expect(session.initiateClose).not.toHaveBeenCalled();
   });
 
-  // 0 subs but still talking means the peer is recovering, not dead (#287/#398).
+  // a session still talking is recovering (#287)
   it("keeps a subscribing session that is still talking", async () => {
     const session = fakeSession(20000);
     const { subscribeRequest } = makeBridge([session]);
 
     subscribeRequest(session);
-    // Traffic keeps arriving on the session while it retries.
     for (let i = 0; i < 12; i++) {
       await vi.advanceTimersByTimeAsync(60_000);
       session.timestamp = Date.now();
@@ -183,9 +167,7 @@ describe("subscription aborted during initial data reports (#487)", () => {
     expect(session.initiateClose).not.toHaveBeenCalled();
   });
 
-  // fastSessionRecovery drops the quiet window to zero, so the 30s priming
-  // floor is the only thing keeping a slow-priming session alive. A session
-  // still exchanging data must survive it.
+  // fastSessionRecovery drops the quiet window to the 30s priming floor
   it("does not cut off a slow prime under fastSessionRecovery", async () => {
     const session = fakeSession(40000);
     const { subscribeRequest } = makeBridge([session], {
@@ -201,7 +183,6 @@ describe("subscription aborted during initial data reports (#487)", () => {
     expect(session.initiateClose).not.toHaveBeenCalled();
   });
 
-  // ...but one that goes silent under the same flag is still reaped.
   it("still reaps a wedged session under fastSessionRecovery", async () => {
     const session = fakeSession(40001);
     const { subscribeRequest } = makeBridge([session], {

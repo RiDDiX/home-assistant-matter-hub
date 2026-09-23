@@ -27,8 +27,7 @@ describe("pairingIndex", () => {
     );
   });
 
-  // #488's device is a "Shelly Power Strip 4", so the device name itself ends
-  // in a digit. A plain trailing index reads that as outlet 4.
+  // the #488 device is a "Shelly Power Strip 4"
   it("ignores a number that belongs to the shared device name", () => {
     expect(
       pairingIndex(
@@ -39,8 +38,6 @@ describe("pairingIndex", () => {
     expect(trailingIndex("switch.kitchen_shelly_power_strip_4")).toBe(4);
   });
 
-  // What Home Assistant actually generates for a multi-endpoint Matter device:
-  // both sides carry the same Matter endpoint id.
   it("pairs the ids Home Assistant generates for a multi-outlet Matter device", () => {
     for (const i of [1, 2, 3, 4]) {
       expect(
@@ -58,8 +55,6 @@ describe("pairingIndex", () => {
 });
 
 describe("pairingIndex numeric tokens", () => {
-  // The prefix walk must not stop inside a number: `_101` and `_11` share a
-  // leading 1, and comparing only the remainders reads both as 1.
   it("compares whole numbers, not the digits left after the shared prefix", () => {
     expect(
       pairingIndex("sensor.strip_power_101", "sensor.strip_power_11"),
@@ -73,8 +68,6 @@ describe("pairingIndex numeric tokens", () => {
     expect(pairingIndex("switch.strip_10", "switch.strip_11")).toBe(10);
   });
 
-  // One id being the start of the other leaves nothing that tells them apart,
-  // so there is no index to pair on and the caller falls back.
   it("has no index when one id is the start of the other", () => {
     expect(
       pairingIndex("sensor.strip_power_1", "sensor.strip_power_12"),

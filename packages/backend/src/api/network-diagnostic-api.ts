@@ -71,12 +71,7 @@ function getNetworkInterfaces(): NetworkInterfaceInfo[] {
   return result;
 }
 
-// Two setups tracked an Alexa pairing failure down to another service holding
-// TCP 80 on the Home Assistant host: HA's own UI moved to port 80, and the
-// Emulated Hue integration (#449, #478). Nothing in Matter uses port 80 and
-// nobody has explained the mechanism, so this only reports what it sees.
-// A refused connection means free, anything else means unknown, and only a
-// completed connection warns.
+// Alexa paired once port 80 was freed (#449, #478).
 async function isPort80Taken(host: string): Promise<boolean> {
   return new Promise((resolve) => {
     const socket = net.connect({ host, port: 80 });
@@ -239,8 +234,7 @@ export async function runDiagnostics(
     }
   }
 
-  // Check 7: port 80 held on this host. Loopback covers host networking, the
-  // advertised LAN address covers a container that has its own loopback.
+  // Check 7: port 80, on loopback and on the LAN address for containers
   const probeHosts = [
     "127.0.0.1",
     ...(mdnsInterface
@@ -254,11 +248,10 @@ export async function runDiagnostics(
     checks.push({
       name: "port_80_in_use",
       status: "warn",
-      message: "Something is listening on TCP port 80 on this host",
+      message: "Port 80 is in use on this host",
       detail:
-        `Answering on ${busy.join(", ")}. Matter does not use port 80 and this breaks nothing by itself, so a reverse proxy or a UI on port 80 is not a misconfiguration. ` +
-        "It is listed because two setups only got Alexa to finish pairing after freeing it, one with the Home Assistant UI moved to port 80, one with the Emulated Hue integration (#449, #478). " +
-        "Nobody has explained why. If Alexa pairing keeps failing, stop whatever holds port 80 long enough to pair, then put it back.",
+        `Answering on ${busy.join(", ")}. That is fine on its own. Two users could only pair Alexa after freeing port 80 (#449, #478), nobody knows why yet. ` +
+        "If Alexa won't pair, stop whatever holds it while pairing, then turn it back on.",
     });
   }
 
