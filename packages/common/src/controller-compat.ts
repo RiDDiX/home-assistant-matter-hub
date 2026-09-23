@@ -8,7 +8,7 @@ export type ControllerKey =
   | "smartthings";
 
 // Fabric root vendor ids of the controllers we have support data for.
-// Apple 0x1349/0x1384, Google 0x6006, Amazon Alexa 0x1217/0x1160, Aqara 0x115F,
+// Apple 0x1349/0x1384, Google 0x6006, Amazon Alexa 0x1217, Aqara 0x115F,
 // SmartThings 0x110A. Other ids (incl. Home Assistant 0x134B) classify as
 // undefined, so they never raise a warning. Best-effort: a fabric root vendor
 // can be the hub vendor rather than the end controller, so warnings stay advisory.
@@ -17,7 +17,6 @@ const controllerByVendorId: Record<number, ControllerKey> = {
   4996: "apple", // 0x1384 Apple (iCloud Keychain)
   24582: "google", // 0x6006 Google Home
   4631: "alexa", // 0x1217 Amazon Alexa
-  4448: "alexa", // 0x1160 Amazon (some Alexa ecosystems)
   4447: "aqara", // 0x115F Aqara Home
   4362: "smartthings", // 0x110A SmartThings
 };

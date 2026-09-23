@@ -134,7 +134,7 @@ describe("#491 Alexa set to 20% on an off light", () => {
   it("reaches Home Assistant as a single turn_on with the brightness", async () => {
     const endpoint = await mount(offLight("light.buro_stehlampe"));
 
-    // Alexa's gap was 37ms, act() adds its own, keep it inside the 100ms window
+    // act() adds delay on top of Alexa's 37ms, stay inside the 100ms window
     await endpoint.act(async (agent) => {
       // biome-ignore lint/suspicious/noExplicitAny: drive the controller command
       await (agent as any).onOff.on();

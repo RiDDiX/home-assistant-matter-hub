@@ -199,8 +199,8 @@ class RvcRunModeServerBase extends Base {
             // ServiceArea not available
           }
           s.observedCleaning = false;
-          // Clear a finished job, else the next clean started from HA can
-          // only match its rooms (#490). A mid-job recharge keeps it.
+          // Clear a finished job or the next HA clean stays stuck on its
+          // rooms. A mid-job recharge keeps them (#490).
           if (s.activeAreas.every((id) => s.completedAreas.has(id))) {
             s.activeAreas = [];
             s.completedAreas.clear();

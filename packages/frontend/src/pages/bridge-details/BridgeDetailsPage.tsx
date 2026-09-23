@@ -1,7 +1,8 @@
-import type {
-  BridgeDataWithMetadata,
-  EndpointData,
-  FailedEntity,
+import {
+  type BridgeDataWithMetadata,
+  classifyController,
+  type EndpointData,
+  type FailedEntity,
 } from "@home-assistant-matter-hub/common";
 import InfoOutlinedIcon from "@mui/icons-material/InfoOutlined";
 import RocketLaunchIcon from "@mui/icons-material/RocketLaunch";
@@ -236,8 +237,10 @@ const ServerModeRecommendation = ({
     if (!hasVacuumEndpoint(devices)) return false;
     const fabrics = bridge.commissioning?.fabrics ?? [];
     if (fabrics.length === 0) return true;
-    const appleAlexaVendors = new Set([4937, 4631, 4448]);
-    return fabrics.some((f) => appleAlexaVendors.has(f.rootVendorId));
+    return fabrics.some((f) => {
+      const controller = classifyController(f.rootVendorId);
+      return controller === "apple" || controller === "alexa";
+    });
   }, [devices, bridge.featureFlags?.serverMode, bridge.commissioning?.fabrics]);
 
   const isSingleDevice = useMemo(() => {

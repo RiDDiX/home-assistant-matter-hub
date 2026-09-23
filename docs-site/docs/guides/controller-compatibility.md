@@ -17,7 +17,7 @@ Rows flagged with a footnote number link to the vendor source that establishes t
 | `light` | ColorTemperatureLight | ✅ | ✅ [¹](#sources) | ✅ [²](#sources) | ✅ [⁴](#sources) | ✅ |
 | `light` | ExtendedColorLight | ✅ | ✅ [¹](#sources) | ✅ [²](#sources) | ✅ [⁴](#sources) | ✅ |
 | `switch` | OnOffPlugInUnit | ✅ | ✅ [¹](#sources) | ✅ [²](#sources) | ✅ [⁴](#sources) | ✅ |
-| `switch` | DimmablePlugInUnit | ✅ | ✅ | ✅ [²](#sources) | ✅ [⁴](#sources) | ✅ |
+| `switch` | DimmablePlugInUnit | ✅ | ❌ [¹](#sources) | ✅ [²](#sources) | ✅ [⁴](#sources) | ✅ [⁶](#sources) |
 | `lock` | DoorLock | ✅ | ✅ [¹](#sources) | ✅ [²](#sources) | ✅ [⁴](#sources) | ✅ |
 | `cover` | WindowCovering | ✅ | ✅ [¹](#sources) | ✅ [²](#sources) | ✅ [⁴](#sources) | ✅ |
 | `climate` | Thermostat | ✅ | ✅ [¹](#sources) | ✅ [²](#sources) | ✅ [⁴](#sources) | ✅ |
@@ -25,31 +25,33 @@ Rows flagged with a footnote number link to the vendor source that establishes t
 | `sensor` | TemperatureSensor | ✅ | ✅ [¹](#sources) | ✅ [²](#sources) | ✅ [⁴](#sources) | ✅ |
 | `sensor` | HumiditySensor | ✅ | ✅ [¹](#sources) | ✅ [²](#sources) | ✅ [⁴](#sources) | ✅ |
 | `sensor` | PressureSensor | ❌ [⁵](#sources) | ✅ [¹](#sources) | ❌ [²](#sources) | ✅ [⁴](#sources) | ✅ |
-| `sensor` | IlluminanceSensor | ✅ | ✅ [¹](#sources) | ✅ [²](#sources) | ❓ | ✅ |
-| `sensor` | FlowSensor | ❌ [⁵](#sources) | ✅ [¹](#sources) | ❌ [²](#sources) | ❓ | ❓ |
-| `sensor` | AirQualitySensor | ✅ | ✅ [¹](#sources) | ✅ [²](#sources) | ✅ [⁴](#sources) | ❓ |
-| `sensor` | ElectricalMeter | ❌ | ✅ | ❌ | ❓ | ✅ |
-| `sensor` (override) | SolarPower | ❌ | ❌ | ❓ | ❓ | ✅ |
-| `sensor` (override) | ElectricalUtilityMeter | ❌ | ❌ | ❌ | ❓ | ✅ |
-| `sensor` (override) | BatteryStorage | ❌ | ❌ | ❌ | ✅ | ❓ |
-| `sensor` (override) | EnergyEvse | ❌ | ❌ | ❌ | ✅ | ❓ |
+| `sensor` | IlluminanceSensor | ✅ | ✅ [¹](#sources) | ✅ [²](#sources) | ✅ [⁴](#sources) | ✅ [⁶](#sources) |
+| `sensor` | FlowSensor | ❌ [⁵](#sources) | ✅ [¹](#sources) | ❌ [²](#sources) | ✅ [⁴](#sources) | ✅ [⁶](#sources) |
+| `sensor` | AirQualitySensor | ✅ [⁵](#sources) | ✅ [¹](#sources) | ✅ [²](#sources) | ✅ [⁴](#sources) | ✅ [⁶](#sources) |
+| `sensor` | ElectricalMeter | ❌ | ✅ [¹](#sources) | ❌ | ❓ | ❓ |
+| `sensor` (override) | SolarPower | ❌ | ❌ [¹](#sources) | ❓ | ✅ [⁴](#sources) | ✅ [⁶](#sources) |
+| `sensor` (override) | ElectricalUtilityMeter | ❌ | ✅ [¹](#sources) | ❌ | ❓ | ❓ |
+| `sensor` (override) | BatteryStorage | ❌ | ❌ [¹](#sources) | ❌ | ✅ [⁴](#sources) | ✅ [⁶](#sources) |
+| `sensor` (override) | EnergyEvse | ❌ | ❌ [¹](#sources) | ❌ | ✅ [⁴](#sources) | ✅ [⁶](#sources) |
 | `binary_sensor` | ContactSensor | ✅ | ✅ [¹](#sources) | ✅ [²](#sources) | ✅ [⁴](#sources) | ✅ |
 | `binary_sensor` | OccupancySensor | ✅ | ✅ [¹](#sources) | ✅ [²](#sources) | ✅ [⁴](#sources) | ✅ |
-| `binary_sensor` | SmokeCoAlarm | ✅ [⁵](#sources) | ✅ | ✅ [²](#sources) | ✅ [⁴](#sources) | ✅ |
-| `binary_sensor` (override) | WaterLeakDetector | ✅ [⁵](#sources) | ❌ [¹](#sources) | ❌ [²](#sources) | ✅ [⁴](#sources) | ❓ |
-| `binary_sensor` (override) | WaterFreezeDetector | ❌ [⁵](#sources) | ❌ [¹](#sources) | ❌ [²](#sources) | ✅ [⁴](#sources) | ❓ |
-| `media_player` | Speaker | ❌ [⁵](#sources) | ✅ [¹](#sources) | ❌ [²](#sources) | ✅ [⁴](#sources) | ❓ |
-| `media_player` | BasicVideoPlayer | ❌ [⁵](#sources) | ❓ | ❓ | ✅ [⁴](#sources) | ❓ |
-| `valve` | WaterValve | ❌ [⁵](#sources) | ❌ [¹](#sources) | ❌ [²](#sources) | ✅ [⁴](#sources) | ❓ |
-| `vacuum` | RoboticVacuumCleaner | ✅ [³](#sources)[⁵](#sources) | ✅ [¹](#sources) | ✅* [²](#sources) | ✅ [⁴](#sources) | ❓ |
-| `water_heater` | Thermostat | ✅ | ✅ | ✅ | ✅ [⁴](#sources) | ❓ |
-| `water_heater` (override) | WaterHeater (Matter 1.4) | ❌ | ❌ | ❓ | ❓ | ❓ |
-| `alarm_control_panel` | ModeSelect | ❌ [⁵](#sources) | ❓ | ❌** | ❓ | ❓ |
-| `select` | ModeSelect | ❌ [⁵](#sources) | ❌*** | ❌** | ❓ | ❓ |
-| `event` | GenericSwitch | ✅ [⁵](#sources) | ❓ | ✅ [²](#sources) | ❓ | ❓ |
-| `event` (override) | Doorbell | ❌ | ❌ | ❌ | ❌ | ✅ |
-| `humidifier` | Fan | ✅ | ✅ [¹](#sources) | ✅ [²](#sources) | ✅ [⁴](#sources) | ❓ |
-| `dishwasher` (override) | Dishwasher | ❌ [³](#sources) | ✅ [¹](#sources) | ✅ [²](#sources) | ❓ | ✅ |
+| `binary_sensor` | SmokeCoAlarm | ✅ [⁵](#sources) | ✅ [¹](#sources) | ✅ [²](#sources) | ✅ [⁴](#sources) | ✅ [⁶](#sources) |
+| `binary_sensor` (override) | WaterLeakDetector | ✅ [⁵](#sources) | ❌ [¹](#sources) | ❌ [²](#sources) | ✅ [⁴](#sources) | ✅ [⁶](#sources) |
+| `binary_sensor` (override) | WaterFreezeDetector | ❌ [⁵](#sources) | ❌ [¹](#sources) | ❌ [²](#sources) | ✅ [⁴](#sources) | ✅ [⁶](#sources) |
+| `media_player` | Speaker | ❌ [⁵](#sources) | ✅ [¹](#sources) | ❌ [²](#sources) | ✅ [⁴](#sources) | ✅ [⁶](#sources) |
+| `media_player` | BasicVideoPlayer | ❌ [⁵](#sources) | ❌ [¹](#sources) | ❓ | ✅ [⁴](#sources) | ✅ [⁶](#sources) |
+| `valve` | WaterValve | ❌ [⁵](#sources) | ❌ [¹](#sources) | ❌ [²](#sources) | ✅ [⁴](#sources) | ✅ [⁶](#sources) |
+| `vacuum` | RoboticVacuumCleaner | ✅ [³](#sources)[⁵](#sources) | ✅ [¹](#sources) | ✅* [²](#sources) | ✅ [⁴](#sources) | ✅ [⁶](#sources) |
+| `water_heater` | Thermostat | ✅ | ✅ | ✅ | ✅ [⁴](#sources) | ✅ [⁶](#sources) |
+| `water_heater` (override) | WaterHeater (Matter 1.4) | ❌ | ❌ [¹](#sources) | ❓ | ✅ [⁴](#sources) | ✅ [⁶](#sources) |
+| `alarm_control_panel` | ModeSelect | ❌ [⁵](#sources) | ❓ | ❌** | ❌ [⁴](#sources) | ❓ |
+| `select` | ModeSelect | ❌ [⁵](#sources) | ❌*** | ❌** | ❌ [⁴](#sources) | ❓ |
+| `event` | GenericSwitch | ✅ [⁵](#sources) | ❌ [¹](#sources) | ✅ [²](#sources) | ✅ [⁴](#sources) | ✅ [⁶](#sources) |
+| `event` (override) | Doorbell | ❌ | ✅ [¹](#sources) | ❌ | ❌ [⁴](#sources) | ❓ |
+| `humidifier` | Fan | ✅ | ✅ [¹](#sources) | ✅ [²](#sources) | ✅ [⁴](#sources) | ⚠️ |
+| `switch` (override) | Dishwasher | ❓ [⁵](#sources) | ✅ [¹](#sources) | ⚠️ [²](#sources) | ✅ [⁴](#sources) | ✅ [⁶](#sources) |
+| `switch` (override) | LaundryWasher | ❓ [⁵](#sources) | ✅ [¹](#sources) | ❌ [²](#sources) | ✅ [⁴](#sources) | ✅ [⁶](#sources) |
+| `switch` (override) | LaundryDryer | ❓ [⁵](#sources) | ❌ [¹](#sources) | ❌ [²](#sources) | ✅ [⁴](#sources) | ✅ [⁶](#sources) |
 | `weather` | TemperatureSensor (+Humidity, +Pressure) | ⚠️**** | ⚠️**** | ⚠️**** | ❓ | ❓ |
 
 :::note Apple Home and power readings (iOS 27)
@@ -57,7 +59,7 @@ iOS 27 is the first version that shows Matter power readings. Live wattage only 
 :::
 
 :::note ElectricalUtilityMeter is opt-in
-ElectricalUtilityMeter (0x0511, Matter 1.4) is only used when you set the Matter device type to "Electrical Utility Meter (Meter Identification)" by hand. It adds the MeterIdentification cluster (meter serial number and point of delivery from the mapping, null when unset) on top of the same power/energy measurements as ElectricalMeter. SmartThings renders energy devices; the other mainstream controllers don't know the type yet. Consumption sensors keep defaulting to ElectricalMeter (0x0514), so existing pairings are untouched. See [mapping blueprints](./mapping-blueprints.md#electrical-utility-meter).
+ElectricalUtilityMeter (0x0511, Matter 1.4) is only used when you set the Matter device type to "Electrical Utility Meter (Meter Identification)" by hand. It adds the MeterIdentification cluster (meter serial number and point of delivery from the mapping, null when unset) on top of the same power/energy measurements as ElectricalMeter. Google Home lists the type; SmartThings has no driver match for it. Consumption sensors keep defaulting to ElectricalMeter (0x0514), so existing pairings are untouched. See [mapping blueprints](./mapping-blueprints.md#electrical-utility-meter).
 :::
 
 :::note Apple Home refreshes battery percentages only on read
@@ -65,7 +67,7 @@ Apple's framework lists `PowerSource.BatPercentRemaining` as changes-omitted: it
 :::
 
 :::note EnergyEvse is opt-in and bridge-sensitive
-EnergyEvse (0x050C) is only used when you set the Matter device type to "EV Charger (EVSE)" by hand. Home Assistant and Aqara Home render it; SmartThings announced support but it is unconfirmed here. SmartThings sets the charge limit through EnableCharging and addresses modes by list position, so the bridge numbers its Manual mode 0. UserMaximumChargeCurrent is optional and not exposed. A bridged EVSE has been reported to break Alexa device recognition, so keep it off any bridge that Alexa pairs with. See [mapping blueprints](./mapping-blueprints.md#ev-charger-evse).
+EnergyEvse (0x050C) is only used when you set the Matter device type to "EV Charger (EVSE)" by hand. Home Assistant, Aqara Home and SmartThings render it. SmartThings sets the charge limit through EnableCharging and addresses modes by list position, so the bridge numbers its Manual mode 0. UserMaximumChargeCurrent is optional and not exposed. A bridged EVSE has been reported to break Alexa device recognition, so keep it off any bridge that Alexa pairs with. See [mapping blueprints](./mapping-blueprints.md#ev-charger-evse).
 :::
 
 :::note The Matter 1.4 water heater is opt-in
@@ -73,13 +75,13 @@ By default a `water_heater` entity is exposed as a plain heating Thermostat, whi
 renders. Setting the Matter device type to "Water Heater with Boost (Matter 1.4)" by hand swaps the
 endpoint to WaterHeater (0x050F) with the WaterHeaterManagement (cluster revision 2), WaterHeaterMode
 and Thermostat clusters, which adds the Boost and CancelBoost commands for energy-management
-controllers. No
-mainstream controller renders 0x050F today, and changing the type on an already-paired entity
-requires re-pairing it. See [mapping blueprints](./mapping-blueprints.md).
+controllers. Aqara and
+SmartThings list 0x050F, the other controllers don't, and changing the type on an already-paired
+entity requires re-pairing it. See [mapping blueprints](./mapping-blueprints.md).
 :::
 
 :::note The Doorbell type is opt-in
-By default an `event` entity is exposed as a GenericSwitch, which keeps existing pairings intact. Setting the Matter device type to "Doorbell (experimental)" by hand swaps the endpoint to Doorbell (0x148) with the same momentary Switch cluster. Only SmartThings renders 0x148 as a doorbell today; Apple, Google, Alexa and Aqara don't know the type yet and fall back to the plain Switch cluster, if they show the device at all. Switching an already-paired entity needs a re-pair.
+By default an `event` entity is exposed as a GenericSwitch, which keeps existing pairings intact. Setting the Matter device type to "Doorbell (experimental)" by hand swaps the endpoint to Doorbell (0x148) with the same momentary Switch cluster. Google Home lists 0x148 as a doorbell. SmartThings only knows the video doorbell (0x0143), and Apple, Alexa and Aqara don't know the type; they fall back to the plain Switch cluster, if they show the device at all. Switching an already-paired entity needs a re-pair.
 :::
 
 :::note Leak and freeze detectors are opt-in
@@ -88,7 +90,7 @@ By default a `moisture` or `cold` binary sensor is exposed as a plain ContactSen
 
 ### Legend
 
-- ✅ = Confirmed working
+- ✅ = Supported, per the vendor source in the footnote or user reports
 - ⚠️ = Partial support or known issues
 - ❓ = Untested or unknown
 - ❌ = Not supported by the controller
@@ -107,11 +109,12 @@ By default a `moisture` or `cold` binary sensor is exposed as a plain ContactSen
 
 Footnote references for the ✅ / ❌ cells above:
 
-1. Google Home, [Supported devices](https://developers.home.google.com/matter/supported-devices) (doc dated 2024-12-20). Rows marked ❌ for Google are device types not listed on that page. The Google doc is roughly 16 months old; a cell not listed may just mean "not yet documented".
+1. Google Home, [Supported devices](https://developers.home.google.com/matter/supported-devices) (read 2026-09-23; the page footer still says 2024-12-20, but it lists the 2025 additions like Dishwasher and Laundry Washer). Rows marked ❌ for Google are device types not listed on that page. Laundry Dryer, Refrigerator, Oven and Room AC only show up in Google's developer API catalog so far.
 2. Amazon Alexa, [Supported Matter Device Categories and Clusters](https://developer.amazon.com/en-US/docs/alexa/smarthome/supported-matter-device-categories.html) (doc dated 2026-04-08). Rows marked ❌ for Alexa are device types absent from that page.
 3. Apple Home, [Use Matter accessories with the Home app](https://support.apple.com/en-us/102135) (doc dated 2025-12-12) plus iOS 18.4 release coverage for robot vacuum support. Apple's public doc does not list dishwashers as a supported category.
-4. Aqara Home, [Everything Matter](https://www.aqara.com/en/explore/everything-matter/) device list (fetched 2026-06) plus the [April 2025 Matter controller update](https://www.businesswire.com/news/home/20250409001178/en). Aqara surfaces one of the widest device-type ranges; ❓ for Aqara means the type is not named on that page, not that it is known to fail.
-5. Apple Home (iOS 26), the internal chipplugin-protocol-map.plist from HomeKitMatter.framework, surfaced in [discussion #410](https://github.com/RiDDiX/home-assistant-matter-hub/discussions/410). This is Apple's actual Matter to HomeKit translation table. A device type missing from it gets no HomeKit tile unless Apple handles it natively; the plist's NativeMatterDeviceTypes lists only Robot Vacuum (0x0074) and Network Infrastructure Manager (0x0090). Apple cells marked ❌ with this footnote have no entry in the plist, so they get no tile over Matter; Apple's separate media paths (AirPlay, HomeKit native) are outside this matrix.
+4. Aqara Home, [Aqara Supported Matter Device Type List](https://opendoc.aqara.com/en/docs/Matter/Aqara%20Supported%20Matter%20Device%20Type%20List.html) (updated 2026-06-05). ❌ for Aqara means the type is not on that list, ❓ that HAMH's endpoint carries more than one type and it's unclear which one Aqara picks.
+5. Apple Home (iOS 26), the internal chipplugin-protocol-map.plist from HomeKitMatter.framework, surfaced in [discussion #410](https://github.com/RiDDiX/home-assistant-matter-hub/discussions/410). This is Apple's actual Matter to HomeKit translation table. A device type missing from it gets no HomeKit tile unless Apple handles it natively; the plist's NativeMatterDeviceTypes lists only Robot Vacuum (0x0074) and Network Infrastructure Manager (0x0090). Apple cells marked ❌ with this footnote have no entry in the plist, so they get no tile over Matter; Apple's separate media paths (AirPlay, HomeKit native) are outside this matrix. iOS 27 (beta 3 plist) adds Refrigerator, Laundry Washer, Dishwasher, Cooktop, Oven, Laundry Dryer, Electrical Sensor and Electrical Meter as native types. A tester said in July the appliances weren't finished yet, and it's not confirmed that the released Home app shows them, so those cells are ❓. Fans (0x2B), air quality sensors (0x2C) and air purifiers (0x2D) are in the mapping table, so Apple shows them.
+6. SmartThings, the `matterGeneric` fingerprints of the [matter-* Edge drivers](https://github.com/SmartThingsCommunity/SmartThingsEdgeDrivers/tree/main/drivers/SmartThings) (read 2026-09-23). ❓ means no fingerprint for the type, the driver may still pick it up another way.
 
 Apple, Google, Alexa, Aqara, and SmartThings each move at a different cadence. A ❌ here means the vendor has not published support on their current device-type page, not that the device is known to fail. When a vendor adds the category we flip the cell and cite the update.
 
@@ -126,6 +129,10 @@ A few Aqara quirks are handled for you:
 - `productName` is stripped of characters that crash Aqara when the `productNameFromNodeLabel` flag is on ([#330](https://github.com/RiDDiX/home-assistant-matter-hub/issues/330)).
 
 If Aqara does not show an air conditioner, set the entity's `disableClimateFanControl` flag to expose it as a plain Thermostat ([#318](https://github.com/RiDDiX/home-assistant-matter-hub/issues/318)). The flag needs a full HAMH restart to take effect, and Aqara caches the bridge's device list, so remove the bridge from Aqara Home and pair it again afterwards. Alternatively, Aqara Home app 5.1.9 with controller firmware 4.3.5 or newer knows the Room Air Conditioner type natively, so updating Aqara can make the default exposure work without the flag. For naming, the `productNameFromNodeLabel` bridge flag and the per-entity `customProductName` / `customVendorId` overrides help Aqara show the device name you expect.
+
+## SmartThings
+
+SmartThings is recognized as a controller too (vendor 0x110A): its column shows in the per-device support chips. The column comes from the device types SmartThings' own Matter drivers match on. None of them is a hard ❌ right now, so a SmartThings fabric raises no warnings yet.
 
 ## Controller Profiles
 

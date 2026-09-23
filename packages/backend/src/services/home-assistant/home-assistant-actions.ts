@@ -161,8 +161,7 @@ export class HomeAssistantActions extends Service {
     if (action.action === "light.turn_on") {
       const commandKey = `${base}-command`;
       if (hasData) {
-        // Alexa sends On, then the level. The bare On would bring back the
-        // old brightness first and flash, so drop it (#491).
+        // A bare On here restores the old brightness and flashes (#491).
         this.lastChangeAt.set(base, Date.now());
         if (this.leadingOn.delete(commandKey)) {
           this.debounceContext.get(commandKey, 100).unregister();
@@ -173,7 +172,7 @@ export class HomeAssistantActions extends Service {
           RECENT_CHANGE_MS &&
         !this.debounceContext.isPending(commandKey)
       ) {
-        // no level change just before, so this On may start a pair
+        // no recent level change, this On may start a pair
         this.leadingOn.add(commandKey);
       }
     }

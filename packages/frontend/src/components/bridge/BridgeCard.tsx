@@ -13,6 +13,7 @@ import Typography from "@mui/material/Typography";
 import { useTranslation } from "react-i18next";
 import { Link as RouterLink } from "react-router";
 import { navigation } from "../../routes.tsx";
+import { getVendorName } from "../fabric/vendor-names.ts";
 import { BridgeStatusIcon } from "./BridgeStatusIcon.tsx";
 import { getBridgeIcon, getBridgeIconColor } from "./bridgeIconUtils";
 
@@ -23,6 +24,14 @@ export interface BridgeCardProps {
 export const BridgeCard = ({ bridge }: BridgeCardProps) => {
   const { t } = useTranslation();
   const fabricCount = bridge.commissioning?.fabrics.length ?? 0;
+  // one chip per paired controller
+  const controllers = [
+    ...new Set(
+      (bridge.commissioning?.fabrics ?? []).map((f) =>
+        getVendorName(f.rootVendorId),
+      ),
+    ),
+  ];
   const BridgeIcon = getBridgeIcon(bridge);
   const bridgeColor = getBridgeIconColor(bridge);
 
@@ -77,28 +86,16 @@ export const BridgeCard = ({ bridge }: BridgeCardProps) => {
                   variant="outlined"
                   color={fabricCount > 0 ? "success" : "default"}
                 />
-                {bridge.commissioning?.fabrics.some((f) =>
-                  f.label?.toLowerCase().includes("google"),
-                ) && (
+                {controllers.map((name) => (
                   <Chip
+                    key={name}
                     icon={<Language fontSize="small" />}
-                    label={t("bridge.google")}
+                    label={name}
                     size="small"
                     color="primary"
                     variant="filled"
                   />
-                )}
-                {bridge.commissioning?.fabrics.some((f) =>
-                  f.label?.toLowerCase().includes("amazon"),
-                ) && (
-                  <Chip
-                    icon={<Language fontSize="small" />}
-                    label={t("bridge.alexa")}
-                    size="small"
-                    color="secondary"
-                    variant="filled"
-                  />
-                )}
+                ))}
               </Stack>
             </Box>
           </Box>

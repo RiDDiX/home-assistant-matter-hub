@@ -364,7 +364,7 @@ Mapped to **GenericSwitch** device.
 - Controllers can react to button press events
 
 **Doorbell Override (experimental):**
-An `event` entity (typically `device_class: doorbell`) can be switched to the Matter **Doorbell** type (0x148) via the Entity Mapping UI. It carries the same momentary Switch cluster, only the device type changes. Only SmartThings renders 0x148 as a doorbell today; other controllers don't know the type and fall back to the Switch cluster, if they show the device at all. The default stays GenericSwitch, and switching an already-paired entity needs a re-pair.
+An `event` entity (typically `device_class: doorbell`) can be switched to the Matter **Doorbell** type (0x148) via the Entity Mapping UI. It carries the same momentary Switch cluster, only the device type changes. Google Home lists 0x148 as a doorbell; other controllers don't know the type and fall back to the Switch cluster, if they show the device at all. The default stays GenericSwitch, and switching an already-paired entity needs a re-pair.
 
 ---
 
@@ -550,19 +550,23 @@ Mapped to **OnOffPlugInUnit**.
 
 ---
 
-### Dishwashers (Entity Mapping Override)
+### Dishwashers, Washers and Dryers (Entity Mapping Override)
 
-Available as a **device type override** for `switch` entities via the Entity Mapping UI. Maps to the Matter **Dishwasher** device type with OperationalState and OnOff clusters.
+Available as a **device type override** for `switch` entities via the Entity Mapping UI: **Dishwasher** (0x0075), **Laundry Washer** (0x0073) and **Laundry Dryer** (0x007C). Each has an OperationalState cluster and an OnOff cluster with DeadFrontBehavior, as the spec asks.
 
-A power switch only knows on and off. If the device also has a Home Connect or SmartThings state sensor, the state comes from that, so a dishwasher that's on but idle shows as stopped. No setup needed.
+Map the appliance's power switch. A power switch only knows on and off, so if the same device also has a state sensor, the state comes from that and a machine that's on but idle shows as stopped. It is found automatically, no setup needed. Found are the enum sensors from Home Connect (`operation_state`), SmartThings (`*_machine_state`), Miele (`status`) and LG ThinQ (`current_state`).
+
+When a cycle ends (running or paused, then stopped or error) the endpoint sends the OperationCompletion event, so a controller can tell you the laundry is done.
 
 **HA State → Matter OperationalState Mapping:**
 | HA State | Matter State |
 |----------|-------------|
-| `off`, `idle`, `standby`, `complete`, `finished`, `inactive`, `ready`, `delayedstart`, `stop` | Stopped |
-| `on`, `running`, `active`, `drying`, `washing`, `run`, `aborting` | Running |
-| `paused`, `pause`, `actionrequired` | Paused |
-| `error` | Error |
+| `off`, `idle`, `standby`, `complete`, `finished`, `inactive`, `ready`, `delayedstart`, `stop`, `programmed`, `waiting_to_start`, `program_ended`, `program_interrupted`, `end`, `running_end`, `done`, `initial`, `power_off`, `reserved` | Stopped |
+| `on`, `running`, `active`, `drying`, `washing`, `run`, `aborting`, `in_use`, `detecting`, `prewash`, `soaking`, `add_drain`, `dispensing`, `rinsing`, `softening`, `steam_softening`, `spinning`, `refreshing`, `cooling`, `cool_down`, `night_dry` | Running |
+| `paused`, `pause`, `actionrequired`, `rinse_hold` | Paused |
+| `error`, `failure`, `power_fail` | Error |
+
+From the power switch, anything else counts as Stopped. From a state sensor, a value not in the table (Miele's `not_connected`, for example) keeps the last state, and `on` counts as Stopped (Miele says `on` when the machine is idle). `unavailable` and `unknown` always keep the last state, so a short outage doesn't end a cycle.
 
 **Supported Commands:**
 - **Start** → `homeassistant.turn_on`
@@ -570,11 +574,14 @@ A power switch only knows on and off. If the device also has a Home Connect or S
 - **Resume** → `homeassistant.turn_on`
 - **Pause** → Not supported (returns error)
 
+Start and stop go to the power switch, so they power the machine on or off. Starting a program is not possible over Matter yet.
+
 **Controller Notes:**
-- **Google Home**: Supported
-- **Amazon Alexa**: Supported
-- **Samsung SmartThings**: Supported
-- **Apple Home**: Not supported (Apple does not support the Dishwasher device type)
+- **Google Home**: Dishwasher and Laundry Washer. The dryer is only in Google's developer API so far
+- **Amazon Alexa**: lists the dishwasher, but wants Dishwasher Mode and Temperature Control, which HAMH doesn't expose yet. No washer or dryer
+- **Aqara Home**: all three
+- **Samsung SmartThings**: all three
+- **Apple Home**: iOS 27 lists all three as native types, but it's not confirmed yet that the Home app shows them. iOS 26 and older don't
 
 ---
 
@@ -601,20 +608,20 @@ You can override the default device type mapping per entity using the Entity Map
 - BasicVideoPlayer
 - HumiditySensor, TemperatureSensor, PressureSensor, LightSensor, FlowSensor
 - AirQualitySensor, BatteryStorage, TVOCSensor
-- PM2.5 Sensor, PM10 Sensor, Carbon Dioxide (CO₂) Sensor (Air Quality Sensor endpoints carrying the single concentration cluster, for `sensor` entities that report one pollutant; Aqara renders them, Alexa partially, Apple and Google do not)
+- PM2.5 Sensor, PM10 Sensor, Carbon Dioxide (CO₂) Sensor (Air Quality Sensor endpoints carrying the single concentration cluster, for `sensor` entities that report one pollutant. Google, Aqara and SmartThings show them, Alexa partially; Apple shows the reading for CO, CO₂, PM2.5, PM10, TVOC, NO₂ and ozone, and only the air quality for the others)
 - WaterValve, Pump
 - WaterHeater
-- WaterHeaterManagement — "Water Heater with Boost (Matter 1.4)", the 0x050F device type with the WaterHeaterManagement (Boost / CancelBoost), WaterHeaterMode and heating Thermostat clusters. Opt-in: it is aimed at energy-management controllers, no mainstream controller renders 0x050F yet, and switching an already-paired entity to it needs a re-pair
-- Dishwasher
+- WaterHeaterManagement, "Water Heater with Boost (Matter 1.4)", the 0x050F device type with the WaterHeaterManagement (Boost / CancelBoost), WaterHeaterMode and heating Thermostat clusters. Opt-in: Aqara and SmartThings list 0x050F, the other controllers don't, and switching an already-paired entity to it needs a re-pair
+- Dishwasher, Laundry Washer, Laundry Dryer
 - GenericSwitch
-- Doorbell (experimental 0x148 for `event` entities. Only SmartThings renders it as a doorbell; other controllers don't know the type yet and fall back to the momentary Switch cluster the endpoint also carries. Switching an already-paired entity needs a re-pair)
+- Doorbell (experimental 0x148 for `event` entities. Google Home lists it; other controllers don't know the type yet and fall back to the momentary Switch cluster the endpoint also carries. Switching an already-paired entity needs a re-pair)
 - SmokeCO Alarm, Water Leak Detector, Water Freeze Detector
 
 **Use Cases:**
 - Map a `media_player` to OnOffPlugInUnit for simple on/off switch in Alexa
 - Map a `fan` to Air Purifier type for HEPA filter monitoring
 - Map a `switch` to Pump type
-- Map a `switch` to Dishwasher type for OperationalState support (Google/Alexa/SmartThings)
+- Map an appliance's power `switch` to Dishwasher, Laundry Washer or Laundry Dryer for OperationalState support
 - Force a specific light type
 
 > **Note:** Since v2.0.25, entity mapping changes take effect automatically within ~30 seconds. No bridge restart is required.

@@ -866,15 +866,9 @@ export class BridgeRegistry {
   }
 
   /**
-   * Find a matching sensor entity (by device_class) on the same HA device.
-   *
-   * A device may expose several matching sensors: a multi-outlet power strip
-   * reports one power (and energy) sensor per outlet, all under one device id.
-   * Returning the first match then attributes a single outlet's reading to
-   * every outlet (#488). When several candidates exist, pair them to the
-   * requesting entity by index (`switch_2` -> `power_2`); fall back to
-   * the first match when there is no index to pair on. Single-sensor devices
-   * keep the previous behaviour.
+   * Sensor with this device_class on the same HA device.
+   * Pair by index (`switch_2` -> `power_2`) when a strip has one
+   * sensor per outlet. Otherwise the first match (#488).
    */
   private findSensorEntityForDevice(
     deviceId: string,

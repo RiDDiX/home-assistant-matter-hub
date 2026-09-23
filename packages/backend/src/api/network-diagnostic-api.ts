@@ -71,7 +71,7 @@ function getNetworkInterfaces(): NetworkInterfaceInfo[] {
   return result;
 }
 
-// Alexa paired once port 80 was freed (#449, #478).
+// Alexa would not pair while port 80 was taken (#449, #478).
 async function isPort80Taken(host: string): Promise<boolean> {
   return new Promise((resolve) => {
     const socket = net.connect({ host, port: 80 });
