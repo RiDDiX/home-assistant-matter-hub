@@ -154,7 +154,7 @@ An energy `sensor` (`device_class: energy`, kWh) can opt in to the Matter 1.4 El
 }
 ```
 
-Only pick this on a controller that knows the type (SmartThings renders energy devices, mainstream controllers don't surface 0x0511 yet), and re-pair the entity after changing the type.
+Only pick this on a controller that knows the type (Google Home lists 0x0511, the other mainstream controllers don't), and re-pair the entity after changing the type.
 
 ---
 

@@ -348,7 +348,30 @@ Home, ...) are not placed in the same network segment. Please make sure to revie
 </details>
 
 <details>
-<summary><strong>🧪 Alpha (v2.1.0-alpha.899)</strong></summary>
+<summary><strong>🧪 Alpha (v2.1.0-alpha.904)</strong></summary>
+
+**v2.1.0-alpha.904:**
+- 🧺 **Washers and dryers on a power switch show their real state**: Laundry Washer and Laundry Dryer types pick up the state from Home Connect, SmartThings, Miele or LG
+- ✅ **Vacuums and appliances report a finished clean or cycle**
+- 🏠 **Every paired controller shows on the bridge card**: it only showed Google and Alexa, and 4448 now shows as Sengled
+- 📖 **Controller support**: SmartThings added, Apple no longer warns about fans, air purifiers and air quality, and Google no longer warns about smoke alarms and dishwashers
+
+**v2.1.0-alpha.903:**
+- 🧹 **Vacuum rooms reset when a clean finishes on its own**: the next clean started from Home Assistant could only match the old rooms ([#490](https://github.com/RiDDiX/home-assistant-matter-hub/issues/490))
+- 💡 **No flash when Alexa dims a light that is off**: it now turns on straight at the new level instead of its old brightness first ([#491](https://github.com/RiDDiX/home-assistant-matter-hub/issues/491))
+- 🧽 **Dishwashers on a power switch show their real state**: the Home Connect or SmartThings state sensor is picked up automatically ([#486](https://github.com/RiDDiX/home-assistant-matter-hub/issues/486))
+
+**v2.1.0-alpha.902:**
+- 🔁 **A bridge that went quiet comes back on its own**: a subscription that died while starting left every device offline until a restart ([#487](https://github.com/RiDDiX/home-assistant-matter-hub/issues/487))
+- 🧽 **Dishwashers understand Home Connect and SmartThings states** ([#486](https://github.com/RiDDiX/home-assistant-matter-hub/issues/486))
+
+**v2.1.0-alpha.901:**
+- 🔌 **Each outlet of a power strip reports its own power** ([#488](https://github.com/RiDDiX/home-assistant-matter-hub/issues/488), thanks @barnabasbusa)
+
+**v2.1.0-alpha.900:**
+- 🔌 **Port 80 in the network check**: freeing it helped two users pair Alexa, so the Health Dashboard shows when it's in use ([#449](https://github.com/RiDDiX/home-assistant-matter-hub/issues/449), [#478](https://github.com/RiDDiX/home-assistant-matter-hub/issues/478))
+- 💡 **Wattage for lights in Apple Home**: a light can be set to On/Off Plug-in Unit, Apple only shows wattage on outlets ([#484](https://github.com/RiDDiX/home-assistant-matter-hub/issues/484))
+- 📖 **Docs**: Apple Home power readings since iOS 27, and the port 80 note for Alexa
 
 **v2.1.0-alpha.899:**
 - 🗂️ **Old backups get deleted again**: the automatic backup only runs while HAMH shuts down, and the add-on gets a few seconds to stop, so the backup could be cut off before it reached the cleanup. Every restart left one more half-written backup in the list. Old backups are now also cleaned up at startup, and a backup keeps a temporary name until it is complete, so a cut-off one never shows up ([#483](https://github.com/RiDDiX/home-assistant-matter-hub/issues/483))

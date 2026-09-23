@@ -31,6 +31,14 @@ Lights can optionally report electrical power and energy consumption via Matter 
 
 Lights no longer pick up power/energy sensors automatically. Electrical clusters on a light endpoint break Aqara, so a light that previously showed an energy readout may drop it after upgrading. Re-add it by setting `powerEntity` / `energyEntity` explicitly on that light in the Entity Mapping dialog (#374).
 
+### Apple Home shows wattage only on outlets
+
+Apple Home (iOS 27) only shows live wattage on an outlet's tile, a light with the same power sensor shows nothing ([#484](https://github.com/RiDDiX/home-assistant-matter-hub/issues/484)). Switches already map to an outlet.
+
+To get it for a light, set its **Matter Device Type** to **On/Off Plug-in Unit**. You lose brightness and color. **Show As -> Light** in the Home app brings the light icon back.
+
+Apple's Energy view only lists devices paired directly, so bridged devices count towards the total but don't get their own entry.
+
 ## Entity Mapping Options
 
 | Option | Description |
