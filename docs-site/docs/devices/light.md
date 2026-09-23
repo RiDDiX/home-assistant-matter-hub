@@ -33,14 +33,11 @@ Lights no longer pick up power/energy sensors automatically. Electrical clusters
 
 ### Apple Home shows wattage only on outlets
 
-Apple Home (iOS/tvOS 27) reads the Matter power and energy clusters, but it only puts a live wattage reading on the tile of an accessory whose Matter device type is an **outlet**. A light publishing the exact same measurements shows nothing ([#484](https://github.com/RiDDiX/home-assistant-matter-hub/issues/484)). The `switch` domain is unaffected, it already maps to On/Off Plug-in Unit.
+Apple Home (iOS 27) only shows live wattage on an outlet's tile, a light with the same power sensor shows nothing ([#484](https://github.com/RiDDiX/home-assistant-matter-hub/issues/484)). Switches already map to an outlet.
 
-To get the reading, set the light's **Matter Device Type** to **On/Off Plug-in Unit** in the Entity Mapping dialog. The power and energy mapping carries over unchanged. Two things to weigh:
+To get it for a light, set its **Matter Device Type** to **On/Off Plug-in Unit**. You lose brightness and color. **Show As -> Light** in the Home app brings the light icon back.
 
-- Brightness and color are gone. On/Off Plug-in Unit is an on/off type, and Dimmable Plug-in Unit does not help, because Apple maps that one back to a lightbulb.
-- The tile looks like an outlet. Apple's **Show As -> Light** on the accessory restores the light appearance without affecting the wattage, and Apple only offers that option on outlet-typed accessories.
-
-Separately, Apple's Energy view lists individual accessories only for devices paired directly with Apple Home. Everything behind a bridge, HAMH included, counts towards the whole-home total but gets no per-device entry.
+Apple's Energy view only lists devices paired directly, so bridged devices count towards the total but don't get their own entry.
 
 ## Entity Mapping Options
 

@@ -38,7 +38,7 @@ of port forwarding etc.
 | Channel | Branch | Current Version | Description |
 |---------|--------|-----------------|-------------|
 | **Stable** | `main` | v2.0.57 | Production-ready, recommended for most users |
-| **Alpha** | `alpha` | v2.1.0-alpha.902 | Ahead of Stable, carries the additions listed under Alpha Features |
+| **Alpha** | `alpha` | v2.1.0-alpha.903 | Ahead of Stable, carries the additions listed under Alpha Features |
 | **Testing** | `testing` | v4.1.0-testing.x | ⚠️ **Highly unstable!** Experimental features, may break |
 
 ### Which version should I use?
@@ -348,19 +348,24 @@ Re-assign the affected devices to their rooms after they reconnect. See the [doc
 </details>
 
 <details>
-<summary><strong>🧪 Alpha Features (v2.1.0-alpha.902)</strong> - Click to expand</summary>
+<summary><strong>🧪 Alpha Features (v2.1.0-alpha.903)</strong> - Click to expand</summary>
+
+**v2.1.0-alpha.903:**
+- 🧹 **Vacuum rooms reset when a clean finishes on its own**: the next clean started from Home Assistant could only match the old rooms ([#490](https://github.com/RiDDiX/home-assistant-matter-hub/issues/490))
+- 💡 **No flash when Alexa dims a light that is off**: it now turns on straight at the new level instead of its old brightness first ([#491](https://github.com/RiDDiX/home-assistant-matter-hub/issues/491))
+- 🧽 **Dishwashers on a power switch show their real state**: the Home Connect or SmartThings state sensor is picked up automatically ([#486](https://github.com/RiDDiX/home-assistant-matter-hub/issues/486))
 
 **v2.1.0-alpha.902:**
-- 🔁 **A bridge that went quiet now comes back on its own**: if a controller's subscription died while the bridge was still sending it the first batch of data, nothing noticed. The session was never cleaned up and the bridge stopped advertising itself, so every device read offline until the add-on was restarted. One report sat like that for 39 minutes. The bridge now watches a session from the moment it asks to subscribe ([#487](https://github.com/RiDDiX/home-assistant-matter-hub/issues/487))
-- 🧽 **Dishwashers report what they are actually doing**: the states were only matched against generic on/off words, so a Home Connect machine looked stopped even while running, and the error state was never reachable. The words Home Connect and SmartThings really use are understood now ([#486](https://github.com/RiDDiX/home-assistant-matter-hub/issues/486))
+- 🔁 **A bridge that went quiet comes back on its own**: a subscription that died while starting left every device offline until a restart ([#487](https://github.com/RiDDiX/home-assistant-matter-hub/issues/487))
+- 🧽 **Dishwashers understand Home Connect and SmartThings states** ([#486](https://github.com/RiDDiX/home-assistant-matter-hub/issues/486))
 
 **v2.1.0-alpha.901:**
-- 🔌 **Each outlet of a power strip reports its own power**: a multi-outlet device showed the same wattage on all of its outlets, because every outlet was handed the first power sensor on the device. Outlets are now paired to their own power and energy sensor ([#488](https://github.com/RiDDiX/home-assistant-matter-hub/issues/488), thanks to @barnabasbusa)
+- 🔌 **Each outlet of a power strip reports its own power** ([#488](https://github.com/RiDDiX/home-assistant-matter-hub/issues/488), thanks @barnabasbusa)
 
 **v2.1.0-alpha.900:**
-- 🔌 **Port 80 shows up in the network check**: two setups only got Alexa to finish pairing after freeing TCP port 80 on the Home Assistant host, once with the Home Assistant UI moved there, once with the Emulated Hue integration. Nothing in Matter uses port 80 and nobody has explained the link, so the Health Dashboard's network diagnostics now only points it out when something answers there ([#449](https://github.com/RiDDiX/home-assistant-matter-hub/issues/449), [#478](https://github.com/RiDDiX/home-assistant-matter-hub/issues/478))
-- 💡 **Wattage for a light in Apple Home**: Apple Home puts a live wattage reading only on the tile of an outlet, so a light with a mapped power sensor never showed one. Lights can now be set to On/Off Plug-in Unit in the Entity Mapping dialog, which keeps the power and energy mapping and gives Apple the tile. It costs brightness and color, so the dialog says so before you pick it ([#484](https://github.com/RiDDiX/home-assistant-matter-hub/issues/484))
-- 📖 **Docs**: what Apple Home does and does not show for power since iOS/tvOS 27, and the port 80 note in the Alexa troubleshooting section
+- 🔌 **Port 80 in the network check**: freeing it helped two users pair Alexa, so the Health Dashboard shows when it's in use ([#449](https://github.com/RiDDiX/home-assistant-matter-hub/issues/449), [#478](https://github.com/RiDDiX/home-assistant-matter-hub/issues/478))
+- 💡 **Wattage for lights in Apple Home**: a light can be set to On/Off Plug-in Unit, Apple only shows wattage on outlets ([#484](https://github.com/RiDDiX/home-assistant-matter-hub/issues/484))
+- 📖 **Docs**: Apple Home power readings since iOS 27, and the port 80 note for Alexa
 
 **v2.1.0-alpha.899:**
 - 🗂️ **Old backups get deleted again**: the automatic backup only runs while HAMH shuts down, and the add-on gets a few seconds to stop, so the backup could be cut off before it reached the cleanup. Every restart left one more half-written backup in the list. Old backups are now also cleaned up at startup, and a backup keeps a temporary name until it is complete, so a cut-off one never shows up ([#483](https://github.com/RiDDiX/home-assistant-matter-hub/issues/483))
