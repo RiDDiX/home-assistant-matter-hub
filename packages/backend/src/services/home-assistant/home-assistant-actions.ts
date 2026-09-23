@@ -31,6 +31,10 @@ export interface HomeAssistantActionsConfig {
 // Three failures in a row is a broken entity, not a blip.
 const TARGET_FAILURE_THRESHOLD = 3;
 
+// An On this soon after a level change is kept, some lights only switch on
+// through it (#453).
+const RECENT_CHANGE_MS = 2000;
+
 const defaultConfig: Required<HomeAssistantActionsConfig> = {
   retryAttempts: 3,
   retryBaseDelayMs: 100,
@@ -101,7 +105,12 @@ export class HomeAssistantActions extends Service {
     });
   }
 
-  private processAction(_key: string, calls: HomeAssistantActionCall[]) {
+  // bare Ons that may start an on-then-level pair (#491)
+  private readonly leadingOn = new Set<string>();
+  private readonly lastChangeAt = new Map<string, number>();
+
+  private processAction(key: string, calls: HomeAssistantActionCall[]) {
+    this.leadingOn.delete(key);
     // target === false means skip entity targeting (domain-level services like mqtt.publish)
     const skipTarget = calls[0].target === false;
     const entity_id = skipTarget
@@ -146,8 +155,28 @@ export class HomeAssistantActions extends Service {
     // are debounced independently instead of being merged incorrectly.
     const target =
       action.target === false ? entityId : (action.target ?? entityId);
-    const intent = Object.keys(action.data ?? {}).length ? "adjust" : "command";
-    const key = `${target}-${action.action}-${intent}`;
+    const base = `${target}-${action.action}`;
+    const hasData = Object.keys(action.data ?? {}).length > 0;
+    const key = `${base}-${hasData ? "adjust" : "command"}`;
+    if (action.action === "light.turn_on") {
+      const commandKey = `${base}-command`;
+      if (hasData) {
+        // Alexa sends On, then the level. The bare On would bring back the
+        // old brightness first and flash, so drop it (#491).
+        this.lastChangeAt.set(base, Date.now());
+        if (this.leadingOn.delete(commandKey)) {
+          this.debounceContext.get(commandKey, 100).unregister();
+        }
+      } else if (
+        Date.now() -
+          (this.lastChangeAt.get(base) ?? Number.NEGATIVE_INFINITY) >=
+          RECENT_CHANGE_MS &&
+        !this.debounceContext.isPending(commandKey)
+      ) {
+        // no level change just before, so this On may start a pair
+        this.leadingOn.add(commandKey);
+      }
+    }
     this.debounceContext.get(key, 100)({ ...action, entityId });
   }
 

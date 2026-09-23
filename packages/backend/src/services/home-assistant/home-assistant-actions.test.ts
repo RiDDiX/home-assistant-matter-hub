@@ -136,3 +136,239 @@ describe("HomeAssistantActions debounce", () => {
     expect(serviceData).toEqual([{ brightness: 200 }, {}]);
   });
 });
+
+// #491: Alexa sends On, then the level 37ms later, and the light flashed to
+// its old brightness first.
+describe("HomeAssistantActions on-then-level (#491)", () => {
+  function recorder() {
+    const sent: { service: string; data: unknown }[] = [];
+    const { actions } = makeActions(async (message) => {
+      if (message.type === "call_service") {
+        sent.push({
+          service: `${message.domain}.${message.service}`,
+          data: message.service_data,
+        });
+      }
+      return {};
+    });
+    return { actions, sent };
+  }
+  const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+  it("sends one turn_on with the brightness, not a bare one before it", async () => {
+    const { actions, sent } = recorder();
+
+    actions.call({ action: "light.turn_on" }, "light.buro_stehlampe");
+    await wait(37);
+    actions.call(
+      { action: "light.turn_on", data: { brightness: 25 } },
+      "light.buro_stehlampe",
+    );
+    await wait(200);
+
+    expect(sent).toEqual([
+      { service: "light.turn_on", data: { brightness: 25 } },
+    ]);
+  });
+
+  it("covers colour too, the same pair with a hue instead of a level", async () => {
+    const { actions, sent } = recorder();
+
+    actions.call({ action: "light.turn_on" }, "light.lamp");
+    await wait(20);
+    actions.call(
+      { action: "light.turn_on", data: { hs_color: [0, 100] } },
+      "light.lamp",
+    );
+    await wait(200);
+
+    expect(sent).toEqual([
+      { service: "light.turn_on", data: { hs_color: [0, 100] } },
+    ]);
+  });
+
+  it("still sends a bare On that has nothing after it", async () => {
+    const { actions, sent } = recorder();
+
+    actions.call({ action: "light.turn_on" }, "light.lamp");
+    await wait(200);
+
+    expect(sent).toEqual([{ service: "light.turn_on", data: {} }]);
+  });
+
+  // #453: Flic sends level, On, level, and some lights need that bare On
+  it("keeps an explicit On that follows a level change (#453)", async () => {
+    const { actions, sent } = recorder();
+
+    actions.call(
+      { action: "light.turn_on", data: { brightness: 100 } },
+      "light.lamp",
+    );
+    await wait(10);
+    actions.call({ action: "light.turn_on" }, "light.lamp");
+    await wait(10);
+    actions.call(
+      { action: "light.turn_on", data: { brightness: 200 } },
+      "light.lamp",
+    );
+    await wait(200);
+
+    expect(sent).toContainEqual({ service: "light.turn_on", data: {} });
+    expect(sent).toContainEqual({
+      service: "light.turn_on",
+      data: { brightness: 200 },
+    });
+  });
+
+  it("keeps an explicit On after an earlier standalone On", async () => {
+    const { actions, sent } = recorder();
+
+    actions.call({ action: "light.turn_on" }, "light.lamp");
+    await wait(200);
+    actions.call(
+      { action: "light.turn_on", data: { brightness: 100 } },
+      "light.lamp",
+    );
+    await wait(10);
+    actions.call({ action: "light.turn_on" }, "light.lamp");
+    await wait(10);
+    actions.call(
+      { action: "light.turn_on", data: { brightness: 150 } },
+      "light.lamp",
+    );
+    await wait(200);
+
+    expect(sent.filter((c) => JSON.stringify(c.data) === "{}")).toHaveLength(2);
+  });
+
+  it("leaves other lights alone", async () => {
+    const { actions, sent } = recorder();
+
+    actions.call({ action: "light.turn_on" }, "light.a");
+    await wait(10);
+    actions.call(
+      { action: "light.turn_on", data: { brightness: 25 } },
+      "light.b",
+    );
+    await wait(200);
+
+    expect(sent).toContainEqual({ service: "light.turn_on", data: {} });
+    expect(sent).toContainEqual({
+      service: "light.turn_on",
+      data: { brightness: 25 },
+    });
+  });
+
+  // script.turn_on with variables starts a second run
+  it("does not touch any action but light.turn_on", async () => {
+    for (const [action, target] of [
+      ["light.toggle", "light.lamp"],
+      ["script.turn_on", "script.scene"],
+      ["fan.turn_on", "fan.ceiling"],
+    ]) {
+      const { actions, sent } = recorder();
+
+      actions.call({ action }, target);
+      await wait(10);
+      actions.call({ action, data: { brightness: 25 } }, target);
+      await wait(200);
+
+      expect(sent, action).toHaveLength(2);
+    }
+  });
+
+  // a slower Flic
+  it("keeps an explicit On after a level change that already went out", async () => {
+    const { actions, sent } = recorder();
+
+    actions.call(
+      { action: "light.turn_on", data: { brightness: 100 } },
+      "light.lamp",
+    );
+    await wait(120);
+    actions.call({ action: "light.turn_on" }, "light.lamp");
+    await wait(30);
+    actions.call(
+      { action: "light.turn_on", data: { brightness: 200 } },
+      "light.lamp",
+    );
+    await wait(200);
+
+    expect(sent).toContainEqual({ service: "light.turn_on", data: {} });
+  });
+
+  it("never drops an explicit On that shares a buffer", async () => {
+    const { actions, sent } = recorder();
+
+    actions.call(
+      { action: "light.turn_on", data: { brightness: 100 } },
+      "light.lamp",
+    );
+    await wait(90);
+    actions.call({ action: "light.turn_on" }, "light.lamp");
+    await wait(20);
+    actions.call({ action: "light.turn_on" }, "light.lamp");
+    await wait(30);
+    actions.call(
+      { action: "light.turn_on", data: { brightness: 200 } },
+      "light.lamp",
+    );
+    await wait(200);
+
+    expect(sent).toContainEqual({ service: "light.turn_on", data: {} });
+  });
+
+  it("treats an On long after the last level change as a new pair", async () => {
+    vi.useFakeTimers();
+    try {
+      const { actions, sent } = recorder();
+
+      actions.call(
+        { action: "light.turn_on", data: { brightness: 254 } },
+        "light.lamp",
+      );
+      await vi.advanceTimersByTimeAsync(5_000);
+      actions.call({ action: "light.turn_on" }, "light.lamp");
+      await vi.advanceTimersByTimeAsync(37);
+      actions.call(
+        { action: "light.turn_on", data: { brightness: 25 } },
+        "light.lamp",
+      );
+      await vi.advanceTimersByTimeAsync(500);
+
+      expect(sent).toEqual([
+        { service: "light.turn_on", data: { brightness: 254 } },
+        { service: "light.turn_on", data: { brightness: 25 } },
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // the first On is inside the window
+  it("keeps an explicit On when a later On lands in its buffer past the window", async () => {
+    vi.useFakeTimers();
+    try {
+      const { actions, sent } = recorder();
+
+      actions.call(
+        { action: "light.turn_on", data: { brightness: 100 } },
+        "light.lamp",
+      );
+      await vi.advanceTimersByTimeAsync(1_950);
+      actions.call({ action: "light.turn_on" }, "light.lamp");
+      await vi.advanceTimersByTimeAsync(60);
+      actions.call({ action: "light.turn_on" }, "light.lamp");
+      await vi.advanceTimersByTimeAsync(30);
+      actions.call(
+        { action: "light.turn_on", data: { brightness: 200 } },
+        "light.lamp",
+      );
+      await vi.advanceTimersByTimeAsync(500);
+
+      expect(sent).toContainEqual({ service: "light.turn_on", data: {} });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});

@@ -45,10 +45,7 @@ export class DebounceContext<TPayload> {
       this.getBuffer(key).push(payload);
       bufferedFn();
     };
-    return Object.assign(debouncer, {
-      get isPending() {
-        return bufferedFn.isPending;
-      },
+    const fn = Object.assign(debouncer, {
       clear: () => bufferedFn.clear(),
       flush: () => bufferedFn.flush(),
       trigger: () => bufferedFn.trigger(),
@@ -56,6 +53,15 @@ export class DebounceContext<TPayload> {
         this.unregister(key);
       },
     });
+    // Object.assign copies a getter's value once, isPending would stay false
+    Object.defineProperty(fn, "isPending", {
+      get: () => bufferedFn.isPending,
+    });
+    return fn as DebounceFunction<TPayload>;
+  }
+
+  isPending(key: string): boolean {
+    return (this.buffers.get(key)?.length ?? 0) > 0;
   }
 
   unregisterAll() {
