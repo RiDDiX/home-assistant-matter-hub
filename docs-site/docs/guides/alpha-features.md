@@ -31,7 +31,7 @@ docker run -d \
 
 ## Current Alpha Features
 
-Alpha is ahead of Stable (v2.0.57) with backup fixes, a port 80 check, per-outlet power, session recovery, wattage for lights in Apple Home, and vacuum, light and dishwasher fixes. See the alpha notes for each release. Standalone Devices graduated to Stable in v2.0.47, see [Standalone Devices](../getting-started/standalone-devices.md).
+Alpha is ahead of Stable (v2.0.57) with backup fixes, a port 80 check, per-outlet power, session recovery, wattage for lights in Apple Home, vacuum, light and dishwasher fixes, washer and dryer types, and SmartThings in controller support. See the alpha notes for each release. Standalone Devices graduated to Stable in v2.0.47, see [Standalone Devices](../getting-started/standalone-devices.md).
 
 For a complete list of all supported features and device types, see [Supported Device Types](../supported-device-types.md).
 

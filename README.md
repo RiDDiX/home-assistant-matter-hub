@@ -38,7 +38,7 @@ of port forwarding etc.
 | Channel | Branch | Current Version | Description |
 |---------|--------|-----------------|-------------|
 | **Stable** | `main` | v2.0.57 | Production-ready, recommended for most users |
-| **Alpha** | `alpha` | v2.1.0-alpha.903 | Ahead of Stable, carries the additions listed under Alpha Features |
+| **Alpha** | `alpha` | v2.1.0-alpha.904 | Ahead of Stable, carries the additions listed under Alpha Features |
 | **Testing** | `testing` | v4.1.0-testing.x | ⚠️ **Highly unstable!** Experimental features, may break |
 
 ### Which version should I use?
@@ -348,7 +348,13 @@ Re-assign the affected devices to their rooms after they reconnect. See the [doc
 </details>
 
 <details>
-<summary><strong>🧪 Alpha Features (v2.1.0-alpha.903)</strong> - Click to expand</summary>
+<summary><strong>🧪 Alpha Features (v2.1.0-alpha.904)</strong> - Click to expand</summary>
+
+**v2.1.0-alpha.904:**
+- 🧺 **Washers and dryers on a power switch show their real state**: Laundry Washer and Laundry Dryer types pick up the state from Home Connect, SmartThings, Miele or LG
+- ✅ **Vacuums and appliances report a finished clean or cycle**
+- 🏠 **Every paired controller shows on the bridge card**: it only showed Google and Alexa, and 4448 now shows as Sengled
+- 📖 **Controller support**: SmartThings added, Apple no longer warns about fans, air purifiers and air quality, and Google no longer warns about smoke alarms and dishwashers
 
 **v2.1.0-alpha.903:**
 - 🧹 **Vacuum rooms reset when a clean finishes on its own**: the next clean started from Home Assistant could only match the old rooms ([#490](https://github.com/RiDDiX/home-assistant-matter-hub/issues/490))

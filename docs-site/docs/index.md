@@ -348,7 +348,13 @@ Home, ...) are not placed in the same network segment. Please make sure to revie
 </details>
 
 <details>
-<summary><strong>🧪 Alpha (v2.1.0-alpha.903)</strong></summary>
+<summary><strong>🧪 Alpha (v2.1.0-alpha.904)</strong></summary>
+
+**v2.1.0-alpha.904:**
+- 🧺 **Washers and dryers on a power switch show their real state**: Laundry Washer and Laundry Dryer types pick up the state from Home Connect, SmartThings, Miele or LG
+- ✅ **Vacuums and appliances report a finished clean or cycle**
+- 🏠 **Every paired controller shows on the bridge card**: it only showed Google and Alexa, and 4448 now shows as Sengled
+- 📖 **Controller support**: SmartThings added, Apple no longer warns about fans, air purifiers and air quality, and Google no longer warns about smoke alarms and dishwashers
 
 **v2.1.0-alpha.903:**
 - 🧹 **Vacuum rooms reset when a clean finishes on its own**: the next clean started from Home Assistant could only match the old rooms ([#490](https://github.com/RiDDiX/home-assistant-matter-hub/issues/490))
