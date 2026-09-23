@@ -221,6 +221,26 @@ export class LegacyEndpoint extends EntityEndpoint {
         }
       }
 
+      // A dishwasher's power switch only reports on and off (#486).
+      if (
+        mapping?.matterDeviceType === "dishwasher" &&
+        !mapping.operationalStateEntity
+      ) {
+        const stateEntityId = registry.findOperationalStateEntityForDevice(
+          entity.device_id,
+        );
+        if (stateEntityId && stateEntityId !== entityId) {
+          effectiveMapping = {
+            ...effectiveMapping,
+            entityId: effectiveMapping?.entityId ?? entityId,
+            operationalStateEntity: stateEntityId,
+          };
+          logger.debug(
+            `Auto-assigned operational state ${stateEntityId} to ${entityId}`,
+          );
+        }
+      }
+
       // 4. Auto-assign power entity to switch/plug entities.
       // Not lights: an outlet's indicator light would grab the outlet's power
       // sensor, and electrical clusters on a light endpoint break Aqara (#374).

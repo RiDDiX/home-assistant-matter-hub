@@ -160,6 +160,8 @@ export interface EntityMappingConfig {
    * Example: "binary_sensor.smoke_problem"
    */
   readonly faultEntity?: string;
+  /** Dishwasher state sensor on the same device, found automatically (#486). */
+  readonly operationalStateEntity?: string;
   /**
    * Optional: Entity ID of a charging-state sensor for a vacuum, so the Matter
    * batChargeState comes from a dedicated sensor (e.g. Xiaomi charging_state)
@@ -704,7 +706,7 @@ export const matterDeviceTypeControllerSupport: Record<
     google: "yes",
     alexa: "yes",
     aqara: "unknown",
-    note: "Google and Alexa both list Dishwasher; Apple does not render it yet.",
+    note: "Apple Home doesn't show it yet.",
   },
   speaker: {
     apple: "no",
@@ -952,9 +954,7 @@ export const domainToDefaultMatterTypes: Partial<
     "dimmable_light",
     "extended_color_light",
     "on_off_light",
-    // Apple Home only puts live wattage on the tile of an outlet, so a metered
-    // light has to become On/Off Plug-in Unit (0x010A) to show it. Dimming is
-    // lost, and "Show As -> Light" restores the look (#484).
+    // Apple only shows wattage on outlet tiles (#484)
     "on_off_plugin_unit",
   ],
   lock: ["door_lock"],

@@ -248,6 +248,27 @@ export class BridgeRegistry {
     return this._usedBatteryEntities.has(entityId);
   }
 
+  // Home Connect's operation state and SmartThings' machine state are both
+  // enum sensors with run and pause among their options (#486).
+  findOperationalStateEntityForDevice(deviceId: string): string | undefined {
+    for (const entity of values(this.registry.entities)) {
+      if (entity.device_id !== deviceId) continue;
+      if (!entity.entity_id.startsWith("sensor.")) continue;
+      const attrs = this.registry.states[entity.entity_id]?.attributes as
+        | { device_class?: string; options?: unknown }
+        | undefined;
+      const options = Array.isArray(attrs?.options) ? attrs.options : [];
+      if (
+        attrs?.device_class === "enum" &&
+        options.includes("run") &&
+        options.includes("pause")
+      ) {
+        return entity.entity_id;
+      }
+    }
+    return undefined;
+  }
+
   /**
    * Find a problem/safety binary sensor on the same HA device, so a smoke/CO
    * alarm can drive hardwareFaultAlert from it. Prefers device_class=problem
@@ -851,10 +872,9 @@ export class BridgeRegistry {
    * reports one power (and energy) sensor per outlet, all under one device id.
    * Returning the first match then attributes a single outlet's reading to
    * every outlet (#488). When several candidates exist, pair them to the
-   * requesting entity by the index that tells the two ids apart
-   * (`switch_2` -> `power_2`); fall back to the first match when nothing pairs,
-   * so an unpairable device keeps the reading it had before. Single-sensor
-   * devices keep the previous behaviour.
+   * requesting entity by index (`switch_2` -> `power_2`); fall back to
+   * the first match when there is no index to pair on. Single-sensor devices
+   * keep the previous behaviour.
    */
   private findSensorEntityForDevice(
     deviceId: string,
@@ -882,8 +902,7 @@ export class BridgeRegistry {
         const wanted = pairingIndex(forEntityId, id);
         return wanted != null && pairingIndex(id, forEntityId) === wanted;
       });
-      // Exactly one, or the index does not identify an outlet and guessing
-      // would be worse than the shared reading every outlet got before.
+      // don't guess between several matches
       if (matched.length === 1) return matched[0];
     }
     return candidates[0];

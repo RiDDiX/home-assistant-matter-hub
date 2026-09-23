@@ -3,18 +3,14 @@ import type { EndpointType } from "@matter/main";
 import { OperationalStateServer as Base } from "@matter/main/behaviors/operational-state";
 import { OperationalState } from "@matter/main/clusters/operational-state";
 import { DishwasherDevice as Device } from "@matter/main/devices";
+import { EntityStateProvider } from "../../../../services/bridges/entity-state-provider.js";
 import { applyPatchState } from "../../../../utils/apply-patch-state.js";
 import { BasicInformationServer } from "../../../behaviors/basic-information-server.js";
 import { HomeAssistantEntityBehavior } from "../../../behaviors/home-assistant-entity-behavior.js";
 import { IdentifyServer } from "../../../behaviors/identify-server.js";
 import { OnOffServer } from "../../../behaviors/on-off-server.js";
 
-// Plain switch words, plus the vocabularies the integrations that actually
-// expose a dishwasher use. Home Connect's operation state sensor reports
-// inactive/ready/delayedstart/run/pause/actionrequired/finished/error/aborting
-// (home_connect/sensor.py), and SmartThings reports run/pause/stop. Only
-// "finished" used to match, so a running Home Connect machine read as Stopped
-// and the Error state was unreachable (#486).
+// Switch words, plus the states Home Connect and SmartThings report (#486).
 const haStateToDishwasherState: Record<
   string,
   OperationalState.OperationalStateEnum
@@ -30,17 +26,15 @@ const haStateToDishwasherState: Record<
   paused: OperationalState.OperationalStateEnum.Paused,
   complete: OperationalState.OperationalStateEnum.Stopped,
   finished: OperationalState.OperationalStateEnum.Stopped,
-  // Home Connect
   inactive: OperationalState.OperationalStateEnum.Stopped,
   ready: OperationalState.OperationalStateEnum.Stopped,
   delayedstart: OperationalState.OperationalStateEnum.Stopped,
   run: OperationalState.OperationalStateEnum.Running,
   pause: OperationalState.OperationalStateEnum.Paused,
-  // Halted waiting for the user, which is a pause rather than a failure.
+  // waiting for the user
   actionrequired: OperationalState.OperationalStateEnum.Paused,
   aborting: OperationalState.OperationalStateEnum.Running,
   error: OperationalState.OperationalStateEnum.Error,
-  // SmartThings
   stop: OperationalState.OperationalStateEnum.Stopped,
 };
 
@@ -67,14 +61,18 @@ class DishwasherOperationalStateServer extends Base {
     if (!entity.state) {
       return;
     }
-    const haState = entity.state.state?.toLowerCase() ?? "off";
+    const stateEntity = this.agent.get(HomeAssistantEntityBehavior).state
+      .mapping?.operationalStateEntity;
+    const raw = stateEntity
+      ? this.agent.env.get(EntityStateProvider).getState(stateEntity)?.state
+      : entity.state.state;
+    const haState = raw?.toLowerCase() ?? "off";
     const newState =
       haStateToDishwasherState[haState] ??
       OperationalState.OperationalStateEnum.Stopped;
     applyPatchState(this.state, {
       operationalState: newState,
       operationalError: {
-        // Error is only meaningful with an error state to go with it.
         errorStateId:
           newState === OperationalState.OperationalStateEnum.Error
             ? OperationalState.ErrorState.UnableToCompleteOperation

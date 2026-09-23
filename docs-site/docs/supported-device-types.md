@@ -554,12 +554,15 @@ Mapped to **OnOffPlugInUnit**.
 
 Available as a **device type override** for `switch` entities via the Entity Mapping UI. Maps to the Matter **Dishwasher** device type with OperationalState and OnOff clusters.
 
+A power switch only knows on and off. If the device also has a Home Connect or SmartThings state sensor, the state comes from that, so a dishwasher that's on but idle shows as stopped. No setup needed.
+
 **HA State → Matter OperationalState Mapping:**
 | HA State | Matter State |
 |----------|-------------|
-| `off`, `idle`, `standby`, `complete`, `finished` | Stopped |
-| `on`, `running`, `active`, `drying`, `washing` | Running |
-| `paused` | Paused |
+| `off`, `idle`, `standby`, `complete`, `finished`, `inactive`, `ready`, `delayedstart`, `stop` | Stopped |
+| `on`, `running`, `active`, `drying`, `washing`, `run`, `aborting` | Running |
+| `paused`, `pause`, `actionrequired` | Paused |
+| `error` | Error |
 
 **Supported Commands:**
 - **Start** → `homeassistant.turn_on`

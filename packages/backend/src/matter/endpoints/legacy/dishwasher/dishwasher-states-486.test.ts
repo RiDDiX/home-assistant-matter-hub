@@ -14,11 +14,7 @@ import { HomeAssistantConfig } from "../../../../services/home-assistant/home-as
 import { AggregatorEndpoint } from "../../aggregator-endpoint.js";
 import { createLegacyEndpointType } from "../create-legacy-endpoint-type.js";
 
-// #486: the state table only knew plain switch words, so a Home Connect
-// dishwasher (whose sensor reports run/pause/error, see
-// homeassistant/components/home_connect/sensor.py) read as Stopped for every
-// state but "finished", and the Error state declared in operationalStateList
-// was unreachable.
+// #486: every Home Connect state but "finished" fell through to Stopped.
 
 let dir: string;
 let env: Environment;
@@ -113,7 +109,6 @@ async function bringUp(haState: string) {
 const Op = OperationalState.OperationalStateEnum;
 
 describe("dishwasher operational state from real integrations (#486)", () => {
-  // The two Home Connect states users care about, both Stopped before.
   it("maps Home Connect run to Running", async () => {
     expect((await bringUp("Run")).state).toBe(Op.Running);
   });

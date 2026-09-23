@@ -70,6 +70,7 @@ export function getMappedEntityIds(mapping?: EntityMappingConfig): string[] {
   if (mapping.currentLimitEntity) ids.push(mapping.currentLimitEntity);
   if (mapping.currentRoomEntity) ids.push(mapping.currentRoomEntity);
   if (mapping.cleanedAreaEntity) ids.push(mapping.cleanedAreaEntity);
+  if (mapping.operationalStateEntity) ids.push(mapping.operationalStateEntity);
   if (mapping.composedEntities) {
     for (const sub of mapping.composedEntities) {
       if (sub.entityId) ids.push(sub.entityId);
