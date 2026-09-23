@@ -1,10 +1,15 @@
 import type { ControllerSupport } from "./entity-mapping.js";
 
-export type ControllerKey = "apple" | "google" | "alexa" | "aqara";
+export type ControllerKey =
+  | "apple"
+  | "google"
+  | "alexa"
+  | "aqara"
+  | "smartthings";
 
 // Fabric root vendor ids of the controllers we have support data for.
-// Apple 0x1349/0x1384, Google 0x6006, Amazon Alexa 0x1217/0x1160, Aqara 0x115F.
-// Other ids (incl. Home Assistant 0x134B and SmartThings 0x110A) classify as
+// Apple 0x1349/0x1384, Google 0x6006, Amazon Alexa 0x1217/0x1160, Aqara 0x115F,
+// SmartThings 0x110A. Other ids (incl. Home Assistant 0x134B) classify as
 // undefined, so they never raise a warning. Best-effort: a fabric root vendor
 // can be the hub vendor rather than the end controller, so warnings stay advisory.
 const controllerByVendorId: Record<number, ControllerKey> = {
@@ -14,6 +19,7 @@ const controllerByVendorId: Record<number, ControllerKey> = {
   4631: "alexa", // 0x1217 Amazon Alexa
   4448: "alexa", // 0x1160 Amazon (some Alexa ecosystems)
   4447: "aqara", // 0x115F Aqara Home
+  4362: "smartthings", // 0x110A SmartThings
 };
 
 export function classifyController(
@@ -36,6 +42,7 @@ interface DeviceTypeSupport {
   google: ControllerSupport;
   alexa: ControllerSupport;
   aqara: ControllerSupport;
+  smartthings: ControllerSupport;
   note?: string;
 }
 
@@ -44,132 +51,186 @@ interface DeviceTypeSupport {
 // quality concentration sensors are 0x002c, motion and occupancy are both
 // 0x0107, so collapsing to the id is correct here. Only ids that are
 // unsupported ("no") somewhere need an entry; anything absent never warns.
-// Apple/Google/Alexa verified 2026-06 against their device pages. Aqara from its
-// own Matter device list (aqara.com/en/explore/everything-matter, 2026-06), which
-// covers most types; "unknown" where Aqara does not name the type. Snapshot.
+// Same sources and date as matterDeviceTypeControllerSupport (2026-09).
 const deviceTypeIdSupport: Record<number, DeviceTypeSupport> = {
-  43: {
-    apple: "no",
-    google: "yes",
-    alexa: "yes",
-    aqara: "yes",
-    note: "Apple Home has no standalone fan.",
-  },
-  45: {
-    apple: "no",
-    google: "yes",
-    alexa: "yes",
-    aqara: "yes",
-    note: "Apple Home does not list air purifiers.",
-  },
+  // speaker
   34: {
     apple: "no",
     google: "yes",
     alexa: "no",
     aqara: "yes",
-    note: "Google Home and Aqara show Matter speakers.",
+    smartthings: "yes",
+    note: "Apple and Alexa do not show Matter speakers.",
   },
+  // basic video player
   40: {
     apple: "no",
     google: "no",
     alexa: "no",
     aqara: "yes",
-    note: "TV/media types only show in Aqara Home here.",
+    smartthings: "yes",
+    note: "TV/media types only show in Aqara Home and SmartThings.",
   },
+  // pressure sensor
   773: {
     apple: "no",
     google: "yes",
     alexa: "no",
     aqara: "yes",
-    note: "Google Home and Aqara show pressure sensors.",
+    smartthings: "yes",
+    note: "Google Home, Aqara and SmartThings show pressure sensors.",
   },
+  // flow sensor
   774: {
     apple: "no",
     google: "yes",
     alexa: "no",
-    aqara: "unknown",
-    note: "Only Google Home shows flow sensors.",
-  },
-  44: {
-    apple: "no",
-    google: "yes",
-    alexa: "yes",
     aqara: "yes",
-    note: "Apple Home does not show air quality.",
+    smartthings: "yes",
+    note: "Google Home, Aqara and SmartThings show flow sensors.",
   },
+  // solar power
   23: {
     apple: "no",
     google: "no",
     alexa: "unknown",
-    aqara: "unknown",
-    note: "SolarPower is only rendered standalone by SmartThings today.",
+    aqara: "yes",
+    smartthings: "yes",
+    note: "SolarPower is only shown standalone by Aqara and SmartThings.",
   },
+  // electrical meter
   1300: {
     apple: "no",
     google: "yes",
     alexa: "no",
     aqara: "unknown",
-    note: "ElectricalMeter shows in Google Home and SmartThings; Apple and Alexa do not surface standalone power/energy.",
+    smartthings: "unknown",
+    note: "ElectricalMeter shows in Google Home; Apple and Alexa do not show standalone power/energy.",
   },
+  // electrical utility meter
+  1297: {
+    apple: "no",
+    google: "yes",
+    alexa: "no",
+    aqara: "unknown",
+    smartthings: "unknown",
+    note: "ElectricalUtilityMeter shows in Google Home only.",
+  },
+  // battery storage
   24: {
     apple: "no",
     google: "no",
     alexa: "no",
     aqara: "yes",
-    note: "Aqara lists battery storage; others show battery inside a device.",
+    smartthings: "yes",
+    note: "Aqara and SmartThings list battery storage; others show battery inside a device.",
   },
+  // EVSE
   1292: {
     apple: "no",
     google: "no",
     alexa: "no",
     aqara: "yes",
-    note: "HA and Aqara render EnergyEvse; SmartThings announced support, unconfirmed (it sets the limit via EnableCharging and addresses modes by list position). Bridged EVSE can break Alexa device recognition, keep it off Alexa bridges.",
+    smartthings: "yes",
+    note: "HA, Aqara and SmartThings render EnergyEvse (SmartThings sets the limit via EnableCharging and addresses modes by list position). Bridged EVSE can break Alexa device recognition, keep it off Alexa bridges.",
   },
+  // water heater
+  1295: {
+    apple: "no",
+    google: "no",
+    alexa: "unknown",
+    aqara: "yes",
+    smartthings: "yes",
+    note: "Matter 1.4 Water Heater, only Aqara and SmartThings list it.",
+  },
+  // mode select
   39: {
     apple: "no",
     google: "no",
     alexa: "no",
-    aqara: "unknown",
+    aqara: "no",
+    smartthings: "unknown",
     note: "Mode Select is not supported here (Google #356).",
   },
-  66: { apple: "no", google: "no", alexa: "no", aqara: "yes" },
+  // water valve
+  66: {
+    apple: "no",
+    google: "no",
+    alexa: "no",
+    aqara: "yes",
+    smartthings: "yes",
+  },
+  // pump
   771: {
     apple: "no",
     google: "yes",
     alexa: "no",
     aqara: "yes",
-    note: "Google Home and Aqara show pumps.",
+    smartthings: "yes",
+    note: "Google Home, Aqara and SmartThings show pumps.",
   },
+  // rain sensor
   68: {
     apple: "no",
     google: "no",
     alexa: "no",
     aqara: "yes",
+    smartthings: "yes",
     note: "Newer Matter detector, thin support; Alexa may reject it (#365).",
   },
+  // water freeze detector
   65: {
     apple: "no",
     google: "no",
     alexa: "no",
     aqara: "yes",
+    smartthings: "yes",
     note: "Newer Matter detector, thin support; Alexa may reject it (#365).",
   },
+  // water leak detector
   67: {
     apple: "yes",
     google: "no",
+    alexa: "no",
+    aqara: "yes",
+    smartthings: "yes",
+    note: "Alexa has no capability for it and it can take an Alexa bridge offline (#365).",
+  },
+  // laundry washer
+  115: {
+    apple: "unknown",
+    google: "yes",
+    alexa: "no",
+    aqara: "yes",
+    smartthings: "yes",
+    note: "iOS 27 knows the type, but it's not confirmed that Apple Home shows it.",
+  },
+  // laundry dryer
+  124: {
+    apple: "unknown",
+    google: "no",
+    alexa: "no",
+    aqara: "yes",
+    smartthings: "yes",
+    note: "iOS 27 knows the type, but it's not confirmed that Apple Home shows it.",
+  },
+  // doorbell
+  328: {
+    apple: "no",
+    google: "yes",
+    alexa: "no",
+    aqara: "no",
+    smartthings: "unknown",
+    note: "Google Home lists the Matter 1.4 Doorbell; others fall back to the plain Switch cluster, if they show it at all.",
+  },
+  // generic switch
+  15: {
+    apple: "partial",
+    google: "no",
     alexa: "yes",
     aqara: "yes",
-    note: "Newer Matter detector, can be risky on Alexa bridges (#365).",
+    smartthings: "yes",
   },
-  118: { apple: "yes", google: "no", alexa: "yes", aqara: "yes" },
-  117: {
-    apple: "no",
-    google: "no",
-    alexa: "unknown",
-    aqara: "unknown",
-    note: "Appliance types have little controller support.",
-  },
-  15: { apple: "partial", google: "no", alexa: "yes", aqara: "unknown" },
 };
 
 const controllerLabels: Record<ControllerKey, string> = {
@@ -177,6 +238,7 @@ const controllerLabels: Record<ControllerKey, string> = {
   google: "Google Home",
   alexa: "Alexa",
   aqara: "Aqara Home",
+  smartthings: "SmartThings",
 };
 
 export interface ControllerWarning {

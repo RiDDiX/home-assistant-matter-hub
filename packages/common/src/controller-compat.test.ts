@@ -12,11 +12,11 @@ describe("classifyController", () => {
     expect(classifyController(24582)).toBe("google"); // 0x6006
     expect(classifyController(4631)).toBe("alexa"); // 0x1217
     expect(classifyController(4447)).toBe("aqara"); // 0x115F
+    expect(classifyController(4362)).toBe("smartthings"); // 0x110A
   });
 
-  it("returns undefined for non-controller vendors (HA hub, SmartThings, unknown)", () => {
+  it("returns undefined for non-controller vendors (HA hub, unknown)", () => {
     expect(classifyController(4939)).toBeUndefined(); // Home Assistant
-    expect(classifyController(4362)).toBeUndefined(); // SmartThings
     expect(classifyController(99999)).toBeUndefined();
   });
 });
@@ -39,17 +39,56 @@ describe("alexaPairingPortProblem", () => {
 
 describe("computeControllerWarnings", () => {
   it("warns when a commissioned controller does not support an exposed type", () => {
-    // 0x002b (fan) is not supported on Apple Home
+    // 0x0022 (speaker) is not supported on Apple Home
     const warnings = computeControllerWarnings(
       ["apple"],
-      [{ entityId: "fan.office", deviceTypeId: 0x2b }],
+      [{ entityId: "media_player.kitchen", deviceTypeId: 0x22 }],
     );
     expect(warnings).toHaveLength(1);
     expect(warnings[0]).toMatchObject({
-      entityId: "fan.office",
+      entityId: "media_player.kitchen",
       controller: "apple",
       controllerLabel: "Apple Home",
     });
+  });
+
+  it("does not warn Apple about fans, purifiers or air quality", () => {
+    // Apple's plist maps 0x2b, 0x2c and 0x2d to HAP services
+    expect(
+      computeControllerWarnings(
+        ["apple"],
+        [
+          { entityId: "fan.office", deviceTypeId: 0x2b },
+          { entityId: "sensor.aq", deviceTypeId: 0x2c },
+          { entityId: "fan.purifier", deviceTypeId: 0x2d },
+        ],
+      ),
+    ).toEqual([]);
+  });
+
+  it("does not warn Google about smoke alarms or dishwashers", () => {
+    expect(
+      computeControllerWarnings(
+        ["google"],
+        [
+          { entityId: "binary_sensor.smoke", deviceTypeId: 0x76 },
+          { entityId: "switch.dishwasher", deviceTypeId: 0x75 },
+        ],
+      ),
+    ).toEqual([]);
+  });
+
+  it("warns where laundry types are not listed", () => {
+    const washer = computeControllerWarnings(
+      ["apple", "google", "alexa", "aqara", "smartthings"],
+      [{ entityId: "switch.washer", deviceTypeId: 0x73 }],
+    );
+    expect(washer.map((w) => w.controller)).toEqual(["alexa"]);
+    const dryer = computeControllerWarnings(
+      ["apple", "google", "alexa", "aqara", "smartthings"],
+      [{ entityId: "switch.dryer", deviceTypeId: 0x7c }],
+    );
+    expect(dryer.map((w) => w.controller).sort()).toEqual(["alexa", "google"]);
   });
 
   it("does not warn when the type is supported (fan on Google/Alexa)", () => {
@@ -173,11 +212,11 @@ describe("controllerWarningsForFabrics", () => {
   it("derives warnings from a fabric's root vendor id", () => {
     const warnings = controllerWarningsForFabrics(
       [{ rootVendorId: 4937 }], // 0x1349 Apple Home
-      [{ entityId: "fan.office", deviceTypeId: 0x2b }], // fan: no on Apple
+      [{ entityId: "media_player.kitchen", deviceTypeId: 0x22 }], // no on Apple
     );
     expect(warnings).toHaveLength(1);
     expect(warnings[0]).toMatchObject({
-      entityId: "fan.office",
+      entityId: "media_player.kitchen",
       controller: "apple",
     });
   });
@@ -185,7 +224,7 @@ describe("controllerWarningsForFabrics", () => {
   it("warns once for two fabrics of the same ecosystem", () => {
     const warnings = controllerWarningsForFabrics(
       [{ rootVendorId: 4937 }, { rootVendorId: 4996 }], // both Apple
-      [{ entityId: "fan.office", deviceTypeId: 0x2b }],
+      [{ entityId: "media_player.kitchen", deviceTypeId: 0x22 }],
     );
     expect(warnings).toHaveLength(1);
   });

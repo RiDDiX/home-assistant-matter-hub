@@ -11,10 +11,11 @@ import ErrorState = RvcOperationalState.ErrorState;
 
 const logger = Logger.get("RvcOperationalStateServer");
 
-// States that indicate the vacuum is actively performing work
+// States still in progress. A paused job counts.
 const activeStates = new Set([
   OperationalState.Running,
   OperationalState.SeekingCharger,
+  OperationalState.Paused,
 ]);
 
 // Operational states to advertise in operationalStateList.
@@ -49,8 +50,11 @@ export interface RvcOperationalStateServerConfig {
   goHome?: ValueSetter<void>;
 }
 
+// OperationCompletion is optional in the cluster, so matter.js leaves it off
 // biome-ignore lint/correctness/noUnusedVariables: Biome thinks this is unused, but it's used by the function below
-class RvcOperationalStateServerBase extends Base {
+class RvcOperationalStateServerBase extends Base.enable({
+  events: { operationCompletion: true },
+}) {
   declare state: RvcOperationalStateServerBase.State;
 
   override async initialize() {
@@ -104,9 +108,13 @@ class RvcOperationalStateServerBase extends Base {
     );
 
     // Emit OperationCompletion event when transitioning from an active state
-    // (Running, SeekingCharger) to an inactive state (Docked, Stopped, Paused).
-    // This is MANDATORY for the RoboticVacuumCleaner device type.
+    // (Running, SeekingCharger, Paused) to Docked, Stopped or Error.
+    // Required on the RoboticVacuumCleaner device type.
+    // Unavailable maps to Error with no finished job.
+    const offline =
+      entity.state.state === "unavailable" || entity.state.state === "unknown";
     if (
+      !offline &&
       activeStates.has(previousState as OperationalState) &&
       !activeStates.has(newState)
     ) {

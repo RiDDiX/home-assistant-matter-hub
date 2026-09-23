@@ -1,4 +1,5 @@
 import {
+  type ControllerKey,
   type ControllerSupport,
   type MatterDeviceType,
   matterDeviceTypeControllerSupport,
@@ -6,7 +7,7 @@ import {
 import Box from "@mui/material/Box";
 
 const controllers: {
-  key: "apple" | "google" | "alexa" | "aqara";
+  key: ControllerKey;
   label: string;
   short: string;
 }[] = [
@@ -14,6 +15,7 @@ const controllers: {
   { key: "google", label: "Google Home", short: "G" },
   { key: "alexa", label: "Alexa", short: "X" },
   { key: "aqara", label: "Aqara Home", short: "Q" },
+  { key: "smartthings", label: "SmartThings", short: "S" },
 ];
 
 const tint: Record<ControllerSupport, string> = {

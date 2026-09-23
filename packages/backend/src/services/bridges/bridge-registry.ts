@@ -248,8 +248,8 @@ export class BridgeRegistry {
     return this._usedBatteryEntities.has(entityId);
   }
 
-  // Home Connect's operation state and SmartThings' machine state are both
-  // enum sensors with run and pause among their options (#486).
+  // An enum with a running and a paused state: run (Home Connect, SmartThings),
+  // in_use (Miele), running (LG) (#486).
   findOperationalStateEntityForDevice(deviceId: string): string | undefined {
     for (const entity of values(this.registry.entities)) {
       if (entity.device_id !== deviceId) continue;
@@ -260,8 +260,8 @@ export class BridgeRegistry {
       const options = Array.isArray(attrs?.options) ? attrs.options : [];
       if (
         attrs?.device_class === "enum" &&
-        options.includes("run") &&
-        options.includes("pause")
+        ["run", "running", "in_use"].some((o) => options.includes(o)) &&
+        ["pause", "paused"].some((o) => options.includes(o))
       ) {
         return entity.entity_id;
       }

@@ -1,6 +1,7 @@
 import type {
   EntityMappingConfig,
   HomeAssistantEntityState,
+  MatterDeviceType,
   SensorDeviceAttributes,
   VacuumDeviceAttributes,
 } from "@home-assistant-matter-hub/common";
@@ -30,6 +31,12 @@ import { supportsCleaningModes } from "./vacuum/behaviors/vacuum-rvc-clean-mode-
 import type { VacuumEffectiveConfig } from "./vacuum/behaviors/vacuum-service-area-server.js";
 
 const logger = Logger.get("LegacyEndpoint");
+
+const applianceTypes = new Set<MatterDeviceType>([
+  "dishwasher",
+  "laundry_washer",
+  "laundry_dryer",
+]);
 
 /**
  * @deprecated
@@ -221,9 +228,10 @@ export class LegacyEndpoint extends EntityEndpoint {
         }
       }
 
-      // A dishwasher's power switch only reports on and off (#486).
+      // An appliance's power switch only reports on and off (#486).
       if (
-        mapping?.matterDeviceType === "dishwasher" &&
+        mapping?.matterDeviceType &&
+        applianceTypes.has(mapping.matterDeviceType) &&
         !mapping.operationalStateEntity
       ) {
         const stateEntityId = registry.findOperationalStateEntityForDevice(

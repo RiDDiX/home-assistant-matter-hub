@@ -23,6 +23,7 @@ describe("matterDeviceTypeControllerSupport", () => {
         value.google,
         value.alexa,
         value.aqara,
+        value.smartthings,
       ]) {
         expect(allowed, `${key}: ${support}`).toContain(support);
       }

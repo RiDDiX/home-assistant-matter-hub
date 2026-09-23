@@ -6,8 +6,8 @@ import { HaPowerTopologyServer } from "../../../../behaviors/power-topology-serv
 import { EnergyServer, PowerServer } from "./electrical-sensor.js";
 
 // ElectricalMeter (0x0514) is the default for consumption electrical sensors
-// (device_class power/energy/voltage/current). Google Home and SmartThings
-// render it, unlike SolarPower. Its two measurement clusters are seeded (see
+// (device_class power/energy/voltage/current). Google Home renders it.
+// Its two measurement clusters are seeded (see
 // PowerServer/EnergyServer), so the mandatory attributes never brick it (#419).
 // PowerTopology is mandatory here: ElectricalMeter requires the ElectricalSensor
 // device type, which requires the cluster. matter.js does not enforce it.
