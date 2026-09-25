@@ -9,15 +9,15 @@ All device types Home-Assistant-Matter-Hub supports, with their capabilities, co
 | Home Assistant Domain | Matter Device Type |
 |-----------------------|-------------------|
 | `light` | Light (OnOff / Dimmable / Color Temperature / Extended Color) |
-| `switch`, `input_boolean` | On/Off Plug-in Unit |
+| `switch`, `input_boolean` | On/Off Plug-in Unit (switch overrides: Dishwasher, Laundry Washer, Laundry Dryer, EV Charger, Pump, Water Valve) |
 | `lock` | Door Lock |
 | `cover` | Window Covering |
-| `climate` | Thermostat |
-| `fan` | Fan |
-| `sensor` | Temperature / Humidity / Pressure / Flow / Illuminance / Air Quality |
+| `climate` | Room Air Conditioner (with fan modes), otherwise Thermostat |
+| `fan` | Fan, On/Off Plug-in Unit without speed control |
+| `sensor` | Temperature / Humidity / Pressure / Flow / Illuminance / Air Quality / Electrical Meter / Battery |
 | `weather` | Temperature + Humidity + Pressure (composed) |
 | `binary_sensor` | Contact / Occupancy / Smoke/CO / OnOff Sensor |
-| `media_player` | Speaker |
+| `media_player` | Speaker, Basic Video Player for TVs |
 | `valve` | Water Valve |
 | `vacuum` | Robotic Vacuum Cleaner |
 | `lawn_mower` | Robotic Vacuum Cleaner |
@@ -25,7 +25,9 @@ All device types Home-Assistant-Matter-Hub supports, with their capabilities, co
 | `select`, `input_select` | Mode Select |
 | `alarm_control_panel` | Mode Select |
 | `event` | Generic Switch |
-| `siren` | On/Off Plug-in Unit |
+| `siren`, `remote` | On/Off Plug-in Unit |
+| `button`, `input_button` | On/Off Plug-in Unit, pressed when turned on |
+| `automation`, `script`, `scene` | On/Off Plug-in Unit, triggers when turned on |
 | `humidifier` | Fan (with humidity control) |
 
 > [!NOTE]
@@ -370,12 +372,12 @@ An `event` entity (typically `device_class: doorbell`) can be switched to the Ma
 
 ### Buttons (`button`, `input_button`)
 
-Mapped to **OnOffPlugInUnit** with auto-off behavior.
+Mapped to **OnOffPlugInUnit**, used as a push button.
 
 **Behavior:**
 1. Controller sends "turn on" command
-2. Button press is triggered in HA
-3. Device automatically turns off after 3 seconds
+2. `button.press` (or `input_button.press`) runs in HA
+3. The device keeps showing "off", a button has no on state
 
 ---
 
@@ -516,9 +518,8 @@ Mapped to **ModeSelectDevice** (0x0027). Each option in the select entity become
 Mapped to **OnOffPlugInUnit**.
 
 **Behavior:**
-- Turning "on" triggers the automation (runs it once)
-- Turning "off" disables the automation
-- State reflects the automation's enabled/disabled status
+- Turning "on" triggers the automation once (`automation.trigger`)
+- Turning "off" does nothing, the device always shows "off"
 
 ---
 

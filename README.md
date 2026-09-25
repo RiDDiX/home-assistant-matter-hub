@@ -4,7 +4,7 @@
 
 !["Home-Assistant-Matter-Hub"](./docs-site/static/img/hamh-logo-small.png)
 
-**Expose your Home Assistant devices to Matter controllers like Apple Home, Google Home, and Alexa**
+**Expose your Home Assistant devices to Matter controllers like Apple Home, Google Home, Alexa, SmartThings and Aqara Home**
 
 [![GitHub Release](https://img.shields.io/github/v/release/RiDDiX/home-assistant-matter-hub?label=stable&color=green)](https://github.com/RiDDiX/home-assistant-matter-hub/releases)
 [![GitHub Pre-Release](https://img.shields.io/github/v/release/RiDDiX/home-assistant-matter-hub?include_prereleases&label=alpha&color=orange)](https://github.com/RiDDiX/home-assistant-matter-hub/releases)
@@ -28,7 +28,7 @@
 ## 📝 About
 
 This project simulates bridges to publish your entities from Home Assistant to any Matter-compatible controller like
-Alexa, Apple Home or Google Home. Using Matter, those can be connected easily using local communication without the need
+Alexa, Apple Home, Google Home, SmartThings or Aqara Home. Using Matter, those can be connected easily using local communication without the need
 of port forwarding etc.
 
 ---
@@ -477,27 +477,32 @@ Matter Bridge, Multi-Fabric support, Health Monitoring, Bridge Wizard, AirQualit
 
 ## Supported Device Types
 
-| Home Assistant Domain | Matter Device Type | Feature Flags |
-|-----------------------|-------------------|---------------|
-| `light` | On/Off, Dimmable, Color Temp, Extended Color | `powerEntity`, `energyEntity` (no longer auto-mapped, set explicitly if a light's energy readout disappears, [#374](https://github.com/RiDDiX/home-assistant-matter-hub/issues/374)), `coverExposeAsDimmableLight` ([#372](https://github.com/RiDDiX/home-assistant-matter-hub/issues/372)) |
-| `switch`, `input_boolean` | On/Off Plug-in Unit | `powerEntity`, `energyEntity` |
-| `lock` | Door Lock | PIN Credentials, Unlatch/Unbolt |
-| `cover` | Window Covering | `coverSwapOpenClose` |
-| `climate` | Thermostat | Battery via `batteryEntity`, `climateExposeFan` ([#309](https://github.com/RiDDiX/home-assistant-matter-hub/issues/309)) |
-| `fan` | Fan, Air Purifier | Oscillation, Wind Modes, `filterLifeEntity` |
-| `alarm_control_panel` | Mode Select | Arm/Disarm modes |
-| `binary_sensor` | Contact, OnOff, Occupancy, Smoke/CO | Leak/freeze default to Contact Sensor (Alexa-safe); the Matter 1.4 Water Leak/Freeze and Rain detector types are per-entity overrides ([#365](https://github.com/RiDDiX/home-assistant-matter-hub/issues/365)) |
-| `sensor` | Temperature, Humidity, Pressure, Flow, Light, AirQuality | `batteryEntity`, `humidityEntity`, `pressureEntity` |
-| `event` | Generic Switch (Doorbell, Button Events) | |
-| `button`, `input_button` | Generic Switch | |
-| `media_player` | Speaker, Basic Video Player (TV) | |
-| `valve` | Water Valve, Pump | |
-| `select`, `input_select` | Mode Select | |
-| `vacuum` | Robot Vacuum Cleaner | `serverMode`, `roomEntities`, `batteryEntity`, `cleaningModeEntity`, `suctionLevelEntity`, `mopIntensityEntity`, `customServiceAreas`, `vacuumMinimalClusters`, `chargingStateEntity` ([#377](https://github.com/RiDDiX/home-assistant-matter-hub/issues/377)) |
-| `lawn_mower` | Robotic Lawn Mower (RVC-based) | reuses the robot-vacuum flags ([#301](https://github.com/RiDDiX/home-assistant-matter-hub/issues/301)) |
-| `humidifier` | Humidifier/Dehumidifier | |
-| `water_heater` | Thermostat (Heating) | Optional `water_heater_management` override exposes the Matter 1.4 Water Heater (0x050F) with WaterHeaterManagement Boost/CancelBoost, WaterHeaterMode and a heating Thermostat |
-| `automation`, `script`, `scene` | On/Off Switch | The per-entity "On/Off Switch" override now produces a real `0x0100` On/Off Light (controllers render a switch), needs a one-time re-pair, and no longer carries power/energy fields ([#380](https://github.com/RiDDiX/home-assistant-matter-hub/issues/380)) |
+| Home Assistant Domain | Matter Device Type | Notes and Feature Flags |
+|-----------------------|-------------------|-------------------------|
+| `light` | Extended Color (color or color temperature), Dimmable, On/Off | `powerEntity`, `energyEntity` set by hand, lights don't get them auto-mapped ([#374](https://github.com/RiDDiX/home-assistant-matter-hub/issues/374)). Can be set to On/Off Plug-in Unit so Apple Home shows its wattage ([#484](https://github.com/RiDDiX/home-assistant-matter-hub/issues/484)) |
+| `switch` | On/Off Plug-in Unit | Power and energy sensors of the same device are mapped automatically. Overrides: Dishwasher, Laundry Washer, Laundry Dryer, EV Charger, Pump, Water Valve, On/Off Switch, Mounted On/Off Control |
+| `input_boolean` | On/Off Plug-in Unit | |
+| `lock` | Door Lock | PIN credentials, unbolt when the lock can open |
+| `cover` | Window Covering | `coverSwapOpenClose`, `coverExposeAsDimmableLight` ([#372](https://github.com/RiDDiX/home-assistant-matter-hub/issues/372)) |
+| `climate` | Room Air Conditioner (with fan modes), otherwise Thermostat | `disableClimateFanControl`, `disableClimateOnOff`, `climateExposeFan` ([#309](https://github.com/RiDDiX/home-assistant-matter-hub/issues/309)), battery via `batteryEntity` |
+| `fan` | Fan, On/Off Plug-in Unit without speed control | Oscillation, wind modes. Air Purifier override with `filterLifeEntity` |
+| `humidifier` | Fan, the fan speed sets the target humidity | Matter has no humidifier type |
+| `binary_sensor` | Contact, Occupancy, Smoke/CO Alarm, On/Off Sensor | Leak and freeze default to Contact Sensor (Alexa-safe); the Matter 1.4 Water Leak, Water Freeze and Rain detectors are overrides ([#365](https://github.com/RiDDiX/home-assistant-matter-hub/issues/365)) |
+| `sensor` | Temperature, Humidity, Pressure, Flow, Light, Air Quality (CO₂, CO, PM1, PM2.5, PM10, TVOC, NO₂, ozone, radon), Electrical Meter (power, energy, voltage, current), Battery | `batteryEntity`, `humidityEntity`, `pressureEntity`. Overrides: Solar Power, Electrical Utility Meter, EV Charger, Battery Storage with power and energy |
+| `event` | Generic Switch | Doorbell override (experimental) |
+| `button`, `input_button` | On/Off Plug-in Unit, pressed when turned on | |
+| `automation`, `script`, `scene` | On/Off Plug-in Unit, triggers when turned on | On/Off Switch override, needs a one-time re-pair ([#380](https://github.com/RiDDiX/home-assistant-matter-hub/issues/380)) |
+| `select`, `input_select` | Mode Select | `selectExposeAsSwitch` for a select with on and off options |
+| `alarm_control_panel` | Mode Select | On/Off Plug-in Unit override to arm and disarm |
+| `media_player` | Speaker, Basic Video Player for TVs | |
+| `valve` | Water Valve | |
+| `vacuum` | Robot Vacuum Cleaner | `serverMode`, `roomEntities`, `customServiceAreas`, `vacuumRoomSwitches`, `vacuumOnOff`, `batteryEntity`, `cleaningModeEntity`, `suctionLevelEntity`, `mopIntensityEntity`, `chargingStateEntity` ([#377](https://github.com/RiDDiX/home-assistant-matter-hub/issues/377)) |
+| `lawn_mower` | Robot Vacuum Cleaner, Matter has no mower type yet | Same flags as the vacuum ([#301](https://github.com/RiDDiX/home-assistant-matter-hub/issues/301)) |
+| `water_heater` | Thermostat (heating) | Override: Matter 1.4 Water Heater (0x050F) with Boost |
+| `siren`, `remote` | On/Off Plug-in Unit | |
+| `weather` | Temperature Sensor with humidity and pressure | |
+
+Which controller shows which type is in the [Controller Compatibility](https://riddix.github.io/home-assistant-matter-hub/guides/controller-compatibility) matrix (Apple Home, Google Home, Alexa, Aqara Home, SmartThings).
 
 > 📖 See [Supported Device Types Documentation](https://riddix.github.io/home-assistant-matter-hub/supported-device-types) for details
 
@@ -571,9 +576,10 @@ Add this repository to your Add-on Store:
 https://github.com/RiDDiX/home-assistant-addons
 ```
 
-Two add-ons are available:
-- **Home-Assistant-Matter-Hub** - Stable release
-- **Home-Assistant-Matter-Hub (Alpha)** - Pre-release for testing
+Three add-ons are available:
+- **Home-Assistant-Matter-Hub** (`hamh`) - Stable release
+- **Home-Assistant-Matter-Hub (Alpha)** (`hamh-alpha`) - Pre-release, gets every fix first
+- **Home-Assistant-Matter-Hub (Testing)** (`hamh-testing`) - Experimental, may break
 
 ### Docker
 
