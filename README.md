@@ -38,7 +38,7 @@ of port forwarding etc.
 | Channel | Branch | Current Version | Description |
 |---------|--------|-----------------|-------------|
 | **Stable** | `main` | v2.0.57 | Production-ready, recommended for most users |
-| **Alpha** | `alpha` | v2.1.0-alpha.908 | Ahead of Stable, carries the additions listed under Alpha Features |
+| **Alpha** | `alpha` | v2.1.0-alpha.909 | Ahead of Stable, carries the additions listed under Alpha Features |
 | **Testing** | `testing` | v4.1.0-testing.x | ⚠️ **Highly unstable!** Experimental features, may break |
 
 ### Which version should I use?
@@ -348,7 +348,10 @@ Re-assign the affected devices to their rooms after they reconnect. See the [doc
 </details>
 
 <details>
-<summary><strong>🧪 Alpha Features (v2.1.0-alpha.908)</strong> - Click to expand</summary>
+<summary><strong>🧪 Alpha Features (v2.1.0-alpha.909)</strong> - Click to expand</summary>
+
+**v2.1.0-alpha.909:**
+- 🧹 **Apple Home drops the old rooms during a clean started elsewhere**: after a three room Apple job, a one room clean from Home Assistant still showed "cleaning 3 rooms" ([#492](https://github.com/RiDDiX/home-assistant-matter-hub/issues/492))
 
 **v2.1.0-alpha.908:**
 - 🌀 **Fans and air purifiers follow Home Assistant again**: speed and mode changes from HA stopped reaching controllers in alpha.880 and 2.0.57, only on/off still followed ([#494](https://github.com/RiDDiX/home-assistant-matter-hub/pull/494), thanks @bigmike613)

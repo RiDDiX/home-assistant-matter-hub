@@ -348,7 +348,10 @@ Home, ...) are not placed in the same network segment. Please make sure to revie
 </details>
 
 <details>
-<summary><strong>🧪 Alpha (v2.1.0-alpha.908)</strong></summary>
+<summary><strong>🧪 Alpha (v2.1.0-alpha.909)</strong></summary>
+
+**v2.1.0-alpha.909:**
+- 🧹 **Apple Home drops the old rooms during a clean started elsewhere**: after a three room Apple job, a one room clean from Home Assistant still showed "cleaning 3 rooms" ([#492](https://github.com/RiDDiX/home-assistant-matter-hub/issues/492))
 
 **v2.1.0-alpha.908:**
 - 🌀 **Fans and air purifiers follow Home Assistant again**: speed and mode changes from HA stopped reaching controllers in alpha.880 and 2.0.57, only on/off still followed ([#494](https://github.com/RiDDiX/home-assistant-matter-hub/pull/494), thanks @bigmike613)
