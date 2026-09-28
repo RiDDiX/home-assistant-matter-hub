@@ -47,5 +47,6 @@ describe("omit events in priming (#424)", () => {
       expect(source).toContain("hamhOmitEventsInPriming");
       expect(source).toContain("omitEventsInPriming");
     }
-  });
+    // the cold imports alone can take over 5 s on a loaded runner
+  }, 30_000);
 });

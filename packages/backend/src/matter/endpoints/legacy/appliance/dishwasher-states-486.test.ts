@@ -76,6 +76,8 @@ function entity(state: string): HomeAssistantEntityInformation {
 }
 
 async function bringUp(haState: string) {
+  // tests bring up several nodes in a row, only the last one reaches afterEach
+  await server?.close().catch(() => {});
   const type = createLegacyEndpointType(entity(haState), {
     entityId: "switch.dishwasher",
     matterDeviceType: "dishwasher",
