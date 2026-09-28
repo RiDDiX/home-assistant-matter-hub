@@ -48,7 +48,7 @@ function openSession(): SecureSession {
 
 let dir: string;
 let env: Environment;
-let server: ServerNode | undefined;
+const servers: ServerNode[] = [];
 let counter = 0;
 const touched = new Set<number>();
 
@@ -59,8 +59,8 @@ beforeEach(() => {
 });
 
 afterEach(async () => {
-  await server?.close().catch(() => {});
-  server = undefined;
+  // one test mounts two cameras, close every node before the dir goes
+  await Promise.all(servers.splice(0).map((s) => s.close().catch(() => {})));
   for (const id of touched) unregisterRequestor(id);
   touched.clear();
   setRequestorInvokeForTests(undefined);
@@ -71,7 +71,7 @@ async function mountCamera(
   bridge: WebRtcBridge,
   endpointId = "camera",
 ): Promise<Endpoint> {
-  server = await ServerNode.create({
+  const server = await ServerNode.create({
     // biome-ignore lint/suspicious/noExplicitAny: env valid at runtime
     environment: env as any,
     id: `webrtc-provider-node-${counter++}`,
@@ -79,6 +79,7 @@ async function mountCamera(
     commissioning: { passcode: 20202021, discriminator: 3840 },
     basicInformation: { vendorId: VendorId(0xfff1), productId: 0x8000 },
   });
+  servers.push(server);
   const aggregator = new AggregatorEndpoint("aggregator");
   await server.add(aggregator);
   const endpoint = new Endpoint(
