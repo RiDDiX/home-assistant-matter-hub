@@ -348,7 +348,10 @@ Home, ...) are not placed in the same network segment. Please make sure to revie
 </details>
 
 <details>
-<summary><strong>🧪 Alpha (v2.1.0-alpha.904)</strong></summary>
+<summary><strong>🧪 Alpha (v2.1.0-alpha.908)</strong></summary>
+
+**v2.1.0-alpha.908:**
+- 🌀 **Fans and air purifiers follow Home Assistant again**: speed and mode changes from HA stopped reaching controllers in alpha.880 and 2.0.57, only on/off still followed ([#494](https://github.com/RiDDiX/home-assistant-matter-hub/pull/494), thanks @bigmike613)
 
 **v2.1.0-alpha.904:**
 - 🧺 **Washers and dryers on a power switch show their real state**: Laundry Washer and Laundry Dryer types pick up the state from Home Connect, SmartThings, Miele or LG
