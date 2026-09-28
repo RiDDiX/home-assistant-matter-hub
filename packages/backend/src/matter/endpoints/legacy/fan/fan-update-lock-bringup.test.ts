@@ -123,5 +123,7 @@ describe("HA state updates reach the fan cluster", () => {
     expect(fc.percentSetting).toBe(66);
     expect(fc.fanMode).not.toBe(0); // not Off
     expect(memory.lastPercent).toBe(66);
+    // an HA update must not be sent back to HA
+    expect(calls).toEqual([]);
   });
 });

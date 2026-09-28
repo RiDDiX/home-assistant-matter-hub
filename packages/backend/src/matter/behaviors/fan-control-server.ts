@@ -31,16 +31,8 @@ import AirflowDirection = FanControl.AirflowDirection;
 
 const logger = Logger.get("FanControlServer");
 
-/**
- * Resolve a behavior to the resource that actually carries its lock.
- *
- * A behavior is only a stand-in for its datasource ([Resource.reference]).
- * matter.js follows that reference when it takes locks, but the reactor's
- * post-lock sanity check reads `lockedBy` off the raw object in the
- * transaction. A behavior instance never has `lockedBy` set, so the check
- * failed with "Lock of ...fanControl should be held by reactor ... but is
- * not" and the update was dropped on every HA state change.
- */
+// matter.js locks the datasource behind a behavior, but the reactor's lock check
+// reads lockedBy off the raw object, so hand it the datasource itself.
 function lockResource(behavior: object): Transaction.Resource {
   let resource = behavior as Transaction.Resource;
   while (resource[Transaction.Resource.reference]) {
