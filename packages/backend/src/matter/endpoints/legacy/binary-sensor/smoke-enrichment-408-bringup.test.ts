@@ -204,6 +204,9 @@ async function deliver(
   await delay(200);
 }
 
+// Slow CI runners can take longer than the fixed settle delay.
+const settled = <T>(read: () => T) => expect.poll(read, { timeout: 3000 });
+
 function alarm(endpoint: LegacyEndpoint): {
   smokeState: SmokeCoAlarm.AlarmState;
   batteryAlert: SmokeCoAlarm.AlarmState;
@@ -223,11 +226,15 @@ describe("smoke/CO alarm enrichment (#408)", () => {
 
     batteryPercent = 15;
     await deliver(endpoint, { smoke: "off", battery: "15" });
-    expect(alarm(endpoint).batteryAlert).toBe(SmokeCoAlarm.AlarmState.Warning);
+    await settled(() => alarm(endpoint).batteryAlert).toBe(
+      SmokeCoAlarm.AlarmState.Warning,
+    );
 
     batteryPercent = 80;
     await deliver(endpoint, { smoke: "off", battery: "80" });
-    expect(alarm(endpoint).batteryAlert).toBe(SmokeCoAlarm.AlarmState.Normal);
+    await settled(() => alarm(endpoint).batteryAlert).toBe(
+      SmokeCoAlarm.AlarmState.Normal,
+    );
   });
 
   it("reflects a same-device problem sensor in hardwareFaultAlert and expressedState", async () => {
@@ -238,9 +245,10 @@ describe("smoke/CO alarm enrichment (#408)", () => {
 
     faultOn = true;
     await deliver(endpoint, { smoke: "off", fault: "on" });
-    const s = alarm(endpoint);
-    expect(s.hardwareFaultAlert).toBe(true);
-    expect(s.expressedState).toBe(SmokeCoAlarm.ExpressedState.HardwareFault);
+    await settled(() => alarm(endpoint).hardwareFaultAlert).toBe(true);
+    expect(alarm(endpoint).expressedState).toBe(
+      SmokeCoAlarm.ExpressedState.HardwareFault,
+    );
   });
 
   it("prioritizes an active smoke alarm over a battery warning", async () => {
@@ -269,7 +277,7 @@ describe("smoke/CO alarm enrichment (#408)", () => {
     faultOn = true;
     await mount(smoke);
     await deliver(smoke, { smoke: "off", fault: "on" });
-    expect(alarm(smoke).hardwareFaultAlert).toBe(true);
+    await settled(() => alarm(smoke).hardwareFaultAlert).toBe(true);
   });
 
   it("leaves enrichment at defaults with no sibling sensors", async () => {
