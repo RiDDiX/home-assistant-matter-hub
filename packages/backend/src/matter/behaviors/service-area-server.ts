@@ -3,6 +3,7 @@ import type { Agent } from "@matter/main";
 import { ServiceAreaBehavior } from "@matter/main/behaviors";
 import { ServiceArea } from "@matter/main/clusters";
 import { HomeAssistantEntityBehavior } from "./home-assistant-entity-behavior.js";
+import { getSession } from "./rvc-run-mode-server.js";
 
 const logger = Logger.get("ServiceAreaServer");
 
@@ -64,6 +65,8 @@ export class ServiceAreaServerBase extends ServiceAreaWithProgress {
 
     // Store selected areas - actual cleaning starts when RvcRunMode.changeToMode(Cleaning) is called
     this.state.selectedAreas = uniqueAreas;
+    // A new selection, even an empty one, replaces a parked one (#492)
+    getSession(this.endpoint).parkedAreas = [];
 
     // Initialize progress for all selected areas as Pending
     this.state.progress = uniqueAreas.map((areaId) => ({
@@ -168,6 +171,7 @@ class ServiceAreaServerWithMapsBase extends ServiceAreaWithMapsAndProgress {
     }
 
     this.state.selectedAreas = uniqueAreas;
+    getSession(this.endpoint).parkedAreas = [];
 
     // Initialize progress for all selected areas as Pending
     this.state.progress = uniqueAreas.map((areaId) => ({

@@ -7,11 +7,15 @@ import type {
 } from "@home-assistant-matter-hub/common";
 import { Environment, VariableService } from "@matter/general";
 import { Endpoint, VendorId } from "@matter/main";
+import { ServiceArea } from "@matter/main/clusters";
 import { ServerNode } from "@matter/main/node";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { BridgeDataProvider } from "../../../../services/bridges/bridge-data-provider.js";
 import { EntityStateProvider } from "../../../../services/bridges/entity-state-provider.js";
-import { HomeAssistantActions } from "../../../../services/home-assistant/home-assistant-actions.js";
+import {
+  type HomeAssistantAction,
+  HomeAssistantActions,
+} from "../../../../services/home-assistant/home-assistant-actions.js";
 import { HomeAssistantConfig } from "../../../../services/home-assistant/home-assistant-config.js";
 import { HomeAssistantEntityBehavior } from "../../../behaviors/home-assistant-entity-behavior.js";
 import {
@@ -33,12 +37,15 @@ const ROOMS = [
   "Bathroom",
   "Primary Bedroom", // 7
 ];
+const KITCHEN = 1;
 const DINING = 4;
+const OFFICE = 5;
 const BEDROOM = 7;
 
 let dir: string;
 let env: Environment;
 let room: string;
+let calls: HomeAssistantAction[];
 let counter = 0;
 let server: ServerNode | undefined;
 
@@ -47,8 +54,11 @@ beforeEach(() => {
   env = new Environment("test", Environment.default);
   env.get(VariableService).set("storage.path", dir);
   room = "unknown";
-  // biome-ignore lint/suspicious/noExplicitAny: test stub
-  env.set(HomeAssistantActions, { call() {} } as any);
+  calls = [];
+  env.set(HomeAssistantActions, {
+    call: (a: HomeAssistantAction) => calls.push(a),
+    // biome-ignore lint/suspicious/noExplicitAny: test stub
+  } as any);
   env.set(
     BridgeDataProvider,
     new BridgeDataProvider({
@@ -139,22 +149,35 @@ async function haState(endpoint: Endpoint, state: string) {
   await delay(40);
 }
 
+async function controllerStart(
+  endpoint: Endpoint,
+  newMode: number = RvcSupportedRunMode.Cleaning,
+) {
+  await endpoint.act(async (agent) => {
+    // biome-ignore lint/suspicious/noExplicitAny: drive the controller command
+    await (agent as any).rvcRunMode.changeToMode({ newMode });
+  });
+}
+
 async function controllerClean(endpoint: Endpoint, areas: number[]) {
   await endpoint.act(async (agent) => {
     // biome-ignore lint/suspicious/noExplicitAny: drive the controller command
     await (agent as any).serviceArea.selectAreas({ newAreas: areas });
   });
-  await endpoint.act(async (agent) => {
-    // biome-ignore lint/suspicious/noExplicitAny: drive the controller command
-    await (agent as any).rvcRunMode.changeToMode({
-      newMode: RvcSupportedRunMode.Cleaning,
-    });
-  });
+  await controllerStart(endpoint);
 }
 
 function currentArea(endpoint: Endpoint): number | null {
   // biome-ignore lint/suspicious/noExplicitAny: read cluster state
   return (endpoint.state as any).serviceArea.currentArea;
+}
+
+function serviceArea(endpoint: Endpoint): {
+  selectedAreas: number[];
+  progress: ServiceArea.Progress[];
+} {
+  // biome-ignore lint/suspicious/noExplicitAny: read cluster state
+  return (endpoint.state as any).serviceArea;
 }
 
 describe("#490 vacuum clean that finishes on its own", () => {
@@ -203,5 +226,136 @@ describe("#490 vacuum clean that finishes on its own", () => {
     await haState(endpoint, "cleaning");
 
     expect(currentArea(endpoint)).toBe(BEDROOM);
+  });
+});
+
+// #492: Apple Home kept showing "cleaning 3 rooms" for a one room clean
+// started from HA after a three room controller job.
+describe("#492 clean started outside Matter after a controller job", () => {
+  const rooms = [KITCHEN, DINING, BEDROOM];
+
+  async function threeRoomJob(endpoint: Endpoint) {
+    await controllerClean(endpoint, rooms);
+    for (const name of ["Kitchen", "Dining Room", "Primary Bedroom"]) {
+      room = name;
+      await haState(endpoint, "cleaning");
+    }
+    await haState(endpoint, "docked");
+  }
+
+  it("hides the old rooms while it runs and puts them back after", async () => {
+    const endpoint = await mount();
+
+    await threeRoomJob(endpoint);
+    expect(serviceArea(endpoint).progress.map((p) => p.status)).toEqual([
+      ServiceArea.OperationalStatus.Completed,
+      ServiceArea.OperationalStatus.Completed,
+      ServiceArea.OperationalStatus.Completed,
+    ]);
+
+    // one room, started from HA
+    room = "Office";
+    await haState(endpoint, "cleaning");
+    expect(serviceArea(endpoint).selectedAreas).toEqual([]);
+    expect(serviceArea(endpoint).progress).toEqual([]);
+    expect(currentArea(endpoint)).toBe(OFFICE);
+
+    await haState(endpoint, "docked");
+    expect(serviceArea(endpoint).selectedAreas).toEqual(rooms);
+
+    // Apple starts the same rooms again without re-sending them (#317)
+    await controllerStart(endpoint);
+    expect(getSession(endpoint).activeAreas).toEqual(rooms);
+  });
+
+  it("cleans the old rooms when Apple starts during the outside clean", async () => {
+    const endpoint = await mount();
+
+    await threeRoomJob(endpoint);
+    room = "Office";
+    await haState(endpoint, "cleaning");
+    expect(serviceArea(endpoint).selectedAreas).toEqual([]);
+
+    calls = [];
+    await controllerStart(endpoint);
+    expect(getSession(endpoint).activeAreas).toEqual(rooms);
+    expect(serviceArea(endpoint).selectedAreas).toEqual(rooms);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatchObject({
+      action: "script.clean_room",
+      data: { selected_area_ids: rooms },
+    });
+  });
+
+  it("does not bring back rooms the controller cleared meanwhile", async () => {
+    const endpoint = await mount();
+
+    await threeRoomJob(endpoint);
+    room = "Office";
+    await haState(endpoint, "cleaning");
+
+    calls = [];
+    await controllerClean(endpoint, []);
+    expect(getSession(endpoint).activeAreas).toEqual([]);
+    expect(calls).toEqual([{ action: "vacuum.start" }]);
+
+    await haState(endpoint, "docked");
+    expect(serviceArea(endpoint).selectedAreas).toEqual([]);
+  });
+
+  it("cleans the old rooms when Apple starts with a room mode", async () => {
+    const endpoint = await mount();
+
+    await threeRoomJob(endpoint);
+    room = "Office";
+    await haState(endpoint, "cleaning");
+
+    // Apple sends a room mode after its picker, here without selectAreas
+    calls = [];
+    await controllerStart(endpoint, 103);
+    expect(getSession(endpoint).activeAreas).toEqual(rooms);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatchObject({
+      action: "script.clean_room",
+      data: { selected_area_ids: rooms },
+    });
+  });
+
+  it("keeps a stopped job's progress when HA reports cleaning late", async () => {
+    const endpoint = await mount();
+
+    await controllerClean(endpoint, rooms);
+    room = "Kitchen";
+    await haState(endpoint, "cleaning");
+    await controllerStart(endpoint, RvcSupportedRunMode.Idle);
+    const statuses = () => serviceArea(endpoint).progress.map((p) => p.status);
+    const stopped = [
+      ServiceArea.OperationalStatus.Completed,
+      ServiceArea.OperationalStatus.Skipped,
+      ServiceArea.OperationalStatus.Skipped,
+    ];
+    expect(statuses()).toEqual(stopped);
+
+    // the vacuum still says cleaning for a moment after return_to_base
+    await haState(endpoint, "cleaning");
+    await haState(endpoint, "docked");
+    expect(statuses()).toEqual(stopped);
+    expect(serviceArea(endpoint).selectedAreas).toEqual(rooms);
+  });
+
+  it("keeps it too when the stop beats the first cleaning update", async () => {
+    const endpoint = await mount();
+
+    await controllerClean(endpoint, rooms);
+    await controllerStart(endpoint, RvcSupportedRunMode.Idle);
+    const stopped = serviceArea(endpoint).progress.map((p) => p.status);
+
+    room = "Kitchen";
+    await haState(endpoint, "cleaning");
+    await haState(endpoint, "docked");
+    expect(serviceArea(endpoint).progress.map((p) => p.status)).toEqual(
+      stopped,
+    );
+    expect(serviceArea(endpoint).selectedAreas).toEqual(rooms);
   });
 });

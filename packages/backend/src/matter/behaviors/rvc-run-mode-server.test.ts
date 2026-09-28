@@ -163,6 +163,7 @@ describe("changeToMode(Cleaning) room order (#368)", () => {
       orderSelectedAreas: proto.orderSelectedAreas,
       trySetCurrentArea: proto.trySetCurrentArea,
       updateProgress: proto.updateProgress,
+      restoreParkedAreas: proto.restoreParkedAreas,
     };
 
     proto.changeToMode.call(ctx, { newMode: RvcSupportedRunMode.Cleaning });

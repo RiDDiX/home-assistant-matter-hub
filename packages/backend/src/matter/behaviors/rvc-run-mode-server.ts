@@ -83,6 +83,12 @@ export interface CleaningSession {
   /** Cumulative cleaned area (m2) at clean start, so a lifetime sensor maps
    *  to per-clean progress (#368). null when no cleanedAreaEntity is set. */
   cleanedAreaBaseline: number | null;
+  /** Controller selection hidden while a clean started outside Matter runs,
+   *  put back when it ends (#492). */
+  parkedAreas: number[];
+  /** HA reported cleaning last, or a controller start is on its way. A
+   *  late cleaning update after a controller stop is not a new clean. */
+  haCleaning: boolean;
 }
 
 const cleaningSessions = new WeakMap<object, CleaningSession>();
@@ -98,6 +104,8 @@ export function getSession(endpoint: object): CleaningSession {
       observedCleaning: false,
       pendingDispatches: [],
       cleanedAreaBaseline: null,
+      parkedAreas: [],
+      haCleaning: false,
     };
     cleaningSessions.set(endpoint, session);
   }
@@ -150,6 +158,8 @@ class RvcRunModeServerBase extends Base {
     if (newMode === RvcSupportedRunMode.Cleaning) {
       s.observedCleaning = true;
     }
+    const wasHaCleaning = s.haCleaning;
+    s.haCleaning = newMode === RvcSupportedRunMode.Cleaning;
 
     if (previousMode !== newMode) {
       if (newMode === RvcSupportedRunMode.Idle) {
@@ -207,6 +217,7 @@ class RvcRunModeServerBase extends Base {
             s.lastCurrentArea = null;
             s.cleanedAreaBaseline = null;
           }
+          this.restoreParkedAreas();
         }
         s.loggedShortCircuits.clear();
       } else if (newMode === RvcSupportedRunMode.Cleaning) {
@@ -221,6 +232,8 @@ class RvcRunModeServerBase extends Base {
           if (firstPending !== undefined) {
             this.trySetCurrentArea(firstPending);
           }
+        } else if (s.activeAreas.length === 0 && !wasHaCleaning) {
+          this.parkSelectedAreas();
         }
       }
     }
@@ -613,6 +626,49 @@ class RvcRunModeServerBase extends Base {
   }
 
   /**
+   * A clean started from HA, the vendor app, Alexa on/off or a room switch
+   * is not the last controller job. Keeping that job's rooms made
+   * Apple Home show "cleaning 3 rooms" for a one room clean (#492).
+   */
+  private parkSelectedAreas() {
+    const s = getSession(this.endpoint);
+    try {
+      const serviceArea = this.agent.get(ServiceAreaBehavior);
+      const state = serviceArea.state as typeof serviceArea.state & {
+        progress?: ServiceArea.Progress[];
+      };
+      if (state.selectedAreas.length > 0) {
+        s.parkedAreas = [...state.selectedAreas];
+        state.selectedAreas = [];
+      }
+      if (state.progress?.length) {
+        state.progress = [];
+      }
+    } catch {
+      // ServiceArea not available
+    }
+  }
+
+  /**
+   * Put the parked selection back once the outside clean is over. Apple
+   * Home does not re-send a selection it thinks is still set (#317).
+   * A newer controller selection wins.
+   */
+  private restoreParkedAreas() {
+    const s = getSession(this.endpoint);
+    if (s.parkedAreas.length === 0) return;
+    try {
+      const serviceArea = this.agent.get(ServiceAreaBehavior);
+      if (serviceArea.state.selectedAreas.length === 0) {
+        serviceArea.state.selectedAreas = s.parkedAreas;
+      }
+    } catch {
+      // ServiceArea not available
+    }
+    s.parkedAreas = [];
+  }
+
+  /**
    * Find the ServiceArea area ID that corresponds to a run mode value
    * by matching the mode label to the area location name.
    */
@@ -647,6 +703,12 @@ class RvcRunModeServerBase extends Base {
         status: ModeBase.ModeChangeStatus.UnsupportedMode,
         statusText: `Unsupported mode: ${newMode}`,
       };
+    }
+
+    // Apple starts its unchanged selection without re-sending it (#317)
+    if (newMode !== RvcSupportedRunMode.Idle) {
+      this.restoreParkedAreas();
+      s.haCleaning = true;
     }
 
     // Check for room-specific cleaning mode
@@ -726,6 +788,7 @@ class RvcRunModeServerBase extends Base {
       case RvcSupportedRunMode.Idle:
         // Explicit user command to stop, clear session state
         this.finalizeProgressOnStop();
+        this.restoreParkedAreas();
         s.completedAreas.clear();
         s.lastCurrentArea = null;
         s.activeAreas = [];

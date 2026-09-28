@@ -362,6 +362,8 @@ export function dispatchRoomClean(
       observedCleaning: false,
       pendingDispatches: [],
       cleanedAreaBaseline: null,
+      parkedAreas: [],
+      haCleaning: false,
     };
     const action = handleCustomServiceAreas(
       selectedAreas,

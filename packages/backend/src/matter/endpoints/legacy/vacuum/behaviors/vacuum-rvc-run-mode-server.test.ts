@@ -22,6 +22,8 @@ function session(): CleaningSession {
     observedCleaning: false,
     pendingDispatches: [],
     cleanedAreaBaseline: null,
+    parkedAreas: [],
+    haCleaning: false,
   };
 }
 
