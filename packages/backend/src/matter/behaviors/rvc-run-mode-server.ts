@@ -2,9 +2,10 @@ import type { HomeAssistantEntityInformation } from "@home-assistant-matter-hub/
 import { Logger } from "@matter/general";
 import {
   RvcRunModeServer as Base,
+  RvcOperationalStateBehavior,
   ServiceAreaBehavior,
 } from "@matter/main/behaviors";
-import { ServiceArea } from "@matter/main/clusters";
+import { RvcOperationalState, ServiceArea } from "@matter/main/clusters";
 import { ModeBase } from "@matter/main/clusters/mode-base";
 import { RvcRunMode } from "@matter/main/clusters/rvc-run-mode";
 import { EntityStateProvider } from "../../services/bridges/entity-state-provider.js";
@@ -92,6 +93,12 @@ export interface CleaningSession {
 }
 
 const cleaningSessions = new WeakMap<object, CleaningSession>();
+
+const idleOperationalStates = new Set<number>([
+  RvcOperationalState.OperationalState.Stopped,
+  RvcOperationalState.OperationalState.Charging,
+  RvcOperationalState.OperationalState.Docked,
+]);
 
 export function getSession(endpoint: object): CleaningSession {
   let session = cleaningSessions.get(endpoint);
@@ -669,6 +676,23 @@ class RvcRunModeServerBase extends Base {
   }
 
   /**
+   * HA can take 15 s to report cleaning after a start. Apple Home drops its
+   * own "Vacuuming" after about 10 s and shows Cleaning + Docked as "Ready,
+   * Resume Cleaning Later" until then (#496). The next HA update corrects it.
+   */
+  private showRunning() {
+    try {
+      const opState = this.agent.get(RvcOperationalStateBehavior);
+      if (idleOperationalStates.has(opState.state.operationalState)) {
+        opState.state.operationalState =
+          RvcOperationalState.OperationalState.Running;
+      }
+    } catch {
+      // RvcOperationalState not available
+    }
+  }
+
+  /**
    * Find the ServiceArea area ID that corresponds to a run mode value
    * by matching the mode label to the area location name.
    */
@@ -732,6 +756,7 @@ class RvcRunModeServerBase extends Base {
           s.cleanedAreaBaseline = this.readCleanedAreaSqm();
           this.trySetCurrentArea(s.activeAreas[0]);
           homeAssistant.callAction(this.state.config.start(void 0, this.agent));
+          this.showRunning();
           this.state.currentMode = newMode;
           return {
             status: ModeBase.ModeChangeStatus.Success,
@@ -753,6 +778,7 @@ class RvcRunModeServerBase extends Base {
         homeAssistant.callAction(
           this.state.config.cleanRoom(newMode, this.agent),
         );
+        this.showRunning();
         this.state.currentMode = newMode;
         return {
           status: ModeBase.ModeChangeStatus.Success,
@@ -783,6 +809,7 @@ class RvcRunModeServerBase extends Base {
           // ServiceArea not available
         }
         homeAssistant.callAction(this.state.config.start(void 0, this.agent));
+        this.showRunning();
         break;
       }
       case RvcSupportedRunMode.Idle:

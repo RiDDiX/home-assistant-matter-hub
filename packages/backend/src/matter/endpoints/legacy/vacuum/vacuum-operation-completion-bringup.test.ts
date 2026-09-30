@@ -4,6 +4,7 @@ import { join } from "node:path";
 import type { HomeAssistantEntityInformation } from "@home-assistant-matter-hub/common";
 import { Environment, VariableService } from "@matter/general";
 import { Endpoint, VendorId } from "@matter/main";
+import { RvcOperationalState } from "@matter/main/clusters";
 import { ServerNode } from "@matter/main/node";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { BridgeDataProvider } from "../../../../services/bridges/bridge-data-provider.js";
@@ -13,6 +14,8 @@ import { HomeAssistantConfig } from "../../../../services/home-assistant/home-as
 import { HomeAssistantEntityBehavior } from "../../../behaviors/home-assistant-entity-behavior.js";
 import { AggregatorEndpoint } from "../../aggregator-endpoint.js";
 import { createLegacyEndpointType } from "../create-legacy-endpoint-type.js";
+
+import OperationalState = RvcOperationalState.OperationalState;
 
 // OperationCompletion is mandatory for the vacuum device type but optional in
 // the cluster, so it was never sent.
@@ -103,6 +106,18 @@ async function haState(endpoint: Endpoint, state: string) {
   await delay(40);
 }
 
+async function controllerStart(endpoint: Endpoint) {
+  await endpoint.act(async (agent) => {
+    // biome-ignore lint/suspicious/noExplicitAny: drive the controller command
+    await (agent as any).rvcRunMode.changeToMode({ newMode: 1 });
+  });
+}
+
+function operationalState(endpoint: Endpoint): number {
+  // biome-ignore lint/suspicious/noExplicitAny: behavior state
+  return (endpoint.state as any).rvcOperationalState.operationalState;
+}
+
 function completions(endpoint: Endpoint): number[] {
   const seen: number[] = [];
   // biome-ignore lint/suspicious/noExplicitAny: behavior events
@@ -144,6 +159,34 @@ describe("vacuum OperationCompletion", () => {
     await haState(endpoint, "cleaning");
     await haState(endpoint, "unavailable");
 
+    expect(seen).toEqual([]);
+  });
+});
+
+// #496: HA took 15 s to report cleaning, Apple Home read Cleaning + Docked
+// as "Ready, Resume Cleaning Later" in between.
+describe("vacuum controller start", () => {
+  it("reports Running before HA confirms the clean", async () => {
+    const endpoint = await mount();
+    const seen = completions(endpoint);
+    expect(operationalState(endpoint)).toBe(OperationalState.Docked);
+
+    await controllerStart(endpoint);
+    expect(operationalState(endpoint)).toBe(OperationalState.Running);
+
+    await haState(endpoint, "cleaning");
+    await haState(endpoint, "docked");
+    expect(seen).toEqual([0]);
+  });
+
+  it("sends no completion when HA still reports docked", async () => {
+    const endpoint = await mount();
+    const seen = completions(endpoint);
+
+    await controllerStart(endpoint);
+    await haState(endpoint, "docked");
+
+    expect(operationalState(endpoint)).toBe(OperationalState.Docked);
     expect(seen).toEqual([]);
   });
 });

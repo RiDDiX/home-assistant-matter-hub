@@ -18,6 +18,10 @@ const activeStates = new Set([
   OperationalState.Paused,
 ]);
 
+// Last state Home Assistant reported, per endpoint. A controller start shows
+// Running before HA confirms it (#496), that is no finished job.
+const haStates = new WeakMap<object, OperationalState>();
+
 // Operational states to advertise in operationalStateList.
 // Only include the well-established states from the base OperationalState
 // cluster (0-3) and the core RVC-specific states (64-66).
@@ -90,7 +94,8 @@ class RvcOperationalStateServerBase extends Base.enable({
       entity.state,
       this.agent,
     );
-    const previousState = this.state.operationalState;
+    const previousState = haStates.get(this.endpoint);
+    haStates.set(this.endpoint, newState);
 
     const errorStateId =
       newState === OperationalState.Error
@@ -115,7 +120,8 @@ class RvcOperationalStateServerBase extends Base.enable({
       entity.state.state === "unavailable" || entity.state.state === "unknown";
     if (
       !offline &&
-      activeStates.has(previousState as OperationalState) &&
+      previousState !== undefined &&
+      activeStates.has(previousState) &&
       !activeStates.has(newState)
     ) {
       logger.info(
