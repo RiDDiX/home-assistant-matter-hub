@@ -415,10 +415,8 @@ export function dispatchRoomClean(
     }
   }
 
-  // Valetudo vacuums: rooms come from sensor.*_map_segments (injected at
-  // creation time), not from the vacuum entity's live attributes.
-  // parseVacuumRooms() would return [] at runtime. Use selectedAreas directly
-  // as segment IDs since toAreaId(numericId) === numericId.
+  // Valetudo vacuums: rooms come from sensor.*_map_segments, so the
+  // selected areas are the segment IDs (toAreaId(numericId) === numericId).
   if (entityId.startsWith("vacuum.valetudo_")) {
     return {
       action: buildValetudoSegmentAction(
@@ -525,6 +523,10 @@ const vacuumRvcRunModeConfig = {
   getSupportedModes: (entity: { attributes: unknown }, agent: Agent) => {
     const attributes = entity.attributes as VacuumDeviceAttributes;
     const mapping = agent.get(HomeAssistantEntityBehavior).state.mapping;
+    // CLEAN_AREA rooms live in the mapping, not the attributes (#497)
+    if (mapping?.cleanAreaRooms?.length) {
+      return buildCleanAreaModes(mapping.cleanAreaRooms);
+    }
     const customAreas = mapping?.customServiceAreas;
     return buildSupportedModes(
       attributes,
@@ -547,8 +549,7 @@ const vacuumRvcRunModeConfig = {
       if (selectedAreas.length > 0) {
         const homeAssistant = agent.get(HomeAssistantEntityBehavior);
         // The ServiceArea cluster was built from the endpoint's effective
-        // snapshot; live state loses injected rooms on the first raw HA
-        // update, so dispatch from the snapshot when the endpoint has one.
+        // snapshot, dispatch from it to stay in the same area id space.
         const effective = (
           homeAssistant.endpoint as unknown as {
             vacuumEffective?: VacuumEffectiveConfig;
@@ -651,10 +652,8 @@ const vacuumRvcRunModeConfig = {
       }
     }
 
-    // Valetudo vacuums: rooms come from sensor.*_map_segments (injected
-    // at creation time), not from the vacuum entity's live attributes.
-    // parseVacuumRooms() would return [] at runtime. The segment ID equals
-    // roomMode - ROOM_MODE_BASE since toAreaId(numericId) === numericId.
+    // Valetudo vacuums: rooms come from sensor.*_map_segments. The segment
+    // ID equals roomMode - ROOM_MODE_BASE (toAreaId(numericId) === numericId).
     const vacuumEntityId = entity.entity_id;
     if (vacuumEntityId.startsWith("vacuum.valetudo_")) {
       const segmentId = getRoomIdFromMode(roomMode);
@@ -804,9 +803,9 @@ export function createVacuumRvcRunModeServer(
  * Room modes are generated from the HA areas so Apple Home (which doesn't use
  * ServiceArea.selectAreas) can still trigger per-area cleaning.
  */
-export function createCleanAreaRvcRunModeServer(
+function buildCleanAreaModes(
   cleanAreaRooms: CleanAreaRoom[],
-) {
+): RvcRunMode.ModeOption[] {
   const modes: RvcRunMode.ModeOption[] = [
     {
       label: "Idle",
@@ -832,7 +831,13 @@ export function createCleanAreaRvcRunModeServer(
       modeTags: [{ value: RvcRunMode.ModeTag.Cleaning }],
     });
   }
+  return modes;
+}
 
+export function createCleanAreaRvcRunModeServer(
+  cleanAreaRooms: CleanAreaRoom[],
+) {
+  const modes = buildCleanAreaModes(cleanAreaRooms);
   logger.info(
     `Creating CLEAN_AREA RvcRunModeServer with ${cleanAreaRooms.length} HA areas, ${modes.length} total modes`,
   );

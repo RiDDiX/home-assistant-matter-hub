@@ -28,7 +28,10 @@ import { asStandaloneEndpointType } from "../standalone-endpoint-type.js";
 import { updateEntityState } from "../update-entity-state.js";
 import { createLegacyEndpointType } from "./create-legacy-endpoint-type.js";
 import { supportsCleaningModes } from "./vacuum/behaviors/vacuum-rvc-clean-mode-server.js";
-import type { VacuumEffectiveConfig } from "./vacuum/behaviors/vacuum-service-area-server.js";
+import {
+  type VacuumEffectiveConfig,
+  withResolvedRooms,
+} from "./vacuum/behaviors/vacuum-service-area-server.js";
 
 const logger = Logger.get("LegacyEndpoint");
 
@@ -726,10 +729,13 @@ export class LegacyEndpoint extends EntityEndpoint {
     // entity state is structurally identical. matter.js uses isDeepEqual on
     // setStateOf, so the entity$Changed event would never fire. Bump
     // last_updated to force a structural difference.
-    let effectiveState = state;
+    let effectiveState = withResolvedRooms(state, this.vacuumEffective);
     if (this.pendingMappedChange) {
       this.pendingMappedChange = false;
-      effectiveState = { ...state, last_updated: new Date().toISOString() };
+      effectiveState = {
+        ...effectiveState,
+        last_updated: new Date().toISOString(),
+      };
     }
     await updateEntityState(this, effectiveState);
   }
