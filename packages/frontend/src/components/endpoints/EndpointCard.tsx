@@ -208,6 +208,10 @@ export const formatTemperature = (
   return `${celsius.toFixed(1)}°C`;
 };
 
+// Matter lift position is percent closed, 10000 is fully closed (#495).
+export const formatCoverPosition = (liftPercent100ths: number): string =>
+  `${Math.round((10000 - liftPercent100ths) / 100)}% open`;
+
 export interface EndpointCardProps {
   endpoint: EndpointData;
   bridgeName?: string;
@@ -515,8 +519,9 @@ export const EndpointCard = ({
 
     // Window covering
     if (cover?.currentPositionLiftPercent100ths != null) {
-      const pos = Math.round(cover.currentPositionLiftPercent100ths / 100);
-      chips.push({ label: `${pos}% open` });
+      chips.push({
+        label: formatCoverPosition(cover.currentPositionLiftPercent100ths),
+      });
     }
 
     // Door lock
