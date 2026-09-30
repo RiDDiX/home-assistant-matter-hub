@@ -348,7 +348,10 @@ Home, ...) are not placed in the same network segment. Please make sure to revie
 </details>
 
 <details>
-<summary><strong>🧪 Alpha (v2.1.0-alpha.910)</strong></summary>
+<summary><strong>🧪 Alpha (v2.1.0-alpha.912)</strong></summary>
+
+**v2.1.0-alpha.912:**
+- 🗺️ **Vacuum rooms stay in the run mode list**: Valetudo and auto-detected Roborock rooms fell out after the first Home Assistant update, CLEAN_AREA rooms right at startup, so controllers such as Alexa saw only Idle and Cleaning ([#497](https://github.com/RiDDiX/home-assistant-matter-hub/issues/497))
 
 **v2.1.0-alpha.910:**
 - 🧹 **Apple Home stays on Vacuuming after a start**: while the vacuum was still leaving the dock, Home flipped to "Ready, Resume Cleaning Later" for a few seconds ([#496](https://github.com/RiDDiX/home-assistant-matter-hub/issues/496))
