@@ -281,7 +281,9 @@ Apple Home uses the Matter 1.4 **Service Area** cluster for room selection. This
 
 ### 3. RVC Run Mode (Google Home, Alexa, etc.)
 
-Custom cleaning modes are created for each room, e.g., "Clean Kitchen", "Clean Living Room". These appear as selectable modes in compatible controllers.
+Each room is also added as a run mode named after the room, e.g. "Kitchen", "Living Room". Picking one starts a clean of that room only.
+
+Alexa has no room picker for Matter vacuums. Amazon lists only RVC Run Mode for robot vacuums ([Alexa Supported Matter Device Categories](https://developer.amazon.com/en-US/docs/alexa/smarthome/supported-matter-device-categories.html)), not Service Area, so rooms show up in Alexa only as run modes.
 
 ### Room Data Requirements (Vendor-Specific Fallback)
 
