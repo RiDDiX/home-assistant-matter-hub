@@ -38,7 +38,7 @@ of port forwarding etc.
 | Channel | Branch | Current Version | Description |
 |---------|--------|-----------------|-------------|
 | **Stable** | `main` | v2.0.57 | Production-ready, recommended for most users |
-| **Alpha** | `alpha` | v2.1.0-alpha.909 | Ahead of Stable, carries the additions listed under Alpha Features |
+| **Alpha** | `alpha` | v2.1.0-alpha.910 | Ahead of Stable, carries the additions listed under Alpha Features |
 | **Testing** | `testing` | v4.1.0-testing.x | ⚠️ **Highly unstable!** Experimental features, may break |
 
 ### Which version should I use?
@@ -348,7 +348,11 @@ Re-assign the affected devices to their rooms after they reconnect. See the [doc
 </details>
 
 <details>
-<summary><strong>🧪 Alpha Features (v2.1.0-alpha.909)</strong> - Click to expand</summary>
+<summary><strong>🧪 Alpha Features (v2.1.0-alpha.910)</strong> - Click to expand</summary>
+
+**v2.1.0-alpha.910:**
+- 🧹 **Apple Home stays on Vacuuming after a start**: while the vacuum was still leaving the dock, Home flipped to "Ready, Resume Cleaning Later" for a few seconds ([#496](https://github.com/RiDDiX/home-assistant-matter-hub/issues/496))
+- 🪟 **Dashboard cover chip shows how far it is open**: a closed cover showed "100% open", controllers were never affected ([#495](https://github.com/RiDDiX/home-assistant-matter-hub/issues/495))
 
 **v2.1.0-alpha.909:**
 - 🧹 **Apple Home drops the old rooms during a clean started elsewhere**: after a three room Apple job, a one room clean from Home Assistant still showed "cleaning 3 rooms" ([#492](https://github.com/RiDDiX/home-assistant-matter-hub/issues/492))

@@ -348,7 +348,11 @@ Home, ...) are not placed in the same network segment. Please make sure to revie
 </details>
 
 <details>
-<summary><strong>🧪 Alpha (v2.1.0-alpha.909)</strong></summary>
+<summary><strong>🧪 Alpha (v2.1.0-alpha.910)</strong></summary>
+
+**v2.1.0-alpha.910:**
+- 🧹 **Apple Home stays on Vacuuming after a start**: while the vacuum was still leaving the dock, Home flipped to "Ready, Resume Cleaning Later" for a few seconds ([#496](https://github.com/RiDDiX/home-assistant-matter-hub/issues/496))
+- 🪟 **Dashboard cover chip shows how far it is open**: a closed cover showed "100% open", controllers were never affected ([#495](https://github.com/RiDDiX/home-assistant-matter-hub/issues/495))
 
 **v2.1.0-alpha.909:**
 - 🧹 **Apple Home drops the old rooms during a clean started elsewhere**: after a three room Apple job, a one room clean from Home Assistant still showed "cleaning 3 rooms" ([#492](https://github.com/RiDDiX/home-assistant-matter-hub/issues/492))
