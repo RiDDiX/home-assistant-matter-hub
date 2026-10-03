@@ -38,7 +38,7 @@ of port forwarding etc.
 | Channel | Branch | Current Version | Description |
 |---------|--------|-----------------|-------------|
 | **Stable** | `main` | v2.0.57 | Production-ready, recommended for most users |
-| **Alpha** | `alpha` | v2.1.0-alpha.912 | Ahead of Stable, carries the additions listed under Alpha Features |
+| **Alpha** | `alpha` | v2.1.0-alpha.915 | Ahead of Stable, carries the additions listed under Alpha Features |
 | **Testing** | `testing` | v4.1.0-testing.x | ⚠️ **Highly unstable!** Experimental features, may break |
 
 ### Which version should I use?
@@ -348,7 +348,18 @@ Re-assign the affected devices to their rooms after they reconnect. See the [doc
 </details>
 
 <details>
-<summary><strong>🧪 Alpha Features (v2.1.0-alpha.912)</strong> - Click to expand</summary>
+<summary><strong>🧪 Alpha Features (v2.1.0-alpha.915)</strong> - Click to expand</summary>
+
+**v2.1.0-alpha.915:**
+- 🇫🇷 **French translation completed**: about 316 strings that fell back to English are translated now, thanks [@iblur01](https://github.com/iblur01) ([#504](https://github.com/RiDDiX/home-assistant-matter-hub/pull/504))
+
+**v2.1.0-alpha.914:**
+- 🇳🇱 **Dutch translation**: new `nl` locale, thanks [@toineenzo](https://github.com/toineenzo) ([#503](https://github.com/RiDDiX/home-assistant-matter-hub/pull/503))
+
+**v2.1.0-alpha.913:**
+- 🔋 **Battery sensors stop showing up as their own device**: a battery that was unavailable during a refresh got its own device next to the temperature sensor and stayed, and a temperature sensor built in that moment never picked its battery up ([#498](https://github.com/RiDDiX/home-assistant-matter-hub/issues/498))
+- 🧹 **Vacuum current room and room names in Apple Home**: the current room follows the robot through rooms outside the job, and a room renamed in Home Assistant reaches the room list without re-pairing ([#501](https://github.com/RiDDiX/home-assistant-matter-hub/issues/501))
+- ↩️ **Failed Home Assistant calls no longer leave a stale state**: when a call fails after the command was accepted, the device goes back to its Home Assistant state within a second instead of staying "opening" or "on" ([#446](https://github.com/RiDDiX/home-assistant-matter-hub/issues/446))
 
 **v2.1.0-alpha.912:**
 - 🗺️ **Vacuum rooms stay in the run mode list**: Valetudo and auto-detected Roborock rooms fell out after the first Home Assistant update, CLEAN_AREA rooms right at startup, so controllers such as Alexa saw only Idle and Cleaning ([#497](https://github.com/RiDDiX/home-assistant-matter-hub/issues/497))
@@ -741,6 +752,8 @@ Newest first.
 
 | Contributor | Contributions |
 |-------------|---------------|
+| [@iblur01](https://github.com/iblur01) | 🌐 **Translator** - French translation completed ([#504](https://github.com/RiDDiX/home-assistant-matter-hub/pull/504)) |
+| [@toineenzo](https://github.com/toineenzo) | 🌐 **Translator** - Dutch translation ([#503](https://github.com/RiDDiX/home-assistant-matter-hub/pull/503)) |
 | [@qbattersby](https://github.com/qbattersby) | 🤖 **Code Contributor** - LevelControl transitionTime patch for matter.js 0.17, so Google Home can dim already-on lights ([#383](https://github.com/RiDDiX/home-assistant-matter-hub/pull/383)) |
 | [@Yllelder](https://github.com/Yllelder) | 🌐 **Translator** - Spanish translation ([#314](https://github.com/RiDDiX/home-assistant-matter-hub/pull/314)) |
 | [@MStankiewiczOfficial](https://github.com/MStankiewiczOfficial) | 🌐 **Translator** - Polish translation ([#288](https://github.com/RiDDiX/home-assistant-matter-hub/pull/288), [#329](https://github.com/RiDDiX/home-assistant-matter-hub/pull/329)) |

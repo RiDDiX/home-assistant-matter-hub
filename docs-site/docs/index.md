@@ -348,7 +348,18 @@ Home, ...) are not placed in the same network segment. Please make sure to revie
 </details>
 
 <details>
-<summary><strong>🧪 Alpha (v2.1.0-alpha.912)</strong></summary>
+<summary><strong>🧪 Alpha (v2.1.0-alpha.915)</strong></summary>
+
+**v2.1.0-alpha.915:**
+- 🇫🇷 **French translation completed**: about 316 strings that fell back to English are translated now, thanks [@iblur01](https://github.com/iblur01) ([#504](https://github.com/RiDDiX/home-assistant-matter-hub/pull/504))
+
+**v2.1.0-alpha.914:**
+- 🇳🇱 **Dutch translation**: new `nl` locale, thanks [@toineenzo](https://github.com/toineenzo) ([#503](https://github.com/RiDDiX/home-assistant-matter-hub/pull/503))
+
+**v2.1.0-alpha.913:**
+- 🔋 **Battery sensors stop showing up as their own device**: a battery that was unavailable during a refresh got its own device next to the temperature sensor and stayed, and a temperature sensor built in that moment never picked its battery up ([#498](https://github.com/RiDDiX/home-assistant-matter-hub/issues/498))
+- 🧹 **Vacuum current room and room names in Apple Home**: the current room follows the robot through rooms outside the job, and a room renamed in Home Assistant reaches the room list without re-pairing ([#501](https://github.com/RiDDiX/home-assistant-matter-hub/issues/501))
+- ↩️ **Failed Home Assistant calls no longer leave a stale state**: when a call fails after the command was accepted, the device goes back to its Home Assistant state within a second instead of staying "opening" or "on" ([#446](https://github.com/RiDDiX/home-assistant-matter-hub/issues/446))
 
 **v2.1.0-alpha.912:**
 - 🗺️ **Vacuum rooms stay in the run mode list**: Valetudo and auto-detected Roborock rooms fell out after the first Home Assistant update, CLEAN_AREA rooms right at startup, so controllers such as Alexa saw only Idle and Cleaning ([#497](https://github.com/RiDDiX/home-assistant-matter-hub/issues/497))
