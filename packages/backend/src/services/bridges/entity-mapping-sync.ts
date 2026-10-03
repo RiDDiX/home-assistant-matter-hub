@@ -22,14 +22,16 @@ export class EntityMappingSync {
   ) {}
 
   // Only endpoints the auto-mapping applies to belong in the candidates: a
-  // manual or disabled mapping, or a sensor endpoint sharing the device,
-  // must not claim the slot (last writer would win) and stall the recovery.
+  // manual or disabled mapping, or the battery sensor's own endpoint, must
+  // not claim the slot (last writer would win) and stall the recovery.
   eligible(entityId: string): boolean {
     const mapping = this.getMapping(entityId);
     if (mapping?.batteryEntity || mapping?.disableBatteryMapping) return false;
+    if (entityId.startsWith("binary_sensor.")) return false;
     if (
-      entityId.startsWith("sensor.") ||
-      entityId.startsWith("binary_sensor.")
+      entityId.startsWith("sensor.") &&
+      this.registry.initialState(entityId)?.attributes?.device_class ===
+        "battery"
     ) {
       return false;
     }
@@ -97,7 +99,17 @@ export class EntityMappingSync {
       if (fingerprintBattery(fingerprint) != null) continue;
       if (!this.eligible(entityId)) continue;
       const deviceId = this.registry.entity(entityId)?.device_id;
-      if (deviceId) this.candidates.set(deviceId, entityId);
+      if (!deviceId) continue;
+      // a sibling sensor never displaces the vacuum or other primary
+      const owner = this.candidates.get(deviceId);
+      if (
+        owner &&
+        !owner.startsWith("sensor.") &&
+        entityId.startsWith("sensor.")
+      ) {
+        continue;
+      }
+      this.candidates.set(deviceId, entityId);
     }
   }
 

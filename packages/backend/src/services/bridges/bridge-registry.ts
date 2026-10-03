@@ -126,13 +126,9 @@ export class BridgeRegistry {
     mapping: EntityMappingConfig | undefined,
   ): string {
     if (mapping?.batteryEntity || mapping?.disableBatteryMapping) return "";
-    // sensor endpoints never auto-map a battery, same gate as the managers
-    if (
-      entityId.startsWith("sensor.") ||
-      entityId.startsWith("binary_sensor.")
-    ) {
-      return "";
-    }
+    // sensor.* endpoints auto-map the device battery too (composed temperature
+    // sensor), so they need the catch-up as well (#498)
+    if (entityId.startsWith("binary_sensor.")) return "";
     if (
       !this.isAutoBatteryMappingEnabled() &&
       !entityId.startsWith("vacuum.")

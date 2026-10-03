@@ -666,6 +666,16 @@ export class BridgeEndpointManager extends Service {
     return result;
   }
 
+  // battery, humidity and pressure skips from LegacyEndpoint.create
+  private isAutoAssigned(entityId: string): boolean {
+    const r = this.registry;
+    return (
+      (r.isAutoBatteryMappingEnabled() && r.isBatteryEntityUsed(entityId)) ||
+      (r.isAutoHumidityMappingEnabled() && r.isHumidityEntityUsed(entityId)) ||
+      (r.isAutoPressureMappingEnabled() && r.isPressureEntityUsed(entityId))
+    );
+  }
+
   private getEntityMapping(entityId: string): EntityMappingConfig | undefined {
     return this.mappingStorage.getMapping(this.bridgeId, entityId);
   }
@@ -892,6 +902,19 @@ export class BridgeEndpointManager extends Service {
     const existingEndpoints: EntityEndpoint[] = [];
     const registryPushes: Promise<void>[] = [];
     const now = Date.now();
+    // entities another live endpoint carries, or picks up when the mapping
+    // check below rebuilds it, see the duplicate branch (#498)
+    const carriedElsewhere = new Set(
+      endpoints.flatMap((e) =>
+        [
+          ...(e.mappedEntityIds ?? []),
+          this.registry.batteryFingerprintFor(
+            e.entityId,
+            this.getEntityMapping(e.entityId),
+          ),
+        ].filter((id) => id && id !== e.entityId),
+      ),
+    );
     for (const endpoint of endpoints) {
       const present = this.entityIds.includes(endpoint.entityId);
 
@@ -989,6 +1012,25 @@ export class BridgeEndpointManager extends Service {
         } catch (e) {
           this.log.warn(
             `Failed to remove composed sub-entity endpoint ${endpoint.entityId}:`,
+            e,
+          );
+        }
+        this.mappingFingerprints.delete(endpoint.entityId);
+      } else if (
+        carriedElsewhere.has(endpoint.entityId) &&
+        this.isAutoAssigned(endpoint.entityId)
+      ) {
+        // A refresh that saw the battery sensor unavailable built it its own
+        // endpoint, which nothing removed once the sensor came back. Its
+        // device already shows it, so drop the duplicate (#498).
+        this.log.info(
+          `Removing standalone endpoint ${endpoint.entityId}, auto-mapped onto another device`,
+        );
+        try {
+          await endpoint.close();
+        } catch (e) {
+          this.log.warn(
+            `Failed to remove auto-mapped endpoint ${endpoint.entityId}:`,
             e,
           );
         }
