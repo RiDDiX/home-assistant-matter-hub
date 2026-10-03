@@ -76,6 +76,13 @@ class OnOffServerBase extends Base {
     const homeAssistant = await this.agent.load(HomeAssistantEntityBehavior);
     this.update(homeAssistant.entity);
     this.reactTo(homeAssistant.onChange, this.update, { lock: true });
+    this.reactTo(homeAssistant.events.actionFailed, this.dropOptimistic);
+  }
+
+  private dropOptimistic() {
+    optimisticOnOffState.delete(
+      this.agent.get(HomeAssistantEntityBehavior).entityId,
+    );
   }
 
   protected update(entity: HomeAssistantEntityInformation) {

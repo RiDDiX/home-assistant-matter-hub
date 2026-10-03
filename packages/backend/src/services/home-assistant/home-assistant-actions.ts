@@ -1,4 +1,4 @@
-import type { Logger } from "@matter/general";
+import { type Logger, Observable } from "@matter/general";
 import type { HassServiceTarget } from "home-assistant-js-websocket/dist/types.js";
 import type { LoggerService } from "../../core/app/logger.js";
 import { Service } from "../../core/ioc/service.js";
@@ -18,6 +18,7 @@ export interface HomeAssistantAction {
 
 interface HomeAssistantActionCall extends HomeAssistantAction {
   entityId: string;
+  seq: number;
 }
 
 export interface HomeAssistantActionsConfig {
@@ -51,6 +52,10 @@ export class HomeAssistantActions extends Service {
   get available(): boolean {
     return this.client.haRunning;
   }
+
+  // #446: the issuing entity of a call that failed after its retries. The
+  // command already returned success, so its endpoint rolls back to HA state.
+  readonly failed = Observable<[entityId: string]>();
 
   private readonly log: Logger;
   private readonly debounceContext = new DebounceContext(
@@ -108,6 +113,8 @@ export class HomeAssistantActions extends Service {
   // bare Ons that may start an on-then-level pair (#491)
   private readonly leadingOn = new Set<string>();
   private readonly lastChangeAt = new Map<string, number>();
+  // calls per issuing entity, only the latest one may roll back (#446)
+  private readonly callSeq = new Map<string, number>();
 
   private processAction(key: string, calls: HomeAssistantActionCall[]) {
     this.leadingOn.delete(key);
@@ -124,6 +131,10 @@ export class HomeAssistantActions extends Service {
     // that is what the command guard asks about, and an action can target a
     // sibling entity (identify button, vacuum select).
     const origin = calls[0].entityId;
+    const seq = calls.reduce(
+      (max, c) => (c.entityId === origin ? Math.max(max, c.seq) : max),
+      0,
+    );
     this.callAction(domain, actionName, data, target, false)
       .then(() => this.recordTargetResult(origin, false))
       .catch((error) => {
@@ -132,6 +143,14 @@ export class HomeAssistantActions extends Service {
         this.log.error(
           `Failed to call action '${action}' for entity '${entity_id ?? "(no target)"}': ${errorMsg}`,
         );
+        // A timeout can land a minute later. A newer call owns the
+        // attributes by then, rolling back would undo its write.
+        if (this.callSeq.get(origin) !== seq) return;
+        try {
+          this.failed.emit(origin);
+        } catch (e) {
+          this.log.debug(`Rollback for '${origin}' failed: ${e}`);
+        }
       });
     diagnosticEventBus.emit(
       "command_received",
@@ -176,7 +195,9 @@ export class HomeAssistantActions extends Service {
         this.leadingOn.add(commandKey);
       }
     }
-    this.debounceContext.get(key, 100)({ ...action, entityId });
+    const seq = (this.callSeq.get(entityId) ?? 0) + 1;
+    this.callSeq.set(entityId, seq);
+    this.debounceContext.get(key, 100)({ ...action, entityId, seq });
   }
 
   async callAction<T = void>(
