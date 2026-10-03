@@ -31,6 +31,8 @@ export interface RvcRunModeServerConfig {
   pause: ValueSetter<void>;
   /** Optional: Clean a specific room by mode value */
   cleanRoom?: ValueSetter<number>;
+  /** Optional: Current service area names, to follow renames */
+  getAreaNames?: ValueGetter<{ areaId: number; name: string }[]>;
 }
 
 export interface RvcRunModeServerInitialState {
@@ -159,6 +161,10 @@ class RvcRunModeServerBase extends Base {
       },
       { force: true },
     );
+    // unavailable drops the rooms, keep the last names
+    if (!["unavailable", "unknown"].includes(entity.state.state)) {
+      this.renameAreas(entity.state);
+    }
 
     // changeToMode already set currentMode=Cleaning, so the cleaning event
     // often arrives without a transition. Latch the flag here instead.
@@ -272,6 +278,43 @@ class RvcRunModeServerBase extends Base {
   }
 
   /**
+   * A room renamed in HA keeps its id, so relabel the area in place. A
+   * rebuild would cost the controller its selection and progress (#501).
+   */
+  private renameAreas(state: HomeAssistantEntityInformation["state"]) {
+    const getAreaNames = this.state.config.getAreaNames;
+    if (!getAreaNames) return;
+    try {
+      const names = new Map(
+        getAreaNames(state, this.agent).map((a) => [a.areaId, a.name]),
+      );
+      const serviceArea = this.agent.get(ServiceAreaBehavior);
+      let renamed = false;
+      const areas = serviceArea.state.supportedAreas.map((area) => {
+        const name = names.get(area.areaId);
+        const info = area.areaInfo.locationInfo;
+        if (!name || !info || info.locationName === name) return area;
+        renamed = true;
+        return {
+          ...area,
+          areaInfo: {
+            ...area.areaInfo,
+            locationInfo: { ...info, locationName: name },
+          },
+        };
+      });
+      if (renamed) {
+        serviceArea.state.supportedAreas = areas;
+        logger.info(
+          `Renamed service areas: ${areas.map((a) => `${a.areaId}:${a.areaInfo.locationInfo?.locationName}`).join(", ")}`,
+        );
+      }
+    } catch {
+      // ServiceArea not available
+    }
+  }
+
+  /**
    * Emit a diagnostic INFO log exactly once per cleaning session for a
    * given short-circuit reason. Prevents log flooding while still
    * surfacing the silent paths that would otherwise be invisible.
@@ -314,20 +357,11 @@ class RvcRunModeServerBase extends Base {
 
       const serviceArea = this.agent.get(ServiceAreaBehavior);
 
-      // External-start sessions (HA service call, Roborock app) never run
-      // changeToMode, so activeAreas stays []. currentArea must still
-      // track the actual room reported by the sensor, so in that case
-      // accept any supportedAreas match. With a controller-driven
-      // selection (activeAreas populated), keep the strict filter so we
-      // don't mis-attribute drive-through rooms the user didn't pick.
-      const externalSession = s.activeAreas.length === 0;
+      // currentArea follows the robot, including rooms outside the job (#501).
+      // Try selected rooms first so a shared room_id hits the floor being cleaned.
       const supportedAreaIds = serviceArea.state.supportedAreas.map(
         (a) => a.areaId,
       );
-      const isAllowedArea = (id: number) =>
-        externalSession
-          ? supportedAreaIds.includes(id)
-          : s.activeAreas.includes(id);
 
       // Match by numeric room/segment ID (preferred) or by room name.
       // Dreame sensors use "room_id", others may use "segment_id".
@@ -338,38 +372,45 @@ class RvcRunModeServerBase extends Base {
       const segmentId = sensorAttrs.segment_id ?? sensorAttrs.room_id;
       const roomName = roomState.state;
 
-      let matchedAreaId: number | null = null;
+      const findArea = (isAllowedArea: (id: number) => boolean) => {
+        // Strategy 1: Direct segmentId match (areaId === room_id, e.g. Dreame floor 0).
+        if (segmentId != null && isAllowedArea(segmentId)) {
+          return segmentId;
+        }
 
-      // Strategy 1: Direct segmentId match (areaId === room_id, e.g. Dreame floor 0).
-      if (segmentId != null && isAllowedArea(segmentId)) {
-        matchedAreaId = segmentId;
-      }
-
-      // Strategy 2: Look up segmentId in supportedAreas to find the
-      // corresponding areaId. Dreame multi-floor vacuums offset room IDs
-      // per floor (areaId = floorIndex * 10000 + room_id), so the raw
-      // sensor room_id won't match directly for floor > 0. Also handles
-      // cases where areaId is a hash of a string room ID.
-      if (matchedAreaId === null && segmentId != null) {
-        for (const area of serviceArea.state.supportedAreas) {
-          if (isAllowedArea(area.areaId) && area.areaId % 10000 === segmentId) {
-            matchedAreaId = area.areaId;
-            break;
+        // Strategy 2: Look up segmentId in supportedAreas to find the
+        // corresponding areaId. Dreame multi-floor vacuums offset room IDs
+        // per floor (areaId = floorIndex * 10000 + room_id), so the raw
+        // sensor room_id won't match directly for floor > 0. Also handles
+        // cases where areaId is a hash of a string room ID.
+        if (segmentId != null) {
+          for (const area of serviceArea.state.supportedAreas) {
+            if (
+              isAllowedArea(area.areaId) &&
+              area.areaId % 10000 === segmentId
+            ) {
+              return area.areaId;
+            }
           }
         }
-      }
 
-      // Strategy 3: Match by location name in supportedAreas.
-      if (matchedAreaId === null && roomName) {
-        const area = serviceArea.state.supportedAreas.find(
-          (a) =>
-            a.areaInfo.locationInfo?.locationName?.toLowerCase() ===
-            roomName.toLowerCase(),
-        );
-        if (area && isAllowedArea(area.areaId)) {
-          matchedAreaId = area.areaId;
+        // Strategy 3: Match by location name in supportedAreas.
+        if (roomName) {
+          const area = serviceArea.state.supportedAreas.find(
+            (a) =>
+              a.areaInfo.locationInfo?.locationName?.toLowerCase() ===
+              roomName.toLowerCase(),
+          );
+          if (area && isAllowedArea(area.areaId)) {
+            return area.areaId;
+          }
         }
-      }
+        return null;
+      };
+
+      const matchedAreaId =
+        findArea((id) => s.activeAreas.includes(id)) ??
+        findArea((id) => supportedAreaIds.includes(id));
 
       if (matchedAreaId === null) {
         logger.info(
@@ -379,7 +420,24 @@ class RvcRunModeServerBase extends Base {
         );
         return;
       }
-      if (matchedAreaId === s.lastCurrentArea) return;
+
+      // Driving through a room outside the controller job: show it, but
+      // leave the selected room unfinished until the next selected one.
+      if (s.activeAreas.length > 0 && !s.activeAreas.includes(matchedAreaId)) {
+        if (serviceArea.state.currentArea !== matchedAreaId) {
+          serviceArea.state.currentArea = matchedAreaId;
+          logger.info(
+            `currentRoom sensor: passing through area ${matchedAreaId} ("${roomName}")`,
+          );
+        }
+        return;
+      }
+      if (matchedAreaId === s.lastCurrentArea) {
+        if (serviceArea.state.currentArea !== matchedAreaId) {
+          this.trySetCurrentArea(matchedAreaId);
+        }
+        return;
+      }
 
       // Room transition detected, mark previous area as completed
       if (s.lastCurrentArea !== null) {
@@ -621,7 +679,7 @@ class RvcRunModeServerBase extends Base {
         state.progress = s.activeAreas.map((id) => ({
           areaId: id,
           status:
-            s.completedAreas.has(id) || id === last
+            s.completedAreas.has(id) || id === last || id === s.lastCurrentArea
               ? ServiceArea.OperationalStatus.Completed
               : ServiceArea.OperationalStatus.Skipped,
         }));

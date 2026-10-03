@@ -30,6 +30,7 @@ import {
   ROOM_MODE_BASE,
 } from "../utils/parse-vacuum-rooms.js";
 import {
+  getVacuumServiceAreas,
   toAreaId,
   type VacuumEffectiveConfig,
 } from "./vacuum-service-area-server.js";
@@ -535,6 +536,12 @@ const vacuumRvcRunModeConfig = {
       mapping?.disableCustomAreaRoomModes,
     );
   },
+
+  getAreaNames: (entity: { attributes: unknown }, agent: Agent) =>
+    getVacuumServiceAreas(
+      entity.attributes as VacuumDeviceAttributes,
+      agent.get(HomeAssistantEntityBehavior).state.mapping,
+    ),
 
   // biome-ignore lint/suspicious/noConfusingVoidType: Required by ValueSetter<void> interface
   start: (_: void, agent: Agent) => {

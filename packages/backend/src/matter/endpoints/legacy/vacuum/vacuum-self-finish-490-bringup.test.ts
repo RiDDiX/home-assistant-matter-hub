@@ -218,14 +218,19 @@ describe("#490 vacuum clean that finishes on its own", () => {
     expect(getSession(endpoint).activeAreas).toEqual([DINING, BEDROOM]);
   });
 
-  it("still ignores rooms outside a live controller job", async () => {
+  it("keeps a live controller job on its rooms while passing others", async () => {
     const endpoint = await mount();
 
     await controllerClean(endpoint, [BEDROOM]);
     room = "Kitchen";
     await haState(endpoint, "cleaning");
 
-    expect(currentArea(endpoint)).toBe(BEDROOM);
+    // the robot really is in the kitchen (#501), the job stays the bedroom
+    expect(currentArea(endpoint)).toBe(KITCHEN);
+    expect(getSession(endpoint).activeAreas).toEqual([BEDROOM]);
+    expect(serviceArea(endpoint).progress.map((p) => p.status)).toEqual([
+      ServiceArea.OperationalStatus.Operating,
+    ]);
   });
 });
 
