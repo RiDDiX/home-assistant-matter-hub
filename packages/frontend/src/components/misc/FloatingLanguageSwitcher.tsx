@@ -30,6 +30,7 @@ const BUILT_IN_LANGUAGES: LanguageOption[] = [
   { code: "ja", flag: "🇯🇵", name: "日本語" },
   { code: "ko", flag: "🇰🇷", name: "한국어" },
   { code: "th", flag: "🇹🇭", name: "ไทย" },
+  { code: "nl", flag: "🇳🇱", name: "Nederlands" },
   { code: "sv", flag: "🇸🇪", name: "Svenska" },
   { code: "tr", flag: "🇹🇷", name: "Türkçe" },
   { code: "ru", flag: "🇷🇺", name: "Русский" },
