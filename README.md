@@ -37,14 +37,14 @@ of port forwarding etc.
 
 | Channel | Branch | Current Version | Description |
 |---------|--------|-----------------|-------------|
-| **Stable** | `main` | v2.0.57 | Production-ready, recommended for most users |
-| **Alpha** | `alpha` | v2.1.0-alpha.917 | Ahead of Stable, carries the additions listed under Alpha Features |
+| **Stable** | `main` | v2.0.58 | Production-ready, recommended for most users |
+| **Alpha** | `alpha` | v2.1.0-alpha.x | Currently level with Stable; next pre-release lands here first |
 | **Testing** | `testing` | v4.1.0-testing.x | ⚠️ **Highly unstable!** Experimental features, may break |
 
 ### Which version should I use?
 
 - **Most users**: Use **Stable** (`main` branch) - thoroughly tested
-- **Early adopters**: Use **Alpha** (`alpha` branch) - gets every fix and feature first, see Alpha Features below
+- **Early adopters**: Use **Alpha** (`alpha` branch) - currently level with Stable until the next pre-release lands
 - **Developers/Testers**: Use **Testing** (`testing` branch) - bleeding edge, expect breakage
 
 ### Upgrading from 2.0.46
@@ -61,9 +61,39 @@ Re-assign the affected devices to their rooms after they reconnect. See the [doc
 ## 🎉 What's New
 
 <details>
-<summary><strong>📦 Stable Features (v2.0.57)</strong> - Click to expand</summary>
+<summary><strong>📦 Stable Features (v2.0.58)</strong> - Click to expand</summary>
 
-**New in v2.0.57:**
+**New in v2.0.58:**
+- 🗂️ **Old backups get deleted again**: the automatic backup only runs while HAMH shuts down, and the add-on gets a few seconds to stop, so the backup could be cut off before it reached the cleanup. Every restart left one more half-written backup in the list. Old backups are now also cleaned up at startup, and a backup keeps a temporary name until it is complete, so a cut-off one never shows up ([#483](https://github.com/RiDDiX/home-assistant-matter-hub/issues/483))
+- 🛡️ **Backup settings are checked**: the settings endpoint only takes a keep count from 1 to 100, and a failed write (a full disk, for example) fails that backup instead of crashing the app. The Turkish, Portuguese (Brazil) and Traditional Chinese texts no longer promise a scheduled backup
+- 📖 **Docs**: the Alexa "never connects" entry drops the fresh bridge advice, a new bridge did not help in [#478](https://github.com/RiDDiX/home-assistant-matter-hub/issues/478), and says how to tell from the log whether the Echo reached the bridge
+- 🔌 **Port 80 in the network check**: freeing it helped two users pair Alexa, so the Health Dashboard shows when it's in use ([#449](https://github.com/RiDDiX/home-assistant-matter-hub/issues/449), [#478](https://github.com/RiDDiX/home-assistant-matter-hub/issues/478))
+- 💡 **Wattage for lights in Apple Home**: a light can be set to On/Off Plug-in Unit, Apple only shows wattage on outlets ([#484](https://github.com/RiDDiX/home-assistant-matter-hub/issues/484))
+- 📖 **Docs**: Apple Home power readings since iOS 27, and the port 80 note for Alexa
+- 🔌 **Each outlet of a power strip reports its own power** ([#488](https://github.com/RiDDiX/home-assistant-matter-hub/issues/488), thanks @barnabasbusa)
+- 🔁 **A bridge that went quiet comes back on its own**: a subscription that died while starting left every device offline until a restart ([#487](https://github.com/RiDDiX/home-assistant-matter-hub/issues/487))
+- 🧽 **Dishwashers understand Home Connect and SmartThings states** ([#486](https://github.com/RiDDiX/home-assistant-matter-hub/issues/486))
+- 🧹 **Vacuum rooms reset when a clean finishes on its own**: the next clean started from Home Assistant could only match the old rooms ([#490](https://github.com/RiDDiX/home-assistant-matter-hub/issues/490))
+- 💡 **No flash when Alexa dims a light that is off**: it now turns on straight at the new level instead of its old brightness first ([#491](https://github.com/RiDDiX/home-assistant-matter-hub/issues/491))
+- 🧽 **Dishwashers on a power switch show their real state**: the Home Connect or SmartThings state sensor is picked up automatically ([#486](https://github.com/RiDDiX/home-assistant-matter-hub/issues/486))
+- 🧺 **Washers and dryers on a power switch show their real state**: Laundry Washer and Laundry Dryer types pick up the state from Home Connect, SmartThings, Miele or LG
+- ✅ **Vacuums and appliances report a finished clean or cycle**
+- 🏠 **Every paired controller shows on the bridge card**: it only showed Google and Alexa, and 4448 now shows as Sengled
+- 📖 **Controller support**: SmartThings added, Apple no longer warns about fans, air purifiers and air quality, and Google no longer warns about smoke alarms and dishwashers
+- 🌀 **Fans and air purifiers follow Home Assistant again**: speed and mode changes from HA stopped reaching controllers in alpha.880 and 2.0.57, only on/off still followed ([#494](https://github.com/RiDDiX/home-assistant-matter-hub/pull/494), thanks @bigmike613)
+- 🧹 **Apple Home drops the old rooms during a clean started elsewhere**: after a three room Apple job, a one room clean from Home Assistant still showed "cleaning 3 rooms" ([#492](https://github.com/RiDDiX/home-assistant-matter-hub/issues/492))
+- 🧹 **Apple Home stays on Vacuuming after a start**: while the vacuum was still leaving the dock, Home flipped to "Ready, Resume Cleaning Later" for a few seconds ([#496](https://github.com/RiDDiX/home-assistant-matter-hub/issues/496))
+- 🪟 **Dashboard cover chip shows how far it is open**: a closed cover showed "100% open", controllers were never affected ([#495](https://github.com/RiDDiX/home-assistant-matter-hub/issues/495))
+- 🗺️ **Vacuum rooms stay in the run mode list**: Valetudo and auto-detected Roborock rooms fell out after the first Home Assistant update, CLEAN_AREA rooms right at startup, so controllers such as Alexa saw only Idle and Cleaning ([#497](https://github.com/RiDDiX/home-assistant-matter-hub/issues/497))
+- 🔋 **Battery sensors stop showing up as their own device**: a battery that was unavailable during a refresh got its own device next to the temperature sensor and stayed, and a temperature sensor built in that moment never picked its battery up ([#498](https://github.com/RiDDiX/home-assistant-matter-hub/issues/498))
+- 🧹 **Vacuum current room and room names in Apple Home**: the current room follows the robot through rooms outside the job, and a room renamed in Home Assistant reaches the room list without re-pairing ([#501](https://github.com/RiDDiX/home-assistant-matter-hub/issues/501))
+- ↩️ **Failed Home Assistant calls no longer leave a stale state**: when a call fails after the command was accepted, the device goes back to its Home Assistant state within a second instead of staying "opening" or "on" ([#446](https://github.com/RiDDiX/home-assistant-matter-hub/issues/446))
+- 🇳🇱 **Dutch translation**: new `nl` locale, thanks [@toineenzo](https://github.com/toineenzo) ([#503](https://github.com/RiDDiX/home-assistant-matter-hub/pull/503))
+- 🇫🇷 **French translation completed**: about 316 strings that fell back to English are translated now, thanks [@iblur01](https://github.com/iblur01) ([#504](https://github.com/RiDDiX/home-assistant-matter-hub/pull/504))
+- ☁️ **VeSync plugin**: Levoit, Cosori and Etekcity devices from your VeSync account mount when you switch them on, with no bridge restart. Cloud only, these devices have no local control. An air fryer cannot be started from a controller.
+- ⚙️ **Saving a disabled built-in no longer wipes its settings**: a built-in plugin that has been disabled since the last restart keeps its stored settings when you save.
+
+**Previously in v2.0.57:**
 - 🧹 **Air purifiers stop rebuilding themselves**: a composed device never listed its battery entity, so the battery auto-map retry rebuilt the endpoint on every sensor update, burning CPU and raising unhandled rejections. A sensor without a device class now needs "batt" in its id to count as the battery, so a filter life or tank level percentage is no longer taken for one ([#461](https://github.com/RiDDiX/home-assistant-matter-hub/issues/461))
 - 🪟 **Covers keep their position while a controller is talking to them**: endpoint state writes are serialized per device, and an update that arrives while the endpoint is busy waits for it instead of being dropped with a warning ([#464](https://github.com/RiDDiX/home-assistant-matter-hub/issues/464))
 - 🔒 **Lock PIN handling reworked**: a PIN added or cleared through a controller takes effect immediately instead of on the next state change, empty and overlong PINs are rejected, Add, Modify and the creating fabric are enforced as the Matter rules require, a code the physical lock rejected is no longer reported as programmed, and hashing moved off the event loop so a PIN protected unlock stops freezing every bridge
@@ -348,63 +378,9 @@ Re-assign the affected devices to their rooms after they reconnect. See the [doc
 </details>
 
 <details>
-<summary><strong>🧪 Alpha Features (v2.1.0-alpha.917)</strong> - Click to expand</summary>
+<summary><strong>🧪 Alpha Features (v2.1.0-alpha.x)</strong> - Click to expand</summary>
 
-**v2.1.0-alpha.917:**
-- ☁️ **VeSync plugin**: Levoit, Cosori and Etekcity devices from your VeSync account mount when you switch them on, with no bridge restart. Cloud only, these devices have no local control. An air fryer cannot be started from a controller.
-- ⚙️ **Saving a disabled built-in no longer wipes its settings**: a built-in plugin that has been disabled since the last restart keeps its stored settings when you save.
-
-**v2.1.0-alpha.915:**
-- 🇫🇷 **French translation completed**: about 316 strings that fell back to English are translated now, thanks [@iblur01](https://github.com/iblur01) ([#504](https://github.com/RiDDiX/home-assistant-matter-hub/pull/504))
-
-**v2.1.0-alpha.914:**
-- 🇳🇱 **Dutch translation**: new `nl` locale, thanks [@toineenzo](https://github.com/toineenzo) ([#503](https://github.com/RiDDiX/home-assistant-matter-hub/pull/503))
-
-**v2.1.0-alpha.913:**
-- 🔋 **Battery sensors stop showing up as their own device**: a battery that was unavailable during a refresh got its own device next to the temperature sensor and stayed, and a temperature sensor built in that moment never picked its battery up ([#498](https://github.com/RiDDiX/home-assistant-matter-hub/issues/498))
-- 🧹 **Vacuum current room and room names in Apple Home**: the current room follows the robot through rooms outside the job, and a room renamed in Home Assistant reaches the room list without re-pairing ([#501](https://github.com/RiDDiX/home-assistant-matter-hub/issues/501))
-- ↩️ **Failed Home Assistant calls no longer leave a stale state**: when a call fails after the command was accepted, the device goes back to its Home Assistant state within a second instead of staying "opening" or "on" ([#446](https://github.com/RiDDiX/home-assistant-matter-hub/issues/446))
-
-**v2.1.0-alpha.912:**
-- 🗺️ **Vacuum rooms stay in the run mode list**: Valetudo and auto-detected Roborock rooms fell out after the first Home Assistant update, CLEAN_AREA rooms right at startup, so controllers such as Alexa saw only Idle and Cleaning ([#497](https://github.com/RiDDiX/home-assistant-matter-hub/issues/497))
-
-**v2.1.0-alpha.910:**
-- 🧹 **Apple Home stays on Vacuuming after a start**: while the vacuum was still leaving the dock, Home flipped to "Ready, Resume Cleaning Later" for a few seconds ([#496](https://github.com/RiDDiX/home-assistant-matter-hub/issues/496))
-- 🪟 **Dashboard cover chip shows how far it is open**: a closed cover showed "100% open", controllers were never affected ([#495](https://github.com/RiDDiX/home-assistant-matter-hub/issues/495))
-
-**v2.1.0-alpha.909:**
-- 🧹 **Apple Home drops the old rooms during a clean started elsewhere**: after a three room Apple job, a one room clean from Home Assistant still showed "cleaning 3 rooms" ([#492](https://github.com/RiDDiX/home-assistant-matter-hub/issues/492))
-
-**v2.1.0-alpha.908:**
-- 🌀 **Fans and air purifiers follow Home Assistant again**: speed and mode changes from HA stopped reaching controllers in alpha.880 and 2.0.57, only on/off still followed ([#494](https://github.com/RiDDiX/home-assistant-matter-hub/pull/494), thanks @bigmike613)
-
-**v2.1.0-alpha.904:**
-- 🧺 **Washers and dryers on a power switch show their real state**: Laundry Washer and Laundry Dryer types pick up the state from Home Connect, SmartThings, Miele or LG
-- ✅ **Vacuums and appliances report a finished clean or cycle**
-- 🏠 **Every paired controller shows on the bridge card**: it only showed Google and Alexa, and 4448 now shows as Sengled
-- 📖 **Controller support**: SmartThings added, Apple no longer warns about fans, air purifiers and air quality, and Google no longer warns about smoke alarms and dishwashers
-
-**v2.1.0-alpha.903:**
-- 🧹 **Vacuum rooms reset when a clean finishes on its own**: the next clean started from Home Assistant could only match the old rooms ([#490](https://github.com/RiDDiX/home-assistant-matter-hub/issues/490))
-- 💡 **No flash when Alexa dims a light that is off**: it now turns on straight at the new level instead of its old brightness first ([#491](https://github.com/RiDDiX/home-assistant-matter-hub/issues/491))
-- 🧽 **Dishwashers on a power switch show their real state**: the Home Connect or SmartThings state sensor is picked up automatically ([#486](https://github.com/RiDDiX/home-assistant-matter-hub/issues/486))
-
-**v2.1.0-alpha.902:**
-- 🔁 **A bridge that went quiet comes back on its own**: a subscription that died while starting left every device offline until a restart ([#487](https://github.com/RiDDiX/home-assistant-matter-hub/issues/487))
-- 🧽 **Dishwashers understand Home Connect and SmartThings states** ([#486](https://github.com/RiDDiX/home-assistant-matter-hub/issues/486))
-
-**v2.1.0-alpha.901:**
-- 🔌 **Each outlet of a power strip reports its own power** ([#488](https://github.com/RiDDiX/home-assistant-matter-hub/issues/488), thanks @barnabasbusa)
-
-**v2.1.0-alpha.900:**
-- 🔌 **Port 80 in the network check**: freeing it helped two users pair Alexa, so the Health Dashboard shows when it's in use ([#449](https://github.com/RiDDiX/home-assistant-matter-hub/issues/449), [#478](https://github.com/RiDDiX/home-assistant-matter-hub/issues/478))
-- 💡 **Wattage for lights in Apple Home**: a light can be set to On/Off Plug-in Unit, Apple only shows wattage on outlets ([#484](https://github.com/RiDDiX/home-assistant-matter-hub/issues/484))
-- 📖 **Docs**: Apple Home power readings since iOS 27, and the port 80 note for Alexa
-
-**v2.1.0-alpha.899:**
-- 🗂️ **Old backups get deleted again**: the automatic backup only runs while HAMH shuts down, and the add-on gets a few seconds to stop, so the backup could be cut off before it reached the cleanup. Every restart left one more half-written backup in the list. Old backups are now also cleaned up at startup, and a backup keeps a temporary name until it is complete, so a cut-off one never shows up ([#483](https://github.com/RiDDiX/home-assistant-matter-hub/issues/483))
-- 🛡️ **Backup settings are checked**: the settings endpoint only takes a keep count from 1 to 100, and a failed write (a full disk, for example) fails that backup instead of crashing the app. The Turkish, Portuguese (Brazil) and Traditional Chinese texts no longer promise a scheduled backup
-- 📖 **Docs**: the Alexa "never connects" entry drops the fresh bridge advice, a new bridge did not help in [#478](https://github.com/RiDDiX/home-assistant-matter-hub/issues/478), and says how to tell from the log whether the Echo reached the bridge
+**Alpha is currently level with Stable (v2.0.58).** All alpha work up to the latest pre-release has been promoted into v2.0.58. New alpha work continues from the next pre-release tag onward and will appear here as development progresses.
 
 </details>
 
