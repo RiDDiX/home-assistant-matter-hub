@@ -348,7 +348,11 @@ Home, ...) are not placed in the same network segment. Please make sure to revie
 </details>
 
 <details>
-<summary><strong>🧪 Alpha (v2.1.0-alpha.915)</strong></summary>
+<summary><strong>🧪 Alpha (v2.1.0-alpha.917)</strong></summary>
+
+**v2.1.0-alpha.917:**
+- ☁️ **VeSync plugin**: Levoit, Cosori and Etekcity devices from your VeSync account mount when you switch them on, with no bridge restart. Cloud only, these devices have no local control. An air fryer cannot be started from a controller.
+- ⚙️ **Saving a disabled built-in no longer wipes its settings**: a built-in plugin that has been disabled since the last restart keeps its stored settings when you save.
 
 **v2.1.0-alpha.915:**
 - 🇫🇷 **French translation completed**: about 316 strings that fell back to English are translated now, thanks [@iblur01](https://github.com/iblur01) ([#504](https://github.com/RiDDiX/home-assistant-matter-hub/pull/504))
