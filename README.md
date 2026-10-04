@@ -38,7 +38,7 @@ of port forwarding etc.
 | Channel | Branch | Current Version | Description |
 |---------|--------|-----------------|-------------|
 | **Stable** | `main` | v2.0.57 | Production-ready, recommended for most users |
-| **Alpha** | `alpha` | v2.1.0-alpha.915 | Ahead of Stable, carries the additions listed under Alpha Features |
+| **Alpha** | `alpha` | v2.1.0-alpha.917 | Ahead of Stable, carries the additions listed under Alpha Features |
 | **Testing** | `testing` | v4.1.0-testing.x | ⚠️ **Highly unstable!** Experimental features, may break |
 
 ### Which version should I use?
@@ -348,7 +348,11 @@ Re-assign the affected devices to their rooms after they reconnect. See the [doc
 </details>
 
 <details>
-<summary><strong>🧪 Alpha Features (v2.1.0-alpha.915)</strong> - Click to expand</summary>
+<summary><strong>🧪 Alpha Features (v2.1.0-alpha.917)</strong> - Click to expand</summary>
+
+**v2.1.0-alpha.917:**
+- ☁️ **VeSync plugin**: Levoit, Cosori and Etekcity devices from your VeSync account mount when you switch them on, with no bridge restart. Cloud only, these devices have no local control. An air fryer cannot be started from a controller.
+- ⚙️ **Saving a disabled built-in no longer wipes its settings**: a built-in plugin that has been disabled since the last restart keeps its stored settings when you save.
 
 **v2.1.0-alpha.915:**
 - 🇫🇷 **French translation completed**: about 316 strings that fell back to English are translated now, thanks [@iblur01](https://github.com/iblur01) ([#504](https://github.com/RiDDiX/home-assistant-matter-hub/pull/504))

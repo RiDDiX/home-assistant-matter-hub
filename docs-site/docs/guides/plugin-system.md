@@ -129,6 +129,7 @@ The `context` object passed to `onStart` provides:
 | `thermostat` | Thermostat (0x0301) |
 | `door_lock` | Door Lock (0x000A) |
 | `fan` | Fan (0x002B) |
+| `air_purifier` | Air Purifier (0x002D) |
 | `window_covering` | Window Covering (0x0202) |
 | `generic_switch` | Generic Switch (0x000F) |
 | `water_leak_detector` | Water Leak Detector (0x0043) |
@@ -160,7 +161,7 @@ Some device types need a live matter.js `EndpointType` (custom clusters and comm
 
 Plugins run on standard bridges only. A bridge with Server Mode enabled hosts no plugins at all, including the built-in camera; the Plugins page lists it with a note saying so. If every bridge you have is in Server Mode, create a standard bridge and put the camera there. Apple Home does not render Matter cameras; as of 2026 SmartThings is the only controller that does.
 
-A built-in plugin registers no devices until it is actually configured: the camera waits for camera entity ids, the security plugin for at least one trigger list or a source alarm panel. Until then nothing appears on your controllers, and once you save a real config the devices mount without a bridge restart. Disabling a plugin removes its mounted devices right away and the choice is stored per bridge, so a disabled plugin stays disabled across restarts until you enable it again.
+A built-in plugin registers no devices until it is actually configured: the camera waits for camera entity ids, the security plugin for at least one trigger list or a source alarm panel, and vesync for account credentials and at least one device switched on. Until then nothing appears on your controllers, and once you save a real config the devices mount without a bridge restart. Disabling a plugin removes its mounted devices right away and the choice is stored per bridge, so a disabled plugin stays disabled across restarts until you enable it again.
 
 **Camera** exposes a Home Assistant camera as a Matter Camera (0x0142). It implements the Matter `WebRtcTransportProvider` flow and bridges HA's WebRTC. To configure it, open the Plugins page and click the camera plugin (or its gear icon). A settings dialog opens; fill in the cameras and save:
 
@@ -205,6 +206,25 @@ Arm and disarm calls carry no alarm code. A panel that requires a code for armin
 Known limits: changing `haUrl`/`haToken` while silences or setters are still pending can replay them against the new Home Assistant, and a silence that keeps failing is retried on every reconnect without a cap. Both are on the list for the next revision.
 
 If you already run Alarmo or another alarm integration, keep it as the source of truth and set `sourceAlarmPanel` to its `alarm_control_panel.*` entity. The four Matter switches and Alarm contact sensor then follow the panel's initial state and subsequent `state_changed` events. Matter switch writes call `alarm_arm_home`, `alarm_arm_away`, `alarm_arm_night`, `alarm_arm_vacation`, or `alarm_disarm` on that entity. Local trigger, setter, alert, and silence logic stays inactive while a source panel is configured.
+
+**VeSync** is the cloud behind Levoit, Cosori and Etekcity devices. The plugin signs in with your account email and password and talks to the VeSync cloud. There is no local control: these devices have no LAN API. Open the Plugins page, click vesync, enter the email and password, and save. Open the dialog again after a few seconds. It now lists one switch per device found on the account. Switch on the devices you want and save. They mount without a bridge restart. Devices stay hidden until switched on. The status line shows sign-in problems. Devices the plugin cannot handle yet are named in the dialog.
+
+| Setting | Description |
+|---------|-------------|
+| `email` | The account you use in the VeSync app. |
+| `password` | Stored in the bridge's plugin storage file. Never sent back to the browser. Not part of backups, so re-enter it after a restore. |
+| `pollInterval` | Seconds between cloud polls. Default 60, from 30 to 3600. Raised on its own when polling would exceed the daily VeSync request quota of 3200 plus 1500 per device. That quota is shared with every other bridge and integration on the account. |
+| Device switch | One per device found on the account, labeled with the device name. Off by default. |
+
+A Cosori Dual Blaze TwinFry (CAF-TF101S or CAF-TF102S) becomes one on/off plug per basket, named Left and Right. A Dual Blaze (CAF-P583S) or TurboBlaze (CAF-DC601S) becomes one plug. The plug is on while a program is loaded, running or paused, and it turns off when the cook ends. Turning it off ends the cook. Turning it on does nothing and snaps back. The plugin never starts a cook remotely, because EU units refuse a remote start and a voice assistant should not switch on a heating appliance. Use the off transition for a "food is ready" automation.
+
+Etekcity outlets and wall switches (ESW01, ESW03, ESW10, ESW15, ESWL01, ESWL03, WHOGPLUG, BSDOG and similar smart plugs) become an on/off plug. Levoit air purifiers (Core 200S, 300S, 400S and 600S, LV-RH131S, Vital 100S and 200S, EverestAir, Sprout) become a Matter air purifier with on/off and fan speed. Tower and pedestal fans (LTF-F422S, LPF-R432S) become a fan with speed. Auto mode cannot be selected from a controller. A purifier running in auto shows a low speed. Humidifiers (Levoit Classic 200S and 300S, Dual 200S, LV600S, OasisMist, Superior 6000S, Sprout) become an on/off plug plus a humidity sensor.
+
+Not supported yet: bulbs, the ESWD16 dimmer, the two-socket outdoor plug, the 7A plug, LV-PUR131S, the thermostat, and the older CS137 and CS158 fryers. Accounts with two-factor sign-in cannot be used. Experimental: the request formats are ported from the pyvesync project and checked against captures of the real app, but ending a cook on a TwinFry has not been confirmed on real hardware yet. An offline device shows as unreachable.
+
+Same rules as the other built-ins: standard bridges only, config per bridge, nothing registers until configured, and disabling removes the devices at once.
+
+Plugin authors: `air_purifier` (Air Purifier, 0x002D) is a supported device type. A `fanControl` cluster needs `fanModeSequence` in the initial attributes, or the endpoint does not mount.
 
 ### Cluster IDs
 
