@@ -1,6 +1,7 @@
 import { Logger } from "@matter/general";
 import type { MutableEndpoint } from "@matter/main";
 import {
+  AirPurifierDevice,
   AirQualitySensorDevice,
   ColorTemperatureLightDevice,
   ContactSensorDevice,
@@ -135,6 +136,12 @@ const deviceTypeMap: Record<string, () => MutableEndpoint> = {
     ),
   fan: () =>
     FanDevice.with(
+      IdentifyServer,
+      PluginBasicInformationServer,
+      PluginDeviceBehavior,
+    ),
+  air_purifier: () =>
+    AirPurifierDevice.with(
       IdentifyServer,
       PluginBasicInformationServer,
       PluginDeviceBehavior,
