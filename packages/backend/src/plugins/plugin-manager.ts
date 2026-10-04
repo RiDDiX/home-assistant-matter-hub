@@ -296,6 +296,13 @@ export class PluginManager {
     if (enabled === false) {
       metadata.enabled = false;
       logger.info(`Plugin "${plugin.name}" stays disabled (persisted)`);
+      // onStart never runs, so the listing would be empty and a save would
+      // wipe storage
+      if (metadata.source === "builtin") {
+        metadata.config =
+          (await storage.get<Record<string, unknown>>(PLUGIN_CONFIG_KEY)) ??
+          metadata.config;
+      }
     }
     const devices = new Map<string, PluginDevice>();
     const pluginLogger = Logger.get(`Plugin:${plugin.name}`);

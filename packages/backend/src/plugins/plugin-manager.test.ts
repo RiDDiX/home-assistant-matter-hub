@@ -479,6 +479,29 @@ describe("PluginManager", () => {
         fs.rmSync(dir, { recursive: true, force: true });
       }
     });
+
+    it("lists the stored config of a plugin that boots disabled", async () => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), "hamh-test-bootoff-"));
+      try {
+        const pm1 = new PluginManager("bridge-p", dir);
+        await pm1.registerBuiltIn(makeDevicePlugin().plugin);
+        await pm1.startAll();
+        await pm1.disablePlugin("persist-plugin");
+        const stored = { email: "a@x", password: "pw", expose_1: true };
+        fs.writeFileSync(
+          path.join(dir, "plugin-bridge-p-persist-plugin.json"),
+          JSON.stringify({ config: stored }),
+        );
+
+        // The listing feeds the config dialog, an empty one saves over it.
+        const pm2 = new PluginManager("bridge-p", dir);
+        await pm2.registerBuiltIn(makeDevicePlugin().plugin);
+        await pm2.startAll();
+        expect(pm2.getMetadata()[0].config).toEqual(stored);
+      } finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+      }
+    });
   });
 
   describe("disable with the breaker open (#439 review)", () => {
