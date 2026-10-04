@@ -1,6 +1,7 @@
 import type {
   EntityMappingConfig,
   HomeAssistantEntityState,
+  MatterDeviceType,
   SensorDeviceAttributes,
   VacuumDeviceAttributes,
 } from "@home-assistant-matter-hub/common";
@@ -27,9 +28,18 @@ import { asStandaloneEndpointType } from "../standalone-endpoint-type.js";
 import { updateEntityState } from "../update-entity-state.js";
 import { createLegacyEndpointType } from "./create-legacy-endpoint-type.js";
 import { supportsCleaningModes } from "./vacuum/behaviors/vacuum-rvc-clean-mode-server.js";
-import type { VacuumEffectiveConfig } from "./vacuum/behaviors/vacuum-service-area-server.js";
+import {
+  type VacuumEffectiveConfig,
+  withResolvedRooms,
+} from "./vacuum/behaviors/vacuum-service-area-server.js";
 
 const logger = Logger.get("LegacyEndpoint");
+
+const applianceTypes = new Set<MatterDeviceType>([
+  "dishwasher",
+  "laundry_washer",
+  "laundry_dryer",
+]);
 
 /**
  * @deprecated
@@ -221,6 +231,27 @@ export class LegacyEndpoint extends EntityEndpoint {
         }
       }
 
+      // An appliance's power switch only reports on and off (#486).
+      if (
+        mapping?.matterDeviceType &&
+        applianceTypes.has(mapping.matterDeviceType) &&
+        !mapping.operationalStateEntity
+      ) {
+        const stateEntityId = registry.findOperationalStateEntityForDevice(
+          entity.device_id,
+        );
+        if (stateEntityId && stateEntityId !== entityId) {
+          effectiveMapping = {
+            ...effectiveMapping,
+            entityId: effectiveMapping?.entityId ?? entityId,
+            operationalStateEntity: stateEntityId,
+          };
+          logger.debug(
+            `Auto-assigned operational state ${stateEntityId} to ${entityId}`,
+          );
+        }
+      }
+
       // 4. Auto-assign power entity to switch/plug entities.
       // Not lights: an outlet's indicator light would grab the outlet's power
       // sensor, and electrical clusters on a light endpoint break Aqara (#374).
@@ -229,6 +260,7 @@ export class LegacyEndpoint extends EntityEndpoint {
         if (domain === "switch") {
           const powerEntityId = registry.findPowerEntityForDevice(
             entity.device_id,
+            entityId,
           );
           if (powerEntityId && powerEntityId !== entityId) {
             effectiveMapping = {
@@ -249,6 +281,7 @@ export class LegacyEndpoint extends EntityEndpoint {
         if (domain === "switch") {
           const energyEntityId = registry.findEnergyEntityForDevice(
             entity.device_id,
+            entityId,
           );
           if (energyEntityId && energyEntityId !== entityId) {
             effectiveMapping = {
@@ -696,10 +729,13 @@ export class LegacyEndpoint extends EntityEndpoint {
     // entity state is structurally identical. matter.js uses isDeepEqual on
     // setStateOf, so the entity$Changed event would never fire. Bump
     // last_updated to force a structural difference.
-    let effectiveState = state;
+    let effectiveState = withResolvedRooms(state, this.vacuumEffective);
     if (this.pendingMappedChange) {
       this.pendingMappedChange = false;
-      effectiveState = { ...state, last_updated: new Date().toISOString() };
+      effectiveState = {
+        ...effectiveState,
+        last_updated: new Date().toISOString(),
+      };
     }
     await updateEntityState(this, effectiveState);
   }

@@ -36,10 +36,14 @@ export function isDetachedEndpointError(error: unknown): boolean {
   );
 }
 
-/** Push one Home Assistant state onto an endpoint, serialized per endpoint. */
+/**
+ * Push one Home Assistant state onto an endpoint, serialized per endpoint.
+ * Without a state the last one is pushed again, which puts every cluster back
+ * on what HA reports after a failed call (#446).
+ */
 export function updateEntityState(
   endpoint: Endpoint,
-  state: HomeAssistantEntityState,
+  state?: HomeAssistantEntityState,
 ): Promise<void> {
   const next = (chains.get(endpoint) ?? Promise.resolve()).then(() =>
     writeState(endpoint, state),
@@ -114,7 +118,7 @@ async function writeRegistry(
 
 async function writeState(
   endpoint: Endpoint,
-  state: HomeAssistantEntityState,
+  state?: HomeAssistantEntityState,
 ): Promise<void> {
   try {
     await endpoint.construction.ready;
@@ -125,7 +129,14 @@ async function writeState(
   try {
     const current = endpoint.stateOf(HomeAssistantEntityBehavior).entity;
     await endpoint.setStateOf(HomeAssistantEntityBehavior, {
-      entity: { ...current, state },
+      entity: {
+        ...current,
+        // a re-push needs a new last_updated, setStateOf drops equal values
+        state: state ?? {
+          ...current.state,
+          last_updated: new Date().toISOString(),
+        },
+      },
     });
   } catch (error) {
     if (isDetachedEndpointError(error)) return;

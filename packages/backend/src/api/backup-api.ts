@@ -12,7 +12,10 @@ import unzipper from "unzipper";
 import { pluginStateFilePath } from "../plugins/plugin-storage.js";
 import type { BackupService } from "../services/backup/backup-service.js";
 import type { BridgeService } from "../services/bridges/bridge-service.js";
-import type { AppSettingsStorage } from "../services/storage/app-settings-storage.js";
+import type {
+  AppSettingsStorage,
+  BackupSettings,
+} from "../services/storage/app-settings-storage.js";
 import type { BridgeStorage } from "../services/storage/bridge-storage.js";
 import type { EntityMappingStorage } from "../services/storage/entity-mapping-storage.js";
 
@@ -560,11 +563,35 @@ export function backupApi(
 
   router.put("/settings", async (req, res) => {
     try {
-      const body = req.body as {
-        autoBackup?: boolean;
-        backupRetentionCount?: number;
+      const { autoBackup, backupRetentionCount } = (req.body ?? {}) as {
+        autoBackup?: unknown;
+        backupRetentionCount?: unknown;
       };
-      await settingsStorage.setBackupSettings(body);
+      const next: Partial<BackupSettings> = {};
+      if (autoBackup !== undefined) {
+        if (typeof autoBackup !== "boolean") {
+          res.status(400).json({ error: "autoBackup must be a boolean" });
+          return;
+        }
+        next.autoBackup = autoBackup;
+      }
+      if (backupRetentionCount !== undefined) {
+        // Same bounds as the settings form; anything else used to be stored
+        // as-is and could make retention delete every backup.
+        if (
+          typeof backupRetentionCount !== "number" ||
+          !Number.isInteger(backupRetentionCount) ||
+          backupRetentionCount < 1 ||
+          backupRetentionCount > 100
+        ) {
+          res.status(400).json({
+            error: "backupRetentionCount must be an integer between 1 and 100",
+          });
+          return;
+        }
+        next.backupRetentionCount = backupRetentionCount;
+      }
+      await settingsStorage.setBackupSettings(next);
       res.json(settingsStorage.backupSettings);
     } catch (error) {
       const message =

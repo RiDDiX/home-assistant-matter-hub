@@ -519,6 +519,7 @@ export class SessionSupervisor {
           const type = message?.payloadHeader?.messageType;
           if (type === MessageType.SubscribeRequest) {
             this.pushWedgeRing(this.subscribeTimesMs, session, now);
+            this.armSubscribeWatchdog(session);
           } else if (type != null && commandMessageTypes.includes(type)) {
             this.lastCommandImAt.set(session, now);
           }
@@ -595,6 +596,21 @@ export class SessionSupervisor {
         `wedge v2 give-up recorded sub=${(sub as { subscriptionId?: number })?.subscriptionId}`,
       );
     });
+  }
+
+  // A subscription that dies before its first report never joins the session,
+  // so no event fires to reap the session (#487).
+  private armSubscribeWatchdog(session: { id?: unknown }) {
+    const sessionId = session.id;
+    if (typeof sessionId !== "number") return;
+    if (this.staleSessionTimers.has(sessionId)) return;
+    this.staleSessionTimers.set(
+      sessionId,
+      setTimeout(() => {
+        this.staleSessionTimers.delete(sessionId);
+        this.closeStaleSession(sessionId, PRIMING_GRACE_MS);
+      }, replacedSessionTimeoutMs(this.dataProvider.featureFlags)),
+    );
   }
 
   private closeStaleSession(sessionId: number, minQuietMs = 0) {

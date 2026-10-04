@@ -160,8 +160,8 @@ export function SensorDevice(
     deviceClass === SensorDeviceClass.voltage ||
     deviceClass === SensorDeviceClass.current
   ) {
-    // Consumption sensors default to ElectricalMeter (0x0514), which Google and
-    // SmartThings render. SolarPower (0x0017) stays behind the solar_power /
+    // Consumption sensors default to ElectricalMeter (0x0514), which Google
+    // renders. SolarPower (0x0017) needs the solar_power /
     // electrical_sensor overrides for generation.
     return ElectricalMeterType.set({ homeAssistantEntity });
   }

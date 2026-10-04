@@ -33,7 +33,10 @@ const mappingStorage = {
   setMapping: async () => {},
 } as unknown as EntityMappingStorage;
 
-async function withRouter(fn: (base: string) => Promise<void>): Promise<void> {
+async function withRouter(
+  fn: (base: string) => Promise<void>,
+  settingsStorage = {} as unknown as AppSettingsStorage,
+): Promise<void> {
   const app = express();
   app.use(express.json());
   app.use(
@@ -43,7 +46,7 @@ async function withRouter(fn: (base: string) => Promise<void>): Promise<void> {
       mappingStorage,
       dir,
       {} as unknown as BackupService,
-      {} as unknown as AppSettingsStorage,
+      settingsStorage,
     ),
   );
   const server = app.listen(0);
@@ -82,5 +85,41 @@ describe("plugin state in backup and restore (#439 review)", () => {
         camera: false,
       });
     });
+  });
+});
+
+describe("backup settings validation", () => {
+  it("rejects values the settings form cannot send and stores valid ones", async () => {
+    const stored: unknown[] = [];
+    const settingsStorage = {
+      backupSettings: { autoBackup: true, backupRetentionCount: 5 },
+      setBackupSettings: async (next: unknown) => {
+        stored.push(next);
+      },
+    } as unknown as AppSettingsStorage;
+    await withRouter(async (base) => {
+      const put = (body: unknown) =>
+        fetch(`${base}/backup/settings`, {
+          method: "PUT",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(body),
+        });
+      for (const body of [
+        { backupRetentionCount: "abc" },
+        { backupRetentionCount: 0 },
+        { backupRetentionCount: 2.5 },
+        { backupRetentionCount: 101 },
+        { backupRetentionCount: null },
+        { autoBackup: "yes" },
+      ]) {
+        expect((await put(body)).status).toBe(400);
+      }
+      expect(stored).toHaveLength(0);
+
+      expect((await put({ backupRetentionCount: 3, extra: 1 })).status).toBe(
+        200,
+      );
+      expect(stored).toEqual([{ backupRetentionCount: 3 }]);
+    }, settingsStorage);
   });
 });

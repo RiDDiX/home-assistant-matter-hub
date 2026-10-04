@@ -243,15 +243,22 @@ describe("batteryFingerprintFor (#450)", () => {
     expect(registry.batteryFingerprintFor(BATTERY, undefined)).toBe("");
   });
 
-  it("sensor endpoints never carry a battery fingerprint, even with the flag", () => {
-    // a sibling temperature sensor would resolve the device battery without
-    // the sensor gate, the self-check alone does not cover this
+  it("sensor endpoints resolve the device battery like the build does (#498)", () => {
     const states = vacuumStates("85");
     states["sensor.robot_temp"] = state("sensor.robot_temp", "21", {});
+    states["binary_sensor.robot_door"] = state(
+      "binary_sensor.robot_door",
+      "off",
+      {},
+    );
     const registry = sut(states, true);
     expect(registry.batteryFingerprintFor("sensor.robot_temp", undefined)).toBe(
-      "",
+      BATTERY,
     );
+    expect(registry.batteryFingerprintFor(BATTERY, undefined)).toBe("");
+    expect(
+      registry.batteryFingerprintFor("binary_sensor.robot_door", undefined),
+    ).toBe("");
   });
 });
 

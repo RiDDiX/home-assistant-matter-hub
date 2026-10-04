@@ -347,6 +347,16 @@ export class WindowCoveringServerBase extends FeaturedBase {
     const homeAssistant = await this.agent.load(HomeAssistantEntityBehavior);
     this.update(homeAssistant.entity);
     this.reactTo(homeAssistant.onChange, this.update, { lock: true });
+    this.reactTo(homeAssistant.events.actionFailed, this.dropOptimistic);
+  }
+
+  // The HA call failed, so the move never started. Without this the re-applied
+  // HA state would keep the optimistic Opening/Closing until the timeout (#446).
+  private dropOptimistic() {
+    const optimistic = coverOptimistic.get(this.endpoint);
+    if (!optimistic) return;
+    clearOptimisticAxis(optimistic, "lift");
+    clearOptimisticAxis(optimistic, "tilt");
   }
 
   private update(entity: HomeAssistantEntityInformation) {

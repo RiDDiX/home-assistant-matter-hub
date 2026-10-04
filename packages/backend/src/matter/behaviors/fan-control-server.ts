@@ -1,5 +1,5 @@
 import type { HomeAssistantEntityInformation } from "@home-assistant-matter-hub/common";
-import { Logger } from "@matter/general";
+import { Logger, Transaction } from "@matter/general";
 import type { ActionContext } from "@matter/main";
 import {
   FanControlServer as Base,
@@ -30,6 +30,16 @@ import type { ValueGetter, ValueSetter } from "./utils/cluster-config.js";
 import AirflowDirection = FanControl.AirflowDirection;
 
 const logger = Logger.get("FanControlServer");
+
+// matter.js locks the datasource behind a behavior, but the reactor's lock check
+// reads lockedBy off the raw object, so hand it the datasource itself.
+function lockResource(behavior: object): Transaction.Resource {
+  let resource = behavior as Transaction.Resource;
+  while (resource[Transaction.Resource.reference]) {
+    resource = resource[Transaction.Resource.reference] as Transaction.Resource;
+  }
+  return resource;
+}
 
 const defaultStepSize = 33.33;
 const minSpeedMax = 3;
@@ -230,7 +240,10 @@ export class FanControlServerBase extends FeaturedBase {
     // that one has to be locked too or its write still gets dropped (#464).
     this.reactTo(homeAssistant.onChange, this.update, {
       lock: this.agent.has(FanSpeedMemoryBehavior)
-        ? [this, this.agent.get(FanSpeedMemoryBehavior)]
+        ? [
+            lockResource(this),
+            lockResource(this.agent.get(FanSpeedMemoryBehavior)),
+          ]
         : true,
     });
     this.reactTo(

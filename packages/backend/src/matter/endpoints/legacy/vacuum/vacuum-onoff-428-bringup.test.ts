@@ -161,6 +161,9 @@ afterEach(async () => {
 });
 
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
+// The onOff reactor takes a lock, slow CI runners need more than the delay.
+// biome-ignore lint/suspicious/noExplicitAny: read cluster state
+const onOff = (endpoint: LegacyEndpoint) => (endpoint.state as any).onOff.onOff;
 
 async function mount(value: string): Promise<LegacyEndpoint> {
   const endpoint = await LegacyEndpoint.create(registry(value), VACUUM);
@@ -195,13 +198,11 @@ describe("vacuum onOff run mode resolution (#428)", () => {
       t.includes("installed implementation is incompatible"),
     );
     expect(hit).toEqual([]);
-    // biome-ignore lint/suspicious/noExplicitAny: read cluster state
-    expect((endpoint.state as any).onOff.onOff).toBe(true);
+    await expect.poll(() => onOff(endpoint), { timeout: 3000 }).toBe(true);
     // biome-ignore lint/suspicious/noExplicitAny: read cluster state
     expect((endpoint.state as any).rvcRunMode.currentMode).toBe(1);
 
     await deliver(endpoint, "docked");
-    // biome-ignore lint/suspicious/noExplicitAny: read cluster state
-    expect((endpoint.state as any).onOff.onOff).toBe(false);
+    await expect.poll(() => onOff(endpoint), { timeout: 3000 }).toBe(false);
   });
 });

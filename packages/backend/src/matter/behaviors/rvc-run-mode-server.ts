@@ -2,9 +2,10 @@ import type { HomeAssistantEntityInformation } from "@home-assistant-matter-hub/
 import { Logger } from "@matter/general";
 import {
   RvcRunModeServer as Base,
+  RvcOperationalStateBehavior,
   ServiceAreaBehavior,
 } from "@matter/main/behaviors";
-import { ServiceArea } from "@matter/main/clusters";
+import { RvcOperationalState, ServiceArea } from "@matter/main/clusters";
 import { ModeBase } from "@matter/main/clusters/mode-base";
 import { RvcRunMode } from "@matter/main/clusters/rvc-run-mode";
 import { EntityStateProvider } from "../../services/bridges/entity-state-provider.js";
@@ -30,6 +31,8 @@ export interface RvcRunModeServerConfig {
   pause: ValueSetter<void>;
   /** Optional: Clean a specific room by mode value */
   cleanRoom?: ValueSetter<number>;
+  /** Optional: Current service area names, to follow renames */
+  getAreaNames?: ValueGetter<{ areaId: number; name: string }[]>;
 }
 
 export interface RvcRunModeServerInitialState {
@@ -83,9 +86,21 @@ export interface CleaningSession {
   /** Cumulative cleaned area (m2) at clean start, so a lifetime sensor maps
    *  to per-clean progress (#368). null when no cleanedAreaEntity is set. */
   cleanedAreaBaseline: number | null;
+  /** Controller selection hidden while a clean started outside Matter runs,
+   *  put back when it ends (#492). */
+  parkedAreas: number[];
+  /** HA reported cleaning last, or a controller start is on its way. A
+   *  late cleaning update after a controller stop is not a new clean. */
+  haCleaning: boolean;
 }
 
 const cleaningSessions = new WeakMap<object, CleaningSession>();
+
+const idleOperationalStates = new Set<number>([
+  RvcOperationalState.OperationalState.Stopped,
+  RvcOperationalState.OperationalState.Charging,
+  RvcOperationalState.OperationalState.Docked,
+]);
 
 export function getSession(endpoint: object): CleaningSession {
   let session = cleaningSessions.get(endpoint);
@@ -98,6 +113,8 @@ export function getSession(endpoint: object): CleaningSession {
       observedCleaning: false,
       pendingDispatches: [],
       cleanedAreaBaseline: null,
+      parkedAreas: [],
+      haCleaning: false,
     };
     cleaningSessions.set(endpoint, session);
   }
@@ -144,12 +161,18 @@ class RvcRunModeServerBase extends Base {
       },
       { force: true },
     );
+    // unavailable drops the rooms, keep the last names
+    if (!["unavailable", "unknown"].includes(entity.state.state)) {
+      this.renameAreas(entity.state);
+    }
 
     // changeToMode already set currentMode=Cleaning, so the cleaning event
     // often arrives without a transition. Latch the flag here instead.
     if (newMode === RvcSupportedRunMode.Cleaning) {
       s.observedCleaning = true;
     }
+    const wasHaCleaning = s.haCleaning;
+    s.haCleaning = newMode === RvcSupportedRunMode.Cleaning;
 
     if (previousMode !== newMode) {
       if (newMode === RvcSupportedRunMode.Idle) {
@@ -199,6 +222,15 @@ class RvcRunModeServerBase extends Base {
             // ServiceArea not available
           }
           s.observedCleaning = false;
+          // Clear a finished job or the next HA clean stays stuck on its
+          // rooms. A mid-job recharge keeps them (#490).
+          if (s.activeAreas.every((id) => s.completedAreas.has(id))) {
+            s.activeAreas = [];
+            s.completedAreas.clear();
+            s.lastCurrentArea = null;
+            s.cleanedAreaBaseline = null;
+          }
+          this.restoreParkedAreas();
         }
         s.loggedShortCircuits.clear();
       } else if (newMode === RvcSupportedRunMode.Cleaning) {
@@ -213,6 +245,8 @@ class RvcRunModeServerBase extends Base {
           if (firstPending !== undefined) {
             this.trySetCurrentArea(firstPending);
           }
+        } else if (s.activeAreas.length === 0 && !wasHaCleaning) {
+          this.parkSelectedAreas();
         }
       }
     }
@@ -240,6 +274,43 @@ class RvcRunModeServerBase extends Base {
       } else if (mapping?.cleanedAreaEntity) {
         this.updateCurrentRoomFromCleanedArea();
       }
+    }
+  }
+
+  /**
+   * A room renamed in HA keeps its id, so relabel the area in place. A
+   * rebuild would cost the controller its selection and progress (#501).
+   */
+  private renameAreas(state: HomeAssistantEntityInformation["state"]) {
+    const getAreaNames = this.state.config.getAreaNames;
+    if (!getAreaNames) return;
+    try {
+      const names = new Map(
+        getAreaNames(state, this.agent).map((a) => [a.areaId, a.name]),
+      );
+      const serviceArea = this.agent.get(ServiceAreaBehavior);
+      let renamed = false;
+      const areas = serviceArea.state.supportedAreas.map((area) => {
+        const name = names.get(area.areaId);
+        const info = area.areaInfo.locationInfo;
+        if (!name || !info || info.locationName === name) return area;
+        renamed = true;
+        return {
+          ...area,
+          areaInfo: {
+            ...area.areaInfo,
+            locationInfo: { ...info, locationName: name },
+          },
+        };
+      });
+      if (renamed) {
+        serviceArea.state.supportedAreas = areas;
+        logger.info(
+          `Renamed service areas: ${areas.map((a) => `${a.areaId}:${a.areaInfo.locationInfo?.locationName}`).join(", ")}`,
+        );
+      }
+    } catch {
+      // ServiceArea not available
     }
   }
 
@@ -286,20 +357,11 @@ class RvcRunModeServerBase extends Base {
 
       const serviceArea = this.agent.get(ServiceAreaBehavior);
 
-      // External-start sessions (HA service call, Roborock app) never run
-      // changeToMode, so activeAreas stays []. currentArea must still
-      // track the actual room reported by the sensor, so in that case
-      // accept any supportedAreas match. With a controller-driven
-      // selection (activeAreas populated), keep the strict filter so we
-      // don't mis-attribute drive-through rooms the user didn't pick.
-      const externalSession = s.activeAreas.length === 0;
+      // currentArea follows the robot, including rooms outside the job (#501).
+      // Try selected rooms first so a shared room_id hits the floor being cleaned.
       const supportedAreaIds = serviceArea.state.supportedAreas.map(
         (a) => a.areaId,
       );
-      const isAllowedArea = (id: number) =>
-        externalSession
-          ? supportedAreaIds.includes(id)
-          : s.activeAreas.includes(id);
 
       // Match by numeric room/segment ID (preferred) or by room name.
       // Dreame sensors use "room_id", others may use "segment_id".
@@ -310,38 +372,45 @@ class RvcRunModeServerBase extends Base {
       const segmentId = sensorAttrs.segment_id ?? sensorAttrs.room_id;
       const roomName = roomState.state;
 
-      let matchedAreaId: number | null = null;
+      const findArea = (isAllowedArea: (id: number) => boolean) => {
+        // Strategy 1: Direct segmentId match (areaId === room_id, e.g. Dreame floor 0).
+        if (segmentId != null && isAllowedArea(segmentId)) {
+          return segmentId;
+        }
 
-      // Strategy 1: Direct segmentId match (areaId === room_id, e.g. Dreame floor 0).
-      if (segmentId != null && isAllowedArea(segmentId)) {
-        matchedAreaId = segmentId;
-      }
-
-      // Strategy 2: Look up segmentId in supportedAreas to find the
-      // corresponding areaId. Dreame multi-floor vacuums offset room IDs
-      // per floor (areaId = floorIndex * 10000 + room_id), so the raw
-      // sensor room_id won't match directly for floor > 0. Also handles
-      // cases where areaId is a hash of a string room ID.
-      if (matchedAreaId === null && segmentId != null) {
-        for (const area of serviceArea.state.supportedAreas) {
-          if (isAllowedArea(area.areaId) && area.areaId % 10000 === segmentId) {
-            matchedAreaId = area.areaId;
-            break;
+        // Strategy 2: Look up segmentId in supportedAreas to find the
+        // corresponding areaId. Dreame multi-floor vacuums offset room IDs
+        // per floor (areaId = floorIndex * 10000 + room_id), so the raw
+        // sensor room_id won't match directly for floor > 0. Also handles
+        // cases where areaId is a hash of a string room ID.
+        if (segmentId != null) {
+          for (const area of serviceArea.state.supportedAreas) {
+            if (
+              isAllowedArea(area.areaId) &&
+              area.areaId % 10000 === segmentId
+            ) {
+              return area.areaId;
+            }
           }
         }
-      }
 
-      // Strategy 3: Match by location name in supportedAreas.
-      if (matchedAreaId === null && roomName) {
-        const area = serviceArea.state.supportedAreas.find(
-          (a) =>
-            a.areaInfo.locationInfo?.locationName?.toLowerCase() ===
-            roomName.toLowerCase(),
-        );
-        if (area && isAllowedArea(area.areaId)) {
-          matchedAreaId = area.areaId;
+        // Strategy 3: Match by location name in supportedAreas.
+        if (roomName) {
+          const area = serviceArea.state.supportedAreas.find(
+            (a) =>
+              a.areaInfo.locationInfo?.locationName?.toLowerCase() ===
+              roomName.toLowerCase(),
+          );
+          if (area && isAllowedArea(area.areaId)) {
+            return area.areaId;
+          }
         }
-      }
+        return null;
+      };
+
+      const matchedAreaId =
+        findArea((id) => s.activeAreas.includes(id)) ??
+        findArea((id) => supportedAreaIds.includes(id));
 
       if (matchedAreaId === null) {
         logger.info(
@@ -351,7 +420,24 @@ class RvcRunModeServerBase extends Base {
         );
         return;
       }
-      if (matchedAreaId === s.lastCurrentArea) return;
+
+      // Driving through a room outside the controller job: show it, but
+      // leave the selected room unfinished until the next selected one.
+      if (s.activeAreas.length > 0 && !s.activeAreas.includes(matchedAreaId)) {
+        if (serviceArea.state.currentArea !== matchedAreaId) {
+          serviceArea.state.currentArea = matchedAreaId;
+          logger.info(
+            `currentRoom sensor: passing through area ${matchedAreaId} ("${roomName}")`,
+          );
+        }
+        return;
+      }
+      if (matchedAreaId === s.lastCurrentArea) {
+        if (serviceArea.state.currentArea !== matchedAreaId) {
+          this.trySetCurrentArea(matchedAreaId);
+        }
+        return;
+      }
 
       // Room transition detected, mark previous area as completed
       if (s.lastCurrentArea !== null) {
@@ -593,7 +679,7 @@ class RvcRunModeServerBase extends Base {
         state.progress = s.activeAreas.map((id) => ({
           areaId: id,
           status:
-            s.completedAreas.has(id) || id === last
+            s.completedAreas.has(id) || id === last || id === s.lastCurrentArea
               ? ServiceArea.OperationalStatus.Completed
               : ServiceArea.OperationalStatus.Skipped,
         }));
@@ -601,6 +687,66 @@ class RvcRunModeServerBase extends Base {
       serviceArea.state.currentArea = null;
     } catch {
       // ServiceArea not available
+    }
+  }
+
+  /**
+   * A clean started from HA, the vendor app, Alexa on/off or a room switch
+   * is not the last controller job. Keeping that job's rooms made
+   * Apple Home show "cleaning 3 rooms" for a one room clean (#492).
+   */
+  private parkSelectedAreas() {
+    const s = getSession(this.endpoint);
+    try {
+      const serviceArea = this.agent.get(ServiceAreaBehavior);
+      const state = serviceArea.state as typeof serviceArea.state & {
+        progress?: ServiceArea.Progress[];
+      };
+      if (state.selectedAreas.length > 0) {
+        s.parkedAreas = [...state.selectedAreas];
+        state.selectedAreas = [];
+      }
+      if (state.progress?.length) {
+        state.progress = [];
+      }
+    } catch {
+      // ServiceArea not available
+    }
+  }
+
+  /**
+   * Put the parked selection back once the outside clean is over. Apple
+   * Home does not re-send a selection it thinks is still set (#317).
+   * A newer controller selection wins.
+   */
+  private restoreParkedAreas() {
+    const s = getSession(this.endpoint);
+    if (s.parkedAreas.length === 0) return;
+    try {
+      const serviceArea = this.agent.get(ServiceAreaBehavior);
+      if (serviceArea.state.selectedAreas.length === 0) {
+        serviceArea.state.selectedAreas = s.parkedAreas;
+      }
+    } catch {
+      // ServiceArea not available
+    }
+    s.parkedAreas = [];
+  }
+
+  /**
+   * HA can take 15 s to report cleaning after a start. Apple Home drops its
+   * own "Vacuuming" after about 10 s and shows Cleaning + Docked as "Ready,
+   * Resume Cleaning Later" until then (#496). The next HA update corrects it.
+   */
+  private showRunning() {
+    try {
+      const opState = this.agent.get(RvcOperationalStateBehavior);
+      if (idleOperationalStates.has(opState.state.operationalState)) {
+        opState.state.operationalState =
+          RvcOperationalState.OperationalState.Running;
+      }
+    } catch {
+      // RvcOperationalState not available
     }
   }
 
@@ -641,6 +787,12 @@ class RvcRunModeServerBase extends Base {
       };
     }
 
+    // Apple starts its unchanged selection without re-sending it (#317)
+    if (newMode !== RvcSupportedRunMode.Idle) {
+      this.restoreParkedAreas();
+      s.haCleaning = true;
+    }
+
     // Check for room-specific cleaning mode
     if (isRoomMode(newMode)) {
       // When selectedAreas exist (e.g. Apple Home sends selectAreas before
@@ -662,6 +814,7 @@ class RvcRunModeServerBase extends Base {
           s.cleanedAreaBaseline = this.readCleanedAreaSqm();
           this.trySetCurrentArea(s.activeAreas[0]);
           homeAssistant.callAction(this.state.config.start(void 0, this.agent));
+          this.showRunning();
           this.state.currentMode = newMode;
           return {
             status: ModeBase.ModeChangeStatus.Success,
@@ -683,6 +836,7 @@ class RvcRunModeServerBase extends Base {
         homeAssistant.callAction(
           this.state.config.cleanRoom(newMode, this.agent),
         );
+        this.showRunning();
         this.state.currentMode = newMode;
         return {
           status: ModeBase.ModeChangeStatus.Success,
@@ -713,11 +867,13 @@ class RvcRunModeServerBase extends Base {
           // ServiceArea not available
         }
         homeAssistant.callAction(this.state.config.start(void 0, this.agent));
+        this.showRunning();
         break;
       }
       case RvcSupportedRunMode.Idle:
         // Explicit user command to stop, clear session state
         this.finalizeProgressOnStop();
+        this.restoreParkedAreas();
         s.completedAreas.clear();
         s.lastCurrentArea = null;
         s.activeAreas = [];

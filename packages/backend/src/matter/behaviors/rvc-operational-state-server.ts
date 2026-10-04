@@ -11,11 +11,16 @@ import ErrorState = RvcOperationalState.ErrorState;
 
 const logger = Logger.get("RvcOperationalStateServer");
 
-// States that indicate the vacuum is actively performing work
+// States still in progress. A paused job counts.
 const activeStates = new Set([
   OperationalState.Running,
   OperationalState.SeekingCharger,
+  OperationalState.Paused,
 ]);
+
+// Last state Home Assistant reported, per endpoint. A controller start shows
+// Running before HA confirms it (#496), that is no finished job.
+const haStates = new WeakMap<object, OperationalState>();
 
 // Operational states to advertise in operationalStateList.
 // Only include the well-established states from the base OperationalState
@@ -49,8 +54,11 @@ export interface RvcOperationalStateServerConfig {
   goHome?: ValueSetter<void>;
 }
 
+// OperationCompletion is optional in the cluster, so matter.js leaves it off
 // biome-ignore lint/correctness/noUnusedVariables: Biome thinks this is unused, but it's used by the function below
-class RvcOperationalStateServerBase extends Base {
+class RvcOperationalStateServerBase extends Base.enable({
+  events: { operationCompletion: true },
+}) {
   declare state: RvcOperationalStateServerBase.State;
 
   override async initialize() {
@@ -86,7 +94,8 @@ class RvcOperationalStateServerBase extends Base {
       entity.state,
       this.agent,
     );
-    const previousState = this.state.operationalState;
+    const previousState = haStates.get(this.endpoint);
+    haStates.set(this.endpoint, newState);
 
     const errorStateId =
       newState === OperationalState.Error
@@ -104,10 +113,15 @@ class RvcOperationalStateServerBase extends Base {
     );
 
     // Emit OperationCompletion event when transitioning from an active state
-    // (Running, SeekingCharger) to an inactive state (Docked, Stopped, Paused).
-    // This is MANDATORY for the RoboticVacuumCleaner device type.
+    // (Running, SeekingCharger, Paused) to Docked, Stopped or Error.
+    // Required on the RoboticVacuumCleaner device type.
+    // Unavailable maps to Error with no finished job.
+    const offline =
+      entity.state.state === "unavailable" || entity.state.state === "unknown";
     if (
-      activeStates.has(previousState as OperationalState) &&
+      !offline &&
+      previousState !== undefined &&
+      activeStates.has(previousState) &&
       !activeStates.has(newState)
     ) {
       logger.info(

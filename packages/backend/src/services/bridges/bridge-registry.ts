@@ -17,6 +17,7 @@ import { Logger } from "@matter/general";
 import { callService } from "home-assistant-js-websocket";
 import { keys, pickBy, values } from "lodash-es";
 import { sendHaMessage } from "../../utils/send-ha-message.js";
+import { pairingIndex } from "../../utils/trailing-index.js";
 import type { HomeAssistantClient } from "../home-assistant/home-assistant-client.js";
 import type {
   HomeAssistantDevices,
@@ -125,13 +126,9 @@ export class BridgeRegistry {
     mapping: EntityMappingConfig | undefined,
   ): string {
     if (mapping?.batteryEntity || mapping?.disableBatteryMapping) return "";
-    // sensor endpoints never auto-map a battery, same gate as the managers
-    if (
-      entityId.startsWith("sensor.") ||
-      entityId.startsWith("binary_sensor.")
-    ) {
-      return "";
-    }
+    // sensor.* endpoints auto-map the device battery too (composed temperature
+    // sensor), so they need the catch-up as well (#498)
+    if (entityId.startsWith("binary_sensor.")) return "";
     if (
       !this.isAutoBatteryMappingEnabled() &&
       !entityId.startsWith("vacuum.")
@@ -245,6 +242,27 @@ export class BridgeRegistry {
    */
   isBatteryEntityUsed(entityId: string): boolean {
     return this._usedBatteryEntities.has(entityId);
+  }
+
+  // An enum with a running and a paused state: run (Home Connect, SmartThings),
+  // in_use (Miele), running (LG) (#486).
+  findOperationalStateEntityForDevice(deviceId: string): string | undefined {
+    for (const entity of values(this.registry.entities)) {
+      if (entity.device_id !== deviceId) continue;
+      if (!entity.entity_id.startsWith("sensor.")) continue;
+      const attrs = this.registry.states[entity.entity_id]?.attributes as
+        | { device_class?: string; options?: unknown }
+        | undefined;
+      const options = Array.isArray(attrs?.options) ? attrs.options : [];
+      if (
+        attrs?.device_class === "enum" &&
+        ["run", "running", "in_use"].some((o) => options.includes(o)) &&
+        ["pause", "paused"].some((o) => options.includes(o))
+      ) {
+        return entity.entity_id;
+      }
+    }
+    return undefined;
   }
 
   /**
@@ -844,11 +862,17 @@ export class BridgeRegistry {
   }
 
   /**
-   * Find a power sensor entity (device_class: power) on the same HA device.
+   * Sensor with this device_class on the same HA device.
+   * Pair by index (`switch_2` -> `power_2`) when a strip has one
+   * sensor per outlet. Otherwise the first match (#488).
    */
-  findPowerEntityForDevice(deviceId: string): string | undefined {
-    const entities = values(this.registry.entities);
-    for (const entity of entities) {
+  private findSensorEntityForDevice(
+    deviceId: string,
+    deviceClass: SensorDeviceClass,
+    forEntityId?: string,
+  ): string | undefined {
+    const candidates: string[] = [];
+    for (const entity of values(this.registry.entities)) {
       if (entity.device_id !== deviceId) continue;
       if (!entity.entity_id.startsWith("sensor.")) continue;
 
@@ -856,31 +880,50 @@ export class BridgeRegistry {
       if (!state) continue;
 
       const attrs = state.attributes as SensorDeviceAttributes;
-      if (attrs.device_class === SensorDeviceClass.power) {
-        return entity.entity_id;
+      if (attrs.device_class === deviceClass) {
+        candidates.push(entity.entity_id);
       }
     }
-    return undefined;
+
+    if (candidates.length <= 1) return candidates[0];
+
+    if (forEntityId != null) {
+      const matched = candidates.filter((id) => {
+        const wanted = pairingIndex(forEntityId, id);
+        return wanted != null && pairingIndex(id, forEntityId) === wanted;
+      });
+      // don't guess between several matches
+      if (matched.length === 1) return matched[0];
+    }
+    return candidates[0];
+  }
+
+  /**
+   * Find a power sensor entity (device_class: power) on the same HA device.
+   */
+  findPowerEntityForDevice(
+    deviceId: string,
+    forEntityId?: string,
+  ): string | undefined {
+    return this.findSensorEntityForDevice(
+      deviceId,
+      SensorDeviceClass.power,
+      forEntityId,
+    );
   }
 
   /**
    * Find an energy sensor entity (device_class: energy) on the same HA device.
    */
-  findEnergyEntityForDevice(deviceId: string): string | undefined {
-    const entities = values(this.registry.entities);
-    for (const entity of entities) {
-      if (entity.device_id !== deviceId) continue;
-      if (!entity.entity_id.startsWith("sensor.")) continue;
-
-      const state = this.registry.states[entity.entity_id];
-      if (!state) continue;
-
-      const attrs = state.attributes as SensorDeviceAttributes;
-      if (attrs.device_class === SensorDeviceClass.energy) {
-        return entity.entity_id;
-      }
-    }
-    return undefined;
+  findEnergyEntityForDevice(
+    deviceId: string,
+    forEntityId?: string,
+  ): string | undefined {
+    return this.findSensorEntityForDevice(
+      deviceId,
+      SensorDeviceClass.energy,
+      forEntityId,
+    );
   }
 
   markPowerEntityUsed(entityId: string): void {
@@ -1030,14 +1073,20 @@ export class BridgeRegistry {
       const domain = entity.entity_id.split(".")[0];
       if (domain !== "switch" && domain !== "light") continue;
 
-      const powerEntityId = this.findPowerEntityForDevice(entity.device_id);
+      const powerEntityId = this.findPowerEntityForDevice(
+        entity.device_id,
+        entity.entity_id,
+      );
       if (powerEntityId && powerEntityId !== entity.entity_id) {
         if (!this._usedPowerEntities.has(powerEntityId)) {
           this._usedPowerEntities.add(powerEntityId);
         }
       }
 
-      const energyEntityId = this.findEnergyEntityForDevice(entity.device_id);
+      const energyEntityId = this.findEnergyEntityForDevice(
+        entity.device_id,
+        entity.entity_id,
+      );
       if (energyEntityId && energyEntityId !== entity.entity_id) {
         if (!this._usedEnergyEntities.has(energyEntityId)) {
           this._usedEnergyEntities.add(energyEntityId);

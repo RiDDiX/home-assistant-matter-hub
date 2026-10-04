@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   type ControllerSupport,
+  domainToDefaultMatterTypes,
   matterDeviceTypeControllerSupport,
   matterDeviceTypeLabels,
 } from "./entity-mapping.js";
@@ -22,6 +23,7 @@ describe("matterDeviceTypeControllerSupport", () => {
         value.google,
         value.alexa,
         value.aqara,
+        value.smartthings,
       ]) {
         expect(allowed, `${key}: ${support}`).toContain(support);
       }
@@ -49,5 +51,22 @@ describe("matterDeviceTypeControllerSupport", () => {
       "yes",
     );
     expect(matterDeviceTypeControllerSupport.speaker.aqara).toBe("yes");
+  });
+});
+
+describe("domainToDefaultMatterTypes", () => {
+  it("only suggests known device types", () => {
+    for (const [domain, types] of Object.entries(domainToDefaultMatterTypes)) {
+      for (const type of types ?? []) {
+        expect(matterDeviceTypeLabels, `${domain}: ${type}`).toHaveProperty(
+          type,
+        );
+      }
+    }
+  });
+
+  // Apple only shows wattage on outlets (#484)
+  it("offers the outlet type for lights", () => {
+    expect(domainToDefaultMatterTypes.light).toContain("on_off_plugin_unit");
   });
 });

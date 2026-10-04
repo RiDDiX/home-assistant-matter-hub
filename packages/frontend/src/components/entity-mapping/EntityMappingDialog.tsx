@@ -711,6 +711,14 @@ export function EntityMappingDialog({
               {controllerSupportWarning(matterDeviceType)}
             </Alert>
           )}
+        {currentDomain === "light" &&
+          matterDeviceType === "on_off_plugin_unit" && (
+            <Alert severity="warning" sx={{ mt: 1 }}>
+              Every controller will see this light as a plain outlet, with no
+              brightness or color. Only worth it to get a light's wattage into
+              Apple Home.
+            </Alert>
+          )}
 
         <TextField
           fullWidth

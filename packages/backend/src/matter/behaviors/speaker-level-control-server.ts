@@ -66,6 +66,13 @@ export class SpeakerLevelControlServerBase extends FeaturedBase {
     const homeAssistant = await this.agent.load(HomeAssistantEntityBehavior);
     this.update(homeAssistant.entity);
     this.reactTo(homeAssistant.onChange, this.update, { lock: true });
+    this.reactTo(homeAssistant.events.actionFailed, this.dropOptimistic);
+  }
+
+  private dropOptimistic() {
+    optimisticLevelState.delete(
+      this.agent.get(HomeAssistantEntityBehavior).entityId,
+    );
   }
 
   private update(entity: HomeAssistantEntityInformation) {

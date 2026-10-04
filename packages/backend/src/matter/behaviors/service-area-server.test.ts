@@ -16,7 +16,7 @@ function selectAreas(
 ) {
   const agent = mapping ? { get: () => ({ state: { mapping } }) } : undefined;
   return ServiceAreaServerBase.prototype.selectAreas.call(
-    { state, agent } as unknown as ServiceAreaServerBase,
+    { state, agent, endpoint: {} } as unknown as ServiceAreaServerBase,
     { newAreas },
   );
 }

@@ -10,6 +10,10 @@ import type { BridgeRegistry } from "../../services/bridges/bridge-registry.js";
 import type { HomeAssistantStates } from "../../services/home-assistant/home-assistant-registry.js";
 import { EntityEndpoint, getMappedEntityIds } from "./entity-endpoint.js";
 import { supportsCleaningModes } from "./legacy/vacuum/behaviors/vacuum-rvc-clean-mode-server.js";
+import {
+  type VacuumEffectiveConfig,
+  withResolvedRooms,
+} from "./legacy/vacuum/behaviors/vacuum-service-area-server.js";
 import { ServerModeVacuumDevice } from "./legacy/vacuum/server-mode-vacuum-device.js";
 import { updateEntityState } from "./update-entity-state.js";
 
@@ -284,6 +288,7 @@ export class ServerModeVacuumEndpoint extends EntityEndpoint {
       customName,
       mappedIds,
       endpointId,
+      { mapping: effectiveMapping, state },
     );
   }
 
@@ -297,6 +302,7 @@ export class ServerModeVacuumEndpoint extends EntityEndpoint {
     customName?: string,
     mappedEntityIds?: string[],
     endpointId?: string,
+    readonly vacuumEffective?: VacuumEffectiveConfig,
   ) {
     super(type, entityId, customName, mappedEntityIds, endpointId);
     // Debounce state updates to batch rapid changes into a single transaction.
@@ -355,10 +361,13 @@ export class ServerModeVacuumEndpoint extends EntityEndpoint {
     // entity state is structurally identical. matter.js uses isDeepEqual on
     // setStateOf, so the entity$Changed event would never fire. Bump
     // last_updated to force a structural difference.
-    let effectiveState = state;
+    let effectiveState = withResolvedRooms(state, this.vacuumEffective);
     if (this.pendingMappedChange) {
       this.pendingMappedChange = false;
-      effectiveState = { ...state, last_updated: new Date().toISOString() };
+      effectiveState = {
+        ...effectiveState,
+        last_updated: new Date().toISOString(),
+      };
     }
     await updateEntityState(this, effectiveState);
   }

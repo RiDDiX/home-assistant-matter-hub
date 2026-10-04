@@ -1,4 +1,4 @@
-import type { Logger } from "@matter/general";
+import { type Logger, Observable } from "@matter/general";
 import type { HassServiceTarget } from "home-assistant-js-websocket/dist/types.js";
 import type { LoggerService } from "../../core/app/logger.js";
 import { Service } from "../../core/ioc/service.js";
@@ -18,6 +18,7 @@ export interface HomeAssistantAction {
 
 interface HomeAssistantActionCall extends HomeAssistantAction {
   entityId: string;
+  seq: number;
 }
 
 export interface HomeAssistantActionsConfig {
@@ -30,6 +31,10 @@ export interface HomeAssistantActionsConfig {
 
 // Three failures in a row is a broken entity, not a blip.
 const TARGET_FAILURE_THRESHOLD = 3;
+
+// An On this soon after a level change is kept, some lights only switch on
+// through it (#453).
+const RECENT_CHANGE_MS = 2000;
 
 const defaultConfig: Required<HomeAssistantActionsConfig> = {
   retryAttempts: 3,
@@ -47,6 +52,10 @@ export class HomeAssistantActions extends Service {
   get available(): boolean {
     return this.client.haRunning;
   }
+
+  // #446: the issuing entity of a call that failed after its retries. The
+  // command already returned success, so its endpoint rolls back to HA state.
+  readonly failed = Observable<[entityId: string]>();
 
   private readonly log: Logger;
   private readonly debounceContext = new DebounceContext(
@@ -101,7 +110,14 @@ export class HomeAssistantActions extends Service {
     });
   }
 
-  private processAction(_key: string, calls: HomeAssistantActionCall[]) {
+  // bare Ons that may start an on-then-level pair (#491)
+  private readonly leadingOn = new Set<string>();
+  private readonly lastChangeAt = new Map<string, number>();
+  // calls per issuing entity, only the latest one may roll back (#446)
+  private readonly callSeq = new Map<string, number>();
+
+  private processAction(key: string, calls: HomeAssistantActionCall[]) {
+    this.leadingOn.delete(key);
     // target === false means skip entity targeting (domain-level services like mqtt.publish)
     const skipTarget = calls[0].target === false;
     const entity_id = skipTarget
@@ -115,6 +131,10 @@ export class HomeAssistantActions extends Service {
     // that is what the command guard asks about, and an action can target a
     // sibling entity (identify button, vacuum select).
     const origin = calls[0].entityId;
+    const seq = calls.reduce(
+      (max, c) => (c.entityId === origin ? Math.max(max, c.seq) : max),
+      0,
+    );
     this.callAction(domain, actionName, data, target, false)
       .then(() => this.recordTargetResult(origin, false))
       .catch((error) => {
@@ -123,6 +143,14 @@ export class HomeAssistantActions extends Service {
         this.log.error(
           `Failed to call action '${action}' for entity '${entity_id ?? "(no target)"}': ${errorMsg}`,
         );
+        // A timeout can land a minute later. A newer call owns the
+        // attributes by then, rolling back would undo its write.
+        if (this.callSeq.get(origin) !== seq) return;
+        try {
+          this.failed.emit(origin);
+        } catch (e) {
+          this.log.debug(`Rollback for '${origin}' failed: ${e}`);
+        }
       });
     diagnosticEventBus.emit(
       "command_received",
@@ -146,9 +174,30 @@ export class HomeAssistantActions extends Service {
     // are debounced independently instead of being merged incorrectly.
     const target =
       action.target === false ? entityId : (action.target ?? entityId);
-    const intent = Object.keys(action.data ?? {}).length ? "adjust" : "command";
-    const key = `${target}-${action.action}-${intent}`;
-    this.debounceContext.get(key, 100)({ ...action, entityId });
+    const base = `${target}-${action.action}`;
+    const hasData = Object.keys(action.data ?? {}).length > 0;
+    const key = `${base}-${hasData ? "adjust" : "command"}`;
+    if (action.action === "light.turn_on") {
+      const commandKey = `${base}-command`;
+      if (hasData) {
+        // A bare On here restores the old brightness and flashes (#491).
+        this.lastChangeAt.set(base, Date.now());
+        if (this.leadingOn.delete(commandKey)) {
+          this.debounceContext.get(commandKey, 100).unregister();
+        }
+      } else if (
+        Date.now() -
+          (this.lastChangeAt.get(base) ?? Number.NEGATIVE_INFINITY) >=
+          RECENT_CHANGE_MS &&
+        !this.debounceContext.isPending(commandKey)
+      ) {
+        // no recent level change, this On may start a pair
+        this.leadingOn.add(commandKey);
+      }
+    }
+    const seq = (this.callSeq.get(entityId) ?? 0) + 1;
+    this.callSeq.set(entityId, seq);
+    this.debounceContext.get(key, 100)({ ...action, entityId, seq });
   }
 
   async callAction<T = void>(

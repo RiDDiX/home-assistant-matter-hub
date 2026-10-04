@@ -496,9 +496,9 @@
     "confirmDeleteMessage": "Are you sure you want to delete \"{{filename}}\"? This action cannot be undone.",
     "settings": "Ayarlar",
     "autoBackupLabel": "Otomatik yedekleme",
-    "autoBackupDesc": "Belirli aralıklarla otomatik yedek oluştur.",
+    "autoBackupDesc": "Uygulama kapanırken veya yeniden başlatılırken otomatik olarak tam yedek oluştur.",
     "retentionCount": "Saklama adedi",
-    "retentionCountDesc": "Saklanacak otomatik yedek sayısı"
+    "retentionCountDesc": "Saklanacak yedek sayısı (en eskileri otomatik olarak silinir)"
   },
   "networkMap": {
     "title": "Ağ haritası",

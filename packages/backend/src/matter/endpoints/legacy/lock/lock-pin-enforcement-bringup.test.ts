@@ -107,7 +107,13 @@ async function mount() {
   return endpoint;
 }
 
-const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
+// The store change lands through a reactor, give slow CI runners time.
+const requirePin = (endpoint: Endpoint) =>
+  expect.poll(
+    // biome-ignore lint/suspicious/noExplicitAny: read cluster state
+    () => (endpoint.state as any).doorLock.requirePinForRemoteOperation,
+    { timeout: 3000 },
+  );
 
 function unlock(endpoint: Endpoint, pinCode?: Uint8Array) {
   return endpoint.act(async (agent) => {
@@ -130,12 +136,7 @@ describe("PIN enforcement follows the credential store (#464 follow-up)", () => 
       entityId: "lock.front_door",
       pinCode: "4321",
     });
-    await delay(30);
-
-    // biome-ignore lint/suspicious/noExplicitAny: read cluster state
-    expect((endpoint.state as any).doorLock.requirePinForRemoteOperation).toBe(
-      true,
-    );
+    await requirePin(endpoint).toBe(true);
     calls.length = 0;
     await expect(unlock(endpoint)).rejects.toThrow();
     expect(calls.length).toBe(0);
@@ -150,14 +151,9 @@ describe("PIN enforcement follows the credential store (#464 follow-up)", () => 
       entityId: "lock.front_door",
       pinCode: "4321",
     });
-    await delay(30);
+    await requirePin(endpoint).toBe(true);
     await storage.deleteCredential("lock.front_door");
-    await delay(30);
-
-    // biome-ignore lint/suspicious/noExplicitAny: read cluster state
-    expect((endpoint.state as any).doorLock.requirePinForRemoteOperation).toBe(
-      false,
-    );
+    await requirePin(endpoint).toBe(false);
     calls.length = 0;
     await unlock(endpoint);
     expect(calls.length).toBe(1);

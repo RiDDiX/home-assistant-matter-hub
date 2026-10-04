@@ -33,6 +33,15 @@ export class BackupService {
   ) {
     this.backupDir = path.join(props.storageLocation, "backups");
     fs.mkdirSync(this.backupDir, { recursive: true });
+    // A backup taken on shutdown can be killed before it prunes (#483), so
+    // sweep what the last run left behind instead of waiting for the next
+    // completed backup.
+    for (const file of fs.readdirSync(this.backupDir)) {
+      if (file.endsWith(".part")) {
+        fs.unlinkSync(path.join(this.backupDir, file));
+      }
+    }
+    this.enforceRetention();
   }
 
   async createBackup(auto: boolean): Promise<BackupMetadata> {
@@ -46,6 +55,9 @@ export class BackupService {
     const prefix = auto ? "auto" : "manual";
     const filename = `hamh-${prefix}-${version}-${dateStr}.zip`;
     const filepath = path.join(this.backupDir, filename);
+    // Write under a temporary name so a killed shutdown leaves no half-written
+    // archive behind that the backup list would treat as restorable (#483).
+    const tmpPath = `${filepath}.part`;
 
     const bridges = this.bridgeStorage.bridges as BridgeData[];
     const entityMappings: Record<string, unknown[]> = {};
@@ -78,10 +90,11 @@ export class BackupService {
     };
 
     await new Promise<void>((resolve, reject) => {
-      const output = fs.createWriteStream(filepath);
+      const output = fs.createWriteStream(tmpPath);
       const archive = archiver("zip", { zlib: { level: 9 } });
 
       output.on("close", () => resolve());
+      output.on("error", (err) => reject(err));
       archive.on("error", (err) => reject(err));
       archive.pipe(output);
 
@@ -136,7 +149,12 @@ export class BackupService {
       }
 
       archive.finalize();
+    }).catch((e) => {
+      fs.rmSync(tmpPath, { force: true });
+      throw e;
     });
+
+    fs.renameSync(tmpPath, filepath);
 
     const stat = fs.statSync(filepath);
     const metadata: BackupMetadata = {
@@ -151,7 +169,7 @@ export class BackupService {
       `Backup created: ${filename} (${Math.round(stat.size / 1024)} KB)`,
     );
 
-    await this.enforceRetention();
+    this.enforceRetention();
     return metadata;
   }
 
@@ -226,10 +244,12 @@ export class BackupService {
     }
   }
 
-  private async enforceRetention(): Promise<void> {
+  private enforceRetention(): void {
     const settings = this.settingsStorage.backupSettings;
     const maxCount = settings.backupRetentionCount;
-    if (maxCount <= 0) return;
+    // A non-numeric stored value would make slice() below return every
+    // backup, so anything but a positive integer means "keep all".
+    if (!Number.isInteger(maxCount) || maxCount <= 0) return;
 
     const backups = this.listBackups();
     if (backups.length <= maxCount) return;

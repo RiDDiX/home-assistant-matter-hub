@@ -21,6 +21,8 @@ import { FanDevice } from "./index.js";
 // #443: controllers stream percentSetting while the user drags the slider, one
 // Google Home drag was measured emitting nine writes in eight seconds. With
 // fanSliderDebounceMs only the last write of the burst may reach HA.
+// The windows are wide on purpose: a slow CI runner can take more than 100 ms
+// between two writes, which fires the timer mid drag.
 
 let dir: string;
 let env: Environment;
@@ -143,16 +145,16 @@ describe("fan slider debounce (#443)", () => {
 
   it("collapses a nine-write drag into one dispatch, last value wins", async () => {
     const { immediate, settled } = await drag(
-      { entityId: "fan.test", fanSliderDebounceMs: 100 },
-      400,
+      { entityId: "fan.test", fanSliderDebounceMs: 1000 },
+      1300,
     );
     expect(immediate).toEqual([]);
     expect(settled).toEqual([90]);
   });
 
   it("debounces via the per-bridge feature flag", async () => {
-    setBridge({ fanSliderDebounceMs: 100 });
-    const { immediate, settled } = await drag({ entityId: "fan.test" }, 400);
+    setBridge({ fanSliderDebounceMs: 1000 });
+    const { immediate, settled } = await drag({ entityId: "fan.test" }, 1300);
     expect(immediate).toEqual([]);
     expect(settled).toEqual([90]);
   });
@@ -162,8 +164,8 @@ describe("fan slider debounce (#443)", () => {
     // proves the entity's shorter window was the one used.
     setBridge({ fanSliderDebounceMs: 8000 });
     const { settled } = await drag(
-      { entityId: "fan.test", fanSliderDebounceMs: 100 },
-      400,
+      { entityId: "fan.test", fanSliderDebounceMs: 1000 },
+      1300,
     );
     expect(settled).toEqual([90]);
   });
@@ -188,7 +190,7 @@ describe("fan slider debounce (#443)", () => {
     const endpoint = new Endpoint(
       FanDevice({
         entity: fanEntity(),
-        mapping: { entityId: "fan.test", fanSliderDebounceMs: 100 },
+        mapping: { entityId: "fan.test", fanSliderDebounceMs: 1000 },
       } as never),
       { id: "fan" },
     );
@@ -201,7 +203,7 @@ describe("fan slider debounce (#443)", () => {
         subject: {},
       });
     });
-    await wait(400);
+    await wait(1300);
     expect(setPercentageCalls()).toEqual([40]);
     await server.close().catch(() => {});
   });

@@ -137,16 +137,17 @@ describe("coverSliderDebounceMs collapses back-to-back slider commands (#411)", 
   it("fires one set_cover_position for the last target within the window", async () => {
     const endpoint = await mount(LIFT_WITH_POSITION, {
       entityId: "cover.blind",
-      coverSliderDebounceMs: 150,
+      coverSliderDebounceMs: 1200,
     });
 
     calls.length = 0;
     // Two slider commands land on two fresh behavior instances, exactly the
     // production path. Before the fix the second could not clear the first
-    // timer, so both fired (positions 33 then 49).
+    // timer, so both fired (positions 33 then 49). The wide window keeps a
+    // slow CI runner from firing the first one between the two commands.
     await slideLift(endpoint, 6700);
     await slideLift(endpoint, 5100);
-    await delay(400);
+    await delay(1500);
 
     const positionCalls = calls.filter(
       (c) => c.action === "cover.set_cover_position",

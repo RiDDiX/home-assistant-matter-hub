@@ -15,6 +15,11 @@ import {
   AlarmControlPanelDevice,
   AlarmOnOffDevice,
 } from "./alarm-control-panel/index.js";
+import {
+  DishwasherEndpoint,
+  LaundryDryerEndpoint,
+  LaundryWasherEndpoint,
+} from "./appliance/index.js";
 import { AutomationDevice } from "./automation/index.js";
 import { ContactSensorType } from "./binary-sensor/contact-sensor.js";
 import { BinarySensorDevice } from "./binary-sensor/index.js";
@@ -27,7 +32,6 @@ import { WaterLeakDetectorType } from "./binary-sensor/water-leak-detector.js";
 import { ButtonDevice } from "./button/index.js";
 import { ClimateDevice } from "./climate/index.js";
 import { CoverDevice } from "./cover/index.js";
-import { DishwasherEndpoint } from "./dishwasher/index.js";
 import { DoorbellDevice } from "./event/doorbell.js";
 import { EventDevice } from "./event/index.js";
 import { FanDevice } from "./fan/index.js";
@@ -305,6 +309,8 @@ const matterDeviceTypeFactories: Partial<
     return SwitchDevice(ha);
   },
   dishwasher: DishwasherEndpoint,
+  laundry_washer: LaundryWasherEndpoint,
+  laundry_dryer: LaundryDryerEndpoint,
   dimmable_plugin_unit: (ha) =>
     DimmablePlugInUnitType.set({ homeAssistantEntity: ha }),
   // Expose as On/Off Light (0x0100, an OnOff server) so controllers show a

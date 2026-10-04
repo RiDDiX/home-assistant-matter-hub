@@ -16,6 +16,7 @@ import {
   type HomeAssistantAction,
   HomeAssistantActions,
 } from "../home-assistant/home-assistant-actions.js";
+import { HomeAssistantConfig } from "../home-assistant/home-assistant-config.js";
 import type { EntityIdentityStorage } from "../storage/entity-identity-storage.js";
 import type { EntityMappingStorage } from "../storage/entity-mapping-storage.js";
 import { BridgeDataProvider } from "./bridge-data-provider.js";
@@ -141,7 +142,10 @@ let seq = 0;
 const servers: ServerNode[] = [];
 const managers: BridgeEndpointManager[] = [];
 
-function makeProvider(patterns: string[] = ["vacuum.*"]): BridgeDataProvider {
+function makeProvider(
+  patterns: string[] = ["vacuum.*"],
+  featureFlags: Record<string, boolean> = {},
+): BridgeDataProvider {
   return new BridgeDataProvider({
     id: "bridge-445",
     name: "b",
@@ -154,7 +158,7 @@ function makeProvider(patterns: string[] = ["vacuum.*"]): BridgeDataProvider {
       exclude: [],
       includeMode: "any",
     },
-    featureFlags: {},
+    featureFlags,
     basicInformation: {
       vendorId: 0xfff1,
       vendorName: "t",
@@ -168,14 +172,22 @@ function makeProvider(patterns: string[] = ["vacuum.*"]): BridgeDataProvider {
   } as any);
 }
 
-async function buildManager(ha: FakeHa, patterns?: string[]) {
-  const provider = makeProvider(patterns);
+async function buildManager(
+  ha: FakeHa,
+  patterns?: string[],
+  featureFlags?: Record<string, boolean>,
+) {
+  const provider = makeProvider(patterns, featureFlags);
   const env = new Environment("test", Environment.default);
   env.get(VariableService).set("storage.path", dir);
   env.set(BridgeDataProvider, provider);
   env.set(HomeAssistantActions, {
     call(_action: HomeAssistantAction) {},
     fireEvent() {},
+    // biome-ignore lint/suspicious/noExplicitAny: test stub
+  } as any);
+  env.set(HomeAssistantConfig, {
+    unitSystem: { temperature: "°C" },
     // biome-ignore lint/suspicious/noExplicitAny: test stub
   } as any);
   env.set(EntityStateProvider, {
@@ -781,5 +793,141 @@ describe("battery sensor appearing after endpoint creation (#450)", () => {
     // drain the deferred refresh before teardown
     // biome-ignore lint/suspicious/noExplicitAny: reach the retry flag
     await until(() => !(manager as any).mappingSync.retryPending);
+  });
+});
+
+// #498: a battery sensor unavailable during a refresh is not auto-assigned, so
+// it mounts beside the temperature sensor. Once it reports, that extra endpoint
+// goes, and a sensor built without its battery picks it up like the vacuum
+// does (#450).
+describe("battery sensor of a composed temperature sensor (#498)", () => {
+  const TEMP = "sensor.koket_temperature";
+  const HUMIDITY = "sensor.koket_humidity";
+  const BATTERY = "sensor.koket_battery";
+
+  function sensorHa(batteryState: string): FakeHa {
+    const ha = makeHa();
+    ha.devices.koket = { id: "koket", name: "Koket" };
+    const add = (id: string, state: string, attrs: object) => {
+      ha.entities[id] = { entity_id: id, device_id: "koket" };
+      ha.states[id] = {
+        entity_id: id,
+        state,
+        attributes: { friendly_name: id, ...attrs },
+        context: { id: "ctx" },
+        last_changed: "2026-01-01T00:00:00",
+        last_updated: "2026-01-01T00:00:00",
+      };
+    };
+    add(TEMP, "21", { device_class: "temperature", unit_of_measurement: "°C" });
+    add(HUMIDITY, "50", { device_class: "humidity", unit_of_measurement: "%" });
+    add(BATTERY, batteryState, { device_class: "battery" });
+    return ha;
+  }
+
+  async function build(ha: FakeHa) {
+    return buildManager(ha, ["sensor.*"], { autoComposedDevices: true });
+  }
+
+  function mounted(manager: BridgeEndpointManager): string[] {
+    return [...manager.root.parts]
+      .map((p) => (p as EntityEndpoint).entityId)
+      .sort();
+  }
+
+  function temp(manager: BridgeEndpointManager): EntityEndpoint {
+    const ep = [...manager.root.parts].find(
+      (p) => (p as EntityEndpoint).entityId === TEMP,
+    );
+    if (!ep) throw new Error("temperature endpoint not mounted");
+    return ep as EntityEndpoint;
+  }
+
+  it("drops the standalone battery a flaky refresh built once it is back", async () => {
+    const ha = sensorHa("90");
+    const { manager } = await build(ha);
+    await manager.refreshDevices();
+    expect(mounted(manager)).toEqual([TEMP]);
+
+    ha.states[BATTERY].state = "unavailable";
+    await manager.refreshDevices();
+    expect(mounted(manager)).toEqual([BATTERY, TEMP]);
+
+    ha.states[BATTERY].state = "80";
+    await manager.refreshDevices();
+    expect(mounted(manager)).toEqual([TEMP]);
+    expect(temp(manager).mappedEntityIds).toContain(BATTERY);
+  });
+
+  it("rebuilds a sensor built without its battery and closes the standalone", async () => {
+    const ha = sensorHa("unavailable");
+    const { manager } = await build(ha);
+    await manager.refreshDevices();
+    expect(mounted(manager)).toEqual([BATTERY, TEMP]);
+    const first = temp(manager);
+    expect(first.mappedEntityIds).not.toContain(BATTERY);
+
+    ha.states[BATTERY].state = "85";
+    await manager.refreshDevices();
+    expect(mounted(manager)).toEqual([TEMP]);
+    const second = temp(manager);
+    expect(second).not.toBe(first);
+    expect(second.mappedEntityIds).toContain(BATTERY);
+
+    // stable afterwards, no rebuild churn
+    await manager.refreshDevices();
+    expect(temp(manager)).toBe(second);
+  });
+
+  it("a state update alone triggers that rebuild", async () => {
+    const ha = sensorHa("unavailable");
+    const { manager } = await build(ha);
+    await manager.refreshDevices();
+    // biome-ignore lint/suspicious/noExplicitAny: the retry only runs while observing
+    (manager as any).observingRequested = true;
+    vi.spyOn(manager, "startObserving").mockResolvedValue(undefined);
+    const first = temp(manager);
+
+    ha.states[BATTERY].state = "85";
+    await manager.updateStates(ha.states, new Set([BATTERY]));
+    await until(() => temp(manager) !== first);
+    expect(temp(manager).mappedEntityIds).toContain(BATTERY);
+    expect(mounted(manager)).toEqual([TEMP]);
+    // biome-ignore lint/suspicious/noExplicitAny: reach the retry flag
+    await until(() => !(manager as any).mappingSync.retryPending);
+  });
+
+  it("a sibling sensor endpoint does not displace the vacuum candidate", async () => {
+    const ha = makeHa();
+    ha.entities[VACUUM].device_id = "dev498";
+    ha.devices.dev498 = { id: "dev498", name: "Robot" };
+    for (const [id, state, attrs] of [
+      ["sensor.robot_battery", "unavailable", { device_class: "battery" }],
+      [
+        "sensor.robot_temp",
+        "30",
+        { device_class: "temperature", unit_of_measurement: "°C" },
+      ],
+    ] as const) {
+      ha.entities[id] = { entity_id: id, device_id: "dev498" };
+      ha.states[id] = {
+        entity_id: id,
+        state,
+        attributes: { friendly_name: id, ...attrs },
+        context: { id: "ctx" },
+        last_changed: "2026-01-01T00:00:00",
+        last_updated: "2026-01-01T00:00:00",
+      };
+    }
+    const { manager } = await buildManager(ha, ["vacuum.*", "sensor.*"], {
+      autoBatteryMapping: true,
+    });
+    await manager.refreshDevices();
+    // biome-ignore lint/suspicious/noExplicitAny: read the retry slot
+    const candidates = (manager as any).mappingSync.candidates as Map<
+      string,
+      string
+    >;
+    expect(candidates.get("dev498")).toBe(VACUUM);
   });
 });

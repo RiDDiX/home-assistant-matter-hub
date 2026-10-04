@@ -312,6 +312,26 @@ export interface VacuumEffectiveConfig {
 }
 
 /**
+ * Rooms HAMH resolved itself (Valetudo segments, roborock.get_maps) exist only
+ * in the build snapshot. Put them back on every HA update, else the run modes
+ * are rebuilt without them and controllers see only Idle and Cleaning (#497).
+ */
+export function withResolvedRooms(
+  state: HomeAssistantEntityState,
+  effective?: VacuumEffectiveConfig,
+): HomeAssistantEntityState {
+  const rooms = (effective?.state.attributes as VacuumDeviceAttributes)?.rooms;
+  const live = state.attributes as VacuumDeviceAttributes | undefined;
+  if (!rooms || !live || live.rooms || live.segments || live.room_mapping) {
+    return state;
+  }
+  return {
+    ...state,
+    attributes: { ...state.attributes, rooms } as typeof state.attributes,
+  };
+}
+
+/**
  * Single source of truth for the service areas a vacuum exposes. Reproduces the
  * exact branch order and area ids/names used to build the ServiceArea cluster in
  * vacuum/index.ts, so the room switches (#355) cannot drift from the cluster.

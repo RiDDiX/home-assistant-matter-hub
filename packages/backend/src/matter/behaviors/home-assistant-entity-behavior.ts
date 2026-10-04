@@ -3,6 +3,7 @@ import {
   type EntityMappingConfig,
   type HomeAssistantEntityInformation,
 } from "@home-assistant-matter-hub/common";
+import { Observable } from "@matter/general";
 import { Behavior, EventEmitter } from "@matter/main";
 import { StatusCode, StatusResponseError } from "@matter/main/types";
 
@@ -12,6 +13,7 @@ import {
 } from "../../services/home-assistant/home-assistant-actions.js";
 import { AsyncObservable } from "../../utils/async-observable.js";
 import { transactionIsOffline } from "../../utils/transaction-is-offline.js";
+import { updateEntityState } from "../endpoints/update-entity-state.js";
 
 export class HomeAssistantEntityBehavior extends Behavior {
   static override readonly id = ClusterId.homeAssistantEntity;
@@ -44,6 +46,23 @@ export class HomeAssistantEntityBehavior extends Behavior {
       this.entity.state.state !== "unavailable" &&
       this.entity.state.state !== "unknown"
     );
+  }
+
+  override initialize() {
+    // Optional: test stubs neither register the service nor define `failed`.
+    const failed = this.env.maybeGet(HomeAssistantActions)?.failed;
+    if (failed) {
+      this.reactTo(failed, this.rollback);
+    }
+  }
+
+  // #446: the command already returned success, only assertAvailable can
+  // still fail it. Drop the optimistic holds and re-apply the HA state so the
+  // subscription shows the truth.
+  private rollback(entityId: string) {
+    if (entityId !== this.entityId) return;
+    this.events.actionFailed.emit();
+    updateEntityState(this.endpoint).catch(() => {});
   }
 
   // #446: fail the command instead of telling the controller it worked while
@@ -97,5 +116,7 @@ export namespace HomeAssistantEntityBehavior {
 
   export class Events extends EventEmitter {
     entity$Changed = AsyncObservable<HomeAssistantEntityInformation>();
+    // an HA call this entity issued failed, see rollback()
+    actionFailed = Observable<[]>();
   }
 }

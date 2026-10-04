@@ -1,5 +1,6 @@
 import type {
   EntityMappingConfig,
+  HomeAssistantEntityState,
   VacuumDeviceAttributes,
 } from "@home-assistant-matter-hub/common";
 import type { ServiceArea } from "@matter/main/clusters";
@@ -10,6 +11,7 @@ import {
   createDefaultServiceAreaServer,
   createVacuumServiceAreaServer,
   getVacuumServiceAreas,
+  withResolvedRooms,
 } from "./vacuum-service-area-server.js";
 
 // getVacuumServiceAreas is the single enumeration the #355 room switches and the
@@ -123,5 +125,28 @@ describe("getVacuumServiceAreas", () => {
     ).toEqual([]);
     // The default cluster still exposes a single Home area, but switches don't.
     expect(supportedAreas(createDefaultServiceAreaServer())).toHaveLength(1);
+  });
+});
+
+describe("withResolvedRooms (#497)", () => {
+  const state = (attributes: Record<string, unknown>) =>
+    ({ state: "docked", attributes }) as unknown as HomeAssistantEntityState;
+  const effective = { state: state({ rooms: { "1": "Kitchen" } }) };
+
+  it("puts resolved rooms back into a live state without room data", () => {
+    const next = withResolvedRooms(state({ battery_level: 50 }), effective);
+    expect(next.attributes).toEqual({
+      battery_level: 50,
+      rooms: { "1": "Kitchen" },
+    });
+  });
+
+  it("leaves a state alone that has its own rooms or nothing to add", () => {
+    const own = state({ segments: [{ id: 2, name: "Hall" }] });
+    expect(withResolvedRooms(own, effective)).toBe(own);
+    const plain = state({ battery_level: 50 });
+    expect(withResolvedRooms(plain, undefined)).toBe(plain);
+    const empty = {} as HomeAssistantEntityState;
+    expect(withResolvedRooms(empty, effective)).toBe(empty);
   });
 });
