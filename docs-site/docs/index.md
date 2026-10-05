@@ -378,7 +378,11 @@ Home, ...) are not placed in the same network segment. Please make sure to revie
 </details>
 
 <details>
-<summary><strong>🧪 Alpha (v2.1.0-alpha.919)</strong></summary>
+<summary><strong>🧪 Alpha (v2.1.0-alpha.920)</strong></summary>
+
+**v2.1.0-alpha.920:**
+- ⚙️ **Device list changes are one log line**: the log now has one line 'Device list changed: N removed, M added, K mounted' whenever a bridge changes its set of devices, with the added ones named and the bridge id in the logger name, so a log or diagnostic export shows whether the bridge itself changed what a controller sees ([#505](https://github.com/RiDDiX/home-assistant-matter-hub/issues/505))
+- ⚙️ **Session cleanup no longer quotes a false 60s gap**: the session cleanup lines no longer say 'no subscriptions for 60s', because that number was the check interval and not the time without subscriptions ([#505](https://github.com/RiDDiX/home-assistant-matter-hub/issues/505))
 
 **v2.1.0-alpha.919:**
 - ⚙️ **Failed label queries keep the last labels**: a failed Home Assistant label query no longer empties the label list, and before that a bridge filtering by label name could unmount its devices until the next refresh ([#500](https://github.com/RiDDiX/home-assistant-matter-hub/issues/500))
