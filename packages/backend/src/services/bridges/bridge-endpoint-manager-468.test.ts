@@ -204,6 +204,7 @@ async function buildManager(ha: FakeHa, patterns: string[] = ["vacuum.*"]) {
   const registry = new BridgeRegistry(ha as any, provider);
   const client = { connection: {}, haRunning: true, runningSince: 0 };
   const mapping = new FakeMappingStorage();
+  const log = fakeLogger();
   const manager = new BridgeEndpointManager(
     // biome-ignore lint/suspicious/noExplicitAny: client only used for observing
     client as any,
@@ -211,11 +212,11 @@ async function buildManager(ha: FakeHa, patterns: string[] = ["vacuum.*"]) {
     mapping as unknown as EntityMappingStorage,
     new FakeIdentityStorage() as unknown as EntityIdentityStorage,
     provider.id,
-    fakeLogger(),
+    log,
   );
   managers.push(manager);
   await server.add(manager.root);
-  return { manager, provider, mapping };
+  return { manager, provider, mapping, log };
 }
 
 function switchNumbers(manager: BridgeEndpointManager): Record<string, number> {
@@ -265,6 +266,34 @@ describe("filter edits reconcile without the grace window (#468)", () => {
 
     expect(mountedEntityIds(manager)).toEqual([OTHER]);
     expect(pending(manager).size).toBe(0);
+  });
+
+  it("logs one line when the mounted device list moves and none when it does not (#505)", async () => {
+    const ha = makeHa();
+    const { manager, provider, log } = await buildManager(ha);
+    const changes = () =>
+      vi
+        .mocked(log.info)
+        .mock.calls.map((c) => String(c[0]))
+        .filter((m) => m.startsWith("Device list changed"));
+
+    await manager.refreshDevices();
+    expect(changes()).toEqual([
+      "Device list changed: 0 removed, 2 added (vacuum_robot, vacuum_other), 2 mounted",
+    ]);
+
+    await manager.refreshDevices();
+    expect(changes()).toHaveLength(1);
+
+    setFilter(provider, ["vacuum.other"]);
+    await manager.refreshDevices();
+    // one out, one in: counts alone would miss it
+    setFilter(provider, ["vacuum.robot"]);
+    await manager.refreshDevices();
+    expect(changes().slice(1)).toEqual([
+      "Device list changed: 1 removed, 0 added, 1 mounted",
+      "Device list changed: 1 removed, 1 added (vacuum_robot), 1 mounted",
+    ]);
   });
 
   it("keeps the grace window for an entity that vanished from HA itself", async () => {

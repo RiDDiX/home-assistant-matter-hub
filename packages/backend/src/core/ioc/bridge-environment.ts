@@ -48,7 +48,9 @@ export class BridgeEnvironment extends EnvironmentBase {
     const log = loggerService.get(`BridgeEnvironment / ${initialData.id}`);
 
     super({ id: initialData.id, parent, log });
-    this.endpointManagerLogger = loggerService.get("BridgeEndpointManager");
+    this.endpointManagerLogger = loggerService.get(
+      `BridgeEndpointManager / ${initialData.id}`,
+    );
     this.storageLocation = storageLocation;
     this.construction = this.init();
 

@@ -371,6 +371,7 @@ export class BridgeEndpointManager extends Service {
           } else {
             await this.topologyChange(() => endpoint.delete());
           }
+          this.log.info(`Plugin "${pluginName}": removed device "${deviceId}"`);
         } catch (e) {
           this.log.warn(
             `Plugin "${pluginName}": failed to remove device "${deviceId}":`,
@@ -788,6 +789,7 @@ export class BridgeEndpointManager extends Service {
 
     this._failedEntities = [];
     this.entityIds = this.registry.entityIds;
+    const mountedBefore = new Set([...this.root.parts].map((p) => p.id));
 
     // Pre-calculate composed sub-entities so they get skipped
     // during individual endpoint creation (requires mapping access).
@@ -1222,6 +1224,22 @@ export class BridgeEndpointManager extends Service {
         return fp === undefined ? [] : [[p.entityId, fp] as [string, string]];
       }),
     );
+
+    // One line when the mounted set moves, so a log or export shows whether
+    // the bridge changed what controllers see (#500, #505).
+    const mountedNow = new Set([...this.root.parts].map((p) => p.id));
+    const added = [...mountedNow].filter((id) => !mountedBefore.has(id));
+    const removed = [...mountedBefore].filter((id) => !mountedNow.has(id));
+    if (added.length + removed.length > 0) {
+      // removals name their entity in their own lines, additions only here
+      const names =
+        added.length > 0
+          ? ` (${added.slice(0, 10).join(", ")}${added.length > 10 ? ", ..." : ""})`
+          : "";
+      this.log.info(
+        `Device list changed: ${removed.length} removed, ${added.length} added${names}, ${mountedNow.size} mounted`,
+      );
+    }
 
     if (this.observingRequested) {
       this.startObserving();
