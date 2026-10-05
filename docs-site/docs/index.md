@@ -378,9 +378,10 @@ Home, ...) are not placed in the same network segment. Please make sure to revie
 </details>
 
 <details>
-<summary><strong>🧪 Alpha (v2.1.0-alpha.x)</strong></summary>
+<summary><strong>🧪 Alpha (v2.1.0-alpha.918)</strong></summary>
 
-**Alpha is currently level with Stable (v2.0.58).** All alpha work up to the latest pre-release has been promoted into v2.0.58. New alpha work continues from the next pre-release tag onward and will appear here as development progresses.
+**v2.1.0-alpha.918:**
+- 📡 **Clearer mDNS global IPv6 warning**: the startup log now says you can ignore it when devices work, and names `mdns_strip_global_ipv6` for the add-on and `--mdns-strip-global-ipv6` for a container ([#392](https://github.com/RiDDiX/home-assistant-matter-hub/discussions/392))
 
 </details>
 

@@ -265,7 +265,7 @@ Keep the custom names and entity mappings too: they are keyed by `entity_id`, an
 ## What's the difference between Stable and Alpha?
 
 - **Stable** (v2.0.58): Production-ready, recommended for daily use
-- **Alpha**: Currently level with Stable (v2.0.58); the next pre-release lands here first and may contain bugs
+- **Alpha**: Ahead of Stable (v2.0.58); fixes and features land here first and may contain bugs
 
 See the [Alpha Features Guide](./guides/alpha-features.md) for details on alpha features.
 
