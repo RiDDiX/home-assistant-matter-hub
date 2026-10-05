@@ -378,7 +378,11 @@ Home, ...) are not placed in the same network segment. Please make sure to revie
 </details>
 
 <details>
-<summary><strong>🧪 Alpha (v2.1.0-alpha.918)</strong></summary>
+<summary><strong>🧪 Alpha (v2.1.0-alpha.919)</strong></summary>
+
+**v2.1.0-alpha.919:**
+- ⚙️ **Failed label queries keep the last labels**: a failed Home Assistant label query no longer empties the label list, and before that a bridge filtering by label name could unmount its devices until the next refresh ([#500](https://github.com/RiDDiX/home-assistant-matter-hub/issues/500))
+- 📡 **False mDNS re-announcement log is gone**: the log line "Triggered mDNS re-announcement after session cleanup" is gone, nothing was sent at that point ([#500](https://github.com/RiDDiX/home-assistant-matter-hub/issues/500), [#485](https://github.com/RiDDiX/home-assistant-matter-hub/issues/485))
 
 **v2.1.0-alpha.918:**
 - 📡 **Clearer mDNS global IPv6 warning**: the startup log now says you can ignore it when devices work, and names `mdns_strip_global_ipv6` for the add-on and `--mdns-strip-global-ipv6` for a container ([#392](https://github.com/RiDDiX/home-assistant-matter-hub/discussions/392))
