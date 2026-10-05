@@ -645,7 +645,7 @@ export class SessionSupervisor {
           break;
         }
         this.log.warn(
-          `Closing stale session ${s.id} (peer ${s.peerNodeId}, no subscriptions for ${deadSessionTimeoutMs(this.dataProvider.featureFlags) / 1000}s, no traffic for ${idleSec}s)`,
+          `Closing stale session ${s.id} (peer ${s.peerNodeId}, no subscriptions, no traffic for ${idleSec}s)`,
         );
         s.initiateClose()
           .catch(() => {
@@ -692,7 +692,7 @@ export class SessionSupervisor {
           continue;
         }
         this.log.warn(
-          `Closing dead session ${s.id} (peer ${s.peerNodeId}, no subscriptions for ${deadSessionTimeoutMs(this.dataProvider.featureFlags) / 1000}s, no traffic for ${idleSec}s)`,
+          `Closing dead session ${s.id} (peer ${s.peerNodeId}, no subscriptions, no traffic for ${idleSec}s)`,
         );
         closes.push(
           s.initiateClose().catch(() => {
