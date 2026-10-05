@@ -136,6 +136,41 @@ describe("HomeAssistantRegistry", () => {
     expect(registry.snapshotGeneration).toBe(g0 + 1);
   });
 
+  it("keeps the last labels when the label query fails (#500)", async () => {
+    const fake = makeConnection();
+    let labelsFail = false;
+    let devices: unknown[] = [];
+    fake.connection.sendMessagePromise = vi.fn((message: { type: string }) => {
+      if (message.type === "config/device_registry/list") {
+        return Promise.resolve(devices);
+      }
+      if (message.type !== "config/label_registry/list") {
+        return Promise.resolve([]);
+      }
+      return labelsFail
+        ? Promise.reject(new Error("timed out"))
+        : Promise.resolve([{ label_id: "voice_2", name: "Voice" }]);
+    }) as unknown as Connection["sendMessagePromise"];
+    const client = {
+      connection: fake.connection,
+      haRunning: true,
+    } as unknown as HomeAssistantClient & { haRunning: boolean };
+    const registry = new HomeAssistantRegistry(client, defaultOptions);
+    const initPromise = registry.construction;
+    await vi.runAllTimersAsync();
+    await initPromise;
+    expect(registry.labels).toHaveLength(1);
+
+    labelsFail = true;
+    await expect(registry.reload()).resolves.toBe(false);
+    expect(registry.labels).toEqual([{ label_id: "voice_2", name: "Voice" }]);
+
+    // a rebuild for another reason must not empty them either
+    devices = [{ id: "d1", name: "Oven" }];
+    await expect(registry.reload()).resolves.toBe(true);
+    expect(registry.labels).toEqual([{ label_id: "voice_2", name: "Voice" }]);
+  });
+
   // #467: onRefresh only runs when the fingerprint moved, so a field missing
   // from the hash never reaches the endpoints at all.
   it("notices a device manufacturer, model_id or firmware change (#467)", async () => {
