@@ -152,7 +152,6 @@ The `@matter/*` packages are pinned to a specific version in `packages/backend/p
 | HAMH File | matter.js API | Purpose |
 |---|---|---|
 | `bridge.ts` | `SessionManager.sessions`, `.subscriptionsChanged` | Session diagnostics and stale session cleanup |
-| `bridge.ts` | `DeviceAdvertiser.restartAdvertisement()` | mDNS re-announce after session cleanup |
 | `bridge.ts` | `CommissioningServer.enterCommissionableMode()` | Multi-admin commissioning window |
 | `create-legacy-endpoint-type.ts` | `MutableEndpoint.with()` | Behavior composition for all device types |
 | `bridge-server-node.ts` | `ServerNode` subclass | Bridge server lifecycle |

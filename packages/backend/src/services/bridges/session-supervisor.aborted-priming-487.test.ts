@@ -43,7 +43,6 @@ function makeBridge(sessions: FakeSession[], featureFlags: object = {}) {
   const interactionServer = {
     onNewExchange: (e: unknown, m: unknown) => onNewExchange(e, m),
   };
-  const restartAdvertisement = vi.fn();
   const list = Object.assign(sessions, {
     added: { on: (fn: Handler) => (handlers.added = fn) },
     deleted: { on: () => {} },
@@ -57,7 +56,6 @@ function makeBridge(sessions: FakeSession[], featureFlags: object = {}) {
   const server = {
     env: {
       get: (type: { name?: string }) => {
-        if (type?.name === "DeviceAdvertiser") return { restartAdvertisement };
         if (type?.name === "InteractionServer") return interactionServer;
         return sessionManager;
       },
@@ -92,7 +90,7 @@ function makeBridge(sessions: FakeSession[], featureFlags: object = {}) {
       } as never,
     );
 
-  return { handlers, subscribeRequest, restartAdvertisement };
+  return { handlers, subscribeRequest };
 }
 
 // past the 5 min quiet window plus a 60s re-arm
@@ -118,16 +116,6 @@ describe("subscription aborted during initial data reports (#487)", () => {
     await vi.advanceTimersByTimeAsync(PAST_QUIET_MS);
 
     expect(session.initiateClose).toHaveBeenCalled();
-  });
-
-  it("re-announces once the wedged session is closed", async () => {
-    const session = fakeSession(10885);
-    const { subscribeRequest, restartAdvertisement } = makeBridge([session]);
-
-    subscribeRequest(session);
-    await vi.advanceTimersByTimeAsync(PAST_QUIET_MS);
-
-    expect(restartAdvertisement).toHaveBeenCalled();
   });
 
   it("leaves a session alone once its subscription primes", async () => {

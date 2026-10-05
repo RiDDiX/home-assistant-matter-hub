@@ -460,9 +460,7 @@ export class SessionSupervisor {
             ),
           );
         }
-        if (closes.length > 0) {
-          Promise.allSettled(closes).then(() => this.triggerMdnsReAnnounce());
-        }
+        void Promise.allSettled(closes);
       };
       this.sessionDeletedHandler = (session: {
         id: number;
@@ -656,8 +654,7 @@ export class SessionSupervisor {
               cause: new Error("graceful close failed, forcing"),
             });
           })
-          .catch(() => {})
-          .finally(() => this.triggerMdnsReAnnounce());
+          .catch(() => {});
         break;
       }
     } catch {
@@ -706,9 +703,7 @@ export class SessionSupervisor {
           }),
         );
       }
-      if (closes.length > 0) {
-        Promise.allSettled(closes).then(() => this.triggerMdnsReAnnounce());
-      }
+      void Promise.allSettled(closes);
       if (kept > 0 && !this.deadSessionTimer) {
         // Some peers are still active; re-check after another interval.
         this.deadSessionTimer = setTimeout(() => {
@@ -759,27 +754,6 @@ export class SessionSupervisor {
       }
     } catch {
       // SessionManager may be disposed
-    }
-  }
-
-  /**
-   * Force a fresh mDNS operational advertisement after session cleanup.
-   * matter.js DeviceAdvertiser only re-announces when a subscription is
-   * canceled BY THE PEER. When the server cancels after 3 delivery
-   * timeouts, no re-announcement happens and the controller may not
-   * realize it should reconnect (#266).
-   */
-  private triggerMdnsReAnnounce() {
-    try {
-      const advertiser = this.server.env.get(DeviceAdvertiser);
-      // restartAdvertisement re-sends the cached records for live fabrics but
-      // does not rebuild them; refreshOperationalAdvertisement (used by the
-      // address watch for #415) is what re-runs the address lookup. This path
-      // only needs the controller poked to reconnect, so keep it as is.
-      advertiser.restartAdvertisement();
-      this.log.info("Triggered mDNS re-announcement after session cleanup");
-    } catch {
-      // DeviceAdvertiser may not be available
     }
   }
 
@@ -967,9 +941,7 @@ export class SessionSupervisor {
           }),
         );
       }
-      if (closes.length > 0) {
-        Promise.allSettled(closes).then(() => this.triggerMdnsReAnnounce());
-      }
+      void Promise.allSettled(closes);
     } catch {
       // SessionManager may be disposed
     }
@@ -1115,9 +1087,7 @@ export class SessionSupervisor {
           }),
         );
       }
-      if (closes.length > 0) {
-        Promise.allSettled(closes).then(() => this.triggerMdnsReAnnounce());
-      }
+      void Promise.allSettled(closes);
     } catch {
       // SessionManager may be disposed
     }
