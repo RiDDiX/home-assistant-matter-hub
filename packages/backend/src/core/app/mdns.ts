@@ -35,7 +35,7 @@ function warnAboutAdvertising(options: MdnsOptions) {
   const choice = selectMdnsInterface(os.networkInterfaces());
   if (choice.hasGlobalIpv6) {
     logger.warn(
-      "Matter mDNS is advertising a global IPv6 address that controllers may not reach on the LAN, so devices can show No Response (#361). Set mdns-strip-global-ipv6 if devices stay unreachable.",
+      "Matter mDNS is advertising a global IPv6 address that controllers may not reach on the LAN, so devices can show No Response (#361). If devices work, nothing to do; otherwise turn on mdns_strip_global_ipv6 (add-on) or --mdns-strip-global-ipv6 (container).",
     );
   }
   if (options.networkInterface) {
