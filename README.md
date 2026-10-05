@@ -38,7 +38,7 @@ of port forwarding etc.
 | Channel | Branch | Current Version | Description |
 |---------|--------|-----------------|-------------|
 | **Stable** | `main` | v2.0.58 | Production-ready, recommended for most users |
-| **Alpha** | `alpha` | v2.1.0-alpha.918 | Ahead of Stable, carries the additions listed under Alpha Features |
+| **Alpha** | `alpha` | v2.1.0-alpha.919 | Ahead of Stable, carries the additions listed under Alpha Features |
 | **Testing** | `testing` | v4.1.0-testing.x | ⚠️ **Highly unstable!** Experimental features, may break |
 
 ### Which version should I use?
@@ -378,7 +378,11 @@ Re-assign the affected devices to their rooms after they reconnect. See the [doc
 </details>
 
 <details>
-<summary><strong>🧪 Alpha Features (v2.1.0-alpha.918)</strong> - Click to expand</summary>
+<summary><strong>🧪 Alpha Features (v2.1.0-alpha.919)</strong> - Click to expand</summary>
+
+**v2.1.0-alpha.919:**
+- ⚙️ **Failed label queries keep the last labels**: a failed Home Assistant label query no longer empties the label list, and before that a bridge filtering by label name could unmount its devices until the next refresh ([#500](https://github.com/RiDDiX/home-assistant-matter-hub/issues/500))
+- 📡 **False mDNS re-announcement log is gone**: the log line "Triggered mDNS re-announcement after session cleanup" is gone, nothing was sent at that point ([#500](https://github.com/RiDDiX/home-assistant-matter-hub/issues/500), [#485](https://github.com/RiDDiX/home-assistant-matter-hub/issues/485))
 
 **v2.1.0-alpha.918:**
 - 📡 **Clearer mDNS global IPv6 warning**: the startup log now says you can ignore it when devices work, and names `mdns_strip_global_ipv6` for the add-on and `--mdns-strip-global-ipv6` for a container ([#392](https://github.com/RiDDiX/home-assistant-matter-hub/discussions/392))
