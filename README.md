@@ -38,7 +38,7 @@ of port forwarding etc.
 | Channel | Branch | Current Version | Description |
 |---------|--------|-----------------|-------------|
 | **Stable** | `main` | v2.0.58 | Production-ready, recommended for most users |
-| **Alpha** | `alpha` | v2.1.0-alpha.919 | Ahead of Stable, carries the additions listed under Alpha Features |
+| **Alpha** | `alpha` | v2.1.0-alpha.920 | Ahead of Stable, carries the additions listed under Alpha Features |
 | **Testing** | `testing` | v4.1.0-testing.x | ⚠️ **Highly unstable!** Experimental features, may break |
 
 ### Which version should I use?
@@ -378,7 +378,11 @@ Re-assign the affected devices to their rooms after they reconnect. See the [doc
 </details>
 
 <details>
-<summary><strong>🧪 Alpha Features (v2.1.0-alpha.919)</strong> - Click to expand</summary>
+<summary><strong>🧪 Alpha Features (v2.1.0-alpha.920)</strong> - Click to expand</summary>
+
+**v2.1.0-alpha.920:**
+- ⚙️ **Device list changes are one log line**: the log now has one line 'Device list changed: N removed, M added, K mounted' whenever a bridge changes its set of devices, with the added ones named and the bridge id in the logger name, so a log or diagnostic export shows whether the bridge itself changed what a controller sees ([#505](https://github.com/RiDDiX/home-assistant-matter-hub/issues/505))
+- ⚙️ **Session cleanup no longer quotes a false 60s gap**: the session cleanup lines no longer say 'no subscriptions for 60s', because that number was the check interval and not the time without subscriptions ([#505](https://github.com/RiDDiX/home-assistant-matter-hub/issues/505))
 
 **v2.1.0-alpha.919:**
 - ⚙️ **Failed label queries keep the last labels**: a failed Home Assistant label query no longer empties the label list, and before that a bridge filtering by label name could unmount its devices until the next refresh ([#500](https://github.com/RiDDiX/home-assistant-matter-hub/issues/500))
