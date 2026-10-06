@@ -475,6 +475,15 @@ export interface CustomServiceArea {
    * currentArea/progress from a cumulative cleaned-area sensor (#368).
    */
   readonly sizeSqm?: number;
+  /**
+   * Optional: map (floor) this area belongs to, exposed as a Matter map.
+   * Set it on every area or on none (#506).
+   */
+  readonly mapName?: string;
+  /**
+   * Optional: floor number, 0 is the main floor, negative is below ground.
+   */
+  readonly floorNumber?: number;
 }
 
 export interface EntityMappingRequest {

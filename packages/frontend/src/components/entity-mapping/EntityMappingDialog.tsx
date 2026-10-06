@@ -1342,9 +1342,14 @@ export function EntityMappingDialog({
               const dataValid = parseAreaData(
                 areaDataDrafts[index] ?? "",
               ).valid;
+              const hasMap = (a: CustomServiceArea) =>
+                typeof a.mapName === "string" && a.mapName.trim() !== "";
+              const mapMissing =
+                !hasMap(area) && customServiceAreas.some(hasMap);
               return (
                 <Box
-                  key={`area-${area.name || index}`}
+                  // biome-ignore lint/suspicious/noArrayIndexKey: an area is its position, two may share a name
+                  key={index}
                   sx={{
                     display: "flex",
                     flexDirection: "column",
@@ -1466,6 +1471,49 @@ export function EntityMappingDialog({
                         setCustomServiceAreas(updated);
                       }}
                       sx={{ width: 110 }}
+                    />
+                  </Box>
+                  <Box
+                    sx={{ display: "flex", gap: 1, alignItems: "flex-start" }}
+                  >
+                    <TextField
+                      size="small"
+                      label="Map (optional)"
+                      slotProps={{ htmlInput: { maxLength: 64 } }}
+                      value={area.mapName ?? ""}
+                      error={mapMissing}
+                      helperText={
+                        mapMissing ? "Needed on every area" : undefined
+                      }
+                      onChange={(e) => {
+                        const updated = [...customServiceAreas];
+                        updated[index] = {
+                          ...area,
+                          mapName: e.target.value || undefined,
+                        };
+                        setCustomServiceAreas(updated);
+                      }}
+                      sx={{ width: 150 }}
+                    />
+                    <TextField
+                      size="small"
+                      type="number"
+                      label="Floor"
+                      slotProps={{ htmlInput: { step: 1 } }}
+                      value={area.floorNumber ?? ""}
+                      onChange={(e) => {
+                        const n = Number.parseInt(e.target.value, 10);
+                        const updated = [...customServiceAreas];
+                        updated[index] = {
+                          ...area,
+                          floorNumber:
+                            Number.isInteger(n) && n >= -32767 && n <= 32767
+                              ? n
+                              : undefined,
+                        };
+                        setCustomServiceAreas(updated);
+                      }}
+                      sx={{ width: 90 }}
                     />
                   </Box>
                 </Box>

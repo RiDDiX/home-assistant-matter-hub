@@ -8,6 +8,8 @@ import type { HomeAssistantAction } from "../../../../../services/home-assistant
 import type { CleaningSession } from "../../../../behaviors/rvc-run-mode-server.js";
 import {
   buildSupportedModes,
+  customAreaModeLabels,
+  customAreaModes,
   dispatchRoomClean,
   handleCustomServiceAreas,
 } from "./vacuum-rvc-run-mode-server.js";
@@ -209,6 +211,96 @@ describe("buildSupportedModes disableCustomAreaRoomModes", () => {
     for (const area of areas) {
       expect(modes.some((m) => m.label === area.name)).toBe(false);
     }
+  });
+});
+
+describe("custom area mode labels (#506)", () => {
+  const area = (name: string, mapName?: string): CustomServiceArea => ({
+    name,
+    service: "script.x",
+    mapName,
+  });
+
+  it("leaves unique names alone", () => {
+    expect(customAreaModeLabels([area("Bath"), area("Hall")])).toEqual([
+      "Bath",
+      "Hall",
+    ]);
+  });
+
+  it("appends the map to a name that repeats on another map", () => {
+    expect(
+      customAreaModeLabels([area("Bath", "Ground"), area("Bath", "Upstairs")]),
+    ).toEqual(["Bath", "Bath (Upstairs)"]);
+  });
+
+  it("numbers a repeat that has no map, a reserved name and a long one", () => {
+    const long = "x".repeat(70);
+    const labels = customAreaModeLabels([
+      area("Lawn"),
+      area("Lawn"),
+      area("Cleaning"),
+      area(long),
+    ]);
+    expect(labels).toEqual([
+      "Lawn",
+      "Lawn 2",
+      "Cleaning 3",
+      `${"x".repeat(58)} 4`,
+    ]);
+    expect(new Set(labels).size).toBe(labels.length);
+    expect(labels.every((l) => l.length <= 64)).toBe(true);
+  });
+
+  it("never hands out a label that is another area's real name", () => {
+    expect(
+      customAreaModeLabels([area("Lawn"), area("Lawn"), area("Lawn 2")]),
+    ).toEqual(["Lawn", "Lawn 3", "Lawn 2"]);
+    expect(
+      customAreaModeLabels([
+        area("Lawn", "A"),
+        area("Lawn", "B"),
+        area("Lawn (B)", "A"),
+      ]),
+    ).toEqual(["Lawn", "Lawn 2", "Lawn (B)"]);
+  });
+
+  it("survives a map name that is not a string", () => {
+    // biome-ignore lint/suspicious/noExplicitAny: a hand edited config
+    const broken = { name: "Lawn", service: "script.x", mapName: 2 } as any;
+    expect(customAreaModeLabels([area("Lawn"), broken])).toEqual([
+      "Lawn",
+      "Lawn 2",
+    ]);
+  });
+
+  it("orders the modes by label and keeps each label on its own area", () => {
+    const modes = customAreaModes([
+      { name: "Lawn - North", service: "script.north" },
+      { name: "Lawn", service: "script.a", mapName: "A" },
+      { name: "Lawn", service: "script.b", mapName: "B" },
+    ]);
+    const labels = modes.map((m) => m.label);
+    expect(labels).toEqual([...labels].sort((a, b) => a.localeCompare(b)));
+    expect(
+      Object.fromEntries(modes.map((m) => [m.label, m.area.service])),
+    ).toEqual({
+      Lawn: "script.a",
+      "Lawn (B)": "script.b",
+      "Lawn - North": "script.north",
+    });
+  });
+
+  it("keeps mode values, only labels change", () => {
+    // biome-ignore lint/suspicious/noExplicitAny: custom-area branch never reads attributes
+    const modes = buildSupportedModes({} as any, false, [
+      area("Bath", "Ground"),
+      area("Bath", "Upstairs"),
+    ]);
+    expect(modes.slice(2).map((m) => [m.mode, m.label])).toEqual([
+      [101, "Bath"],
+      [102, "Bath (Upstairs)"],
+    ]);
   });
 });
 

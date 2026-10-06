@@ -38,7 +38,7 @@ function toAreaId(roomId: string | number): number {
  * Extract unique maps (floors) from rooms that have mapName set.
  * Returns an empty array when no rooms carry floor info.
  */
-function extractMaps(rooms: VacuumRoom[]): ServiceArea.Map[] {
+function extractMaps(rooms: { mapName?: string }[]): ServiceArea.Map[] {
   const seen = new Map<string, number>();
   for (const room of rooms) {
     if (room.mapName && !seen.has(room.mapName)) {
@@ -227,6 +227,15 @@ export function createDefaultServiceAreaServer() {
   });
 }
 
+// FloorNumber is a nullable int16, else the endpoint fails.
+function toFloorNumber(floor: unknown): number | null {
+  return typeof floor === "number" &&
+    Number.isInteger(floor) &&
+    Math.abs(floor) <= 32767
+    ? floor
+    : null;
+}
+
 /**
  * Create a ServiceAreaServer from user-defined custom service areas.
  * Each area maps to a custom HA service call (e.g., script.mow_zone_1).
@@ -237,13 +246,27 @@ export function createDefaultServiceAreaServer() {
 export function createCustomServiceAreaServer(
   customAreas: CustomServiceArea[],
 ) {
+  // Matter: map on every area or none, names at most 64 chars (#506).
+  const mapNames = customAreas.map((a) =>
+    typeof a.mapName === "string" ? a.mapName.trim().slice(0, 64) : "",
+  );
+  const mapped = mapNames.every((name) => name.length > 0);
+  if (!mapped && mapNames.some((name) => name.length > 0)) {
+    logger.warn(
+      "Custom service areas: mapName ignored, set it on every area or on none",
+    );
+  }
+  const maps = mapped
+    ? extractMaps(mapNames.map((mapName) => ({ mapName })))
+    : [];
+
   const supportedAreas: ServiceArea.Area[] = customAreas.map((area, index) => ({
     areaId: index + 1,
-    mapId: null,
+    mapId: maps.find((m) => m.name === mapNames[index])?.mapId ?? null,
     areaInfo: {
       locationInfo: {
         locationName: area.name,
-        floorNumber: null,
+        floorNumber: toFloorNumber(area.floorNumber),
         areaType: null,
       },
       landmarkInfo: null,
@@ -253,6 +276,15 @@ export function createCustomServiceAreaServer(
   logger.info(
     `Using ${customAreas.length} custom service areas: ${customAreas.map((a) => a.name).join(", ")}`,
   );
+
+  if (maps.length > 0) {
+    return ServiceAreaServerWithMaps({
+      supportedAreas,
+      supportedMaps: maps,
+      selectedAreas: [],
+      currentArea: null,
+    });
+  }
 
   return ServiceAreaServer({
     supportedAreas,

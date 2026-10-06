@@ -671,6 +671,85 @@ describe("vacuum room switches (#355)", () => {
     ]);
   });
 
+  it("custom areas on two maps mount with maps, floors and unique mode labels (#506)", async () => {
+    const mapping = new FakeMappingStorage();
+    mapping.put("bridge-355", {
+      entityId: VACUUM,
+      customServiceAreas: [
+        {
+          name: "Bath",
+          service: "script.bath_down",
+          mapName: "Ground",
+          floorNumber: 0,
+        },
+        {
+          name: "Bath",
+          service: "script.bath_up",
+          mapName: "Upstairs",
+          floorNumber: 1,
+        },
+      ],
+    });
+    const manager = await buildManager(makeHa(), mapping);
+    await manager.refreshDevices();
+    expect(manager.failedEntities).toEqual([]);
+
+    const vacuum = vacuumEndpoint(manager);
+    await vacuum.construction.ready;
+    // biome-ignore lint/suspicious/noExplicitAny: read cluster state
+    let state: any;
+    await vacuum.act((agent) => {
+      // biome-ignore lint/suspicious/noExplicitAny: read cluster state
+      const a = agent as any;
+      state = {
+        maps: a.serviceArea.state.supportedMaps,
+        mapsFeature: a.serviceArea.features.maps,
+        areas: a.serviceArea.state.supportedAreas.map(
+          // biome-ignore lint/suspicious/noExplicitAny: read cluster state
+          (x: any) => [x.areaId, x.mapId, x.areaInfo.locationInfo.floorNumber],
+        ),
+        labels: a.rvcRunMode.state.supportedModes.map(
+          // biome-ignore lint/suspicious/noExplicitAny: read cluster state
+          (m: any) => m.label,
+        ),
+      };
+    });
+    expect(state.mapsFeature).toBe(true);
+    expect(state.maps).toEqual([
+      { mapId: 1, name: "Ground" },
+      { mapId: 2, name: "Upstairs" },
+    ]);
+    expect(state.areas).toEqual([
+      [1, 1, 0],
+      [2, 2, 1],
+    ]);
+    expect(state.labels).toEqual([
+      "Idle",
+      "Cleaning",
+      "Bath",
+      "Bath (Upstairs)",
+    ]);
+
+    // the second Bath runs its own service, by area and by room mode
+    calls = [];
+    await vacuum.act((agent) => {
+      // biome-ignore lint/suspicious/noExplicitAny: drive the clusters
+      const a = agent as any;
+      a.serviceArea.state.selectedAreas = [2];
+      a.rvcRunMode.changeToMode({ newMode: 1 });
+    });
+    expect(calls).toEqual([{ action: "script.bath_up" }]);
+
+    calls = [];
+    await vacuum.act((agent) => {
+      // biome-ignore lint/suspicious/noExplicitAny: drive the clusters
+      const a = agent as any;
+      a.serviceArea.state.selectedAreas = [];
+      a.rvcRunMode.changeToMode({ newMode: 102 });
+    });
+    expect(calls).toEqual([{ action: "script.bath_up" }]);
+  });
+
   it("mapping edit: kept switches pick up the fresh mapping, number preserved", async () => {
     const mapping = new FakeMappingStorage();
     mapping.put("bridge-355", {

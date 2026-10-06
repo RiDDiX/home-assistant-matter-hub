@@ -128,6 +128,92 @@ describe("getVacuumServiceAreas", () => {
   });
 });
 
+describe("custom areas with maps and floors (#506)", () => {
+  // biome-ignore lint/suspicious/noExplicitAny: read the seeded initial state
+  const defaults = (server: unknown) => (server as any).defaults;
+  const shape = (server: unknown) =>
+    supportedAreas(server).map((a) => [
+      a.areaId,
+      a.mapId,
+      a.areaInfo.locationInfo?.floorNumber,
+    ]);
+
+  it("turns map names into maps and keeps the same room name on two of them", () => {
+    const server = createCustomServiceAreaServer([
+      { name: "Bath", service: "script.a", mapName: "Ground", floorNumber: 0 },
+      {
+        name: "Bath",
+        service: "script.b",
+        mapName: "Upstairs",
+        floorNumber: 1,
+      },
+      {
+        name: "Hall",
+        service: "script.c",
+        mapName: " Ground ",
+        floorNumber: -1,
+      },
+    ]);
+    expect(defaults(server).supportedMaps).toEqual([
+      { mapId: 1, name: "Ground" },
+      { mapId: 2, name: "Upstairs" },
+    ]);
+    expect(shape(server)).toEqual([
+      [1, 1, 0],
+      [2, 2, 1],
+      [3, 1, -1],
+    ]);
+  });
+
+  it("drops the maps when one area has none, Matter forbids the mix", () => {
+    const server = createCustomServiceAreaServer([
+      { name: "Bath", service: "script.a", mapName: "Ground" },
+      { name: "Hall", service: "script.b" },
+    ]);
+    expect(defaults(server).supportedMaps).toBeUndefined();
+    expect(shape(server)).toEqual([
+      [1, null, null],
+      [2, null, null],
+    ]);
+  });
+
+  it("treats a blank or non string map name as no map", () => {
+    const server = createCustomServiceAreaServer([
+      { name: "A", service: "script.a", mapName: "Ground" },
+      { name: "B", service: "script.b", mapName: "   " },
+      // biome-ignore lint/suspicious/noExplicitAny: a hand edited config
+      { name: "C", service: "script.c", mapName: 2 as any },
+    ]);
+    expect(defaults(server).supportedMaps).toBeUndefined();
+    expect(shape(server).map((a) => a[1])).toEqual([null, null, null]);
+  });
+
+  it("ignores a floor that is not an int16 integer", () => {
+    const server = createCustomServiceAreaServer([
+      { name: "A", service: "script.a", floorNumber: 1.5 },
+      { name: "B", service: "script.b", floorNumber: 40000 },
+      // biome-ignore lint/suspicious/noExplicitAny: a hand edited config
+      { name: "C", service: "script.c", floorNumber: "2" as any },
+      { name: "D", service: "script.d", floorNumber: 32767 },
+    ]);
+    expect(shape(server)).toEqual([
+      [1, null, null],
+      [2, null, null],
+      [3, null, null],
+      [4, null, 32767],
+    ]);
+  });
+
+  it("cuts a map name to the 64 chars Matter allows", () => {
+    const server = createCustomServiceAreaServer([
+      { name: "A", service: "script.a", mapName: "m".repeat(80) },
+    ]);
+    expect(defaults(server).supportedMaps).toEqual([
+      { mapId: 1, name: "m".repeat(64) },
+    ]);
+  });
+});
+
 describe("withResolvedRooms (#497)", () => {
   const state = (attributes: Record<string, unknown>) =>
     ({ state: "docked", attributes }) as unknown as HomeAssistantEntityState;
