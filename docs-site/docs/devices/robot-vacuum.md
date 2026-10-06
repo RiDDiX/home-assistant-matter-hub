@@ -447,6 +447,34 @@ For integrations that expect a comma-separated field instead of an array, config
 
 See [#291](https://github.com/RiDDiX/home-assistant-matter-hub/issues/291) for the original request.
 
+### Maps and Floors
+
+Each custom area can take two optional settings: `mapName` and `floorNumber`. In the Entity Mapping dialog they are "Map (optional)" and "Floor" on each area.
+
+Areas with the same `mapName` form one Matter map. Maps are listed in the order they first appear. A map name can be up to 64 characters. Set `mapName` on every area or on none. Matter does not allow a mix. If only some areas have one, HAMH leaves the maps out and logs a warning.
+
+`floorNumber` is a whole number. 0 is the main floor. Negative is below ground. Anything else is ignored.
+
+The same room name can be used on two maps. Its fallback run mode is labelled with the map, for example "Bath (Upstairs)". A selection can hold areas from several maps. HAMH calls each area's service in order, same as without maps.
+
+One [report](https://github.com/orgs/home-assistant/discussions/738) says Apple Home on iOS 26 lists Matter maps as floors. Nothing shows a controller using the floor number. Home Assistant's Matter integration reads only the area names.
+
+```yaml
+customServiceAreas:
+  - name: Kitchen
+    service: script.clean_kitchen
+    mapName: Ground floor
+    floorNumber: 0
+  - name: Bath
+    service: script.clean_bath_down
+    mapName: Ground floor
+    floorNumber: 0
+  - name: Bath
+    service: script.clean_bath_up
+    mapName: Upstairs
+    floorNumber: 1
+```
+
 ---
 
 ## Identify / Locate

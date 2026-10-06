@@ -38,7 +38,7 @@ of port forwarding etc.
 | Channel | Branch | Current Version | Description |
 |---------|--------|-----------------|-------------|
 | **Stable** | `main` | v2.0.58 | Production-ready, recommended for most users |
-| **Alpha** | `alpha` | v2.1.0-alpha.920 | Ahead of Stable, carries the additions listed under Alpha Features |
+| **Alpha** | `alpha` | v2.1.0-alpha.921 | Ahead of Stable, carries the additions listed under Alpha Features |
 | **Testing** | `testing` | v4.1.0-testing.x | ⚠️ **Highly unstable!** Experimental features, may break |
 
 ### Which version should I use?
@@ -378,7 +378,10 @@ Re-assign the affected devices to their rooms after they reconnect. See the [doc
 </details>
 
 <details>
-<summary><strong>🧪 Alpha Features (v2.1.0-alpha.920)</strong> - Click to expand</summary>
+<summary><strong>🧪 Alpha Features (v2.1.0-alpha.921)</strong> - Click to expand</summary>
+
+**v2.1.0-alpha.921:**
+- 🗺️ **Vacuum custom areas can carry a map and a floor**: custom service areas of a vacuum can carry a map name and a floor number, areas sharing a map name show up as one Matter map, and the same room name can sit on two maps ([#506](https://github.com/RiDDiX/home-assistant-matter-hub/issues/506))
 
 **v2.1.0-alpha.920:**
 - ⚙️ **Device list changes are one log line**: the log now has one line 'Device list changed: N removed, M added, K mounted' whenever a bridge changes its set of devices, with the added ones named and the bridge id in the logger name, so a log or diagnostic export shows whether the bridge itself changed what a controller sees ([#505](https://github.com/RiDDiX/home-assistant-matter-hub/issues/505))

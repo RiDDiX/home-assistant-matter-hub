@@ -231,11 +231,7 @@ Maps a vacuum with room-specific cleaning buttons and a cleaning mode selector.
 ```json
 {
   "entityId": "vacuum.valetudo_robot",
-  "valetudoIdentifier": "valetudo_robot",
-  "customServiceAreas": [
-    { "areaId": 1, "label": "Kitchen" },
-    { "areaId": 2, "label": "Living Room" }
-  ]
+  "valetudoIdentifier": "valetudo_robot"
 }
 ```
 
