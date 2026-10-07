@@ -250,6 +250,19 @@ Useful when you have multiple locks and only want PIN protection on some.
 
 ---
 
+## Door Lock without Keypad
+
+Exposes the lock without PIN codes, so controllers skip the access code setup.
+
+```json
+{
+  "entityId": "lock.back_door",
+  "lockWithoutPin": true
+}
+```
+
+---
+
 ## Cover with Swapped Open/Close
 
 For covers where Home Assistant reports inverted position values.

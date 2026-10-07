@@ -378,7 +378,10 @@ Home, ...) are not placed in the same network segment. Please make sure to revie
 </details>
 
 <details>
-<summary><strong>🧪 Alpha (v2.1.0-alpha.924)</strong></summary>
+<summary><strong>🧪 Alpha (v2.1.0-alpha.925)</strong></summary>
+
+**v2.1.0-alpha.925:**
+- 🔒 **Locks without a keypad can skip PIN codes**: the new **Lock has no keypad** switch in a lock's entity mapping exposes it without PIN codes, so controllers offer no access code setup. Other locks keep their PIN support ([#418](https://github.com/RiDDiX/home-assistant-matter-hub/issues/418))
 
 **v2.1.0-alpha.924:**
 - 📷 **High resolution camera streams get through**: a 1440p keyframe overflowed the bridge's UDP receive buffer, so the controller never got a whole picture. The bridge now asks for 4 MB, which HAOS allows ([#373](https://github.com/RiDDiX/home-assistant-matter-hub/issues/373))
