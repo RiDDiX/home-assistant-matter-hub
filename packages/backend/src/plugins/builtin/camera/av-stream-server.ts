@@ -1,6 +1,7 @@
 import type { MaybePromise } from "@matter/general";
 import { CameraAvStreamManagementServer } from "@matter/main/behaviors";
 import { CameraAvStreamManagement } from "@matter/main/clusters";
+import type { StreamUsage } from "@matter/types";
 import type { WebRtcBridge } from "./webrtc-bridge.js";
 
 // ImageControl carries no commands; it is on so we can set an image-orientation
@@ -27,7 +28,18 @@ export class CameraAvStreamServer extends Base {
   override videoStreamAllocate(
     request: CameraAvStreamManagement.VideoStreamAllocateRequest,
   ): MaybePromise<CameraAvStreamManagement.VideoStreamAllocateResponse> {
-    const videoStreamId = this.state.nextVideoStreamId++;
+    return { videoStreamId: this.allocateVideo(request) };
+  }
+
+  private allocateVideo(
+    request: CameraAvStreamManagement.VideoStreamAllocateRequest,
+  ): number {
+    // allocated streams are stored, the counter is not: never reuse a stored id
+    const videoStreamId = Math.max(
+      this.state.nextVideoStreamId,
+      ...this.state.allocatedVideoStreams.map((s) => s.videoStreamId + 1),
+    );
+    this.state.nextVideoStreamId = videoStreamId + 1;
     this.state.allocatedVideoStreams = [
       ...this.state.allocatedVideoStreams,
       {
@@ -41,12 +53,12 @@ export class CameraAvStreamServer extends Base {
         minBitRate: request.minBitRate,
         maxBitRate: request.maxBitRate,
         keyFrameInterval: request.keyFrameInterval,
-        watermarkEnabled: request.watermarkEnabled,
-        osdEnabled: request.osdEnabled,
+        // no WMARK/OSD feature, storing even false fails conformance and
+        // SmartThings always sends both
         referenceCount: 1,
       },
     ];
-    return { videoStreamId };
+    return videoStreamId;
   }
 
   override videoStreamDeallocate(
@@ -60,7 +72,11 @@ export class CameraAvStreamServer extends Base {
   override snapshotStreamAllocate(
     request: CameraAvStreamManagement.SnapshotStreamAllocateRequest,
   ): MaybePromise<CameraAvStreamManagement.SnapshotStreamAllocateResponse> {
-    const snapshotStreamId = this.state.nextSnapshotStreamId++;
+    const snapshotStreamId = Math.max(
+      this.state.nextSnapshotStreamId,
+      ...this.state.allocatedSnapshotStreams.map((s) => s.snapshotStreamId + 1),
+    );
+    this.state.nextSnapshotStreamId = snapshotStreamId + 1;
     this.state.allocatedSnapshotStreams = [
       ...this.state.allocatedSnapshotStreams,
       {
@@ -85,6 +101,28 @@ export class CameraAvStreamServer extends Base {
       this.state.allocatedSnapshotStreams.filter(
         (s) => s.snapshotStreamId !== request.snapshotStreamId,
       );
+  }
+
+  // A WebRTC session must name a video stream (Matter 1.5). Reuse one the
+  // controller allocated for this usage, else allocate one ourselves.
+  videoStreamFor(streamUsage: StreamUsage): number {
+    const allocated = this.state.allocatedVideoStreams.find(
+      (s) => s.streamUsage === streamUsage,
+    );
+    if (allocated) return allocated.videoStreamId;
+    const { sensorWidth, sensorHeight, maxFps } = this.state.videoSensorParams;
+    const resolution = { width: sensorWidth, height: sensorHeight };
+    return this.allocateVideo({
+      streamUsage,
+      videoCodec: CameraAvStreamManagement.VideoCodec.H264,
+      minFrameRate: 1,
+      maxFrameRate: maxFps,
+      minResolution: resolution,
+      maxResolution: resolution,
+      minBitRate: 10_000,
+      maxBitRate: this.state.maxNetworkBandwidth,
+      keyFrameInterval: 4000,
+    });
   }
 
   override async captureSnapshot(

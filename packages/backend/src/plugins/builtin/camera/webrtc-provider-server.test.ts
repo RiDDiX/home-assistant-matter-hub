@@ -93,7 +93,10 @@ async function mountCamera(
 function provideOffer(
   endpoint: Endpoint,
   sessionId: number | null,
-): Promise<{ webRtcSessionId: number }> {
+  streams: { videoStreamId?: number | null; videoStreams?: number[] } = {
+    videoStreamId: null,
+  },
+): Promise<{ webRtcSessionId: number; videoStreamId?: number }> {
   return endpoint.act((agent) =>
     // biome-ignore lint/suspicious/noExplicitAny: invoke provideOffer directly
     (agent as any).webRtcTransportProvider.provideOffer({
@@ -101,10 +104,17 @@ function provideOffer(
       sdp: "v=0 controller-offer",
       streamUsage: StreamUsage.LiveView,
       originatingEndpointId: EndpointNumber(1),
-      videoStreamId: null,
       audioStreamId: null,
+      ...streams,
     }),
-  ) as Promise<{ webRtcSessionId: number }>;
+  ) as Promise<{ webRtcSessionId: number; videoStreamId?: number }>;
+}
+
+function allocatedVideoStreams(
+  endpoint: Endpoint,
+): { videoStreamId: number }[] {
+  // biome-ignore lint/suspicious/noExplicitAny: read behavior state
+  return (endpoint.state as any).cameraAvStreamManagement.allocatedVideoStreams;
 }
 
 describe("provideOffer answer delivery", () => {
@@ -194,5 +204,148 @@ describe("provideOffer answer delivery", () => {
     await vi.waitFor(() => expect(endedSessions).toContain(43), {
       timeout: 3000,
     });
+  });
+});
+
+// Matter 1.5 sessions must name a stream; a controller may send the list, the
+// older single id, or nothing (#373).
+describe("provideOffer video stream", () => {
+  it("echoes the older VideoStreamID the controller sent", async () => {
+    setRequestorInvokeForTests(async () => true);
+    const endpoint = await mountCamera(fakeBridge().bridge);
+
+    const res = await provideOffer(endpoint, null, { videoStreamId: 7 });
+    touched.add(res.webRtcSessionId);
+
+    expect(res.videoStreamId).toBe(7);
+  });
+
+  it("allocates a stream when the offer names none", async () => {
+    setRequestorInvokeForTests(async () => true);
+    const endpoint = await mountCamera(fakeBridge().bridge);
+
+    const res = await provideOffer(endpoint, null);
+    touched.add(res.webRtcSessionId);
+
+    const streams = allocatedVideoStreams(endpoint);
+    expect(streams).toHaveLength(1);
+    expect(res.videoStreamId).toBe(streams[0].videoStreamId);
+  });
+
+  it("reuses a stream the controller allocated", async () => {
+    setRequestorInvokeForTests(async () => true);
+    const endpoint = await mountCamera(fakeBridge().bridge);
+    const allocated = (await endpoint.act((agent) =>
+      // biome-ignore lint/suspicious/noExplicitAny: invoke the command directly
+      (agent as any).cameraAvStreamManagement.videoStreamAllocate({
+        streamUsage: StreamUsage.LiveView,
+        videoCodec: 0,
+        minFrameRate: 15,
+        maxFrameRate: 30,
+        minResolution: { width: 640, height: 360 },
+        maxResolution: { width: 1920, height: 1080 },
+        minBitRate: 10_000,
+        maxBitRate: 4_000_000,
+        keyFrameInterval: 4000,
+      }),
+    )) as { videoStreamId: number };
+
+    const res = await provideOffer(endpoint, null);
+    touched.add(res.webRtcSessionId);
+
+    expect(allocatedVideoStreams(endpoint)).toHaveLength(1);
+    expect(res.videoStreamId).toBe(allocated.videoStreamId);
+  });
+
+  it("leaves the response without VideoStreamID when the offer had none", async () => {
+    setRequestorInvokeForTests(async () => true);
+    const endpoint = await mountCamera(fakeBridge().bridge);
+
+    const res = await provideOffer(endpoint, null, { videoStreams: [3] });
+    touched.add(res.webRtcSessionId);
+
+    expect(res.videoStreamId).toBeUndefined();
+  });
+});
+
+// CHIP based controllers wait about 2 s for an invoke response, pulling HA's
+// stream takes longer, so the response must not wait for it (#373).
+describe("provideOffer negotiates after responding", () => {
+  it("responds while HA has not answered yet", async () => {
+    setRequestorInvokeForTests(async () => true);
+    const bridge = {
+      acceptControllerOffer: () => new Promise<string>(() => {}),
+      endSession: async () => {},
+      snapshot: async () => new Uint8Array(0),
+    } as unknown as WebRtcBridge;
+    const endpoint = await mountCamera(bridge);
+
+    const res = await provideOffer(endpoint, null);
+    touched.add(res.webRtcSessionId);
+
+    expect(res.webRtcSessionId).toBeTypeOf("number");
+  });
+
+  it("ends the session on the controller when HA can't deliver", async () => {
+    const invocations: RequestorInvocation[] = [];
+    setRequestorInvokeForTests(async (i) => {
+      invocations.push(i);
+      return true;
+    });
+    const endedSessions: number[] = [];
+    const bridge = {
+      acceptControllerOffer: async () => {
+        throw new Error("HA WebRTC error: Camera does not support WebRTC");
+      },
+      endSession: async (id: number) => {
+        endedSessions.push(id);
+      },
+      snapshot: async () => new Uint8Array(0),
+    } as unknown as WebRtcBridge;
+    const endpoint = await mountCamera(bridge);
+    touched.add(45);
+    registerRequestor(45, {
+      session: openSession(),
+      requestorEndpoint: EndpointNumber(1),
+      env: fakeEnv,
+    });
+
+    const res = await provideOffer(endpoint, 45);
+    expect(res.webRtcSessionId).toBe(45);
+
+    await vi.waitFor(() => expect(endedSessions).toContain(45));
+    expect(invocations.map((i) => i.request.command)).toEqual(["end"]);
+    expect(invocations[0].request.fields).toEqual({
+      webRtcSessionId: 45,
+      reason: 5, // NoUserMedia
+    });
+  });
+});
+
+describe("videoStreamAllocate", () => {
+  it("takes SmartThings' watermark and OSD flags without storing them", async () => {
+    // SmartThings always sends both; with no WMARK/OSD feature, storing even
+    // false failed conformance and the allocation with it
+    const endpoint = await mountCamera(fakeBridge().bridge);
+    const res = (await endpoint.act((agent) =>
+      // biome-ignore lint/suspicious/noExplicitAny: invoke the command directly
+      (agent as any).cameraAvStreamManagement.videoStreamAllocate({
+        streamUsage: StreamUsage.LiveView,
+        videoCodec: 0,
+        minFrameRate: 15,
+        maxFrameRate: 30,
+        minResolution: { width: 640, height: 360 },
+        maxResolution: { width: 1920, height: 1080 },
+        minBitRate: 10_000,
+        maxBitRate: 4_000_000,
+        keyFrameInterval: 4000,
+        watermarkEnabled: false,
+        osdEnabled: false,
+      }),
+    )) as { videoStreamId: number };
+
+    expect(allocatedVideoStreams(endpoint)).toEqual([
+      expect.objectContaining({ videoStreamId: res.videoStreamId }),
+    ]);
   });
 });

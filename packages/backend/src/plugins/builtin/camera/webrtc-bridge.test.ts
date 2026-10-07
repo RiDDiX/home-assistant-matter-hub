@@ -5,6 +5,8 @@ import {
   RTCPeerConnection,
   RtpHeader,
   RtpPacket,
+  useH264,
+  useOPUS,
 } from "werift";
 import {
   DEFAULT_HA_WEBRTC_TIMEOUT_MS,
@@ -57,7 +59,10 @@ function makeFakeHa(mode: FakeMode): FakeHa {
           return async () => {};
         }
 
-        const haPeer = new RTCPeerConnection();
+        // go2rtc relays an H.264 camera as H.264
+        const haPeer = new RTCPeerConnection({
+          codecs: { video: [useH264()], audio: [useOPUS()] },
+        });
         peers.push(haPeer);
         const track = new MediaStreamTrack({ kind: "video" });
         haPeer.addTransceiver(track, { direction: "sendonly" });
@@ -117,6 +122,11 @@ function sdpOf(peer: RTCPeerConnection): string {
   return local.sdp;
 }
 
+// Matter controllers stream H.264
+function h264Peer(): RTCPeerConnection {
+  return new RTCPeerConnection({ codecs: { video: [useH264()] } });
+}
+
 async function makeControllerOffer(peer: RTCPeerConnection): Promise<string> {
   peer.addTransceiver("video", { direction: "recvonly" });
   const offer = await peer.createOffer();
@@ -155,7 +165,7 @@ describe("WebRtcBridge media relay", () => {
     );
     cleanups.push(() => bridge.close(), fake.cleanup);
 
-    const controller = new RTCPeerConnection();
+    const controller = h264Peer();
     cleanups.push(() => controller.close());
     let received = 0;
     controller.onTrack.subscribe((t) =>
@@ -182,8 +192,8 @@ describe("WebRtcBridge media relay", () => {
   }, 12_000);
 
   it("rejects when HA replies with an error instead of hanging", async () => {
-    // Keep the HA timeout long so only the error path can reject quickly; the
-    // 6s test timeout would fire first if the error were ignored (old bug).
+    // An ignored error would end in the 10s timeout, whose message the regex
+    // below does not match (old bug).
     setHaWebRtcTimeoutMsForTests(10_000);
     const fake = makeFakeHa("error");
     const bridge = new WebRtcBridge(
@@ -192,14 +202,16 @@ describe("WebRtcBridge media relay", () => {
     );
     cleanups.push(() => bridge.close(), fake.cleanup);
 
-    const controller = new RTCPeerConnection();
+    const controller = h264Peer();
     cleanups.push(() => controller.close());
     const offerSdp = await makeControllerOffer(controller);
 
     await expect(
       bridge.acceptControllerOffer(2, "camera.bad", offerSdp),
     ).rejects.toThrow(/HA WebRTC error/);
-  }, 6_000);
+    // werift waits up to 5s per ICE gathering when STUN goes unanswered, and
+    // two peers gather here
+  }, 15_000);
 
   it("rejects after the HA answer timeout when HA never replies", async () => {
     setHaWebRtcTimeoutMsForTests(400);
@@ -210,7 +222,7 @@ describe("WebRtcBridge media relay", () => {
     );
     cleanups.push(() => bridge.close(), fake.cleanup);
 
-    const controller = new RTCPeerConnection();
+    const controller = h264Peer();
     cleanups.push(() => controller.close());
     const offerSdp = await makeControllerOffer(controller);
 
@@ -219,5 +231,5 @@ describe("WebRtcBridge media relay", () => {
       bridge.acceptControllerOffer(3, "camera.slow", offerSdp),
     ).rejects.toThrow(/timed out/);
     expect(Date.now() - start).toBeGreaterThanOrEqual(300);
-  }, 5_000);
+  }, 15_000);
 });

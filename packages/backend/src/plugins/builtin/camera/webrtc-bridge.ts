@@ -4,12 +4,26 @@ import {
   createConnection,
   createLongLivedTokenAuth,
 } from "home-assistant-js-websocket";
-import { RTCPeerConnection, type RTCRtpTransceiver } from "werift";
+import {
+  RTCPeerConnection,
+  type RTCRtpTransceiver,
+  useH264,
+  useOPUS,
+  usePCMU,
+} from "werift";
 
 // Bridges an HA camera to a Matter controller. Both sides want to be the
 // offerer, so we run two werift peers per session and forward the tracks.
 
 const logger = Logger.get("CameraWebRtc");
+
+// werift offers VP8 only by default. Matter cameras stream H.264 and go2rtc
+// relays an H.264 camera without transcoding, so both peers speak H.264; RTP
+// is forwarded as is, both sides have to agree on the codec.
+const CODECS = {
+  video: [useH264()],
+  audio: [useOPUS(), usePCMU()],
+};
 
 // How long we wait for HA to answer a camera/webrtc/offer before giving up.
 const DEFAULT_HA_WEBRTC_TIMEOUT_MS = 15_000;
@@ -101,7 +115,7 @@ export class WebRtcBridge {
     entityId: string,
     ice?: ControllerIceConfig,
   ): Promise<MatterOffer> {
-    const haPeer = new RTCPeerConnection();
+    const haPeer = new RTCPeerConnection({ codecs: CODECS });
     const controllerPeer = new RTCPeerConnection(
       this.controllerConfig(entityId, ice),
     );
@@ -175,7 +189,7 @@ export class WebRtcBridge {
     controllerOfferSdp: string,
     ice?: ControllerIceConfig,
   ): Promise<string> {
-    const haPeer = new RTCPeerConnection();
+    const haPeer = new RTCPeerConnection({ codecs: CODECS });
     const controllerPeer = new RTCPeerConnection(
       this.controllerConfig(entityId, ice),
     );
@@ -402,7 +416,7 @@ export class WebRtcBridge {
     );
     if (iceServers.length === 0) {
       logger.info(`controller peer using default ICE servers (${entityId})`);
-      return undefined;
+      return { codecs: CODECS };
     }
     const policy =
       ice?.iceTransportPolicy === "relay" || ice?.iceTransportPolicy === "all"
@@ -412,7 +426,9 @@ export class WebRtcBridge {
       `controller peer using ${iceServers.length} controller ICE server(s)` +
         `${policy ? ` policy=${policy}` : ""} (${entityId})`,
     );
-    return policy ? { iceServers, iceTransportPolicy: policy } : { iceServers };
+    return policy
+      ? { codecs: CODECS, iceServers, iceTransportPolicy: policy }
+      : { codecs: CODECS, iceServers };
   }
 
   private localSdp(peer: RTCPeerConnection): string {
