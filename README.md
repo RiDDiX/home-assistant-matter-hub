@@ -38,7 +38,7 @@ of port forwarding etc.
 | Channel | Branch | Current Version | Description |
 |---------|--------|-----------------|-------------|
 | **Stable** | `main` | v2.0.58 | Production-ready, recommended for most users |
-| **Alpha** | `alpha` | v2.1.0-alpha.924 | Ahead of Stable, carries the additions listed under Alpha Features |
+| **Alpha** | `alpha` | v2.1.0-alpha.925 | Ahead of Stable, carries the additions listed under Alpha Features |
 | **Testing** | `testing` | v4.1.0-testing.x | ⚠️ **Highly unstable!** Experimental features, may break |
 
 ### Which version should I use?
@@ -378,7 +378,10 @@ Re-assign the affected devices to their rooms after they reconnect. See the [doc
 </details>
 
 <details>
-<summary><strong>🧪 Alpha Features (v2.1.0-alpha.924)</strong> - Click to expand</summary>
+<summary><strong>🧪 Alpha Features (v2.1.0-alpha.925)</strong> - Click to expand</summary>
+
+**v2.1.0-alpha.925:**
+- 🔒 **Locks without a keypad can skip PIN codes**: the new **Lock has no keypad** switch in a lock's entity mapping exposes it without PIN codes, so controllers offer no access code setup. Other locks keep their PIN support ([#418](https://github.com/RiDDiX/home-assistant-matter-hub/issues/418))
 
 **v2.1.0-alpha.924:**
 - 📷 **High resolution camera streams get through**: a 1440p keyframe overflowed the bridge's UDP receive buffer, so the controller never got a whole picture. The bridge now asks for 4 MB, which HAOS allows ([#373](https://github.com/RiDDiX/home-assistant-matter-hub/issues/373))

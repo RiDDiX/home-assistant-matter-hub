@@ -36,7 +36,13 @@ Locking is always allowed without a PIN. Only the unlock action requires PIN ent
 
 ### Apple Home access code prompt
 
-After commissioning a lock with PIN support, Apple Home may show a one-time "Set Up an Access Code" prompt the first time you open the lock's details. Enter the same PIN you configured for this entity in HAMH so Apple Home and the bridge agree on the credential. If you do not want PIN prompts at all, set `disableLockPin` on the entity mapping; HAMH then advertises the lock without the PinCredential feature and Apple Home will skip the access code setup.
+After commissioning a lock with PIN support, Apple Home may show a one-time "Set Up an Access Code" prompt the first time you open the lock's details. Enter the same PIN you configured for this entity in HAMH so Apple Home and the bridge agree on the credential.
+
+`disableLockPin` only turns off the PIN check for remote unlock. The lock still offers PIN codes, so Apple Home still asks for an access code.
+
+### Lock without a keypad
+
+For a lock without a keypad, turn on **Lock has no keypad** in the entity mapping (`lockWithoutPin`). HAMH then exposes the lock without the User and PIN features, so controllers offer no access code setup. Lock, unlock and unlatch keep working. Controllers can keep the old features cached; if the prompt stays, remove the lock in the controller app and pair again. Locks without this setting are unchanged. Available since v2.1.0-alpha.925.
 
 ### Programming the physical lock (opt-in)
 
