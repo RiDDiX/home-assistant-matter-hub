@@ -38,7 +38,7 @@ of port forwarding etc.
 | Channel | Branch | Current Version | Description |
 |---------|--------|-----------------|-------------|
 | **Stable** | `main` | v2.0.58 | Production-ready, recommended for most users |
-| **Alpha** | `alpha` | v2.1.0-alpha.921 | Ahead of Stable, carries the additions listed under Alpha Features |
+| **Alpha** | `alpha` | v2.1.0-alpha.922 | Ahead of Stable, carries the additions listed under Alpha Features |
 | **Testing** | `testing` | v4.1.0-testing.x | ⚠️ **Highly unstable!** Experimental features, may break |
 
 ### Which version should I use?
@@ -378,7 +378,10 @@ Re-assign the affected devices to their rooms after they reconnect. See the [doc
 </details>
 
 <details>
-<summary><strong>🧪 Alpha Features (v2.1.0-alpha.921)</strong> - Click to expand</summary>
+<summary><strong>🧪 Alpha Features (v2.1.0-alpha.922)</strong> - Click to expand</summary>
+
+**v2.1.0-alpha.922:**
+- 📷 **Camera live view can work with SmartThings**: four bugs stopped it every time, SmartThings' stream setup was rejected, every offer failed, the bridge offered VP8 instead of H.264 and answered too late. Tested end to end with a simulated SmartThings controller, a test on real hardware is still missing ([#373](https://github.com/RiDDiX/home-assistant-matter-hub/issues/373))
 
 **v2.1.0-alpha.921:**
 - 🗺️ **Vacuum custom areas can carry a map and a floor**: custom service areas of a vacuum can carry a map name and a floor number, areas sharing a map name show up as one Matter map, and the same room name can sit on two maps ([#506](https://github.com/RiDDiX/home-assistant-matter-hub/issues/506))
@@ -534,7 +537,7 @@ Configurable auto-recovery with failure timestamps in Settings, controller-compa
 
 ### Experimental: Camera Plugin
 
-A built-in plugin exposes Home Assistant cameras as Matter Cameras (`0x0142`). Experimental, SmartThings-only as of 2026, and the WebRTC media path is not verified end to end.
+A built-in plugin exposes Home Assistant cameras as Matter Cameras (`0x0142`). Experimental and SmartThings-only as of 2026. Live view could not work until the [#373](https://github.com/RiDDiX/home-assistant-matter-hub/issues/373) fix; a loopback test that does what SmartThings' camera driver does now streams end to end, a test on real SmartThings hardware is still missing.
 
 ---
 

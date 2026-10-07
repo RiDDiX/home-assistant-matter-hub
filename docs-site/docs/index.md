@@ -378,7 +378,10 @@ Home, ...) are not placed in the same network segment. Please make sure to revie
 </details>
 
 <details>
-<summary><strong>🧪 Alpha (v2.1.0-alpha.921)</strong></summary>
+<summary><strong>🧪 Alpha (v2.1.0-alpha.922)</strong></summary>
+
+**v2.1.0-alpha.922:**
+- 📷 **Camera live view can work with SmartThings**: four bugs stopped it every time, SmartThings' stream setup was rejected, every offer failed, the bridge offered VP8 instead of H.264 and answered too late. Tested end to end with a simulated SmartThings controller, a test on real hardware is still missing ([#373](https://github.com/RiDDiX/home-assistant-matter-hub/issues/373))
 
 **v2.1.0-alpha.921:**
 - 🗺️ **Vacuum custom areas can carry a map and a floor**: custom service areas of a vacuum can carry a map name and a floor number, areas sharing a map name show up as one Matter map, and the same room name can sit on two maps ([#506](https://github.com/RiDDiX/home-assistant-matter-hub/issues/506))
