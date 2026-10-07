@@ -199,7 +199,8 @@ describe("WebRtcBridge media relay", () => {
     // Ending the session must drop the HA subscription, not just the peers.
     await bridge.endSession(1);
     expect(fake.unsubscribedIds).toEqual(fake.unsubscribeCalls);
-  }, 12_000);
+    // two STUN gatherings of up to 5s each before any media flows
+  }, 20_000);
 
   it("rejects when HA replies with an error instead of hanging", async () => {
     // An ignored error would end in the 10s timeout, whose message the regex
