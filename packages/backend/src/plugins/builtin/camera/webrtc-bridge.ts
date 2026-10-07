@@ -1,3 +1,4 @@
+import type { Socket } from "node:dgram";
 import { Logger } from "@matter/general";
 import {
   type Connection,
@@ -144,6 +145,7 @@ export class WebRtcBridge {
       haPeer.addTransceiver("audio", { direction: "recvonly" });
       const haOffer = await haPeer.createOffer();
       await haPeer.setLocalDescription(haOffer);
+      growRecvBuffers(haPeer, entityId);
       const haOfferSdp = this.localSdp(haPeer);
       logger.info(`HA offer sent for ${entityId} (${haOfferSdp.length} chars)`);
       const { answer, sessionId, unsubscribe } = await this.requestHaWebRtc(
@@ -218,6 +220,7 @@ export class WebRtcBridge {
       haPeer.addTransceiver("audio", { direction: "recvonly" });
       const haOffer = await haPeer.createOffer();
       await haPeer.setLocalDescription(haOffer);
+      growRecvBuffers(haPeer, entityId);
       const haOfferSdp = this.localSdp(haPeer);
       logger.info(`HA offer sent for ${entityId} (${haOfferSdp.length} chars)`);
       const { answer, sessionId, unsubscribe } = await this.requestHaWebRtc(
@@ -542,6 +545,42 @@ export class WebRtcBridge {
 
     return { answer, sessionId, unsubscribe };
   }
+}
+
+// The kernel default UDP receive buffer (~208 KB) holds about 90 packets. A
+// 1440p keyframe from go2rtc arrives as a burst of several hundred, the rest is
+// dropped and the controller never gets a whole frame (#373). HAOS allows 4 MB,
+// other hosts cap it at their net.core.rmem_max.
+export const UDP_RECV_BUFFER = 4 * 1024 * 1024;
+
+// werift keeps its sockets internal: ice transport -> connection -> protocols
+export function growRecvBuffers(
+  peer: RTCPeerConnection,
+  entityId: string,
+): number[] {
+  const sizes: number[] = [];
+  for (const ice of peer.iceTransports) {
+    const { protocols = [] } = ice.connection as unknown as {
+      protocols?: { transport?: { socket?: Socket } }[];
+    };
+    for (const p of protocols) {
+      const socket = p.transport?.socket;
+      if (!socket) continue;
+      try {
+        // never shrink a host default that is already larger
+        if (socket.getRecvBufferSize() < UDP_RECV_BUFFER) {
+          socket.setRecvBufferSize(UDP_RECV_BUFFER);
+        }
+        sizes.push(socket.getRecvBufferSize());
+      } catch {
+        // socket closed or not bound yet
+      }
+    }
+  }
+  logger.info(
+    `HA peer UDP receive buffer ${sizes.length ? `${Math.min(...sizes)} bytes` : "unchanged"} (${entityId})`,
+  );
+  return sizes;
 }
 
 // Which media kinds a remote offer advertises, so the answer matches its

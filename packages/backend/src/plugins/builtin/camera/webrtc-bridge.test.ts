@@ -1,3 +1,4 @@
+import { createSocket } from "node:dgram";
 import type { Connection } from "home-assistant-js-websocket";
 import { afterEach, describe, expect, it } from "vitest";
 import {
@@ -10,7 +11,9 @@ import {
 } from "werift";
 import {
   DEFAULT_HA_WEBRTC_TIMEOUT_MS,
+  growRecvBuffers,
   setHaWebRtcTimeoutMsForTests,
+  UDP_RECV_BUFFER,
   WebRtcBridge,
 } from "./webrtc-bridge.js";
 
@@ -255,5 +258,28 @@ describe("WebRtcBridge media relay", () => {
       bridge.acceptControllerOffer(3, "camera.slow", offerSdp),
     ).rejects.toThrow(/timed out/);
     expect(Date.now() - start).toBeGreaterThanOrEqual(300);
+  }, 15_000);
+});
+
+describe("growRecvBuffers", () => {
+  it("raises the receive buffer of the peer's UDP sockets (#373)", async () => {
+    const probe = createSocket("udp4");
+    await new Promise<void>((r) => probe.bind(0, "127.0.0.1", r));
+    const hostDefault = probe.getRecvBufferSize();
+    probe.close();
+
+    const peer = h264Peer();
+    cleanups.push(() => peer.close());
+    await makeControllerOffer(peer);
+
+    const sizes = growRecvBuffers(peer, "camera.hq");
+    expect(sizes.length).toBeGreaterThan(0);
+    for (const size of sizes) {
+      if (hostDefault < UDP_RECV_BUFFER) {
+        expect(size).toBeGreaterThan(hostDefault);
+      } else {
+        expect(size).toBe(hostDefault);
+      }
+    }
   }, 15_000);
 });
