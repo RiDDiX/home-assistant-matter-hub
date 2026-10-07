@@ -167,6 +167,7 @@ export class EntityMappingStorage extends Service {
       chargingStateEntity: request.chargingStateEntity?.trim() || undefined,
       roomEntities: roomEntities.length > 0 ? roomEntities : undefined,
       disableLockPin: request.disableLockPin || undefined,
+      lockWithoutPin: request.lockWithoutPin || undefined,
       lockUsercodeService: request.lockUsercodeService?.trim() || undefined,
       lockUsercodeSlot: sanitizeUsercodeSlot(request.lockUsercodeSlot),
       lockPinMinLength: pinLengths.min,
@@ -245,6 +246,7 @@ export class EntityMappingStorage extends Service {
       !config.chargingStateEntity &&
       !config.roomEntities &&
       !config.disableLockPin &&
+      !config.lockWithoutPin &&
       !config.lockUsercodeService &&
       config.lockUsercodeSlot === undefined &&
       config.lockPinMinLength === undefined &&

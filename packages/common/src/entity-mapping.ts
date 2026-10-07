@@ -186,6 +186,12 @@ export interface EntityMappingConfig {
    */
   readonly disableLockPin?: boolean;
   /**
+   * Optional: expose the lock without User and PIN features, so controllers
+   * offer no access code setup. For locks without a keypad. Controllers cache
+   * the features at pairing, re-pair after changing it. Default: false.
+   */
+  readonly lockWithoutPin?: boolean;
+  /**
    * Optional: HA service that programs a usercode on the physical lock when a
    * controller sets or clears the PIN credential, e.g.
    * zwave_js.set_lock_usercode or zha.set_lock_user_code. Opt-in, leave unset
@@ -506,6 +512,7 @@ export interface EntityMappingRequest {
   readonly chargingStateEntity?: string;
   readonly roomEntities?: string[];
   readonly disableLockPin?: boolean;
+  readonly lockWithoutPin?: boolean;
   readonly lockUsercodeService?: string;
   readonly lockUsercodeSlot?: number;
   readonly lockPinMinLength?: number;

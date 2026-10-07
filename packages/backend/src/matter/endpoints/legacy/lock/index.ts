@@ -10,9 +10,11 @@ import { BasicInformationServer } from "../../../behaviors/basic-information-ser
 import { HomeAssistantEntityBehavior } from "../../../behaviors/home-assistant-entity-behavior.js";
 import { IdentifyServer } from "../../../behaviors/identify-server.js";
 import {
+  LockServer,
   type LockServerConfig,
   LockServerWithPin,
   LockServerWithPinAndUnbolt,
+  LockServerWithUnbolt,
 } from "../../../behaviors/lock-server.js";
 import { DefaultPowerSourceServer } from "../../../behaviors/power-source-server.js";
 
@@ -68,6 +70,38 @@ const LockWithUnlatchAndBatteryDeviceType = DoorLockDevice.with(
   DefaultPowerSourceServer,
 );
 
+// lockWithoutPin (#418): no User or PIN features, so controllers offer no
+// access code setup. Meant for locks without a keypad.
+const LockNoPinDeviceType = DoorLockDevice.with(
+  BasicInformationServer,
+  IdentifyServer,
+  HomeAssistantEntityBehavior,
+  LockServer(lockServerConfig),
+);
+
+const LockNoPinWithBatteryDeviceType = DoorLockDevice.with(
+  BasicInformationServer,
+  IdentifyServer,
+  HomeAssistantEntityBehavior,
+  LockServer(lockServerConfig),
+  DefaultPowerSourceServer,
+);
+
+const LockNoPinWithUnlatchDeviceType = DoorLockDevice.with(
+  BasicInformationServer,
+  IdentifyServer,
+  HomeAssistantEntityBehavior,
+  LockServerWithUnbolt(lockServerConfig),
+);
+
+const LockNoPinWithUnlatchAndBatteryDeviceType = DoorLockDevice.with(
+  BasicInformationServer,
+  IdentifyServer,
+  HomeAssistantEntityBehavior,
+  LockServerWithUnbolt(lockServerConfig),
+  DefaultPowerSourceServer,
+);
+
 export function LockDevice(
   homeAssistantEntity: HomeAssistantEntityBehavior.State,
 ): EndpointType {
@@ -86,6 +120,20 @@ export function LockDevice(
     LockSupportedFeatures.support_open,
   );
 
+  if (homeAssistantEntity.mapping?.lockWithoutPin === true) {
+    if (supportsUnlatch && hasBattery) {
+      return LockNoPinWithUnlatchAndBatteryDeviceType.set({
+        homeAssistantEntity,
+      });
+    }
+    if (supportsUnlatch) {
+      return LockNoPinWithUnlatchDeviceType.set({ homeAssistantEntity });
+    }
+    if (hasBattery) {
+      return LockNoPinWithBatteryDeviceType.set({ homeAssistantEntity });
+    }
+    return LockNoPinDeviceType.set({ homeAssistantEntity });
+  }
   if (supportsUnlatch && hasBattery) {
     return LockWithUnlatchAndBatteryDeviceType.set({ homeAssistantEntity });
   }

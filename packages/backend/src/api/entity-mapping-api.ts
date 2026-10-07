@@ -49,6 +49,7 @@ export function entityMappingApi(
       chargingStateEntity: body.chargingStateEntity,
       roomEntities: body.roomEntities,
       disableLockPin: body.disableLockPin,
+      lockWithoutPin: body.lockWithoutPin,
       lockUsercodeService: body.lockUsercodeService,
       lockUsercodeSlot: body.lockUsercodeSlot,
       lockPinMinLength: body.lockPinMinLength,

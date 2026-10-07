@@ -143,6 +143,7 @@ export function EntityMappingDialog({
   const [disableBatteryMapping, setDisableBatteryMapping] = useState(false);
   const [roomEntities, setRoomEntities] = useState<string[]>([]);
   const [disableLockPin, setDisableLockPin] = useState(false);
+  const [lockWithoutPin, setLockWithoutPin] = useState(false);
   const [lockUsercodeService, setLockUsercodeService] = useState("");
   const [lockUsercodeSlot, setLockUsercodeSlot] = useState("");
   const [lockPinMinLength, setLockPinMinLength] = useState("");
@@ -243,6 +244,7 @@ export function EntityMappingDialog({
       setDisableBatteryMapping(currentMapping?.disableBatteryMapping || false);
       setRoomEntities(currentMapping?.roomEntities || []);
       setDisableLockPin(currentMapping?.disableLockPin || false);
+      setLockWithoutPin(currentMapping?.lockWithoutPin || false);
       setLockUsercodeService(currentMapping?.lockUsercodeService || "");
       setLockUsercodeSlot(
         currentMapping?.lockUsercodeSlot != null
@@ -417,6 +419,7 @@ export function EntityMappingDialog({
       customServiceAreas:
         customServiceAreas.length > 0 ? customServiceAreas : undefined,
       disableLockPin: disableLockPin || undefined,
+      lockWithoutPin: lockWithoutPin || undefined,
       lockUsercodeService: lockUsercodeService.trim() || undefined,
       lockUsercodeSlot: parseUsercodeSlot(lockUsercodeSlot),
       lockPinMinLength: parsePinLength(lockPinMinLength),
@@ -498,6 +501,7 @@ export function EntityMappingDialog({
     disableBatteryMapping,
     roomEntities,
     disableLockPin,
+    lockWithoutPin,
     lockUsercodeService,
     lockUsercodeSlot,
     lockPinMinLength,
@@ -1582,6 +1586,16 @@ export function EntityMappingDialog({
                 />
               }
               label="Disable PIN requirement for this lock"
+              sx={{ mt: 1, display: "block" }}
+            />
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={lockWithoutPin}
+                  onChange={(e) => setLockWithoutPin(e.target.checked)}
+                />
+              }
+              label="Lock has no keypad: offer no PIN codes to controllers (re-pair after changing)"
               sx={{ mt: 1, display: "block" }}
             />
             <TextField

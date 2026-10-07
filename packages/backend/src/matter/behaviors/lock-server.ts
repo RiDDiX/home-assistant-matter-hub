@@ -524,11 +524,14 @@ export async function applyClearUser(
 }
 
 /**
- * Base DoorLock server, used when no PIN is configured for the entity.
+ * DoorLock server without PIN or User, for lockWithoutPin (#418).
  * Plain lock/unlock, no credential workflow.
  */
+// The bare matter.js DoorLockServer turns every feature on, PIN and User too.
+const PlainBase = Base.with();
+
 // biome-ignore lint/correctness/noUnusedVariables: Biome thinks this is unused, but it's used by the function below
-class LockServerBase extends Base {
+class LockServerBase extends PlainBase {
   declare state: LockServerBase.State;
 
   override async initialize() {
@@ -542,23 +545,10 @@ class LockServerBase extends Base {
     if (!entity.state || !entity.state.attributes) {
       return;
     }
-    applyPatchState(this.state, {
-      lockState: this.state.config.getLockState(entity.state, this.agent),
-      lockType: DoorLock.LockType.DeadBolt,
-      operatingMode: DoorLock.OperatingMode.Normal,
-      actuatorEnabled: true,
-      // Matter DoorLock bitmap: true = mode NOT supported (inverted semantics)
-      supportedOperatingModes: {
-        noRemoteLockUnlock: true,
-        normal: false,
-        passage: true,
-        privacy: true,
-        vacation: true,
-        // AlwaysSet (bits 5-15) is mandatory per the Matter spec; matter.js
-        // requires supportedOperatingModes.alwaysSet to be 2047.
-        alwaysSet: 2047,
-      },
-    });
+    applyPatchState(
+      this.state,
+      plainLockState(this.state.config, entity, this.agent),
+    );
   }
 
   override lockDoor() {
@@ -575,7 +565,84 @@ class LockServerBase extends Base {
 }
 
 namespace LockServerBase {
-  export class State extends Base.State {
+  export class State extends PlainBase.State {
+    config!: LockServerConfig;
+  }
+}
+
+function plainLockState(
+  config: LockServerConfig,
+  entity: HomeAssistantEntityInformation,
+  agent: Base["agent"],
+) {
+  return {
+    lockState: config.getLockState(entity.state, agent),
+    lockType: DoorLock.LockType.DeadBolt,
+    operatingMode: DoorLock.OperatingMode.Normal,
+    actuatorEnabled: true,
+    // Matter DoorLock bitmap: true = mode NOT supported (inverted semantics)
+    supportedOperatingModes: {
+      noRemoteLockUnlock: true,
+      normal: false,
+      passage: true,
+      privacy: true,
+      vacation: true,
+      // AlwaysSet (bits 5-15) is mandatory per the Matter spec; matter.js
+      // requires supportedOperatingModes.alwaysSet to be 2047.
+      alwaysSet: 2047,
+    },
+  };
+}
+
+// Unbolting without PIN for locks with HA's OPEN feature and lockWithoutPin
+// set (#418). Unlock opens the latch and unbolt only unlocks, like the PIN
+// variant.
+const UnboltBase = Base.with("Unbolting");
+
+// biome-ignore lint/correctness/noUnusedVariables: used by the factory below
+class LockServerWithUnboltBase extends UnboltBase {
+  declare state: LockServerWithUnboltBase.State;
+
+  override async initialize() {
+    await super.initialize();
+    const homeAssistant = await this.agent.load(HomeAssistantEntityBehavior);
+    this.update(homeAssistant.entity);
+    this.reactTo(homeAssistant.onChange, this.update, { lock: true });
+  }
+
+  private update(entity: HomeAssistantEntityInformation) {
+    if (!entity.state || !entity.state.attributes) {
+      return;
+    }
+    applyPatchState(
+      this.state,
+      plainLockState(this.state.config, entity, this.agent),
+    );
+  }
+
+  override lockDoor() {
+    const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);
+    homeAssistant.callAction(this.state.config.lock(void 0, this.agent));
+  }
+
+  override unlockDoor() {
+    const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);
+    const unlatch = this.state.config.unlatch;
+    homeAssistant.callAction(
+      unlatch
+        ? unlatch(void 0, this.agent)
+        : this.state.config.unlock(void 0, this.agent),
+    );
+  }
+
+  override unboltDoor() {
+    const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);
+    homeAssistant.callAction(this.state.config.unlock(void 0, this.agent));
+  }
+}
+
+namespace LockServerWithUnboltBase {
+  export class State extends UnboltBase.State {
     config!: LockServerConfig;
   }
 }
@@ -832,12 +899,14 @@ namespace LockServerWithPinBase {
   }
 }
 
-/**
- * Creates a basic LockServer without PIN credential support.
- * Use this when no PIN is configured for the entity.
- */
+/** Plain lock/unlock without PIN, see LockServerBase. */
 export function LockServer(config: LockServerConfig) {
   return LockServerBase.set({ config });
+}
+
+/** Unbolting without PIN, see LockServerWithUnboltBase. */
+export function LockServerWithUnbolt(config: LockServerConfig) {
+  return LockServerWithUnboltBase.set({ config });
 }
 
 /**
