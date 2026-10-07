@@ -378,7 +378,10 @@ Home, ...) are not placed in the same network segment. Please make sure to revie
 </details>
 
 <details>
-<summary><strong>🧪 Alpha (v2.1.0-alpha.925)</strong></summary>
+<summary><strong>🧪 Alpha (v2.1.0-alpha.926)</strong></summary>
+
+**v2.1.0-alpha.926:**
+- 🎨 **A color sent right after On is applied**: Alexa sends the color a moment after On, while Home Assistant still reports the light off. The color was held back and applied on the next turn-on instead. It now goes out with this one, and a color right after Off no longer switches the light back on ([#510](https://github.com/RiDDiX/home-assistant-matter-hub/issues/510))
 
 **v2.1.0-alpha.925:**
 - 🔒 **Locks without a keypad can skip PIN codes**: the new **Lock has no keypad** switch in a lock's entity mapping exposes it without PIN codes, so controllers offer no access code setup. Other locks keep their PIN support ([#418](https://github.com/RiDDiX/home-assistant-matter-hub/issues/418))

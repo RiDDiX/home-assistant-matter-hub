@@ -38,7 +38,7 @@ of port forwarding etc.
 | Channel | Branch | Current Version | Description |
 |---------|--------|-----------------|-------------|
 | **Stable** | `main` | v2.0.58 | Production-ready, recommended for most users |
-| **Alpha** | `alpha` | v2.1.0-alpha.925 | Ahead of Stable, carries the additions listed under Alpha Features |
+| **Alpha** | `alpha` | v2.1.0-alpha.926 | Ahead of Stable, carries the additions listed under Alpha Features |
 | **Testing** | `testing` | v4.1.0-testing.x | ⚠️ **Highly unstable!** Experimental features, may break |
 
 ### Which version should I use?
@@ -378,7 +378,10 @@ Re-assign the affected devices to their rooms after they reconnect. See the [doc
 </details>
 
 <details>
-<summary><strong>🧪 Alpha Features (v2.1.0-alpha.925)</strong> - Click to expand</summary>
+<summary><strong>🧪 Alpha Features (v2.1.0-alpha.926)</strong> - Click to expand</summary>
+
+**v2.1.0-alpha.926:**
+- 🎨 **A color sent right after On is applied**: Alexa sends the color a moment after On, while Home Assistant still reports the light off. The color was held back and applied on the next turn-on instead. It now goes out with this one, and a color right after Off no longer switches the light back on ([#510](https://github.com/RiDDiX/home-assistant-matter-hub/issues/510))
 
 **v2.1.0-alpha.925:**
 - 🔒 **Locks without a keypad can skip PIN codes**: the new **Lock has no keypad** switch in a lock's entity mapping exposes it without PIN codes, so controllers offer no access code setup. Other locks keep their PIN support ([#418](https://github.com/RiDDiX/home-assistant-matter-hub/issues/418))
