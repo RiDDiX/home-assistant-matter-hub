@@ -38,7 +38,7 @@ of port forwarding etc.
 | Channel | Branch | Current Version | Description |
 |---------|--------|-----------------|-------------|
 | **Stable** | `main` | v2.0.58 | Production-ready, recommended for most users |
-| **Alpha** | `alpha` | v2.1.0-alpha.923 | Ahead of Stable, carries the additions listed under Alpha Features |
+| **Alpha** | `alpha` | v2.1.0-alpha.924 | Ahead of Stable, carries the additions listed under Alpha Features |
 | **Testing** | `testing` | v4.1.0-testing.x | ⚠️ **Highly unstable!** Experimental features, may break |
 
 ### Which version should I use?
@@ -378,7 +378,10 @@ Re-assign the affected devices to their rooms after they reconnect. See the [doc
 </details>
 
 <details>
-<summary><strong>🧪 Alpha Features (v2.1.0-alpha.923)</strong> - Click to expand</summary>
+<summary><strong>🧪 Alpha Features (v2.1.0-alpha.924)</strong> - Click to expand</summary>
+
+**v2.1.0-alpha.924:**
+- 📷 **High resolution camera streams get through**: a 1440p keyframe overflowed the bridge's UDP receive buffer, so the controller never got a whole picture. The bridge now asks for 4 MB, which HAOS allows ([#373](https://github.com/RiDDiX/home-assistant-matter-hub/issues/373))
 
 **v2.1.0-alpha.923:**
 - 📷 **Camera errors from Home Assistant are readable**: when HA refuses a live view request the log shows its error instead of `[object Object]`, and camera ids HA can't accept (like `camera.rtsp-lq`) are skipped at startup with a warning ([#373](https://github.com/RiDDiX/home-assistant-matter-hub/issues/373))
