@@ -3,6 +3,7 @@ import {
   type HomeAssistantEntityInformation,
 } from "@home-assistant-matter-hub/common";
 import { Logger } from "@matter/general";
+import { OnOffServer } from "@matter/main/behaviors";
 import { ColorControlServer as Base } from "@matter/main/behaviors/color-control";
 import { ColorControl } from "@matter/main/clusters";
 import type { ColorInstance } from "color";
@@ -156,6 +157,10 @@ export class ColorControlServerBase extends FeaturedBase {
   private update(entity: HomeAssistantEntityInformation) {
     if (!entity.state || !entity.state.attributes) {
       return;
+    }
+    // Switched on outside Matter: a color staged while off is stale now (#510)
+    if (entity.state.state === "on" && !this.isLightOff()) {
+      pendingColorStaging.delete(entity.entity_id);
     }
     const config = this.state.config;
     const currentKelvin = config.getCurrentKelvin(entity.state, this.agent);
@@ -538,7 +543,12 @@ export class ColorControlServerBase extends FeaturedBase {
     homeAssistant.callAction(action);
   }
 
+  // Matter's OnOff, not HA's state: it flips with the On or Off command while
+  // HA lags a few hundred ms. Alexa sends the color right after On (#510).
   private isLightOff(): boolean {
+    if (this.agent.has(OnOffServer)) {
+      return !this.agent.get(OnOffServer).state.onOff;
+    }
     const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);
     return homeAssistant.entity.state.state === "off";
   }
