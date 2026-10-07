@@ -49,6 +49,21 @@ describe("CameraPlugin", () => {
     );
   });
 
+  it("skips an id HA would reject", async () => {
+    const ctx = createMockContext({
+      homeAssistant: { url: "http://ha:8123", accessToken: "tok" },
+      storage: makeStorage({ cameras: "camera.rtsp-lq, camera.rtsp_lq" }),
+    });
+
+    const plugin = new CameraPlugin();
+    await plugin.onStart(ctx);
+
+    expect(ctx.registerDevice).toHaveBeenCalledTimes(1);
+    expect(ctx.registerDevice).toHaveBeenCalledWith(
+      expect.objectContaining({ name: "camera.rtsp_lq" }),
+    );
+  });
+
   it("exposes nothing without a connection", async () => {
     const ctx = createMockContext({
       storage: makeStorage({ cameras: "camera.front" }),

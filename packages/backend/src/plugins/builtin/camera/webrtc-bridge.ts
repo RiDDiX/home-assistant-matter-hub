@@ -536,7 +536,7 @@ export class WebRtcBridge {
           if (rejected) unsub();
         })
         .catch((err) => {
-          fail(err instanceof Error ? err : new Error(String(err)));
+          fail(err instanceof Error ? err : new Error(errText(err)));
         });
     });
 
@@ -555,6 +555,13 @@ function offerKinds(sdp: string): ("video" | "audio")[] {
   return kinds;
 }
 
+// HA's websocket rejects with a plain { code, message } object
 function errText(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
+  if (err instanceof Error) return err.message;
+  const { code, message } = (err ?? {}) as {
+    code?: unknown;
+    message?: unknown;
+  };
+  if (message !== undefined) return code ? `${code}: ${message}` : `${message}`;
+  return String(err);
 }

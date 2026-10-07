@@ -19,7 +19,7 @@ import {
 // prove the relay forwards media end to end, and that a HA error/timeout makes
 // provideOffer reject instead of hanging (the old behavior).
 
-type FakeMode = "answer" | "error" | "silent";
+type FakeMode = "answer" | "error" | "reject" | "silent";
 
 interface FakeHa {
   connect: () => Promise<Connection>;
@@ -47,6 +47,13 @@ function makeFakeHa(mode: FakeMode): FakeHa {
       ): Promise<() => Promise<void>> {
         if (mode === "silent") {
           return async () => {};
+        }
+        if (mode === "reject") {
+          // what HA's schema check sends for a bad entity id
+          throw {
+            code: "invalid_format",
+            message: "Message incorrectly formatted: invalid entity ID",
+          };
         }
         if (mode === "error") {
           queueMicrotask(() =>
@@ -211,6 +218,23 @@ describe("WebRtcBridge media relay", () => {
     ).rejects.toThrow(/HA WebRTC error/);
     // werift waits up to 5s per ICE gathering when STUN goes unanswered, and
     // two peers gather here
+  }, 15_000);
+
+  it("names HA's code and message when HA refuses the request", async () => {
+    const fake = makeFakeHa("reject");
+    const bridge = new WebRtcBridge(
+      { haUrl: "http://ha", haToken: "t" },
+      { connect: fake.connect },
+    );
+    cleanups.push(() => bridge.close(), fake.cleanup);
+
+    const controller = h264Peer();
+    cleanups.push(() => controller.close());
+    const offerSdp = await makeControllerOffer(controller);
+
+    await expect(
+      bridge.acceptControllerOffer(4, "camera.rtsp-lq", offerSdp),
+    ).rejects.toThrow(/^invalid_format: Message incorrectly formatted/);
   }, 15_000);
 
   it("rejects after the HA answer timeout when HA never replies", async () => {

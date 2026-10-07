@@ -137,6 +137,11 @@ export class CameraPlugin implements MatterHubPlugin {
     const sensor = this.sensorParams();
     this.bridge = new WebRtcBridge({ haUrl, haToken });
     for (const entityId of entityIds) {
+      // HA rejects any other id when the camera is opened
+      if (!/^[a-z0-9_]+\.[a-z0-9_]+$/.test(entityId)) {
+        this.log.warn(`${entityId} is not a valid entity id, skipped`);
+        continue;
+      }
       const id = entityId.replace(/\./g, "_");
       await context.registerDevice({
         id,
