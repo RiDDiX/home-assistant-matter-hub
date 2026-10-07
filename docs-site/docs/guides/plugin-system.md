@@ -167,7 +167,7 @@ A built-in plugin registers no devices until it is actually configured: the came
 
 | Setting | Description |
 |---------|-------------|
-| `cameras` | Camera entity ids, comma-separated, e.g. `camera.front,camera.garage`. This is the only field you need to set. |
+| `cameras` | Camera entity ids, comma-separated, e.g. `camera.front,camera.garage`. This is the only field you need to set. Copy the ids from HA as they are, an id HA can't accept (uppercase, a hyphen) is skipped with a warning. |
 | `haUrl` | Optional. Leave empty to reuse the bridge's Home Assistant connection. Only set it to point at a different HA. |
 | `haToken` | Optional. Leave empty to reuse the bridge's connection, or set a long-lived token to match a custom `haUrl`. |
 
