@@ -378,7 +378,10 @@ Home, ...) are not placed in the same network segment. Please make sure to revie
 </details>
 
 <details>
-<summary><strong>🧪 Alpha (v2.1.0-alpha.926)</strong></summary>
+<summary><strong>🧪 Alpha (v2.1.0-alpha.927)</strong></summary>
+
+**v2.1.0-alpha.927:**
+- 🌀 **Fans and air purifiers keep their speed range while unavailable**: Home Assistant drops the speed step while a fan is unavailable, so the bridge changed the fixed SpeedMax from 100 to 3 and back on every outage. It now keeps the last value ([#505](https://github.com/RiDDiX/home-assistant-matter-hub/issues/505))
 
 **v2.1.0-alpha.926:**
 - 🎨 **A color sent right after On is applied**: Alexa sends the color a moment after On, while Home Assistant still reports the light off. The color was held back and applied on the next turn-on instead. It now goes out with this one, and a color right after Off no longer switches the light back on ([#510](https://github.com/RiDDiX/home-assistant-matter-hub/issues/510))
