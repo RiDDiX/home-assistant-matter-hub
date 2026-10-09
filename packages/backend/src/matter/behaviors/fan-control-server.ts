@@ -310,7 +310,14 @@ export class FanControlServerBase extends FeaturedBase {
       const stepSize = config.getStepSize(entity.state, this.agent);
       const effectiveStepSize =
         stepSize != null && stepSize > 0 ? stepSize : defaultStepSize;
-      const calculatedSpeedMax = Math.round(100 / effectiveStepSize);
+      // HA drops percentage_step while the fan is unavailable. SpeedMax is a
+      // fixed attribute, so keep the last one instead of the default (#505).
+      const knownSpeedMax =
+        stepSize == null && entity.state.state === "unavailable"
+          ? (this.state as { speedMax?: number }).speedMax
+          : undefined;
+      const calculatedSpeedMax =
+        knownSpeedMax ?? Math.round(100 / effectiveStepSize);
       speedMax = Math.max(
         minSpeedMax,
         Math.min(maxSpeedMax, calculatedSpeedMax),
