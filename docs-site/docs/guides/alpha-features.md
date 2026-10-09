@@ -31,7 +31,7 @@ docker run -d \
 
 ## Current Alpha Features
 
-Alpha is ahead of Stable (v2.0.58) with a clearer mDNS IPv6 warning, a label query fix, a session log cleanup, a device list change log line, maps and floors for vacuum custom areas, a camera live view that can reach SmartThings, readable camera errors from HA, high resolution camera streams, a no keypad option for locks, and colors sent right after On. See the alpha notes for each release. Standalone Devices graduated to Stable in v2.0.47, see [Standalone Devices](../getting-started/standalone-devices.md).
+Alpha is ahead of Stable (v2.0.58) with a clearer mDNS IPv6 warning, a label query fix, a session log cleanup, a device list change log line, maps and floors for vacuum custom areas, a camera live view that can reach SmartThings, readable camera errors from HA, high resolution camera streams, a no keypad option for locks, colors sent right after On, and a steady fan speed range while a fan is unavailable. See the alpha notes for each release. Standalone Devices graduated to Stable in v2.0.47, see [Standalone Devices](../getting-started/standalone-devices.md).
 
 For a complete list of all supported features and device types, see [Supported Device Types](../supported-device-types.md).
 
