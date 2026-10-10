@@ -378,7 +378,10 @@ Home, ...) are not placed in the same network segment. Please make sure to revie
 </details>
 
 <details>
-<summary><strong>🧪 Alpha (v2.1.0-alpha.927)</strong></summary>
+<summary><strong>🧪 Alpha (v2.1.0-alpha.928)</strong></summary>
+
+**v2.1.0-alpha.928:**
+- 🧹 **Apple Home can clean all rooms of a CLEAN_AREA vacuum**: Apple sends "all rooms" as an empty selection and then starts with one room's run mode, so only that room got cleaned. The "Don't expose rooms as per-room cleaning modes" option in the entity mapping now also covers CLEAN_AREA rooms and rooms from the vacuum attributes, not only custom areas. Turn it on when only Apple Home starts the vacuum; Alexa and Google Home still need the room modes ([#511](https://github.com/RiDDiX/home-assistant-matter-hub/issues/511))
 
 **v2.1.0-alpha.927:**
 - 🌀 **Fans and air purifiers keep their speed range while unavailable**: Home Assistant drops the speed step while a fan is unavailable, so the bridge changed the fixed SpeedMax from 100 to 3 and back on every outage. It now keeps the last value ([#505](https://github.com/RiDDiX/home-assistant-matter-hub/issues/505))
