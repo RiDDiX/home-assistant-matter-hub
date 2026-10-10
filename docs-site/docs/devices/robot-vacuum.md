@@ -285,6 +285,8 @@ Each room is also added as a run mode named after the room, e.g. "Kitchen", "Liv
 
 Alexa has no room picker for Matter vacuums. Amazon lists only RVC Run Mode for robot vacuums ([Alexa Supported Matter Device Categories](https://developer.amazon.com/en-US/docs/alexa/smarthome/supported-matter-device-categories.html)), not Service Area, so rooms show up in Alexa only as run modes.
 
+Apple Home can trip over these modes. Pick all rooms and press start, and it may send one room mode, so only that room gets cleaned ([#367](https://github.com/RiDDiX/home-assistant-matter-hub/issues/367), [#511](https://github.com/RiDDiX/home-assistant-matter-hub/issues/511)). If you use the vacuum only from Apple Home, turn on **Don't expose rooms as per-room cleaning modes** in the entity mapping. Rooms then come only from the Service Area picker. Leave it off when Alexa or Google Home start rooms through the modes.
+
 ### Room Data Requirements (Vendor-Specific Fallback)
 
 When `CLEAN_AREA` is not available, room selection falls back to vendor-specific room data from entity attributes. Supported formats:

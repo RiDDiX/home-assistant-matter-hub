@@ -38,7 +38,7 @@ of port forwarding etc.
 | Channel | Branch | Current Version | Description |
 |---------|--------|-----------------|-------------|
 | **Stable** | `main` | v2.0.58 | Production-ready, recommended for most users |
-| **Alpha** | `alpha` | v2.1.0-alpha.927 | Ahead of Stable, carries the additions listed under Alpha Features |
+| **Alpha** | `alpha` | v2.1.0-alpha.928 | Ahead of Stable, carries the additions listed under Alpha Features |
 | **Testing** | `testing` | v4.1.0-testing.x | ⚠️ **Highly unstable!** Experimental features, may break |
 
 ### Which version should I use?
@@ -378,7 +378,10 @@ Re-assign the affected devices to their rooms after they reconnect. See the [doc
 </details>
 
 <details>
-<summary><strong>🧪 Alpha Features (v2.1.0-alpha.927)</strong> - Click to expand</summary>
+<summary><strong>🧪 Alpha Features (v2.1.0-alpha.928)</strong> - Click to expand</summary>
+
+**v2.1.0-alpha.928:**
+- 🧹 **Apple Home can clean all rooms of a CLEAN_AREA vacuum**: Apple sends "all rooms" as an empty selection and then starts with one room's run mode, so only that room got cleaned. The "Don't expose rooms as per-room cleaning modes" option in the entity mapping now also covers CLEAN_AREA rooms and rooms from the vacuum attributes, not only custom areas. Turn it on when only Apple Home starts the vacuum; Alexa and Google Home still need the room modes ([#511](https://github.com/RiDDiX/home-assistant-matter-hub/issues/511))
 
 **v2.1.0-alpha.927:**
 - 🌀 **Fans and air purifiers keep their speed range while unavailable**: Home Assistant drops the speed step while a fan is unavailable, so the bridge changed the fixed SpeedMax from 100 to 3 and back on every outage. It now keeps the last value ([#505](https://github.com/RiDDiX/home-assistant-matter-hub/issues/505))
