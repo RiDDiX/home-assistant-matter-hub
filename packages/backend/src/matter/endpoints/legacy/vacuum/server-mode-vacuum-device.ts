@@ -70,7 +70,10 @@ export function ServerModeVacuumDevice(
   const customAreas = homeAssistantEntity.mapping?.customServiceAreas;
   let device = ServerModeVacuumEndpointType.with(
     cleanAreaRooms && cleanAreaRooms.length > 0
-      ? createCleanAreaRvcRunModeServer(cleanAreaRooms)
+      ? createCleanAreaRvcRunModeServer(
+          cleanAreaRooms,
+          homeAssistantEntity.mapping?.disableCustomAreaRoomModes,
+        )
       : createVacuumRvcRunModeServer(
           attributes,
           false,

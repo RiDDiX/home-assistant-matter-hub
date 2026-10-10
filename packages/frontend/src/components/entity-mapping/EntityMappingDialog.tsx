@@ -946,7 +946,7 @@ export function EntityMappingDialog({
                   }
                 />
               }
-              label="Don't expose custom areas as per-room cleaning modes (forces Apple Home to use the multi-room area picker). Keep off for Google Home / Alexa, which rely on the modes."
+              label="Don't expose rooms as per-room cleaning modes (forces Apple Home to use the multi-room area picker). Keep off for Google Home / Alexa, which rely on the modes."
               sx={{ mt: 1, display: "block" }}
             />
             <FormControlLabel

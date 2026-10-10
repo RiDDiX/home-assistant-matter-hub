@@ -338,9 +338,10 @@ export interface EntityMappingConfig {
    */
   readonly vacuumRoomSwitches?: boolean;
   /**
-   * Optional: Don't expose custom service areas as per-room RvcRunMode modes,
-   * so Apple Home uses the ServiceArea multi-room picker instead of cleaning a
-   * single room. Keep off for Google Home / Alexa, which use the modes (#367).
+   * Optional: Don't expose rooms (custom areas, CLEAN_AREA, vacuum attributes)
+   * as per-room RvcRunMode modes, so Apple Home uses the ServiceArea multi-room
+   * picker instead of cleaning a single room. Keep off for Google Home / Alexa,
+   * which use the modes (#367, #511).
    */
   readonly disableCustomAreaRoomModes?: boolean;
   /**

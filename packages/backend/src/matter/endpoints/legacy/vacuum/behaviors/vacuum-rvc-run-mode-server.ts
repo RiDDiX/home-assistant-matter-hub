@@ -132,6 +132,10 @@ export function buildSupportedModes(
       modeTags: [{ value: RvcRunMode.ModeTag.Cleaning }],
     },
   ];
+  // Apple Home sends selectAreas([]) for all rooms and then starts with a
+  // room mode, which cleans that one room (#367, #511). Without room modes it
+  // has to use the ServiceArea selection.
+  if (disableRoomModes) return modes;
 
   // Room modes in RvcRunMode are a fallback for controllers that don't use
   // ServiceArea.selectAreas. Apple Home does call selectAreas (see #317
@@ -147,19 +151,16 @@ export function buildSupportedModes(
     // Modes use ROOM_MODE_BASE + (1-based alphabetical index); cleanRoom
     // resolves them back the same way. ServiceArea areaIds instead follow
     // config order (createCustomServiceAreaServer), the two numbering
-    // schemes are independent and resolved per path. When disableRoomModes is
-    // set, skip them so the controller can only use ServiceArea (#367).
-    if (!disableRoomModes) {
-      const sorted = customAreaModes(customAreas);
-      for (let i = 0; i < sorted.length; i++) {
-        const modeValue = ROOM_MODE_BASE + i + 1;
-        if (modeValue > 255) continue;
-        modes.push({
-          label: sorted[i].label,
-          mode: modeValue,
-          modeTags: [{ value: RvcRunMode.ModeTag.Cleaning }],
-        });
-      }
+    // schemes are independent and resolved per path.
+    const sorted = customAreaModes(customAreas);
+    for (let i = 0; i < sorted.length; i++) {
+      const modeValue = ROOM_MODE_BASE + i + 1;
+      if (modeValue > 255) continue;
+      modes.push({
+        label: sorted[i].label,
+        mode: modeValue,
+        modeTags: [{ value: RvcRunMode.ModeTag.Cleaning }],
+      });
     }
   } else {
     // Regular room modes from vacuum attributes (Dreame, Roborock, etc.)
@@ -558,7 +559,10 @@ const vacuumRvcRunModeConfig = {
     const mapping = agent.get(HomeAssistantEntityBehavior).state.mapping;
     // CLEAN_AREA rooms live in the mapping, not the attributes (#497)
     if (mapping?.cleanAreaRooms?.length) {
-      return buildCleanAreaModes(mapping.cleanAreaRooms);
+      return buildCleanAreaModes(
+        mapping.cleanAreaRooms,
+        mapping.disableCustomAreaRoomModes,
+      );
     }
     const customAreas = mapping?.customServiceAreas;
     return buildSupportedModes(
@@ -842,6 +846,7 @@ export function createVacuumRvcRunModeServer(
  */
 function buildCleanAreaModes(
   cleanAreaRooms: CleanAreaRoom[],
+  disableRoomModes = false,
 ): RvcRunMode.ModeOption[] {
   const modes: RvcRunMode.ModeOption[] = [
     {
@@ -855,6 +860,7 @@ function buildCleanAreaModes(
       modeTags: [{ value: RvcRunMode.ModeTag.Cleaning }],
     },
   ];
+  if (disableRoomModes) return modes;
 
   const sorted = [...cleanAreaRooms].sort((a, b) =>
     a.name.localeCompare(b.name),
@@ -873,8 +879,9 @@ function buildCleanAreaModes(
 
 export function createCleanAreaRvcRunModeServer(
   cleanAreaRooms: CleanAreaRoom[],
+  disableRoomModes = false,
 ) {
-  const modes = buildCleanAreaModes(cleanAreaRooms);
+  const modes = buildCleanAreaModes(cleanAreaRooms, disableRoomModes);
   logger.info(
     `Creating CLEAN_AREA RvcRunModeServer with ${cleanAreaRooms.length} HA areas, ${modes.length} total modes`,
   );
