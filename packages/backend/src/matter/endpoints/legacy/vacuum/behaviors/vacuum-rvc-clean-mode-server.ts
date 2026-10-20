@@ -114,7 +114,12 @@ export function buildSupportedModes(
     cleanTypes.has(CleanType.Mopping) ||
     cleanTypes.has(CleanType.SweepingAndMopping);
   if (hasMopping && mopIntensityList && mopIntensityList.length > 0) {
-    modes.push(...buildMopIntensityModes(mopIntensityList));
+    modes.push(
+      ...buildMopIntensityModes(
+        mopIntensityList,
+        !cleanTypes.has(CleanType.Mopping),
+      ),
+    );
   }
 
   // VacuumThenMop only when the entity actually supports it
@@ -136,7 +141,7 @@ export function buildSupportedModes(
 // Cleaning mode tokens. Classify any vendor phrasing by the words it
 // contains instead of maintaining per-vendor alias lists.
 const CLEAN_TOKENS = {
-  vacuum: /\b(vacuum|vacuuming|sweep|sweeping|suction)\b/i,
+  vacuum: /\b(vac|vacuum|vacuuming|sweep|sweeping|suction)\b/i,
   mop: /\b(mop|mopping|wipe|wet|wash|scrub)\b/i,
   sequential:
     /\b(then|after|before|followed|following|first|secondly|sequentially)\b/i,
@@ -276,17 +281,23 @@ function getMopIntensityTag(name: string): number | undefined {
 
 function buildMopIntensityModes(
   mopIntensityList: string[],
+  combinedOnly = false,
 ): RvcCleanMode.ModeOption[] {
   // Assign intensity tags to ALL matching mop intensities so
   // Apple Home shows every recognized option by label.
   return mopIntensityList.map((name, index) => {
     const tag = getMopIntensityTag(name);
-    const modeTags: { value: number }[] = [{ value: RvcCleanMode.ModeTag.Mop }];
+    const modeTags: { value: number }[] = combinedOnly
+      ? [
+          { value: RvcCleanMode.ModeTag.Vacuum },
+          { value: RvcCleanMode.ModeTag.Mop },
+        ]
+      : [{ value: RvcCleanMode.ModeTag.Mop }];
     if (tag !== undefined) {
       modeTags.push({ value: tag });
     }
     return {
-      label: `Mop ${formatFanSpeedLabel(name)}`,
+      label: `${combinedOnly ? "Vacuum & Mop" : "Mop"} ${formatFanSpeedLabel(name)}`,
       mode: MOP_INTENSITY_MODE_BASE + index,
       modeTags,
     };
@@ -509,7 +520,7 @@ function readSelectEntity(
 // Config factory
 // ---------------------------------------------------------------------------
 
-function createCleanModeConfig(
+export function createCleanModeConfig(
   fanSpeedList?: string[],
   mopIntensityList?: string[],
   cleaningModeOptions?: string[],
@@ -574,7 +585,9 @@ function createCleanModeConfig(
 
       // Mop intensity: when mopping, check mop intensity entity
       if (
-        cleanType === CleanType.Mopping &&
+        (cleanType === CleanType.Mopping ||
+          (cleanType === CleanType.SweepingAndMopping &&
+            !resolveCleanTypes(cleaningModeOptions).has(CleanType.Mopping))) &&
         mopIntensityList &&
         mopIntensityList.length > 0 &&
         mapping?.mopIntensityEntity
@@ -645,7 +658,12 @@ function createCleanModeConfig(
         // so the cleaning mode must change first.
         if (hasCleanTypes) {
           homeAssistant.callAction(
-            buildCleaningModeAction(CleanType.Mopping, agent),
+            buildCleaningModeAction(
+              resolveCleanTypes(cleaningModeOptions).has(CleanType.Mopping)
+                ? CleanType.Mopping
+                : CleanType.SweepingAndMopping,
+              agent,
+            ),
           );
         }
 
