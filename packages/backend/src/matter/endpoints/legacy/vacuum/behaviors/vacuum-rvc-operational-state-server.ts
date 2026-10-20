@@ -4,6 +4,7 @@ import {
 } from "@home-assistant-matter-hub/common";
 import { Logger } from "@matter/general";
 import { RvcOperationalState } from "@matter/main/clusters";
+import { EntityStateProvider } from "../../../../../services/bridges/entity-state-provider.js";
 import { testBit } from "../../../../../utils/test-bit.js";
 import { HomeAssistantEntityBehavior } from "../../../../behaviors/home-assistant-entity-behavior.js";
 import { RvcOperationalStateServer } from "../../../../behaviors/rvc-operational-state-server.js";
@@ -12,6 +13,7 @@ import {
   getVacuumChargingState,
   type VacuumChargingState,
 } from "./vacuum-battery.js";
+import { mapVacuumOperationalError } from "./vacuum-operational-error.js";
 
 const logger = Logger.get("VacuumRvcOperationalStateServer");
 
@@ -136,6 +138,14 @@ export function mapVacuumOperationalState(
 }
 
 export const VacuumRvcOperationalStateServer = RvcOperationalStateServer({
+  getOperationalError(entity, agent) {
+    const faultEntity = agent.get(HomeAssistantEntityBehavior).state.mapping
+      ?.faultEntity;
+    const fault = faultEntity
+      ? agent.env.get(EntityStateProvider).getState(faultEntity)?.state
+      : undefined;
+    return mapVacuumOperationalError(entity.state, fault, !!faultEntity);
+  },
   getOperationalState(entity, agent): RvcOperationalState.OperationalState {
     return mapVacuumOperationalState(
       entity,

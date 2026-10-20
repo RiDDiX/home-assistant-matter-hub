@@ -159,6 +159,8 @@ export interface EntityMappingConfig {
   /**
    * Optional: Entity ID of a problem/safety binary sensor on the same device.
    * Drives hardwareFaultAlert on a smoke/CO alarm (#408).
+   * For vacuums, a Roborock vacuum_error enum sensor supplies native RVC
+   * operational-error details. Auto-detected from the same HA device.
    * Example: "binary_sensor.smoke_problem"
    */
   readonly faultEntity?: string;

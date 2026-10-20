@@ -32,6 +32,7 @@ import {
   type VacuumEffectiveConfig,
   withResolvedRooms,
 } from "./vacuum/behaviors/vacuum-service-area-server.js";
+import { resolveVacuumFaultMapping } from "./vacuum/utils/resolve-vacuum-fault-mapping.js";
 
 const logger = Logger.get("LegacyEndpoint");
 
@@ -572,6 +573,14 @@ export class LegacyEndpoint extends EntityEndpoint {
           `Companion fan creation failed for ${entityId}, falling back to standalone`,
         );
       }
+    }
+
+    if (entityId.startsWith("vacuum.")) {
+      effectiveMapping = resolveVacuumFaultMapping(
+        registry,
+        entityId,
+        effectiveMapping,
+      );
     }
 
     const payload = {

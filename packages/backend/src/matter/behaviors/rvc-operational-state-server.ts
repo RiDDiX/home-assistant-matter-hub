@@ -49,6 +49,7 @@ export function makeRvcOperationalError(
 
 export interface RvcOperationalStateServerConfig {
   getOperationalState: ValueGetter<OperationalState>;
+  getOperationalError?: ValueGetter<RvcOperationalState.ErrorStateStruct>;
   pause: ValueSetter<void>;
   resume: ValueSetter<void>;
   goHome?: ValueSetter<void>;
@@ -101,7 +102,9 @@ class RvcOperationalStateServerBase extends Base.enable({
       newState === OperationalState.Error
         ? ErrorState.Stuck
         : ErrorState.NoError;
-    const operationalError = makeRvcOperationalError(errorStateId);
+    const operationalError =
+      this.state.config.getOperationalError?.(entity.state, this.agent) ??
+      makeRvcOperationalError(errorStateId);
 
     applyPatchState(
       this.state,
@@ -132,7 +135,7 @@ class RvcOperationalStateServerBase extends Base.enable({
           {
             completionErrorCode:
               newState === OperationalState.Error
-                ? ErrorState.Stuck
+                ? operationalError.errorStateId
                 : ErrorState.NoError,
             totalOperationalTime: null,
             pausedTime: null,
