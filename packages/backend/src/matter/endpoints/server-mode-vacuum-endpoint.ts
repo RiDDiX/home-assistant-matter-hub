@@ -243,7 +243,7 @@ export class ServerModeVacuumEndpoint extends EntityEndpoint {
     const vacAttrsForClean = state.attributes as VacuumDeviceAttributes;
     let cleaningModeOptions: string[] | undefined;
     if (effectiveMapping?.cleaningModeEntity) {
-      const cmState = registry.initialState(
+      const cmState = registry.initialStateIncludingUnfiltered(
         effectiveMapping.cleaningModeEntity,
       );
       cleaningModeOptions = (

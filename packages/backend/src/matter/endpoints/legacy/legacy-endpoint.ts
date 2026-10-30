@@ -585,7 +585,7 @@ export class LegacyEndpoint extends EntityEndpoint {
     let cleaningModeOptions: string[] | undefined;
     if (entityId.startsWith("vacuum.")) {
       if (effectiveMapping?.cleaningModeEntity) {
-        const cmState = registry.initialState(
+        const cmState = registry.initialStateIncludingUnfiltered(
           effectiveMapping.cleaningModeEntity,
         );
         cleaningModeOptions = (
