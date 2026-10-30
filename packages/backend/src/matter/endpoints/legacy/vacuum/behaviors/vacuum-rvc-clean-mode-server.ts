@@ -218,11 +218,17 @@ function buildFanSpeedModes(
   fanSpeedList: string[],
   customTags?: Record<string, number>,
 ): RvcCleanMode.ModeOption[] {
-  // Assign intensity tags to ALL matching speeds so Apple Home
-  // shows every recognized speed. Multiple speeds can share the
-  // same tag, Apple Home distinguishes them by label.
+  // On the S5 Max profile Apple Home collapses equal intensity tags and
+  // selects Turbo for Maximum. Keep all mode IDs, but tag the actual Max
+  // and Quiet entries only. Explicit per-speed tag overrides still win.
+  const s5MaxProfile =
+    fanSpeedList.join(",") === "quiet,balanced,turbo,max,gentle";
   return fanSpeedList.map((name, index) => {
-    const tag = getFanSpeedTag(name, customTags);
+    const duplicate = s5MaxProfile && (name === "turbo" || name === "gentle");
+    const tag =
+      duplicate && customTags?.[name] === undefined
+        ? undefined
+        : getFanSpeedTag(name, customTags);
     const modeTags: { value: number }[] = [
       { value: RvcCleanMode.ModeTag.Vacuum },
     ];
