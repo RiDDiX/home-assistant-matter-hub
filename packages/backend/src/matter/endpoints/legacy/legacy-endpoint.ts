@@ -33,6 +33,8 @@ import {
   withResolvedRooms,
 } from "./vacuum/behaviors/vacuum-service-area-server.js";
 
+import { resolveVacuumJobMapping } from "./vacuum/utils/resolve-vacuum-job-mapping.js";
+
 const logger = Logger.get("LegacyEndpoint");
 
 const applianceTypes = new Set<MatterDeviceType>([
@@ -580,6 +582,14 @@ export class LegacyEndpoint extends EntityEndpoint {
       registry: entity,
       deviceRegistry,
     };
+
+    if (entityId.startsWith("vacuum.")) {
+      effectiveMapping = resolveVacuumJobMapping(
+        registry,
+        entityId,
+        effectiveMapping,
+      );
+    }
 
     // Resolve cleaning mode options for vacuum entities
     let cleaningModeOptions: string[] | undefined;

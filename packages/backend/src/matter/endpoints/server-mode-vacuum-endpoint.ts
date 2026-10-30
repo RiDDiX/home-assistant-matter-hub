@@ -15,6 +15,7 @@ import {
   withResolvedRooms,
 } from "./legacy/vacuum/behaviors/vacuum-service-area-server.js";
 import { ServerModeVacuumDevice } from "./legacy/vacuum/server-mode-vacuum-device.js";
+import { resolveVacuumJobMapping } from "./legacy/vacuum/utils/resolve-vacuum-job-mapping.js";
 import { updateEntityState } from "./update-entity-state.js";
 
 const logger = Logger.get("ServerModeVacuumEndpoint");
@@ -237,6 +238,12 @@ export class ServerModeVacuumEndpoint extends EntityEndpoint {
       registry: entity,
       deviceRegistry,
     };
+
+    effectiveMapping = resolveVacuumJobMapping(
+      registry,
+      entityId,
+      effectiveMapping,
+    );
 
     // Resolve cleaning mode options for accurate RvcCleanMode generation.
     // Reads actual entity options so only supported types get modes.

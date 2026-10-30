@@ -499,6 +499,29 @@ Since v2.0.27, HAMH reports the `IsCharging` state when the vacuum is docked and
 
 ---
 
+## Roborock recharging within a cleaning job
+
+The Roborock integration exposes a `cleaning` binary sensor that remains on
+through a mid-job recharge. HAMH resolves this dependency by registry metadata
+on the same device, including when the sensor was renamed or is outside the
+Matter export filter. Enable the sensor in Home Assistant; missing or ambiguous
+matches keep the existing behavior. The automatically resolved dependency is
+not written to the saved entity mapping or exported as another accessory.
+
+With this job signal, the run mode stays Cleaning while returning and charging.
+The operational state reports SeekingCharger during the return, then Paused at
+the dock with a Recharging phase. Resuming continues the same job. The bridge
+sends one OperationCompletion when the job signal turns off at the actual end,
+even if the vacuum is already returning, and does not repeat it on arrival.
+Offline or temporarily unknown job states do not invent an end; an already
+recharging job can be recovered after a bridge restart.
+
+For these job-aware vacuums, 100% at the dock reports AtFullCharge and Docked
+even if Roborock's binary charging sensor stays on. An ongoing job still has
+priority and remains Paused. Devices without a job signal retain their charging
+and completion fallbacks. Normal low-battery returns are never converted into
+operational errors. Controllers decide notification text and delivery.
+
 ## Troubleshooting
 
 ### Vacuum not showing in Apple Home

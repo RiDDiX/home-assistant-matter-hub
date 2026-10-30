@@ -52,6 +52,10 @@ export interface RvcOperationalStateServerConfig {
   pause: ValueSetter<void>;
   resume: ValueSetter<void>;
   goHome?: ValueSetter<void>;
+  getPhase?: ValueGetter<
+    { phaseList: string[] | null; currentPhase: number | null } | undefined
+  >;
+  shouldCompleteOperation?: ValueGetter<boolean | undefined>;
 }
 
 // OperationCompletion is optional in the cluster, so matter.js leaves it off
@@ -106,6 +110,7 @@ class RvcOperationalStateServerBase extends Base.enable({
     applyPatchState(
       this.state,
       {
+        ...(this.state.config.getPhase?.(entity.state, this.agent) ?? {}),
         operationalState: newState,
         operationalError,
       },
@@ -118,14 +123,14 @@ class RvcOperationalStateServerBase extends Base.enable({
     // Unavailable maps to Error with no finished job.
     const offline =
       entity.state.state === "unavailable" || entity.state.state === "unknown";
-    if (
-      !offline &&
-      previousState !== undefined &&
-      activeStates.has(previousState) &&
-      !activeStates.has(newState)
-    ) {
+    const complete =
+      this.state.config.shouldCompleteOperation?.(entity.state, this.agent) ??
+      (previousState !== undefined &&
+        activeStates.has(previousState) &&
+        !activeStates.has(newState));
+    if (!offline && complete) {
       logger.info(
-        `Operation completed: ${OperationalState[previousState]} -> ${OperationalState[newState]}`,
+        `Operation completed: ${previousState === undefined ? "initial" : OperationalState[previousState]} -> ${OperationalState[newState]}`,
       );
       try {
         this.events.operationCompletion?.emit(
