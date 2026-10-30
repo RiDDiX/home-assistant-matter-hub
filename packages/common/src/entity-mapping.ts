@@ -323,6 +323,8 @@ export interface EntityMappingConfig {
    * cleaned area plus per-room sizeSqm advances currentArea/progress (#368).
    */
   readonly cleanedAreaEntity?: string;
+  /** Internal whole-job dependency resolved from Roborock registry metadata, not persisted. */
+  readonly cleaningJobEntity?: string;
   /**
    * Optional: The vacuum cleans rooms in ascending area ID order regardless of
    * the order they were picked in (Roborock batch segment cleaning does this).
