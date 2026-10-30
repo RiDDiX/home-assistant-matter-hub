@@ -15,6 +15,7 @@ import {
   withResolvedRooms,
 } from "./legacy/vacuum/behaviors/vacuum-service-area-server.js";
 import { ServerModeVacuumDevice } from "./legacy/vacuum/server-mode-vacuum-device.js";
+import { resolveVacuumFaultMapping } from "./legacy/vacuum/utils/resolve-vacuum-fault-mapping.js";
 import { updateEntityState } from "./update-entity-state.js";
 
 const logger = Logger.get("ServerModeVacuumEndpoint");
@@ -229,6 +230,14 @@ export class ServerModeVacuumEndpoint extends EntityEndpoint {
       }
     } else {
       logger.warn(`${entityId}: No device_id, cannot auto-assign battery`);
+    }
+
+    if (entityId.startsWith("vacuum.")) {
+      effectiveMapping = resolveVacuumFaultMapping(
+        registry,
+        entityId,
+        effectiveMapping,
+      );
     }
 
     const payload = {
