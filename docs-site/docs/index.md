@@ -421,7 +421,39 @@ Home, ...) are not placed in the same network segment. Please make sure to revie
 <details>
 <summary><strong>🧪 Alpha (v2.1.0-alpha.x)</strong></summary>
 
-**Alpha is currently level with Stable (v2.0.59).** All alpha work up to the latest pre-release has been promoted into v2.0.59. New alpha work continues from the next pre-release tag onward and will appear here as development progresses.
+**v2.1.0-alpha.952:**
+- **Vietnamese translation**: new `vi` language for the web UI, thanks [@nhok3296](https://github.com/nhok3296) ([#537](https://github.com/RiDDiX/home-assistant-matter-hub/issues/537))
+
+**v2.1.0-alpha.951:**
+- **Log level `silly` works**: the add-on and the command line offer `silly`, but the app crashed at startup with `Unsupported log level "silly"`. `--log-level debug` with a space instead of `=` crashed too. `MATTER_*` environment variables and a `~/.matter/config.json` are now ignored, as they were meant to be
+- **A new bridge port takes effect right away**: after you changed a bridge's port, it kept listening on the old one until the whole app restarted. A running bridge, or one that failed to start on a taken port, now restarts on the new port; a stopped one uses it when it starts
+- **Alpha no longer offers a downgrade**: the update check showed the older stable release as an update on every alpha. It now only reports a release that is newer than the installed version
+- **Bridge pages ready for translation**: bridge details, status, diagnostics and the health dashboard had English texts built in. Status chips, tooltips and code labels now show in your language; the remaining texts stay English until each language adds them
+
+**v2.1.0-alpha.950:**
+- **Backup restore keeps every mapping setting**: restoring a backup, uploaded or picked from Stored Backups, dropped about 16 entity mapping settings, among them custom product and vendor names, vacuum charging and current room sensors and several climate options. All of them are restored now
+- **Room names survive a failed Home Assistant query**: when Home Assistant did not answer the request for its areas, HAMH treated every room as deleted and refreshed all bridges, then again once the answer came. Devices added in that moment got no room name. The last known rooms now stay
+- **Docs**: the connectivity guide lists Linksys Velop and other routers with "Express Forwarding" under Known Affected Equipment. With it on, Google Home on Android finds the bridge but never connects; turn Express Forwarding off ([#523](https://github.com/RiDDiX/home-assistant-matter-hub/issues/523))
+
+**v2.1.0-alpha.949:**
+- **A factory reset gives the bridge a new unique ID**: the bridge kept its unique ID through a factory reset, which Matter does not allow. After a bridge is switched out of server mode, Alexa can refuse every new pairing with error GS014. Delete the device in the Alexa app, factory-reset the bridge in HAMH and pair again ([#530](https://github.com/RiDDiX/home-assistant-matter-hub/issues/530))
+- **Fewer false certificate warnings**: the log warning for a controller that stops after checking the bridge certificates now waits 30 seconds instead of 10. An Echo that paired fine took 14 seconds ([#530](https://github.com/RiDDiX/home-assistant-matter-hub/issues/530))
+
+**v2.1.0-alpha.948:**
+- **Docs**: leave the **Wedge Watchdog** bridge setting off on bridges that only Google Home uses. Google hubs stay quiet between updates, so the watchdog would reconnect them about every 50 minutes for nothing ([#526](https://github.com/RiDDiX/home-assistant-matter-hub/issues/526))
+
+**v2.1.0-alpha.946:**
+- **Model name instead of model number**: the new **Product Name from Model** bridge option, off by default, sends the model Home Assistant shows for the device (like `Smart Lock Pro`) instead of its model ID (like `178`). Apple Home shows it under Model ([#507](https://github.com/RiDDiX/home-assistant-matter-hub/discussions/507))
+
+**v2.1.0-alpha.945:**
+- **Block Off for thermostats**: the new **Refuse Off from Matter controllers** switch in a climate entity's mapping stops controllers and voice commands from turning it off. Changing the temperature still works. It is meant for heating-only thermostats where Off also stops the schedule, since Apple Home always shows them with a power button ([#527](https://github.com/RiDDiX/home-assistant-matter-hub/discussions/527))
+
+**v2.1.0-alpha.944:**
+- **Fans pick up speed and direction added later**: a fan that got its speed or direction after the bridge started (LocalTuya set up later, for example) stayed an on/off device. It is now rebuilt with the new controls ([#515](https://github.com/RiDDiX/home-assistant-matter-hub/issues/515))
+- **Cooling temperature turns an Off thermostat back on**: on heat and cool thermostats, a cooling temperature sent while Off was dropped. It now switches the thermostat to Cool, the same way a heating temperature already switched it to Heat. Both show the new mode right away instead of Off until Home Assistant confirms, which Alexa answered with "not responding" ([#519](https://github.com/RiDDiX/home-assistant-matter-hub/issues/519))
+
+**v2.1.0-alpha.943:**
+- **Dependency updates** for open security alerts (multer, undici, handlebars, vite and others)
 
 </details>
 
