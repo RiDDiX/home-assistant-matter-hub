@@ -29,6 +29,23 @@ function missingSince(m: unknown): string | undefined {
 }
 
 describe("EntityMappingStorage orphan tombstone", () => {
+  it("persists a readiness-only mapping through normalization and reload", async () => {
+    const storage = new EntityMappingStorage(appStorage);
+    await storage.construction;
+    await storage.setMapping({
+      bridgeId: "b",
+      entityId: "vacuum.robot",
+      readinessEntity: "sensor.ready",
+    });
+    await storage.flush();
+    const reloaded = new EntityMappingStorage(appStorage);
+    await reloaded.construction;
+    expect(reloaded.getMapping("b", "vacuum.robot")?.readinessEntity).toBe(
+      "sensor.ready",
+    );
+    await reloaded.dispose();
+    await storage.dispose();
+  });
   it("marks once keeping first-seen, and round-trips missingSince through a flushed reload", async () => {
     const storage = new EntityMappingStorage(appStorage);
     await storage.construction;

@@ -1,8 +1,9 @@
 import type { HomeAssistantEntityInformation } from "@home-assistant-matter-hub/common";
-import { Logger } from "@matter/general";
+import { Logger, Millis, Time, type Timer } from "@matter/general";
 import { RvcOperationalStateServer as Base } from "@matter/main/behaviors/rvc-operational-state";
 import { RvcOperationalState } from "@matter/main/clusters/rvc-operational-state";
 import { applyPatchState } from "../../utils/apply-patch-state.js";
+import { trimToLength } from "../../utils/trim-to-length.js";
 import { HomeAssistantEntityBehavior } from "./home-assistant-entity-behavior.js";
 import type { ValueGetter, ValueSetter } from "./utils/cluster-config.js";
 
@@ -49,6 +50,11 @@ export function makeRvcOperationalError(
 
 export interface RvcOperationalStateServerConfig {
   getOperationalState: ValueGetter<OperationalState>;
+  getOperationalError?: ValueGetter<RvcOperationalState.ErrorStateStruct>;
+  getOperationCompletionError?: ValueGetter<ErrorState>;
+  getAdditionalOperationalStates?: ValueGetter<number[]>;
+  getRecheckAfterMs?: ValueGetter<number | undefined>;
+  getResumeError?: ValueGetter<string | undefined>;
   pause: ValueSetter<void>;
   resume: ValueSetter<void>;
   goHome?: ValueSetter<void>;
@@ -60,6 +66,7 @@ class RvcOperationalStateServerBase extends Base.enable({
   events: { operationCompletion: true },
 }) {
   declare state: RvcOperationalStateServerBase.State;
+  declare internal: RvcOperationalStateServerBase.Internal;
 
   override async initialize() {
     // Set initial operationalStateList BEFORE super.initialize().
@@ -90,6 +97,18 @@ class RvcOperationalStateServerBase extends Base.enable({
     if (!entity.state || !entity.state.attributes) {
       return;
     }
+    // Also handle a readiness mapping added/removed after initialization.
+    // Only this attribute changes; endpoint identity and clusters stay intact.
+    const extra =
+      this.state.config.getAdditionalOperationalStates?.(
+        entity.state,
+        this.agent,
+      ) ?? [];
+    applyPatchState(this.state, {
+      operationalStateList: [
+        ...new Set([...advertisedOperationalStates, ...extra]),
+      ].map((id) => ({ operationalStateId: id })),
+    });
     const newState = this.state.config.getOperationalState(
       entity.state,
       this.agent,
@@ -101,7 +120,9 @@ class RvcOperationalStateServerBase extends Base.enable({
       newState === OperationalState.Error
         ? ErrorState.Stuck
         : ErrorState.NoError;
-    const operationalError = makeRvcOperationalError(errorStateId);
+    const operationalError =
+      this.state.config.getOperationalError?.(entity.state, this.agent) ??
+      makeRvcOperationalError(errorStateId);
 
     applyPatchState(
       this.state,
@@ -111,6 +132,25 @@ class RvcOperationalStateServerBase extends Base.enable({
       },
       { force: true },
     );
+
+    // A stable-ready delay must expire even if HA sends no more state changes.
+    // One timer, inside a fresh locked transaction; no polling or HA actions.
+    this.internal.recheck?.stop();
+    const delay = this.state.config.getRecheckAfterMs?.(
+      entity.state,
+      this.agent,
+    );
+    if (delay !== undefined && delay > 0) {
+      this.internal.recheckCallback ??= this.callback(this.recheck, {
+        offline: true,
+        lock: true,
+      });
+      this.internal.recheck = Time.getTimer(
+        "vacuum-readiness",
+        Millis(Math.max(1, Math.ceil(delay))),
+        this.internal.recheckCallback,
+      ).start();
+    }
 
     // Emit OperationCompletion event when transitioning from an active state
     // (Running, SeekingCharger, Paused) to Docked, Stopped or Error.
@@ -131,9 +171,13 @@ class RvcOperationalStateServerBase extends Base.enable({
         this.events.operationCompletion?.emit(
           {
             completionErrorCode:
-              newState === OperationalState.Error
-                ? ErrorState.Stuck
-                : ErrorState.NoError,
+              this.state.config.getOperationCompletionError?.(
+                entity.state,
+                this.agent,
+              ) ??
+              (newState === OperationalState.Error
+                ? operationalError.errorStateId
+                : ErrorState.NoError),
             totalOperationalTime: null,
             pausedTime: null,
           },
@@ -143,6 +187,15 @@ class RvcOperationalStateServerBase extends Base.enable({
         logger.debug("Failed to emit operationCompletion event:", e);
       }
     }
+  }
+
+  private recheck() {
+    this.update(this.agent.get(HomeAssistantEntityBehavior).entity);
+  }
+
+  override async [Symbol.asyncDispose]() {
+    this.internal.recheck?.stop();
+    await super[Symbol.asyncDispose]?.();
   }
 
   override pause(): RvcOperationalState.OperationalCommandResponse {
@@ -157,6 +210,18 @@ class RvcOperationalStateServerBase extends Base.enable({
 
   override resume(): RvcOperationalState.OperationalCommandResponse {
     const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);
+    const reason = this.state.config.getResumeError?.(
+      homeAssistant.entity.state,
+      this.agent,
+    );
+    if (reason) {
+      return {
+        commandResponseState: {
+          errorStateId: ErrorState.UnableToStartOrResume,
+          errorStateDetails: trimToLength(reason, 64, "..."),
+        },
+      };
+    }
     homeAssistant.callAction(this.state.config.resume(void 0, this.agent));
     return {
       commandResponseState: {
@@ -195,6 +260,10 @@ class RvcOperationalStateServerBase extends Base.enable({
 }
 
 namespace RvcOperationalStateServerBase {
+  export class Internal extends Base.Internal {
+    recheck?: Timer;
+    recheckCallback?: Timer.Callback;
+  }
   export class State extends Base.State {
     config!: RvcOperationalStateServerConfig;
   }

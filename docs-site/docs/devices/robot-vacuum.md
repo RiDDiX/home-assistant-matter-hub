@@ -47,6 +47,42 @@ Server Mode nodes carry up to **10 devices**; the first entity is the primary an
 
 ---
 
+## Readiness sensor (optional)
+
+A vacuum can be docked while it is saving or downloading a map and cannot start
+another job. To report this, edit the existing vacuum's **Entity Mapping** and
+set **Readiness Entity** to its readiness sensor, for example Roomba+'s
+`sensor.roomba_readiness`. No new bridge or pairing is required.
+
+The sensor uses these raw states:
+
+| State | Matter behavior |
+|-------|-----------------|
+| `ready` | Normal docked/idle status after five seconds of stable readiness |
+| `saving_map`, `downloading_map` | `UpdatingMaps` |
+| Other states, or a missing/unavailable sensor | `UnableToStartOrResume` while docked/idle |
+
+The five-second hold covers a brief `ready` between saving and downloading. A
+timer clears it even if HA sends no further state changes. Actual cleaning,
+returning, paused, error and offline states retain their existing status.
+
+Native RVC starts (All Rooms, selected areas and room modes) and Resume check
+the current readiness sensor before sending an HA action or changing optimistic
+run/progress state. A refusal preserves the room selection. Returning, failed
+and offline vacuums also refuse starts when the sensor still says `ready`.
+Stop, Pause and Return to Dock remain available.
+
+This mapping advertises the newer Matter `UpdatingMaps` state. Enable it only
+for a compatible controller; leave it empty to preserve the older state list
+and start behavior. Apple Home was tested with a Roomba s9+: it displayed
+Saving Map without the brief Ready blip, disabled All Rooms Start during map
+processing, and Siri's “Vacuum Everywhere” request was refused without movement
+or a false Vacuuming display. Wording and command availability depend on the
+controller. Base emptying may still be labelled Vacuuming by the HA integration.
+
+This guard covers native RVC commands. Direct HA actions and optional OnOff or
+per-area switch controls remain separate command paths.
+
 ## Cleaning Modes
 
 The RVC Clean Mode cluster allows selecting the cleaning type. This is auto-enabled for Dreame and Ecovacs vacuums, and can be manually configured for other brands (including Roborock).

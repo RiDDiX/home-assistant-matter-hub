@@ -5,13 +5,18 @@ import {
 import { Logger } from "@matter/general";
 import { RvcOperationalState } from "@matter/main/clusters";
 import { testBit } from "../../../../../utils/test-bit.js";
+import { trimToLength } from "../../../../../utils/trim-to-length.js";
 import { HomeAssistantEntityBehavior } from "../../../../behaviors/home-assistant-entity-behavior.js";
-import { RvcOperationalStateServer } from "../../../../behaviors/rvc-operational-state-server.js";
+import {
+  makeRvcOperationalError,
+  RvcOperationalStateServer,
+} from "../../../../behaviors/rvc-operational-state-server.js";
 import {
   getVacuumBatteryPercent,
   getVacuumChargingState,
   type VacuumChargingState,
 } from "./vacuum-battery.js";
+import { getVacuumStartError, readinessReport } from "./vacuum-readiness.js";
 
 const logger = Logger.get("VacuumRvcOperationalStateServer");
 
@@ -136,7 +141,40 @@ export function mapVacuumOperationalState(
 }
 
 export const VacuumRvcOperationalStateServer = RvcOperationalStateServer({
+  getResumeError: getVacuumStartError,
+  getAdditionalOperationalStates: (_, agent) =>
+    agent.get(HomeAssistantEntityBehavior).state.mapping?.readinessEntity
+      ? [RvcOperationalState.OperationalState.UpdatingMaps]
+      : [],
+  getRecheckAfterMs: (entity, agent) =>
+    readinessReport(entity.state, agent)?.recheckAfterMs,
+  // An inability to start the NEXT job is not a failure of the job just ended.
+  getOperationCompletionError: (entity) =>
+    entity.state === "error" || entity.state === "unavailable"
+      ? RvcOperationalState.ErrorState.Stuck
+      : RvcOperationalState.ErrorState.NoError,
+  getOperationalError(entity, agent) {
+    const readiness = readinessReport(entity.state, agent);
+    if (readiness?.kind === "blocked") {
+      return {
+        errorStateId: RvcOperationalState.ErrorState.UnableToStartOrResume,
+        errorStateDetails: trimToLength(readiness.reason, 64, "..."),
+      };
+    }
+    return makeRvcOperationalError(
+      entity.state === "error" || entity.state === "unavailable"
+        ? RvcOperationalState.ErrorState.Stuck
+        : RvcOperationalState.ErrorState.NoError,
+    );
+  },
   getOperationalState(entity, agent): RvcOperationalState.OperationalState {
+    const readiness = readinessReport(entity.state, agent);
+    if (readiness?.kind === "updating_maps") {
+      return RvcOperationalState.OperationalState.UpdatingMaps;
+    }
+    if (readiness?.kind === "blocked") {
+      return RvcOperationalState.OperationalState.Error;
+    }
     return mapVacuumOperationalState(
       entity,
       getVacuumBatteryPercent(entity, agent),

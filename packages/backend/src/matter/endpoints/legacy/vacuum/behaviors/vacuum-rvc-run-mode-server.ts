@@ -29,6 +29,7 @@ import {
   parseVacuumRooms,
   ROOM_MODE_BASE,
 } from "../utils/parse-vacuum-rooms.js";
+import { getVacuumStartError } from "./vacuum-readiness.js";
 import {
   getVacuumServiceAreas,
   toAreaId,
@@ -546,6 +547,7 @@ export function dispatchRoomClean(
 }
 
 const vacuumRvcRunModeConfig = {
+  getStartError: getVacuumStartError,
   getCurrentMode: (entity: { state: string }) => {
     const isCleaning = vacuumIsCleaning(entity.state);
     logger.debug(

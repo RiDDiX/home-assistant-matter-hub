@@ -162,6 +162,7 @@ export function EntityMappingDialog({
   const [mopIntensityEntity, setMopIntensityEntity] = useState("");
   const [currentRoomEntity, setCurrentRoomEntity] = useState("");
   const [chargingStateEntity, setChargingStateEntity] = useState("");
+  const [readinessEntity, setReadinessEntity] = useState("");
   const [cleanedAreaEntity, setCleanedAreaEntity] = useState("");
   const [vacuumAscendingRoomOrder, setVacuumAscendingRoomOrder] =
     useState(false);
@@ -278,6 +279,7 @@ export function EntityMappingDialog({
       setMopIntensityEntity(currentMapping?.mopIntensityEntity || "");
       setCurrentRoomEntity(currentMapping?.currentRoomEntity || "");
       setChargingStateEntity(currentMapping?.chargingStateEntity || "");
+      setReadinessEntity(currentMapping?.readinessEntity || "");
       setCleanedAreaEntity(currentMapping?.cleanedAreaEntity || "");
       setVacuumAscendingRoomOrder(
         currentMapping?.vacuumAscendingRoomOrder || false,
@@ -453,6 +455,7 @@ export function EntityMappingDialog({
       mopIntensityEntity: mopIntensityEntity.trim() || undefined,
       currentRoomEntity: currentRoomEntity.trim() || undefined,
       chargingStateEntity: chargingStateEntity.trim() || undefined,
+      readinessEntity: readinessEntity.trim() || undefined,
       cleanedAreaEntity: cleanedAreaEntity.trim() || undefined,
       vacuumAscendingRoomOrder: vacuumAscendingRoomOrder || undefined,
       disableCustomAreaRoomModes: disableCustomAreaRoomModes || undefined,
@@ -529,6 +532,7 @@ export function EntityMappingDialog({
     mopIntensityEntity,
     currentRoomEntity,
     chargingStateEntity,
+    readinessEntity,
     cleanedAreaEntity,
     vacuumAscendingRoomOrder,
     disableCustomAreaRoomModes,
@@ -918,6 +922,14 @@ export function EntityMappingDialog({
               label="Current Room Entity (optional)"
               placeholder="sensor.vacuum_current_room"
               helperText="Sensor that reports which room the vacuum is currently in (e.g. Dreame current_room sensor). Enables dynamic room progress tracking during multi-room cleaning."
+              domain="sensor"
+            />
+            <EntityAutocomplete
+              value={readinessEntity}
+              onChange={setReadinessEntity}
+              label="Readiness Entity (optional)"
+              placeholder="sensor.roomba_readiness"
+              helperText="Reports map processing and start-blocking conditions. Ready must remain stable for five seconds. Requires a controller that supports the newer Matter vacuum states; leave empty for older controllers."
               domain="sensor"
             />
             <EntityAutocomplete
