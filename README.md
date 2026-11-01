@@ -562,7 +562,7 @@ Matter Bridge, Multi-Fabric support, Health Monitoring, Bridge Wizard, AirQualit
 | `input_boolean` | On/Off Plug-in Unit | |
 | `lock` | Door Lock | PIN credentials, unbolt when the lock can open |
 | `cover` | Window Covering | `coverSwapOpenClose`, `coverExposeAsDimmableLight` ([#372](https://github.com/RiDDiX/home-assistant-matter-hub/issues/372)) |
-| `climate` | Room Air Conditioner (with fan modes), otherwise Thermostat | `disableClimateFanControl`, `disableClimateOnOff`, `climateExposeFan` ([#309](https://github.com/RiDDiX/home-assistant-matter-hub/issues/309)), battery via `batteryEntity` |
+| `climate` | Room Air Conditioner (with fan modes), otherwise Thermostat | `disableClimateFanControl`, `disableClimateOnOff`, `climateBlockOff` ([#527](https://github.com/RiDDiX/home-assistant-matter-hub/discussions/527)), `climateExposeFan` ([#309](https://github.com/RiDDiX/home-assistant-matter-hub/issues/309)), battery via `batteryEntity` |
 | `fan` | Fan, On/Off Plug-in Unit without speed control | Oscillation, wind modes. Air Purifier override with `filterLifeEntity` |
 | `humidifier` | Fan, the fan speed sets the target humidity | Matter has no humidifier type |
 | `binary_sensor` | Contact, Occupancy, Smoke/CO Alarm, On/Off Sensor | Leak and freeze default to Contact Sensor (Alexa-safe); the Matter 1.4 Water Leak, Water Freeze and Rain detectors are overrides ([#365](https://github.com/RiDDiX/home-assistant-matter-hub/issues/365)) |

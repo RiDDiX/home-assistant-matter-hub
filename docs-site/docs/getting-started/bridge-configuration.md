@@ -307,6 +307,7 @@ Feature flags control advanced behavior of the bridge. Configure them in the **B
 | `includeHiddenEntities` | Include entities marked as hidden in Home Assistant | `false` |
 | `serverMode` | Expose device as standalone Matter device (required for Robot Vacuums with Apple Home/Alexa). Only ONE device per bridge! | `false` |
 | `productNameFromNodeLabel` | Report the node label (custom name / friendly name / entity id) as Matter `productName`. Useful for Aqara controllers that show productName as the device name. A per-entity `customProductName` still wins. | `false` |
+| `productNameFromModel` | Report the Home Assistant device model (e.g. `Smart Lock Pro`) as Matter `productName` instead of the `model_id` (e.g. `178`). Apple Home shows `productName` as Model. `customProductName` and `productNameFromNodeLabel` still win ([#507](https://github.com/RiDDiX/home-assistant-matter-hub/discussions/507)) | `false` |
 | `preferEntityRegistryName` | Use the entity registry name (or `original_name`) as `nodeLabel` instead of the composed `friendly_name`. HA 2026.4 prefixes `friendly_name` with the device name, breaking voice commands that relied on the short entity name. `customName` still wins. | `false` |
 | `vacuumOnOff` | Add OnOff cluster to vacuum endpoints. Some Alexa setups need this for the vacuum to be discovered. Disabled by default in both Bridge Mode and Server Mode. | `false` |
 | `vacuumIncludeUnnamedRooms` | Include rooms without names in vacuum room selection | `false` |

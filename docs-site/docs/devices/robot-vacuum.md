@@ -543,7 +543,7 @@ This one sits on Apple's side, the matter.js maintainer confirmed the same behav
 
 #### Wedge Watchdog
 
-The most targeted fix is **Bridge Settings → Wedge Watchdog** (Stable since v2.0.51, off by default). It watches every session and rotates only the one that keeps acknowledging reports but has not sent a single request for about 45 minutes, which is exactly what a stuck iPhone looks like. The phone re-establishes the session and the tile comes back without a reboot. Turn it on, then look for `Wedge watchdog: rotating session` lines in the log the next time the tile sticks. If the tile still sticks with the watchdog on, post that log window in [#287](https://github.com/RiDDiX/home-assistant-matter-hub/issues/287).
+The most targeted fix is **Bridge Settings → Wedge Watchdog** (Stable since v2.0.51, off by default). It watches every session and rotates only the one that keeps acknowledging reports but has not sent a single request for about 45 minutes, which is exactly what a stuck iPhone looks like. The phone re-establishes the session and the tile comes back without a reboot. Turn it on, then look for `Wedge watchdog: rotating session` lines in the log the next time the tile sticks. If the tile still sticks with the watchdog on, post that log window in [#287](https://github.com/RiDDiX/home-assistant-matter-hub/issues/287). Leave it off for bridges that only Google Home uses, Google hubs never send requests between subscriptions and the watchdog would reconnect them every 50 minutes for nothing ([#526](https://github.com/RiDDiX/home-assistant-matter-hub/issues/526)).
 
 #### Built-in session rotation
 

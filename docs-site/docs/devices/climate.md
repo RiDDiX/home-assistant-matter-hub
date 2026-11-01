@@ -53,6 +53,12 @@ An IR blaster only sends, it never hears back, so Home Assistant reports the las
 
 Set `climateForceTurnOn` per entity in **Entity Mapping** to always send `climate.turn_on` on a Matter On command ([#462](https://github.com/RiDDiX/home-assistant-matter-hub/issues/462)).
 
+## Block Off (opt-in)
+
+Apple Home shows a power button on every Matter thermostat and has no setting to hide it. A heating-only entity becomes a Heater Cooler tile there, where the power state is a required part of the tile, so the bridge can't remove it either. On integrations where Off also stops a schedule (Wiser: `auto` is the schedule, `off` is frost protection) a single tap on the tile turns the room off.
+
+Set `climateBlockOff` per entity in **Entity Mapping** to refuse Off from Matter controllers. The bridge answers the Off with an error and never calls Home Assistant, so the entity keeps its mode. Changing the temperature still works, and an Off set in Home Assistant or the device's own app still shows up. The option also drops the OnOff cluster like `disableClimateOnOff`, so a voice "turn off" can't switch the entity off either ([#527](https://github.com/RiDDiX/home-assistant-matter-hub/discussions/527)).
+
 ## Plain Thermostat fallback (Aqara)
 
 A climate entity with a fan mode is exposed as a Matter **Room Air Conditioner** (0x0072). Aqara Home only knows that type since app 5.1.9 / controller firmware 4.3.5, older versions silently drop the endpoint. Set `disableClimateFanControl` in **Entity Mapping** to expose the entity as a plain **Thermostat** instead, which Aqara has long supported.
