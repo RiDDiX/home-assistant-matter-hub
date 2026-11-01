@@ -55,6 +55,10 @@ export interface RvcOperationalStateServerConfig {
   pause: ValueSetter<void>;
   resume: ValueSetter<void>;
   goHome?: ValueSetter<void>;
+  getPhase?: ValueGetter<
+    { phaseList: string[] | null; currentPhase: number | null } | undefined
+  >;
+  shouldCompleteOperation?: ValueGetter<boolean | undefined>;
 }
 
 // OperationCompletion is optional in the cluster, so matter.js leaves it off
@@ -160,6 +164,7 @@ class RvcOperationalStateServerBase extends Base.enable({
     applyPatchState(
       this.state,
       {
+        ...(this.state.config.getPhase?.(entity.state, this.agent) ?? {}),
         operationalState: newState,
         operationalError,
       },
@@ -172,14 +177,14 @@ class RvcOperationalStateServerBase extends Base.enable({
     // An unavailable or unknown device has no confirmed finished job.
     const offline =
       entity.state.state === "unavailable" || entity.state.state === "unknown";
-    if (
-      !offline &&
-      previousState !== undefined &&
-      activeStates.has(previousState) &&
-      !activeStates.has(newState)
-    ) {
+    const complete =
+      this.state.config.shouldCompleteOperation?.(entity.state, this.agent) ??
+      (previousState !== undefined &&
+        activeStates.has(previousState) &&
+        !activeStates.has(newState));
+    if (!offline && previousState !== undefined && complete) {
       logger.info(
-        `Operation completed: ${OperationalState[previousState]} -> ${OperationalState[newState]}`,
+        `Operation completed: ${previousState === undefined ? "initial" : OperationalState[previousState]} -> ${OperationalState[newState]}`,
       );
       try {
         this.events.operationCompletion?.emit(
@@ -220,10 +225,14 @@ class RvcOperationalStateServerBase extends Base.enable({
   }
 
   override goHome(): RvcOperationalState.OperationalCommandResponse {
-    // Already docked or charging - command is valid but no-op
+    // Already docked or charging - command is valid but no-op. A job paused
+    // at the dock for a recharge reports Paused while HA says docked.
+    const haState = this.agent.get(HomeAssistantEntityBehavior).entity.state
+      .state;
     if (
       this.state.operationalState === OperationalState.Docked ||
-      this.state.operationalState === OperationalState.Charging
+      this.state.operationalState === OperationalState.Charging ||
+      haState === "docked"
     ) {
       return {
         commandResponseState: {

@@ -13,6 +13,11 @@ import {
   getVacuumChargingState,
   type VacuumChargingState,
 } from "./vacuum-battery.js";
+import {
+  getVacuumJobOperationalState,
+  getVacuumJobPhase,
+  shouldCompleteVacuumJob,
+} from "./vacuum-job-lifecycle.js";
 import { mapVacuumOperationalError } from "./vacuum-operational-error.js";
 
 const logger = Logger.get("VacuumRvcOperationalStateServer");
@@ -149,14 +154,19 @@ export const VacuumRvcOperationalStateServer = RvcOperationalStateServer({
     return mapVacuumOperationalError(entity.state, fault, !!faultEntity);
   },
   getOperationalState(entity, agent): RvcOperationalState.OperationalState {
-    return mapVacuumOperationalState(
-      entity,
-      getVacuumBatteryPercent(entity, agent),
-      getVacuumChargingState(agent),
+    return (
+      getVacuumJobOperationalState(entity, agent) ??
+      mapVacuumOperationalState(
+        entity,
+        getVacuumBatteryPercent(entity, agent),
+        getVacuumChargingState(agent),
+      )
     );
   },
   getOperationalErrorSettleMs: (_entity, agent) =>
     agent.get(HomeAssistantEntityBehavior).state.mapping?.faultEntity ? 500 : 0,
+  getPhase: getVacuumJobPhase,
+  shouldCompleteOperation: shouldCompleteVacuumJob,
   pause: (_, agent) => {
     const supportedFeatures =
       agent.get(HomeAssistantEntityBehavior).entity.state.attributes
