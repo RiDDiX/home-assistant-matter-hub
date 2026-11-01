@@ -32,6 +32,9 @@ import {
   type VacuumEffectiveConfig,
   withResolvedRooms,
 } from "./vacuum/behaviors/vacuum-service-area-server.js";
+import { resolveVacuumFaultMapping } from "./vacuum/utils/resolve-vacuum-fault-mapping.js";
+
+import { resolveVacuumJobMapping } from "./vacuum/utils/resolve-vacuum-job-mapping.js";
 
 const logger = Logger.get("LegacyEndpoint");
 
@@ -574,6 +577,14 @@ export class LegacyEndpoint extends EntityEndpoint {
       }
     }
 
+    if (entityId.startsWith("vacuum.")) {
+      effectiveMapping = resolveVacuumFaultMapping(
+        registry,
+        entityId,
+        effectiveMapping,
+      );
+    }
+
     const payload = {
       entity_id: entityId,
       state,
@@ -581,11 +592,19 @@ export class LegacyEndpoint extends EntityEndpoint {
       deviceRegistry,
     };
 
+    if (entityId.startsWith("vacuum.")) {
+      effectiveMapping = resolveVacuumJobMapping(
+        registry,
+        entityId,
+        effectiveMapping,
+      );
+    }
+
     // Resolve cleaning mode options for vacuum entities
     let cleaningModeOptions: string[] | undefined;
     if (entityId.startsWith("vacuum.")) {
       if (effectiveMapping?.cleaningModeEntity) {
-        const cmState = registry.initialState(
+        const cmState = registry.initialStateIncludingUnfiltered(
           effectiveMapping.cleaningModeEntity,
         );
         cleaningModeOptions = (

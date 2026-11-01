@@ -173,6 +173,10 @@ export class ServerModeBridge {
         this.server,
         this.dataProvider.featureFlags,
       );
+      // same as the aggregator bridge, a port edit only reached BridgeData
+      if (this.server.state.network.port !== this.dataProvider.port) {
+        await this.server.set({ network: { port: this.dataProvider.port } });
+      }
       await this.server.start();
       this.setStatus({ code: BridgeStatus.Running });
       this.startAutoForceSyncIfEnabled();
@@ -229,7 +233,16 @@ export class ServerModeBridge {
 
   async update(update: UpdateBridgeRequest): Promise<void> {
     try {
+      const { code } = this.status;
+      const rebind =
+        update.port !== this.dataProvider.port &&
+        (code === BridgeStatus.Running || code === BridgeStatus.Failed);
       this.dataProvider.update(update);
+      if (rebind) {
+        await this.stop(BridgeStatus.Stopped, "Port changed");
+        await this.start();
+        return;
+      }
       await this.refreshDevices();
       // Re-evaluate auto force sync setting after config update
       if (this.status.code === BridgeStatus.Running) {

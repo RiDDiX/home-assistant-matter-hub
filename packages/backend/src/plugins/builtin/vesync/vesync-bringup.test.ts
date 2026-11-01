@@ -202,6 +202,19 @@ async function bringUp() {
 // biome-ignore lint/suspicious/noExplicitAny: read behavior state
 const stateOf = (endpoint: Endpoint) => endpoint.state as any;
 
+// Take the OnOff lock the way an Invoke does before calling the command. A
+// bare call writes state synchronously and throws when a pending HA update
+// still holds the lock ("Cannot lock ... synchronously").
+function invokeOnOff(endpoint: Endpoint, command: "on" | "off") {
+  return endpoint.act(async (agent) => {
+    // biome-ignore lint/suspicious/noExplicitAny: matter.js agent is dynamic
+    const onOff = (agent as any).onOff;
+    agent.context.transaction.addResourcesSync(onOff);
+    await agent.context.transaction.begin();
+    await onOff[command]();
+  });
+}
+
 describe("vesync plugin bring-up (#419)", () => {
   it("mounts every unit and shows the polled state", async () => {
     const { manager, endpoints, get } = await bringUp();
@@ -262,8 +275,7 @@ describe("vesync plugin bring-up (#419)", () => {
     writes.length = 0;
     const before = cloud.v2().length;
 
-    // biome-ignore lint/suspicious/noExplicitAny: matter.js agent is dynamic
-    await get("fryer_left").act((agent) => (agent as any).onOff.off());
+    await invokeOnOff(get("fryer_left"), "off");
 
     await vi.waitFor(() =>
       expect(cloud.v2().slice(before)).toEqual([
@@ -287,8 +299,7 @@ describe("vesync plugin bring-up (#419)", () => {
     const { manager, get, cloud } = await bringUp();
     const before = cloud.v2().length;
 
-    // biome-ignore lint/suspicious/noExplicitAny: matter.js agent is dynamic
-    await get("fryer_right").act((agent) => (agent as any).onOff.on());
+    await invokeOnOff(get("fryer_right"), "on");
     expect(stateOf(get("fryer_right")).onOff.onOff).toBe(true);
 
     await vi.waitFor(() =>

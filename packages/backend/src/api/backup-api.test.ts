@@ -123,3 +123,81 @@ describe("backup settings validation", () => {
     }, settingsStorage);
   });
 });
+
+describe("mapping restore keeps every field", () => {
+  // These were missing from the hand-written restore lists before.
+  const mapping = {
+    entityId: "vacuum.robo",
+    customName: "Robo",
+    customProductName: "S8",
+    customVendorName: "Roborock",
+    customSerialNumber: "SN1",
+    customVendorId: 4660,
+    chargingStateEntity: "binary_sensor.robo_charging",
+    currentRoomEntity: "sensor.robo_room",
+    cleanedAreaEntity: "sensor.robo_area",
+    disableCustomAreaRoomModes: true,
+    coverExposeAsDimmableLight: true,
+    selectExposeAsSwitch: true,
+    selectSwitchOnOption: "on",
+    selectSwitchOffOption: "off",
+    updateThrottleMs: 500,
+    climateKeepModeOnIdle: true,
+    climateForceTurnOn: true,
+    climateExposeFan: true,
+    fanRestoreSpeedOnPowerOn: true,
+  };
+
+  it.each(["upload", "snapshot"])("via %s restore", async (path) => {
+    const restored: unknown[] = [];
+    const storage = {
+      getMappingsForBridge: () => [mapping],
+      setMapping: async (req: unknown) => {
+        restored.push(req);
+      },
+    } as unknown as EntityMappingStorage;
+    const zipPath = join(dir, `mappings-${path}.zip`);
+    const app = express();
+    app.use(express.json());
+    app.use(
+      "/backup",
+      backupApi(
+        bridgeStorage,
+        storage,
+        dir,
+        { getBackupPath: () => zipPath } as unknown as BackupService,
+        {} as unknown as AppSettingsStorage,
+      ),
+    );
+    const server = app.listen(0);
+    try {
+      await new Promise<void>((resolve) => server.once("listening", resolve));
+      const { port } = server.address() as AddressInfo;
+      const base = `http://127.0.0.1:${port}`;
+      const zip = Buffer.from(
+        await (await fetch(`${base}/backup/download`)).arrayBuffer(),
+      );
+      let res: Response;
+      if (path === "upload") {
+        const form = new FormData();
+        form.append("file", new Blob([zip]), "backup.zip");
+        form.append("options", JSON.stringify({ overwriteExisting: true }));
+        res = await fetch(`${base}/backup/restore`, {
+          method: "POST",
+          body: form,
+        });
+      } else {
+        writeFileSync(zipPath, zip);
+        res = await fetch(`${base}/backup/snapshots/x.zip/restore`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ overwriteExisting: true }),
+        });
+      }
+      expect(res.status).toBe(200);
+      expect(restored).toEqual([{ ...mapping, bridgeId: "b1" }]);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+});

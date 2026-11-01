@@ -1,5 +1,5 @@
 import type { HomeAssistantEntityInformation } from "@home-assistant-matter-hub/common";
-import { Logger, Millis, Time, type Timer } from "@matter/general";
+import { Logger, Millis, Seconds, Time, type Timer } from "@matter/general";
 import { RvcOperationalStateServer as Base } from "@matter/main/behaviors/rvc-operational-state";
 import { RvcOperationalState } from "@matter/main/clusters/rvc-operational-state";
 import { applyPatchState } from "../../utils/apply-patch-state.js";
@@ -22,6 +22,7 @@ const activeStates = new Set([
 // Last state Home Assistant reported, per endpoint. A controller start shows
 // Running before HA confirms it (#496), that is no finished job.
 const haStates = new WeakMap<object, OperationalState>();
+const errorTimers = new WeakMap<object, Timer>();
 
 // Operational states to advertise in operationalStateList.
 // Only include the well-established states from the base OperationalState
@@ -51,13 +52,20 @@ export function makeRvcOperationalError(
 export interface RvcOperationalStateServerConfig {
   getOperationalState: ValueGetter<OperationalState>;
   getOperationalError?: ValueGetter<RvcOperationalState.ErrorStateStruct>;
+  getOperationalErrorSettleMs?: ValueGetter<number>;
   getOperationCompletionError?: ValueGetter<ErrorState>;
   getAdditionalOperationalStates?: ValueGetter<number[]>;
   getRecheckAfterMs?: ValueGetter<number | undefined>;
   getResumeError?: ValueGetter<string | undefined>;
+  // Docked or charging underneath an UpdatingMaps/Error status overlay
+  isAtBase?: ValueGetter<boolean>;
   pause: ValueSetter<void>;
   resume: ValueSetter<void>;
   goHome?: ValueSetter<void>;
+  getPhase?: ValueGetter<
+    { phaseList: string[] | null; currentPhase: number | null } | undefined
+  >;
+  shouldCompleteOperation?: ValueGetter<boolean | undefined>;
 }
 
 // OperationCompletion is optional in the cluster, so matter.js leaves it off
@@ -94,6 +102,29 @@ class RvcOperationalStateServerBase extends Base.enable({
   }
 
   private update(entity: HomeAssistantEntityInformation) {
+    this.applyEntityState(entity, false);
+  }
+
+  private flushPendingError() {
+    errorTimers.delete(this.endpoint);
+    this.applyEntityState(
+      this.agent.get(HomeAssistantEntityBehavior).entity,
+      true,
+    );
+  }
+
+  override async [Symbol.asyncDispose]() {
+    errorTimers.get(this.endpoint)?.stop();
+    errorTimers.delete(this.endpoint);
+    haStates.delete(this.endpoint);
+    this.internal.recheck?.stop();
+    await super[Symbol.asyncDispose]();
+  }
+
+  private applyEntityState(
+    entity: HomeAssistantEntityInformation,
+    errorSettled: boolean,
+  ) {
     if (!entity.state || !entity.state.attributes) {
       return;
     }
@@ -109,32 +140,11 @@ class RvcOperationalStateServerBase extends Base.enable({
         ...new Set([...advertisedOperationalStates, ...extra]),
       ].map((id) => ({ operationalStateId: id })),
     });
-    const newState = this.state.config.getOperationalState(
-      entity.state,
-      this.agent,
-    );
-    const previousState = haStates.get(this.endpoint);
-    haStates.set(this.endpoint, newState);
-
-    const errorStateId =
-      newState === OperationalState.Error
-        ? ErrorState.Stuck
-        : ErrorState.NoError;
-    const operationalError =
-      this.state.config.getOperationalError?.(entity.state, this.agent) ??
-      makeRvcOperationalError(errorStateId);
-
-    applyPatchState(
-      this.state,
-      {
-        operationalState: newState,
-        operationalError,
-      },
-      { force: true },
-    );
 
     // A stable-ready delay must expire even if HA sends no more state changes.
     // One timer, inside a fresh locked transaction; no polling or HA actions.
+    // Read before the state getters: if the hold expires between these reads,
+    // the timer still fires and re-evaluates.
     this.internal.recheck?.stop();
     const delay = this.state.config.getRecheckAfterMs?.(
       entity.state,
@@ -152,20 +162,72 @@ class RvcOperationalStateServerBase extends Base.enable({
       ).start();
     }
 
+    const newState = this.state.config.getOperationalState(
+      entity.state,
+      this.agent,
+    );
+    const previousState = haStates.get(this.endpoint);
+    const settleMs =
+      this.state.config.getOperationalErrorSettleMs?.(
+        entity.state,
+        this.agent,
+      ) ?? 0;
+    if (
+      newState === OperationalState.Error &&
+      previousState !== undefined &&
+      previousState !== OperationalState.Error &&
+      settleMs > 0 &&
+      !errorSettled
+    ) {
+      if (!errorTimers.has(this.endpoint)) {
+        errorTimers.set(
+          this.endpoint,
+          this.reactorTimer(
+            "operational-error-settle",
+            Seconds(settleMs / 1000),
+            this.flushPendingError,
+            { offline: true, lock: true },
+          ).start(),
+        );
+      }
+      return;
+    }
+    errorTimers.get(this.endpoint)?.stop();
+    errorTimers.delete(this.endpoint);
+    haStates.set(this.endpoint, newState);
+
+    const errorStateId =
+      newState === OperationalState.Error
+        ? ErrorState.Stuck
+        : ErrorState.NoError;
+    const operationalError =
+      this.state.config.getOperationalError?.(entity.state, this.agent) ??
+      makeRvcOperationalError(errorStateId);
+
+    applyPatchState(
+      this.state,
+      {
+        ...(this.state.config.getPhase?.(entity.state, this.agent) ?? {}),
+        operationalState: newState,
+        operationalError,
+      },
+      { force: true },
+    );
+
     // Emit OperationCompletion event when transitioning from an active state
     // (Running, SeekingCharger, Paused) to Docked, Stopped or Error.
     // Required on the RoboticVacuumCleaner device type.
-    // Unavailable maps to Error with no finished job.
+    // An unavailable or unknown device has no confirmed finished job.
     const offline =
       entity.state.state === "unavailable" || entity.state.state === "unknown";
-    if (
-      !offline &&
-      previousState !== undefined &&
-      activeStates.has(previousState) &&
-      !activeStates.has(newState)
-    ) {
+    const complete =
+      this.state.config.shouldCompleteOperation?.(entity.state, this.agent) ??
+      (previousState !== undefined &&
+        activeStates.has(previousState) &&
+        !activeStates.has(newState));
+    if (!offline && previousState !== undefined && complete) {
       logger.info(
-        `Operation completed: ${OperationalState[previousState]} -> ${OperationalState[newState]}`,
+        `Operation completed: ${previousState === undefined ? "initial" : OperationalState[previousState]} -> ${OperationalState[newState]}`,
       );
       try {
         this.events.operationCompletion?.emit(
@@ -191,11 +253,6 @@ class RvcOperationalStateServerBase extends Base.enable({
 
   private recheck() {
     this.update(this.agent.get(HomeAssistantEntityBehavior).entity);
-  }
-
-  override async [Symbol.asyncDispose]() {
-    this.internal.recheck?.stop();
-    await super[Symbol.asyncDispose]?.();
   }
 
   override pause(): RvcOperationalState.OperationalCommandResponse {
@@ -231,10 +288,17 @@ class RvcOperationalStateServerBase extends Base.enable({
   }
 
   override goHome(): RvcOperationalState.OperationalCommandResponse {
-    // Already docked or charging - command is valid but no-op
+    // Already docked or charging - command is valid but no-op. A job paused
+    // at the dock for a recharge reports Paused while HA says docked.
+    const current = this.state.operationalState;
+    const haState = this.agent.get(HomeAssistantEntityBehavior).entity.state;
     if (
-      this.state.operationalState === OperationalState.Docked ||
-      this.state.operationalState === OperationalState.Charging
+      current === OperationalState.Docked ||
+      current === OperationalState.Charging ||
+      haState.state === "docked" ||
+      ((current === OperationalState.UpdatingMaps ||
+        current === OperationalState.Error) &&
+        this.state.config.isAtBase?.(haState, this.agent))
     ) {
       return {
         commandResponseState: {

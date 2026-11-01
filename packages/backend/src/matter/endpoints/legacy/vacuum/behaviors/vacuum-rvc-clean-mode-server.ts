@@ -114,7 +114,12 @@ export function buildSupportedModes(
     cleanTypes.has(CleanType.Mopping) ||
     cleanTypes.has(CleanType.SweepingAndMopping);
   if (hasMopping && mopIntensityList && mopIntensityList.length > 0) {
-    modes.push(...buildMopIntensityModes(mopIntensityList));
+    modes.push(
+      ...buildMopIntensityModes(
+        mopIntensityList,
+        !cleanTypes.has(CleanType.Mopping),
+      ),
+    );
   }
 
   // VacuumThenMop only when the entity actually supports it
@@ -136,7 +141,7 @@ export function buildSupportedModes(
 // Cleaning mode tokens. Classify any vendor phrasing by the words it
 // contains instead of maintaining per-vendor alias lists.
 const CLEAN_TOKENS = {
-  vacuum: /\b(vacuum|vacuuming|sweep|sweeping|suction)\b/i,
+  vacuum: /\b(vac|vacuum|vacuuming|sweep|sweeping|suction)\b/i,
   mop: /\b(mop|mopping|wipe|wet|wash|scrub)\b/i,
   sequential:
     /\b(then|after|before|followed|following|first|secondly|sequentially)\b/i,
@@ -172,9 +177,9 @@ const CLEAN_TYPE_LABELS: Record<CleanType, string> = {
 // Fan speed tag patterns (regex-based, manufacturer-agnostic)
 // ---------------------------------------------------------------------------
 // Each pattern matches the FULL fan_speed_list entry (anchored with ^ $).
-// Compound names like "max_plus" do NOT match any pattern.
-// Apple Home hides modes without a recognized intensity tag,
-// so unmatched speeds will not be selectable from the Apple Home UI.
+// Known aliases are candidates for a single representative per intensity.
+// Other modes keep their IDs for Matter reporting; do not assume Apple Home
+// offers separate controls for modes without a selected intensity tag.
 
 const FAN_TAG_PATTERNS: Array<{ pattern: RegExp; tag: number }> = [
   {
@@ -183,9 +188,9 @@ const FAN_TAG_PATTERNS: Array<{ pattern: RegExp; tag: number }> = [
   },
   {
     // Apple Home renders the Auto tag as "Automatic".
-    // Mid-range names like "normal", "standard", "balanced" map here
-    // because untagged modes are hidden in Apple Home entirely.
-    // "Automatic" is imperfect but the only way to make them visible.
+    // Mid-range names use Auto in the default mapping. Controllers may omit
+    // untagged aliases; explicit standard tags can expose other native labels.
+    // The Home label describes the tag, not necessarily dynamic fan control.
     pattern: /^(auto|normal|standard|balanced|medium|default|regular|mittel)$/i,
     tag: RvcCleanMode.ModeTag.Auto,
   },
@@ -218,11 +223,37 @@ function buildFanSpeedModes(
   fanSpeedList: string[],
   customTags?: Record<string, number>,
 ): RvcCleanMode.ModeOption[] {
-  // Assign intensity tags to ALL matching speeds so Apple Home
-  // shows every recognized speed. Multiple speeds can share the
-  // same tag, Apple Home distinguishes them by label.
+  // One automatic representative per intensity bucket, independent of profile
+  // order or extra off/custom speeds. Explicit overrides retain their semantics.
+  const priorities = new Map<number, readonly string[]>([
+    [RvcCleanMode.ModeTag.Quiet, ["quiet", "silent"]],
+    [RvcCleanMode.ModeTag.Auto, ["auto", "balanced", "normal"]],
+    [RvcCleanMode.ModeTag.Max, ["max_plus", "max+", "max", "turbo"]],
+  ]);
+  const tags = fanSpeedList.map((name) => getFanSpeedTag(name, customTags));
+  const explicit = (index: number) =>
+    customTags?.[fanSpeedList[index]] !== undefined;
+  const reserved = new Set(tags.filter((_tag, index) => explicit(index)));
+  const score = (tag: number, index: number) => {
+    const rank = (priorities.get(tag) ?? []).indexOf(
+      fanSpeedList[index].toLowerCase().trim(),
+    );
+    return rank < 0 ? 0 : 100 - rank;
+  };
+  const winners = new Map<number, number>();
+  tags.forEach((tag, index) => {
+    if (tag === undefined || explicit(index) || reserved.has(tag)) return;
+    const previous = winners.get(tag);
+    if (previous === undefined || score(tag, index) > score(tag, previous))
+      winners.set(tag, index);
+  });
   return fanSpeedList.map((name, index) => {
-    const tag = getFanSpeedTag(name, customTags);
+    const candidate = tags[index];
+    const tag =
+      explicit(index) ||
+      (candidate !== undefined && winners.get(candidate) === index)
+        ? candidate
+        : undefined;
     const modeTags: { value: number }[] = [
       { value: RvcCleanMode.ModeTag.Vacuum },
     ];
@@ -251,8 +282,8 @@ const MOP_TAG_PATTERNS: Array<{ pattern: RegExp; tag: number }> = [
   },
   {
     // Apple Home renders the Auto tag as "Automatic".
-    // Mid-range names like "medium", "moderate" map here
-    // because untagged modes are hidden in Apple Home entirely.
+    // Mid-range names like "medium" and "moderate" use this default tag.
+    // The controller chooses its label from the advertised semantic tag.
     pattern: /^(auto|medium|moderate|normal|standard|mittel)$/i,
     tag: RvcCleanMode.ModeTag.Auto,
   },
@@ -276,17 +307,23 @@ function getMopIntensityTag(name: string): number | undefined {
 
 function buildMopIntensityModes(
   mopIntensityList: string[],
+  combinedOnly = false,
 ): RvcCleanMode.ModeOption[] {
   // Assign intensity tags to ALL matching mop intensities so
   // Apple Home shows every recognized option by label.
   return mopIntensityList.map((name, index) => {
     const tag = getMopIntensityTag(name);
-    const modeTags: { value: number }[] = [{ value: RvcCleanMode.ModeTag.Mop }];
+    const modeTags: { value: number }[] = combinedOnly
+      ? [
+          { value: RvcCleanMode.ModeTag.Vacuum },
+          { value: RvcCleanMode.ModeTag.Mop },
+        ]
+      : [{ value: RvcCleanMode.ModeTag.Mop }];
     if (tag !== undefined) {
       modeTags.push({ value: tag });
     }
     return {
-      label: `Mop ${formatFanSpeedLabel(name)}`,
+      label: `${combinedOnly ? "Vacuum & Mop" : "Mop"} ${formatFanSpeedLabel(name)}`,
       mode: MOP_INTENSITY_MODE_BASE + index,
       modeTags,
     };
@@ -394,6 +431,7 @@ function fanSpeedToModeId(
 // "Vacuum Then Mop" falls back to "Vacuum & Mop" when the entity
 // doesn't expose a dedicated option (e.g. Roborock template selects).
 const CLEAN_TYPE_FALLBACK: Partial<Record<CleanType, CleanType>> = {
+  [CleanType.Mopping]: CleanType.SweepingAndMopping,
   [CleanType.MoppingAfterSweeping]: CleanType.SweepingAndMopping,
 };
 
@@ -509,7 +547,7 @@ function readSelectEntity(
 // Config factory
 // ---------------------------------------------------------------------------
 
-function createCleanModeConfig(
+export function createCleanModeConfig(
   fanSpeedList?: string[],
   mopIntensityList?: string[],
   cleaningModeOptions?: string[],
@@ -574,7 +612,9 @@ function createCleanModeConfig(
 
       // Mop intensity: when mopping, check mop intensity entity
       if (
-        cleanType === CleanType.Mopping &&
+        (cleanType === CleanType.Mopping ||
+          (cleanType === CleanType.SweepingAndMopping &&
+            !resolveCleanTypes(cleaningModeOptions).has(CleanType.Mopping))) &&
         mopIntensityList &&
         mopIntensityList.length > 0 &&
         mapping?.mopIntensityEntity
@@ -645,7 +685,12 @@ function createCleanModeConfig(
         // so the cleaning mode must change first.
         if (hasCleanTypes) {
           homeAssistant.callAction(
-            buildCleaningModeAction(CleanType.Mopping, agent),
+            buildCleaningModeAction(
+              resolveCleanTypes(cleaningModeOptions).has(CleanType.Mopping)
+                ? CleanType.Mopping
+                : CleanType.SweepingAndMopping,
+              agent,
+            ),
           );
         }
 
@@ -795,7 +840,7 @@ function createCleanModeConfig(
  * Create a VacuumRvcCleanModeServer with cleaning modes.
  * Fan-speed modes are generated dynamically from the fanSpeedList.
  * Mop-intensity modes are generated dynamically from the mopIntensityList.
- * Apple Home shows them as "extra features" in the vacuum control panel.
+ * Intensity tags choose the representative modes Apple Home can expose.
  */
 export function createVacuumRvcCleanModeServer(
   _attributes: VacuumDeviceAttributes,

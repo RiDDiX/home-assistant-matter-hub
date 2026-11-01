@@ -159,6 +159,8 @@ export interface EntityMappingConfig {
   /**
    * Optional: Entity ID of a problem/safety binary sensor on the same device.
    * Drives hardwareFaultAlert on a smoke/CO alarm (#408).
+   * For vacuums, a Roborock vacuum_error enum sensor supplies native RVC
+   * operational-error details. Auto-detected from the same HA device.
    * Example: "binary_sensor.smoke_problem"
    */
   readonly faultEntity?: string;
@@ -325,6 +327,8 @@ export interface EntityMappingConfig {
    * cleaned area plus per-room sizeSqm advances currentArea/progress (#368).
    */
   readonly cleanedAreaEntity?: string;
+  /** Internal whole-job dependency resolved from Roborock registry metadata, not persisted. */
+  readonly cleaningJobEntity?: string;
   /**
    * Optional: The vacuum cleans rooms in ascending area ID order regardless of
    * the order they were picked in (Roborock batch segment cleaning does this).
@@ -525,6 +529,7 @@ export interface EntityMappingRequest {
   readonly humidityEntity?: string;
   readonly pressureEntity?: string;
   readonly batteryEntity?: string;
+  readonly faultEntity?: string;
   readonly disableBatteryMapping?: boolean;
   readonly chargingStateEntity?: string;
   readonly readinessEntity?: string;

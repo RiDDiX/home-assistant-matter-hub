@@ -171,6 +171,41 @@ describe("HomeAssistantRegistry", () => {
     expect(registry.labels).toEqual([{ label_id: "voice_2", name: "Voice" }]);
   });
 
+  it("keeps the last areas when the area query fails", async () => {
+    const fake = makeConnection();
+    let areasFail = false;
+    let devices: unknown[] = [];
+    fake.connection.sendMessagePromise = vi.fn((message: { type: string }) => {
+      if (message.type === "config/device_registry/list") {
+        return Promise.resolve(devices);
+      }
+      if (message.type !== "config/area_registry/list") {
+        return Promise.resolve([]);
+      }
+      return areasFail
+        ? Promise.reject(new Error("timed out"))
+        : Promise.resolve([{ area_id: "kitchen", name: "Kitchen" }]);
+    }) as unknown as Connection["sendMessagePromise"];
+    const client = {
+      connection: fake.connection,
+      haRunning: true,
+    } as unknown as HomeAssistantClient & { haRunning: boolean };
+    const registry = new HomeAssistantRegistry(client, defaultOptions);
+    const initPromise = registry.construction;
+    await vi.runAllTimersAsync();
+    await initPromise;
+    expect(registry.areas.get("kitchen")).toBe("Kitchen");
+
+    // unchanged fingerprint, so no full rebuild
+    areasFail = true;
+    await expect(registry.reload()).resolves.toBe(false);
+    expect(registry.areas.get("kitchen")).toBe("Kitchen");
+
+    devices = [{ id: "d1", name: "Oven" }];
+    await expect(registry.reload()).resolves.toBe(true);
+    expect(registry.areas.get("kitchen")).toBe("Kitchen");
+  });
+
   // #467: onRefresh only runs when the fingerprint moved, so a field missing
   // from the hash never reaches the endpoints at all.
   it("notices a device manufacturer, model_id or firmware change (#467)", async () => {

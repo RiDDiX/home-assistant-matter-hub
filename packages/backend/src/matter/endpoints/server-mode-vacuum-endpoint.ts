@@ -15,6 +15,8 @@ import {
   withResolvedRooms,
 } from "./legacy/vacuum/behaviors/vacuum-service-area-server.js";
 import { ServerModeVacuumDevice } from "./legacy/vacuum/server-mode-vacuum-device.js";
+import { resolveVacuumFaultMapping } from "./legacy/vacuum/utils/resolve-vacuum-fault-mapping.js";
+import { resolveVacuumJobMapping } from "./legacy/vacuum/utils/resolve-vacuum-job-mapping.js";
 import { updateEntityState } from "./update-entity-state.js";
 
 const logger = Logger.get("ServerModeVacuumEndpoint");
@@ -231,6 +233,14 @@ export class ServerModeVacuumEndpoint extends EntityEndpoint {
       logger.warn(`${entityId}: No device_id, cannot auto-assign battery`);
     }
 
+    if (entityId.startsWith("vacuum.")) {
+      effectiveMapping = resolveVacuumFaultMapping(
+        registry,
+        entityId,
+        effectiveMapping,
+      );
+    }
+
     const payload = {
       entity_id: entityId,
       state,
@@ -238,12 +248,18 @@ export class ServerModeVacuumEndpoint extends EntityEndpoint {
       deviceRegistry,
     };
 
+    effectiveMapping = resolveVacuumJobMapping(
+      registry,
+      entityId,
+      effectiveMapping,
+    );
+
     // Resolve cleaning mode options for accurate RvcCleanMode generation.
     // Reads actual entity options so only supported types get modes.
     const vacAttrsForClean = state.attributes as VacuumDeviceAttributes;
     let cleaningModeOptions: string[] | undefined;
     if (effectiveMapping?.cleaningModeEntity) {
-      const cmState = registry.initialState(
+      const cmState = registry.initialStateIncludingUnfiltered(
         effectiveMapping.cleaningModeEntity,
       );
       cleaningModeOptions = (

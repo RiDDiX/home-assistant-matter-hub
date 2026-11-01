@@ -35,6 +35,7 @@ const BUILT_IN_LANGUAGES: LanguageOption[] = [
   { code: "tr", flag: "🇹🇷", name: "Türkçe" },
   { code: "ru", flag: "🇷🇺", name: "Русский" },
   { code: "pt-BR", flag: "🇧🇷", name: "Português (Brasil)" },
+  { code: "vi", flag: "🇻🇳", name: "Tiếng Việt" },
 ];
 
 const CUSTOM_LANGS_KEY = "hamh-custom-languages";

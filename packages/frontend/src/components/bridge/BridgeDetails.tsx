@@ -33,7 +33,7 @@ import Tooltip from "@mui/material/Tooltip";
 import Typography from "@mui/material/Typography";
 import { QRCodeSVG } from "qrcode.react";
 import { useState } from "react";
-import { useTranslation } from "react-i18next";
+import { Trans, useTranslation } from "react-i18next";
 import { useNavigate } from "react-router";
 import { forceSyncBridge, openCommissioningWindow } from "../../api/bridges.ts";
 import { navigation } from "../../routes.tsx";
@@ -46,29 +46,23 @@ export interface BridgeDetailsProps {
 }
 
 export const BridgeDetails = ({ bridge }: BridgeDetailsProps) => {
+  const { t } = useTranslation();
   return (
     <Grid container spacing={2}>
       {bridge.featureFlags?.serverMode &&
         bridge.featureFlags?.vacuumOnOff === false && (
           <Grid size={{ xs: 12 }}>
             <Alert severity="warning" icon={<WarningAmberIcon />}>
-              <AlertTitle>
-                Vacuum OnOff Disabled (Alexa incompatible)
-              </AlertTitle>
-              Alexa <strong>requires</strong> the OnOff cluster
-              (PowerController) for robotic vacuums. With OnOff disabled, the
-              vacuum commissions but never appears in the Alexa app. Only
-              disable this if you exclusively use <strong>Apple Home</strong>.
+              <AlertTitle>{t("bridgeUi.vacuumOnOffDisabled")}</AlertTitle>
+              <Trans i18nKey="bridgeUi.vacuumOnOffDisabledHelp" />
             </Alert>
           </Grid>
         )}
       {!bridge.featureFlags?.serverMode && bridge.featureFlags?.vacuumOnOff && (
         <Grid size={{ xs: 12 }}>
           <Alert severity="info" icon={<WarningAmberIcon />}>
-            <AlertTitle>Vacuum OnOff Cluster Enabled (Alexa)</AlertTitle>
-            OnOff cluster is active for Alexa PowerController compatibility.
-            This may cause issues with <strong>Apple Home</strong> and{" "}
-            <strong>Google Home</strong>.
+            <AlertTitle>{t("bridgeUi.vacuumOnOffEnabled")}</AlertTitle>
+            <Trans i18nKey="bridgeUi.vacuumOnOffEnabledHelp" />
           </Alert>
         </Grid>
       )}
@@ -107,7 +101,9 @@ const PairingCard = ({ bridge }: { bridge: BridgeDataWithMetadata }) => {
       setDialogOpen(true);
     } catch (e) {
       notification.show({
-        message: `Failed to open commissioning window: ${e instanceof Error ? e.message : String(e)}`,
+        message: t("bridgeUi.windowFailed", {
+          error: e instanceof Error ? e.message : String(e),
+        }),
         severity: "error",
       });
     } finally {
@@ -320,12 +316,14 @@ const FabricsCard = ({ bridge }: { bridge: BridgeDataWithMetadata }) => {
     try {
       const result = await forceSyncBridge(bridge.id);
       notification.show({
-        message: `Synced ${result.syncedCount} devices to controllers`,
+        message: t("bridgeUi.syncSuccess", { count: result.syncedCount }),
         severity: "success",
       });
     } catch (e) {
       notification.show({
-        message: `Force sync failed: ${e instanceof Error ? e.message : String(e)}`,
+        message: t("bridgeUi.syncFailed", {
+          error: e instanceof Error ? e.message : String(e),
+        }),
         severity: "error",
       });
     } finally {
@@ -345,7 +343,7 @@ const FabricsCard = ({ bridge }: { bridge: BridgeDataWithMetadata }) => {
           <Typography variant="h6">
             {t("bridge.connectedFabrics", { count: fabrics.length })}
           </Typography>
-          <Tooltip title="A fabric represents a connection to a Matter controller (e.g., Apple Home, Google Home, Alexa). Each controller creates one fabric when paired.">
+          <Tooltip title={t("bridge.fabricTooltip")}>
             <InfoOutlinedIcon
               fontSize="small"
               color="action"
@@ -361,7 +359,7 @@ const FabricsCard = ({ bridge }: { bridge: BridgeDataWithMetadata }) => {
         ) : (
           <Stack spacing={2}>
             <FabricList fabrics={fabrics} />
-            <Tooltip title="Push all current device states to connected controllers">
+            <Tooltip title={t("bridge.forceSyncTooltip")}>
               <Button
                 variant="outlined"
                 size="small"
@@ -503,10 +501,10 @@ const PairingDialog = ({
             justifyContent="space-between"
           >
             <Typography variant="body2">
-              <strong>Manual Code:</strong>{" "}
+              <strong>{t("bridge.manualCode")}:</strong>{" "}
               {bridge.commissioning.manualPairingCode}
             </Typography>
-            <Tooltip title="Copy">
+            <Tooltip title={t("common.copy")}>
               <IconButton
                 size="small"
                 onClick={() =>
@@ -523,9 +521,10 @@ const PairingDialog = ({
             justifyContent="space-between"
           >
             <Typography variant="body2">
-              <strong>Passcode:</strong> {bridge.commissioning.passcode}
+              <strong>{t("bridge.passcode")}:</strong>{" "}
+              {bridge.commissioning.passcode}
             </Typography>
-            <Tooltip title="Copy">
+            <Tooltip title={t("common.copy")}>
               <IconButton
                 size="small"
                 onClick={() =>
@@ -542,10 +541,10 @@ const PairingDialog = ({
             justifyContent="space-between"
           >
             <Typography variant="body2">
-              <strong>Discriminator:</strong>{" "}
+              <strong>{t("bridge.discriminator")}:</strong>{" "}
               {bridge.commissioning.discriminator}
             </Typography>
-            <Tooltip title="Copy">
+            <Tooltip title={t("common.copy")}>
               <IconButton
                 size="small"
                 onClick={() =>
@@ -562,8 +561,7 @@ const PairingDialog = ({
 
         <Alert severity="info" sx={{ mt: 2 }}>
           <Typography variant="body2">
-            Matter supports connecting the same bridge to multiple controllers
-            simultaneously. Each controller will have independent control.
+            {t("bridgeUi.multiController")}
           </Typography>
         </Alert>
       </DialogContent>
@@ -575,6 +573,7 @@ const PairingDialog = ({
 };
 
 const ControllerWarnings = ({ bridge }: { bridge: BridgeDataWithMetadata }) => {
+  const { t } = useTranslation();
   const warnings = bridge.controllerWarnings;
   if (!warnings || warnings.length === 0) {
     return null;
@@ -584,9 +583,11 @@ const ControllerWarnings = ({ bridge }: { bridge: BridgeDataWithMetadata }) => {
     <Card>
       <CardContent>
         <Alert severity="warning" icon={<ErrorOutlineIcon />}>
-          <AlertTitle>Controller warnings ({warnings.length})</AlertTitle>
+          <AlertTitle>
+            {t("bridgeUi.controllerWarnings", { count: warnings.length })}
+          </AlertTitle>
           <Typography variant="body2" component="div">
-            A commissioned controller may not show these devices:
+            {t("bridgeUi.controllerWarningsIntro")}
           </Typography>
           <Box sx={{ mt: 1, maxHeight: 200, overflow: "auto" }}>
             {warnings.map((w) => (
@@ -602,8 +603,10 @@ const ControllerWarnings = ({ bridge }: { bridge: BridgeDataWithMetadata }) => {
                   component="span"
                   color="text.secondary"
                 >
-                  {" on "}
-                  {w.controllerLabel}
+                  {" "}
+                  {t("bridgeUi.controllerWarningOn", {
+                    controller: w.controllerLabel,
+                  })}
                   {w.note ? ` (${w.note})` : ""}
                 </Typography>
               </Box>
@@ -616,6 +619,7 @@ const ControllerWarnings = ({ bridge }: { bridge: BridgeDataWithMetadata }) => {
 };
 
 const FailedEntities = ({ bridge }: { bridge: BridgeDataWithMetadata }) => {
+  const { t } = useTranslation();
   const failedEntities = bridge.failedEntities;
   if (!failedEntities || failedEntities.length === 0) {
     return null;
@@ -625,9 +629,11 @@ const FailedEntities = ({ bridge }: { bridge: BridgeDataWithMetadata }) => {
     <Card>
       <CardContent>
         <Alert severity="warning" icon={<ErrorOutlineIcon />}>
-          <AlertTitle>Failed Entities ({failedEntities.length})</AlertTitle>
+          <AlertTitle>
+            {t("bridge.failedEntities")} ({failedEntities.length})
+          </AlertTitle>
           <Typography variant="body2" component="div">
-            The following entities could not be added to the bridge:
+            {t("bridgeUi.failedEntitiesIntro")}
           </Typography>
           <Box sx={{ mt: 1, maxHeight: 200, overflow: "auto" }}>
             {failedEntities.map((entity) => (

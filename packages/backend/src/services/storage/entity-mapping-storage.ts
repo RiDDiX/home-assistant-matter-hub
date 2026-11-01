@@ -163,6 +163,7 @@ export class EntityMappingStorage extends Service {
       temperatureEntity: request.temperatureEntity?.trim() || undefined,
       humidityEntity: request.humidityEntity?.trim() || undefined,
       batteryEntity: request.batteryEntity?.trim() || undefined,
+      faultEntity: request.faultEntity?.trim() || undefined,
       disableBatteryMapping: request.disableBatteryMapping || undefined,
       chargingStateEntity: request.chargingStateEntity?.trim() || undefined,
       readinessEntity: request.readinessEntity?.trim() || undefined,
@@ -245,6 +246,7 @@ export class EntityMappingStorage extends Service {
       !config.temperatureEntity &&
       !config.humidityEntity &&
       !config.batteryEntity &&
+      !config.faultEntity &&
       !config.disableBatteryMapping &&
       !config.chargingStateEntity &&
       !config.readinessEntity &&

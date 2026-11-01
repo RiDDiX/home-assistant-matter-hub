@@ -30,6 +30,8 @@ jobs:
         run: pnpm run test
       - name: Build
         run: pnpm run build
+      - name: Smoke Test Package
+        run: bash .github/scripts/package-smoke.sh apps/home-assistant-matter-hub/package.tgz
 
       - name: Package Artifact
         uses: actions/upload-artifact@v6

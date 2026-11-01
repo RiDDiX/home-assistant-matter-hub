@@ -82,6 +82,15 @@ export interface GithubLatestRelease {
   body?: string;
 }
 
+// releases/latest is the newest stable, an alpha ahead of it is not behind
+function isNewer(latest: string, current: string) {
+  const [a, b] = [latest, current].map((v) =>
+    v.split("-")[0].split(".").map(Number),
+  );
+  for (let i = 0; i < 3; i++) if (a[i] !== b[i]) return a[i] > b[i];
+  return current.includes("-") && !latest.includes("-");
+}
+
 export function toUpdateCheckResponse(
   version: string,
   data: GithubLatestRelease,
@@ -91,7 +100,7 @@ export function toUpdateCheckResponse(
   return {
     currentVersion: version,
     latestVersion,
-    updateAvailable: version !== "0.0.0-dev" && latestVersion !== version,
+    updateAvailable: version !== "0.0.0-dev" && isNewer(latestVersion, version),
     releaseUrl: data.html_url,
     publishedAt: data.published_at,
     releaseNotes: data.body || undefined,

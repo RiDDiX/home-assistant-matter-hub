@@ -152,13 +152,13 @@ describe("mapVacuumOperationalState", () => {
     ).toBe(OperationalState.Stopped);
   });
 
-  it("returns Error for error/unavailable", () => {
+  it("returns Error for a genuine fault and Stopped when unavailable", () => {
     expect(mapVacuumOperationalState({ state: "error", attributes: {} })).toBe(
       OperationalState.Error,
     );
     expect(
       mapVacuumOperationalState({ state: "unavailable", attributes: {} }),
-    ).toBe(OperationalState.Error);
+    ).toBe(OperationalState.Stopped);
   });
 
   it("handles string battery_level like '100%'", () => {

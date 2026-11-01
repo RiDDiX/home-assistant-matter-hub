@@ -211,8 +211,9 @@ export class HomeAssistantRegistry extends Service {
         // failed query: keep last labels, empty would unmount filtered
         // endpoints (#500)
         getLabelRegistry(connection, timeoutMs).catch(() => this._labels),
-        getAreaRegistry(connection, timeoutMs).catch(
-          () => [] as Array<{ area_id: string; name: string }>,
+        // same for areas: empty flips the fingerprint and drops room names
+        getAreaRegistry(connection, timeoutMs).catch(() =>
+          Array.from(this._areas, ([area_id, name]) => ({ area_id, name })),
         ),
       ]);
 

@@ -15,6 +15,7 @@ permissions:
 
 jobs:
   release:
+    if: github.repository == 'RiDDiX/home-assistant-matter-hub'
     permissions:
       contents: write
       packages: write
@@ -74,6 +75,9 @@ jobs:
 
       - name: Package
         run: pnpm run release:pack
+
+      - name: Smoke Test Package
+        run: bash .github/scripts/package-smoke.sh apps/home-assistant-matter-hub/package.tgz
 
       - name: Create Git Tag
         run: |

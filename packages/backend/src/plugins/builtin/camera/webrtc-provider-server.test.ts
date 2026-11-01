@@ -185,15 +185,24 @@ function audioCall(endpoint: Endpoint, command: string, request: unknown) {
 // What a CaptureSnapshot invoke does to the AV state while it waits for HA:
 // matter.js locks the cluster for the whole command.
 async function holdAvState(endpoint: Endpoint): Promise<() => Promise<void>> {
-  let release = () => {};
-  const held = endpoint.act(async (agent) => {
-    // biome-ignore lint/suspicious/noExplicitAny: any write takes the lock
-    (agent as any).cameraAvStreamManagement.state.currentFrameRate = 5;
-    await new Promise<void>((r) => {
-      release = r;
-    });
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
   });
-  await new Promise((r) => setTimeout(r, 20));
+  let locked!: () => void;
+  const ready = new Promise<void>((resolve) => {
+    locked = resolve;
+  });
+  const held = endpoint.act(async (agent) => {
+    // biome-ignore lint/suspicious/noExplicitAny: behavior doubles as resource
+    const av = (agent as any).cameraAvStreamManagement;
+    agent.context.transaction.addResourcesSync(av);
+    await agent.context.transaction.begin();
+    av.state.currentFrameRate = 5;
+    locked();
+    await gate;
+  });
+  await Promise.race([ready, held]);
   return async () => {
     release();
     await held;

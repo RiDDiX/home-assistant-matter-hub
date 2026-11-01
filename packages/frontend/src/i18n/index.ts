@@ -16,6 +16,7 @@ import ru from "./locales/ru.json";
 import sv from "./locales/sv.json";
 import th from "./locales/th.json";
 import tr from "./locales/tr.json";
+import vi from "./locales/vi.json";
 import zh from "./locales/zh.json";
 import zhTW from "./locales/zh-tw.json";
 
@@ -116,6 +117,7 @@ i18n
       nl: { translation: nl },
       pl: { translation: pl },
       "pt-BR": { translation: ptBR },
+      vi: { translation: vi },
     },
     fallbackLng: "en",
     interpolation: {

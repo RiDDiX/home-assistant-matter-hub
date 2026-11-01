@@ -162,6 +162,7 @@ export function EntityMappingDialog({
   const [mopIntensityEntity, setMopIntensityEntity] = useState("");
   const [currentRoomEntity, setCurrentRoomEntity] = useState("");
   const [chargingStateEntity, setChargingStateEntity] = useState("");
+  const [faultEntity, setFaultEntity] = useState("");
   const [readinessEntity, setReadinessEntity] = useState("");
   const [cleanedAreaEntity, setCleanedAreaEntity] = useState("");
   const [vacuumAscendingRoomOrder, setVacuumAscendingRoomOrder] =
@@ -279,6 +280,7 @@ export function EntityMappingDialog({
       setMopIntensityEntity(currentMapping?.mopIntensityEntity || "");
       setCurrentRoomEntity(currentMapping?.currentRoomEntity || "");
       setChargingStateEntity(currentMapping?.chargingStateEntity || "");
+      setFaultEntity(currentMapping?.faultEntity || "");
       setReadinessEntity(currentMapping?.readinessEntity || "");
       setCleanedAreaEntity(currentMapping?.cleanedAreaEntity || "");
       setVacuumAscendingRoomOrder(
@@ -455,6 +457,7 @@ export function EntityMappingDialog({
       mopIntensityEntity: mopIntensityEntity.trim() || undefined,
       currentRoomEntity: currentRoomEntity.trim() || undefined,
       chargingStateEntity: chargingStateEntity.trim() || undefined,
+      faultEntity: faultEntity.trim() || undefined,
       readinessEntity: readinessEntity.trim() || undefined,
       cleanedAreaEntity: cleanedAreaEntity.trim() || undefined,
       vacuumAscendingRoomOrder: vacuumAscendingRoomOrder || undefined,
@@ -532,6 +535,7 @@ export function EntityMappingDialog({
     mopIntensityEntity,
     currentRoomEntity,
     chargingStateEntity,
+    faultEntity,
     readinessEntity,
     cleanedAreaEntity,
     vacuumAscendingRoomOrder,
@@ -922,6 +926,14 @@ export function EntityMappingDialog({
               label="Current Room Entity (optional)"
               placeholder="sensor.vacuum_current_room"
               helperText="Sensor that reports which room the vacuum is currently in (e.g. Dreame current_room sensor). Enables dynamic room progress tracking during multi-room cleaning."
+              domain="sensor"
+            />
+            <EntityAutocomplete
+              value={faultEntity}
+              onChange={setFaultEntity}
+              label="Operational Error Sensor (optional)"
+              placeholder="sensor.vacuum_error"
+              helperText="Error enum sensor. Auto-detected for Roborock; an explicit sensor overrides automatic detection."
               domain="sensor"
             />
             <EntityAutocomplete

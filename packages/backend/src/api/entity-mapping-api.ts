@@ -45,6 +45,7 @@ export function entityMappingApi(
       humidityEntity: body.humidityEntity,
       pressureEntity: body.pressureEntity,
       batteryEntity: body.batteryEntity,
+      faultEntity: body.faultEntity,
       disableBatteryMapping: body.disableBatteryMapping,
       chargingStateEntity: body.chargingStateEntity,
       readinessEntity: body.readinessEntity,

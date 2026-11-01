@@ -31,6 +31,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { timeAgo } from "../../time.ts";
 import { BackupRestore } from "../backup/BackupRestore.tsx";
+import { bridgeStatusMessage } from "../bridge/bridge-status-message.ts";
 import { FabricIcon } from "../fabric/FabricIcon.tsx";
 import { getVendorName } from "../fabric/vendor-names.ts";
 import { FabricHealthCard } from "./FabricHealthCard.tsx";
@@ -472,7 +473,7 @@ export function HealthDashboard(props: HealthDashboardProps = {}) {
                       color="error"
                       sx={{ mt: 1, flexShrink: 0 }}
                     >
-                      {bridge.statusReason}
+                      {bridgeStatusMessage(bridge.statusReason, t)}
                     </Typography>
                   )}
 
