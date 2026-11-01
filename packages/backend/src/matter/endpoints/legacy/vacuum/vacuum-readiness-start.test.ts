@@ -29,6 +29,7 @@ import {
 import { HomeAssistantEntityBehavior } from "../../../behaviors/home-assistant-entity-behavior.js";
 import { getSession } from "../../../behaviors/rvc-run-mode-server.js";
 import { getMappedEntityIds } from "../../entity-endpoint.js";
+import { VacuumReadiness } from "./behaviors/vacuum-readiness.js";
 import { ServerModeVacuumDevice } from "./server-mode-vacuum-device.js";
 
 const { OperationalState, ErrorState } = RvcOperationalState;
@@ -304,18 +305,47 @@ describe("mapped vacuum readiness at the actual Server Mode command boundary", (
 
   it("keeps Stop, Pause and Return to Dock available during map processing", async () => {
     const f = await fixture();
-    await f.endpoint.act((agent) =>
+    const home = await f.endpoint.act((agent) =>
       agent.get(RvcOperationalStateServer).goHome(),
     );
+    expect(home.commandResponseState.errorStateId).toBe(ErrorState.NoError);
     expect((await f.start(0)).status).toBe(ModeBase.ModeChangeStatus.Success);
     await f.endpoint.act((agent) =>
       agent.get(RvcOperationalStateServer).pause(),
     );
+    // Docked underneath UpdatingMaps: Return to Dock stays a no-op as on alpha.
     expect(f.calls.map((c) => c.action)).toEqual([
-      "vacuum.return_to_base",
       "vacuum.return_to_base",
       "vacuum.pause",
     ]);
+  });
+
+  it.each([
+    "saving_map",
+    "bin_full",
+  ])("sends Return to Dock to an idle robot off the dock during %s", async (raw) => {
+    const f = await fixture();
+    await f.update(raw, "idle");
+    await f.endpoint.act((agent) =>
+      agent.get(RvcOperationalStateServer).goHome(),
+    );
+    expect(f.calls.map((c) => c.action)).toEqual(["vacuum.return_to_base"]);
+  });
+
+  it("does not send Return to Dock to a docked robot blocked by readiness", async () => {
+    const f = await fixture("bin_full");
+    expect(f.op().operationalState).toBe(OperationalState.Error);
+    await f.endpoint.act((agent) =>
+      agent.get(RvcOperationalStateServer).goHome(),
+    );
+    expect(f.calls).toEqual([]);
+  });
+
+  it("allows All Rooms when Roomba+ Prime reports none", async () => {
+    const f = await fixture("none");
+    expect(f.op().operationalState).toBe(OperationalState.Docked);
+    expect((await f.start()).status).toBe(ModeBase.ModeChangeStatus.Success);
+    expect(f.calls.map((c) => c.action)).toEqual(["vacuum.start"]);
   });
 
   it("fails closed when the mapped readiness entity disappears", async () => {
@@ -395,6 +425,35 @@ describe("readiness status on the real Server Mode endpoint", () => {
         expect(f.op().operationalState).toBe(OperationalState.Docked);
       },
       { timeout: 2500, interval: 25 },
+    );
+  });
+
+  it("still rechecks when the hold expires between the status reads", async () => {
+    const f = await fixture();
+    const read = VacuumReadiness.prototype.read;
+    let n = 0;
+    // First read 1 ms before the five-second hold ends, later reads after it.
+    const spy = vi
+      .spyOn(VacuumReadiness.prototype, "read")
+      .mockImplementation(function (this: VacuumReadiness, state, snap) {
+        return read.call(
+          this,
+          state,
+          snap,
+          Date.parse(snap?.last_changed ?? "") + 4999 + n++,
+        );
+      });
+    try {
+      await f.update("ready");
+    } finally {
+      spy.mockRestore();
+    }
+    expect(n).toBeGreaterThanOrEqual(3);
+    await vi.waitFor(
+      () => {
+        expect(f.op().operationalState).toBe(OperationalState.Docked);
+      },
+      { timeout: 1000, interval: 25 },
     );
   });
 

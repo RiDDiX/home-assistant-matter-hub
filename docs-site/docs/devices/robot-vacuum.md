@@ -58,7 +58,7 @@ The sensor uses these raw states:
 
 | State | Matter behavior |
 |-------|-----------------|
-| `ready` | Normal docked/idle status after five seconds of stable readiness |
+| `ready`, `none` (Roomba+ Prime) | Normal docked/idle status after five seconds of stable readiness |
 | `saving_map`, `downloading_map` | `UpdatingMaps` |
 | Other states, or a missing/unavailable sensor | `UnableToStartOrResume` while docked/idle |
 

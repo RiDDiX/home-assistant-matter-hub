@@ -36,7 +36,9 @@ export class VacuumReadiness {
       return { kind: "pass_through" };
     }
 
-    const key = snapshot?.state?.trim().toLowerCase() ?? "unknown";
+    const raw = snapshot?.state?.trim().toLowerCase() ?? "unknown";
+    // Roomba+ Prime reports readiness code 0 as "none", Classic as "ready".
+    const key = raw === "none" ? "ready" : raw;
     if (key !== "ready") this.readySince = undefined;
     if (key === "saving_map" || key === "downloading_map") {
       this.mapPending = true;

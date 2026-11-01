@@ -55,6 +55,20 @@ describe("vacuum readiness settling", () => {
     expect(r.read("docked", snap("ready", 20_000), 25_000).kind).toBe("ready");
   });
 
+  it("settles Roomba+ Prime's none like ready", () => {
+    const r = new VacuumReadiness();
+    r.read("docked", snap("saving_map", 0), 0);
+    expect(r.read("docked", snap("none", 1000), 3000).kind).toBe(
+      "updating_maps",
+    );
+    expect(r.read("docked", snap("none", 1000), 6000).kind).toBe("ready");
+    const untimed = new VacuumReadiness();
+    expect(untimed.read("docked", { state: "none" }, 1000).kind).toBe(
+      "blocked",
+    );
+    expect(untimed.read("docked", { state: "none" }, 6000).kind).toBe("ready");
+  });
+
   it.each([
     "cleaning",
     "returning",
