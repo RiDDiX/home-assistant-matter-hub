@@ -47,6 +47,42 @@ Server Mode nodes carry up to **10 devices**; the first entity is the primary an
 
 ---
 
+## Readiness sensor (optional)
+
+A vacuum can be docked while it is saving or downloading a map and cannot start
+another job. To report this, edit the existing vacuum's **Entity Mapping** and
+set **Readiness Entity** to its readiness sensor, for example Roomba+'s
+`sensor.roomba_readiness`. No new bridge or pairing is required.
+
+The sensor uses these raw states:
+
+| State | Matter behavior |
+|-------|-----------------|
+| `ready`, `none` (Roomba+ Prime) | Normal docked/idle status after five seconds of stable readiness |
+| `saving_map`, `downloading_map` | `UpdatingMaps` |
+| Other states, or a missing/unavailable sensor | `UnableToStartOrResume` while docked/idle |
+
+The five-second hold covers a brief `ready` between saving and downloading. A
+timer clears it even if HA sends no further state changes. Actual cleaning,
+returning, paused, error and offline states retain their existing status.
+
+Native RVC starts (All Rooms, selected areas and room modes) and Resume check
+the current readiness sensor before sending an HA action or changing optimistic
+run/progress state. A refusal preserves the room selection. Returning, failed
+and offline vacuums also refuse starts when the sensor still says `ready`.
+Stop, Pause and Return to Dock remain available.
+
+This mapping advertises the newer Matter `UpdatingMaps` state. Enable it only
+for a compatible controller; leave it empty to preserve the older state list
+and start behavior. Apple Home was tested with a Roomba s9+: it displayed
+Saving Map without the brief Ready blip, disabled All Rooms Start during map
+processing, and Siri's “Vacuum Everywhere” request was refused without movement
+or a false Vacuuming display. Wording and command availability depend on the
+controller. Base emptying may still be labelled Vacuuming by the HA integration.
+
+This guard covers native RVC commands. Direct HA actions and optional OnOff or
+per-area switch controls remain separate command paths.
+
 ## Cleaning Modes
 
 The RVC Clean Mode cluster allows selecting the cleaning type. This is auto-enabled for Dreame and Ecovacs vacuums, and can be manually configured for other brands (including Roborock).
@@ -90,7 +126,7 @@ To find the correct select entity, look in Home Assistant for a `select.*` entit
 
 ### Creating a Cleaning Mode Helper (Roborock & Others)
 
-Some integrations (notably the official Roborock integration) **do not expose a cleaning mode select entity**. Without one, HAMH cannot switch between vacuum, mop, and vacuum+mop modes.
+Some integrations **do not expose a cleaning mode select entity**. Without one, HAMH cannot switch between vacuum, mop, and vacuum+mop modes. The official Roborock integration adds a `Cleaning mode` select since Home Assistant 2026.8. HAMH detects it when its entity ID contains `cleaning_mode`, otherwise set it as the Cleaning Mode Entity. On older Home Assistant versions, create a helper as shown below.
 
 You can create one yourself using Home Assistant helpers and automations:
 
@@ -199,23 +235,55 @@ After this setup, Apple Home will show Vacuum, Mop, Vacuum & Mop, and Deep Clean
 
 ## Suction Level / Fan Speed (Apple Home Intensity Options)
 
-When your vacuum has fan speed options, HAMH creates extra intensity modes that Apple Home shows as selectable options under the Vacuum cleaning type.
+When your vacuum has fan speed options, HAMH creates extra intensity modes. Apple Home can show them under the Vacuum cleaning type according to the semantic tags it recognizes.
 
 ### Auto-Detection
 
 Fan speed support is **automatically detected** from the vacuum's `fan_speed_list` attribute. No manual configuration is needed.
 
-### Apple Home Display Limitations
+### Apple Home Labels and Automatic Tag Selection
 
-Apple Home only supports **3 intensity buckets** for RVC cleaning modes: **Quiet**, **Automatic**, and **Max**. HAMH creates modes for all your fan speeds but Apple Home renders only one option per intensity tag:
+HAMH's default automatic fan mapping uses **Quiet**, **Automatic**, and **Max**.
+This is not a three-option limit in Apple Home. Mode IDs and labels alone do
+not guarantee separate Home choices; the semantic mode tags matter. To avoid
+ambiguous choices, this mapping selects one automatic representative per tag:
 
-| Your Fan Speed | Apple Home Label | Matter Tag |
-|----------------|-----------------|------------|
-| quiet, silent, gentle | Quiet | Quiet |
-| balanced, standard, normal, auto | Automatic | Auto |
-| turbo, strong, max | Max | Max |
+| Intensity | Preferred automatic representative |
+|-----------|------------------------------------|
+| Quiet | quiet, then silent, otherwise the first matching quiet alias |
+| Automatic | auto, then balanced, then normal, otherwise the first matching alias |
+| Max | max_plus, then max+, max, turbo, otherwise the first matching strong alias |
 
-Fan speeds that don't match any tag pattern (e.g., "off", "custom", "max_plus") are hidden in Apple Home but still functional via other controllers.
+Only one fan speed gets each intensity tag, whatever the order of the list or
+extra off/custom options. All fan speeds keep their mode and the Vacuum tag, so
+the current mode is still reported when the robot runs one of the others (for
+example Turbo or Gentle). Apple Home may not offer those other speeds as a
+choice.
+
+:::note
+Earlier versions gave every matching speed the tag. Some speeds now lose it, for
+example Dreame `strong` (Max goes to `turbo`), Ecovacs and Roborock `max` (Max
+goes to `max_plus`) and Roborock `medium`/`gentle`. A saved Custom Tag Mapping
+now takes its tag away from the automatic match instead of adding a second one.
+Use a Custom Tag Mapping to choose which speed Apple Home uses for a bucket.
+:::
+
+Additional standard tags include **Min (6)** for the lowest available setting
+and **DeepClean (16384)** for a mode optimized for improved cleaning. They are
+not successive points on a single suction scale: Deep Clean is not defined as
+stronger than Max. See the [Matter mode definitions](https://csa-iot.org/wp-content/uploads/2024/05/matter-application-cluster-specification.pdf),
+sections 1.10.8 and 7.3.7.2.
+
+Native Home choices for Min, Max, Quiet and Deep Clean were observed on iOS 27
+with a separately configured S5 Max bridge. This is a controller-compatibility
+observation, not verification that untagged aliases remain individually
+selectable. Check the presentation and routing of your device's own mapping.
+
+Explicit `customFanSpeedTags` can use these standard tags when they accurately
+describe a device's modes. Choose their meaning per device; this change does
+not automatically relabel Turbo as Deep Clean or Gentle as Min for every
+vacuum. Home supplies the localized display names; personal suction/water
+pairings require their own profile implementation.
 
 ### Manual Override (suctionLevelEntity)
 
@@ -225,7 +293,7 @@ If your vacuum uses a separate `select.*` entity for suction control instead of 
 
 ## Mop Intensity (Apple Home Intensity Options)
 
-When your vacuum has mop intensity / water level options, HAMH adds mop intensity modes under the Mop cleaning type.
+When your vacuum supports mop-only cleaning, HAMH adds water-intensity modes under the Mop cleaning type. A combined-only device instead gets `Vacuum & Mop Low`, `Vacuum & Mop Medium` and `Vacuum & Mop High`, tagged for both vacuuming and mopping.
 
 ### Auto-Detection
 
@@ -239,7 +307,7 @@ Mop intensity entities are **automatically detected** for Dreame and Ecovacs vac
 
 ### Apple Home Intensity Labels
 
-Apple Home shows the same **Quiet / Automatic / Max** labels for mop intensity as it does for fan speed, this is an Apple limitation. The labels come from Matter mode tags, not from HAMH. Behind the scenes, the routing is correct:
+With HAMH's default mop tags, Apple Home uses the same **Quiet / Automatic / Max** labels as for fan speed. These native labels come from the semantic tags and are not a limit on the number of modes the controller can render. Behind the scenes, the routing is:
 
 | Apple Home Label | Mop Intensity Action |
 |-----------------|---------------------|
@@ -253,7 +321,7 @@ Apple Home shows the same **Quiet / Automatic / Max** labels for mop intensity a
 
 ### Matter Spec Limitation: Vacuum & Mop Mode
 
-The Matter spec only allows a single `currentMode` value. When in "Vacuum & Mop" mode, HAMH cannot express both fan speed AND mop intensity simultaneously. The base mode is reported without intensity information.
+The Matter spec only allows a single `currentMode` value. When in "Vacuum & Mop" mode, HAMH cannot express both fan speed AND mop intensity simultaneously. For combined-only devices, HAMH reports the water-intensity variant (modes 50-52) while running in combined mode. Devices that also support mop-only keep the base combined mode without an intensity tag. If the cleaning select was unavailable at registration, commands still resolve against its actual live options: a requested Mop option falls back to the combined option when mop-only is unsupported.
 
 ---
 
@@ -339,7 +407,11 @@ Since v2.0.25, HAMH **automatically detects Roborock rooms** via the `roborock.g
 
 The startup log will show: `Auto-detected X Roborock rooms`
 
-**What's NOT auto-detected:** The Roborock integration does not expose a cleaning mode entity. If you want vacuum/mop/vacuum+mop mode switching, create a helper entity as described in [Creating a Cleaning Mode Helper](#creating-a-cleaning-mode-helper-roborock--others).
+**Cleaning mode:** Since Home Assistant 2026.8 the Roborock integration exposes a `Cleaning mode` select (options like `vacuum`, `mop`, `vac_and_mop`). HAMH detects it when its entity ID contains `cleaning_mode`, otherwise set it as the Cleaning Mode Entity. On older Home Assistant versions, create a helper entity as described in [Creating a Cleaning Mode Helper](#creating-a-cleaning-mode-helper-roborock--others).
+
+:::note
+HAMH now reads `vac_and_mop` as Vacuum & Mop. Before, it was read as mop only. On a Roborock that also offers `mop`, Apple Home's Mop mode and the water intensity modes now start mop only (no suction) instead of vacuum and mop, a separate Vacuum & Mop mode appears, and the current mode shows Vacuum & Mop while the robot runs `vac_and_mop`.
+:::
 
 #### Fallback: Manual Button Entity Mapping
 
@@ -499,6 +571,32 @@ Since v2.0.27, HAMH reports the `IsCharging` state when the vacuum is docked and
 
 ---
 
+## Roborock recharging within a cleaning job
+
+The Roborock integration exposes an `in_cleaning` binary sensor (display name Cleaning) that remains on
+through a mid-job recharge. HAMH resolves this dependency by registry metadata
+on the same device, including when the sensor was renamed or is outside the
+Matter export filter. Enable the sensor in Home Assistant; missing or ambiguous
+matches keep the existing behavior. The automatically resolved dependency is
+not written to the saved entity mapping or exported as another accessory.
+HAMH looks the sensor up when it creates the vacuum device, so after enabling
+or renaming the sensor restart the add-on or container. Restarting a single
+bridge keeps the existing vacuum device and does not pick up the change.
+
+With this job signal, the run mode stays Cleaning while returning and charging.
+The operational state reports SeekingCharger during the return, then Paused at
+the dock with a Recharging phase. Resuming continues the same job. The bridge
+sends one OperationCompletion when the job signal turns off at the actual end,
+even if the vacuum is already returning, and does not repeat it on arrival.
+Offline or temporarily unknown job states do not invent an end; an already
+recharging job can be recovered after a bridge restart.
+
+For these job-aware vacuums, 100% at the dock reports AtFullCharge and Docked
+even if Roborock's binary charging sensor stays on. An ongoing job still has
+priority and remains Paused. Devices without a job signal retain their charging
+and completion fallbacks. Normal low-battery returns are never converted into
+operational errors. Controllers decide notification text and delivery.
+
 ## Troubleshooting
 
 ### Vacuum not showing in Apple Home
@@ -577,3 +675,39 @@ Since v2.0.26, "Vacuum Then Mop" (shown as "Deep Clean" in Apple Home) falls bac
 ### Intensity options look the same for Vacuum and Mop mode
 
 This is an Apple Home limitation. Apple renders the same labels (Quiet / Automatic / Max) for both vacuum fan speed and mop intensity because both use the same Matter mode tags. The routing behind the labels is correct, selecting "Quiet" in Mop mode sets mop intensity, while "Quiet" in Vacuum mode sets fan speed.
+## Native Roborock operational errors
+
+The bridge reads the Roborock integration's `vacuum_error` enum sensor on the
+same Home Assistant device, including when that sensor is outside the Matter
+export filter. Detection uses registry metadata, so renamed sensors work. An
+explicit `faultEntity` mapping takes precedence; ambiguous automatic matches
+are left unmapped. The sensor must be enabled in Home Assistant. An explicit sensor can be selected in the vacuum mapping dialog under **Operational Error Sensor**, or sent as `faultEntity` through the mapping API.
+
+For an actual HA vacuum `error` state, known causes map to standard Matter
+RVC error codes, including LowBattery, WheelsJammed, BrushJammed,
+NavigationSensorObscured, FailedToFindChargingDock, Stuck and DustBinMissing. The detailed cause is included in `errorStateDetails`.
+`errorStateLabel` is reserved for manufacturer-specific codes and is omitted.
+Unknown causes use UnableToCompleteOperation, including a Roborock error sensor
+that reads none, unavailable or an unlisted value. Vacuums without an error
+sensor keep the Stuck fallback.
+
+These errors use the vacuum's native Matter operational-error event. The
+controller determines notification availability and wording. A normal return
+to charge, an offline device, maintenance counters, or a missing optional mop
+attachment do not create a fabricated operational error. Recovering from an
+error clears the error attribute.
+
+
+Operational faults wait up to 500 ms on the initial error transition so a
+slightly later Roborock error-sensor update is included in the first error and
+completion report. If details remain missing, the bridge reports a generic
+fault after this bounded settling period. Later cause changes update the fault
+without repeating completion. Recovery cancels a pending error report. An
+error already present when the bridge starts is reported at once.
+An unavailable vacuum reports Stopped with NoError, rather than the inconsistent
+Error/NoError pair; it does not emit an operation-completion event. A vacuum
+that returns from unavailable still in error sends the operational-error event
+again.
+The mapping also includes the library's dock, tank, wash-roller and tray errors
+34-56. Only an explicit clean-water-empty code is classified as WaterTankEmpty;
+ambiguous dock causes retain a generic native code with the precise details.
