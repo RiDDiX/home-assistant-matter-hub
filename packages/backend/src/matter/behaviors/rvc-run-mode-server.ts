@@ -11,6 +11,7 @@ import { RvcRunMode } from "@matter/main/clusters/rvc-run-mode";
 import { EntityStateProvider } from "../../services/bridges/entity-state-provider.js";
 import type { HomeAssistantAction } from "../../services/home-assistant/home-assistant-actions.js";
 import { applyPatchState } from "../../utils/apply-patch-state.js";
+import { trimToLength } from "../../utils/trim-to-length.js";
 import { HomeAssistantEntityBehavior } from "./home-assistant-entity-behavior.js";
 import { inferCleanedAreaProgress } from "./infer-cleaned-area-progress.js";
 import type { ValueGetter, ValueSetter } from "./utils/cluster-config.js";
@@ -25,6 +26,8 @@ export enum RvcSupportedRunMode {
 export interface RvcRunModeServerConfig {
   getCurrentMode: ValueGetter<RvcSupportedRunMode>;
   getSupportedModes: ValueGetter<RvcRunMode.ModeOption[]>;
+  /** Optional start precondition, evaluated before dispatch or optimistic state. */
+  getStartError?: ValueGetter<string | undefined>;
 
   start: ValueSetter<void>;
   returnToBase: ValueSetter<void>;
@@ -785,6 +788,21 @@ class RvcRunModeServerBase extends Base {
         status: ModeBase.ModeChangeStatus.UnsupportedMode,
         statusText: `Unsupported mode: ${newMode}`,
       };
+    }
+
+    // A refused start leaves mode, session, progress and operational state alone.
+    // Read the current HA precondition, not a cached Matter state.
+    if (newMode !== RvcSupportedRunMode.Idle) {
+      const reason = this.state.config.getStartError?.(
+        homeAssistant.entity.state,
+        this.agent,
+      );
+      if (reason) {
+        return {
+          status: ModeBase.ModeChangeStatus.GenericFailure,
+          statusText: trimToLength(reason, 64, "...") ?? "Robot is not ready",
+        };
+      }
     }
 
     // Apple starts its unchanged selection without re-sending it (#317)

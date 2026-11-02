@@ -30,6 +30,7 @@ import {
   ROOM_MODE_BASE,
 } from "../utils/parse-vacuum-rooms.js";
 import { getVacuumJobRunMode } from "./vacuum-job-lifecycle.js";
+import { getVacuumStartError } from "./vacuum-readiness.js";
 import {
   getVacuumServiceAreas,
   toAreaId,
@@ -547,6 +548,7 @@ export function dispatchRoomClean(
 }
 
 const vacuumRvcRunModeConfig = {
+  getStartError: getVacuumStartError,
   getCurrentMode: (entity: { state: string }, agent: Agent) => {
     const jobMode = getVacuumJobRunMode(entity, agent);
     if (jobMode !== undefined) return jobMode;

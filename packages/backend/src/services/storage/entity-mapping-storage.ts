@@ -166,6 +166,7 @@ export class EntityMappingStorage extends Service {
       faultEntity: request.faultEntity?.trim() || undefined,
       disableBatteryMapping: request.disableBatteryMapping || undefined,
       chargingStateEntity: request.chargingStateEntity?.trim() || undefined,
+      readinessEntity: request.readinessEntity?.trim() || undefined,
       roomEntities: roomEntities.length > 0 ? roomEntities : undefined,
       disableLockPin: request.disableLockPin || undefined,
       lockWithoutPin: request.lockWithoutPin || undefined,
@@ -248,6 +249,7 @@ export class EntityMappingStorage extends Service {
       !config.faultEntity &&
       !config.disableBatteryMapping &&
       !config.chargingStateEntity &&
+      !config.readinessEntity &&
       !config.roomEntities &&
       !config.disableLockPin &&
       !config.lockWithoutPin &&

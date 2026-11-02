@@ -48,6 +48,7 @@ export function entityMappingApi(
       faultEntity: body.faultEntity,
       disableBatteryMapping: body.disableBatteryMapping,
       chargingStateEntity: body.chargingStateEntity,
+      readinessEntity: body.readinessEntity,
       roomEntities: body.roomEntities,
       disableLockPin: body.disableLockPin,
       lockWithoutPin: body.lockWithoutPin,

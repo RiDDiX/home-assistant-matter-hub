@@ -173,6 +173,8 @@ export interface EntityMappingConfig {
    * Example: "sensor.vacuum_charging_state"
    */
   readonly chargingStateEntity?: string;
+  /** Opt-in readiness sensor. Enables Matter UpdatingMaps; requires a compatible controller. */
+  readonly readinessEntity?: string;
   /**
    * Optional: Array of button entity IDs for room-based cleaning (Roborock, etc.).
    * Each button entity represents a room/scene in the vacuum app.
@@ -530,6 +532,7 @@ export interface EntityMappingRequest {
   readonly faultEntity?: string;
   readonly disableBatteryMapping?: boolean;
   readonly chargingStateEntity?: string;
+  readonly readinessEntity?: string;
   readonly roomEntities?: string[];
   readonly disableLockPin?: boolean;
   readonly lockWithoutPin?: boolean;

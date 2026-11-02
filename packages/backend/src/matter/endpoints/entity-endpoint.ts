@@ -54,6 +54,7 @@ export function getMappedEntityIds(mapping?: EntityMappingConfig): string[] {
   if (mapping.faultEntity) ids.push(mapping.faultEntity);
   if (mapping.cleaningJobEntity) ids.push(mapping.cleaningJobEntity);
   if (mapping.chargingStateEntity) ids.push(mapping.chargingStateEntity);
+  if (mapping.readinessEntity) ids.push(mapping.readinessEntity);
   if (mapping.temperatureEntity) ids.push(mapping.temperatureEntity);
   if (mapping.humidityEntity) ids.push(mapping.humidityEntity);
   if (mapping.pressureEntity) ids.push(mapping.pressureEntity);
