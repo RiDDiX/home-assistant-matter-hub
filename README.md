@@ -39,7 +39,7 @@ of port forwarding etc.
 | Channel | Branch | Current Version | Description |
 |---------|--------|-----------------|-------------|
 | **Stable** | `main` | v2.0.59 | Production-ready, recommended for most users |
-| **Alpha** | `alpha` | v2.1.0-alpha.952 | Ahead of Stable, carries the additions listed under Alpha Features |
+| **Alpha** | `alpha` | v2.1.0-alpha.958 | Ahead of Stable, carries the additions listed under Alpha Features |
 | **Testing** | `testing` | v4.1.0-testing.x | ⚠️ **Highly unstable!** Experimental features, may break |
 
 ### Which version should I use?
@@ -421,6 +421,24 @@ Re-assign the affected devices to their rooms after they reconnect. See the [doc
 
 <details>
 <summary><strong>🧪 Alpha Features (v2.1.0-alpha.x)</strong> - Click to expand</summary>
+
+**v2.1.0-alpha.958:**
+- **Vacuum readiness sensor (opt-in)**: the vacuum entity mapping has a new Readiness Entity, for example the Roomba+ readiness sensor. While the robot saves or downloads a map, the controller shows Updating Maps and refuses Start; other not-ready values report that the robot cannot start right now. Without this mapping nothing changes, thanks [@zebulah](https://github.com/zebulah) ([#538](https://github.com/RiDDiX/home-assistant-matter-hub/pull/538))
+
+**v2.1.0-alpha.957:**
+- **Roborock jobs survive a recharge mid-clean**: when a Roborock went back to charge in the middle of a job, the Matter job ended there. With the Roborock Cleaning binary sensor enabled, the job stays active through the return, charging and the resume, and completes once at the real end. Restart the add-on after enabling the sensor, thanks [@Alexander-Hue](https://github.com/Alexander-Hue) ([#536](https://github.com/RiDDiX/home-assistant-matter-hub/pull/536))
+
+**v2.1.0-alpha.956:**
+- **Roborock error causes reach the controller**: every vacuum error was reported as Stuck. With the Roborock error sensor, found automatically or set as Operational Error Sensor in the entity mapping, causes like a missing dust bin, jammed wheels or a dock that cannot be found map to their Matter error codes and carry the cause text. An offline vacuum now reports Stopped instead of an error, thanks [@Alexander-Hue](https://github.com/Alexander-Hue) ([#535](https://github.com/RiDDiX/home-assistant-matter-hub/pull/535))
+
+**v2.1.0-alpha.955:**
+- **One fan speed per Apple Home intensity**: Apple Home's Max picked Turbo on robots where Turbo and Max shared the Max tag. Each intensity tag (Quiet, Automatic, Max) now goes to one fan speed. The other speeds keep their mode but lose the tag, for example Dreame `strong` or Ecovacs `max`. A Custom Tag Mapping decides which speed gets a tag, thanks [@Alexander-Hue](https://github.com/Alexander-Hue) ([#534](https://github.com/RiDDiX/home-assistant-matter-hub/pull/534))
+
+**v2.1.0-alpha.954:**
+- **Vacuum & Mop on combined-only robots**: a cleaning mode select with `vacuum` and `vac_and_mop`, as the official Roborock integration offers since Home Assistant 2026.8, had `vac_and_mop` read as mop only. The water intensity modes are now Vacuum & Mop Low/Medium/High and start the combined mode. On a Roborock that also offers `mop`, Apple Home's Mop mode now runs mop only and a separate Vacuum & Mop mode appears, thanks [@Alexander-Hue](https://github.com/Alexander-Hue) ([#532](https://github.com/RiDDiX/home-assistant-matter-hub/pull/532))
+
+**v2.1.0-alpha.953:**
+- **Vacuum modes match the robot when only the vacuum is exported**: with the cleaning mode select outside the bridge filter, the vacuum offered vacuum, mop, vacuum and mop and vacuum then mop even when the robot supports fewer. The select's options are read anyway and the select stays unexported, thanks [@Alexander-Hue](https://github.com/Alexander-Hue) ([#533](https://github.com/RiDDiX/home-assistant-matter-hub/pull/533))
 
 **v2.1.0-alpha.952:**
 - **Vietnamese translation**: new `vi` language for the web UI, thanks [@nhok3296](https://github.com/nhok3296) ([#537](https://github.com/RiDDiX/home-assistant-matter-hub/issues/537))
