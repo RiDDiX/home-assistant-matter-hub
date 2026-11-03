@@ -421,6 +421,22 @@ Home, ...) are not placed in the same network segment. Please make sure to revie
 <details>
 <summary><strong>🧪 Alpha (v2.1.0-alpha.x)</strong></summary>
 
+**v2.1.0-alpha.961:**
+- **Bridge import applies right away**: imported bridges show up and start without an app restart, an overwrite import changes the running bridge, and a port that is already taken moves to the next free one. A bridge that fails validation is listed with a short reason
+- **Cleared bridge fields stay cleared**: emptying Country Code, the serial number or unique ID suffix or the session age, or picking the Auto icon, now removes the stored value instead of keeping it
+- **Factory reset needs a running bridge**: a stopped bridge answers with an error and keeps its device identities, and the menu entry is disabled until the bridge runs
+- **Bridge menu**: Start or Stop, Clone and Export for each bridge, with a spinner while sync, reset, start or stop are running
+- **Mapping profile import matches by domain**: a profile entry now applies to the one entity of its domain on the target bridge, as the preview showed
+- **Lock PINs keep their switch**: editing a PIN no longer turns a disabled credential back on, and the name can be cleared
+- **Web UI fixes**: copy buttons work over plain http on the LAN, Stop All, Restart All, clearing logs, uninstalling a plugin and deleting a mapping ask first, Save cannot create a bridge twice, filtering devices on a later page no longer shows an empty page, a failed refresh keeps the last data, leak and motion sensors read Detected or Clear, the status chip shows the real health state and links to Health, and the language menu sits in the sidebar and works with the keyboard
+- **More of the web UI can be translated**: about 440 texts that were fixed English now go through the translation files, and Polish is listed in the language menu
+
+**v2.1.0-alpha.960:**
+- **New web UI shell**: a labeled sidebar replaces the icon row in the top bar, which was cut off on tablets, and phones get a menu drawer. Colors meet WCAG AA in light and dark, keyboard focus is visible and cards share one flat style
+- **No more blank page or request loop**: a failed bridge or device request no longer blanks the whole web UI, and Area Setup no longer asks the backend for the area summary in a loop
+- **Create and Edit Bridge**: the extra Submit button that did nothing is gone, Save is the main button
+- **Health page**: leaving it no longer leaves a connection behind, and the Translation Editor opens on demand, so the page loads quickly
+
 **v2.1.0-alpha.958:**
 - **Vacuum readiness sensor (opt-in)**: the vacuum entity mapping has a new Readiness Entity, for example the Roomba+ readiness sensor. While the robot saves or downloads a map, the controller shows Updating Maps and refuses Start; other not-ready values report that the robot cannot start right now. Without this mapping nothing changes, thanks [@zebulah](https://github.com/zebulah) ([#538](https://github.com/RiDDiX/home-assistant-matter-hub/pull/538))
 
