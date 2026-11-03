@@ -66,9 +66,15 @@ export function useDiagnostics() {
     connect();
     return () => {
       clearTimeout(reconnectRef.current);
-      if (wsRef.current) {
-        wsRef.current.send(JSON.stringify({ type: "unsubscribe_diagnostics" }));
-        wsRef.current.close();
+      const ws = wsRef.current;
+      if (ws) {
+        // no reconnect after unmount
+        ws.onclose = null;
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: "unsubscribe_diagnostics" }));
+        }
+        ws.close();
+        wsRef.current = null;
       }
     };
   }, [connect]);

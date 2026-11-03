@@ -201,6 +201,7 @@ export const BridgeConfigEditor = (props: BridgeConfigEditorProps) => {
             onChange={onChange}
             schema={bridgeConfigSchema}
             uiSchema={{
+              "ui:submitButtonOptions": { norender: true },
               icon: { "ui:widget": "hidden" },
               featureFlags: { "ui:field": "featureFlags" },
               filter: {
@@ -255,12 +256,7 @@ export const BridgeConfigEditor = (props: BridgeConfigEditorProps) => {
 
         <Grid container>
           <Grid size={{ xs: 6, sm: 4, md: 3 }}>
-            <Button
-              fullWidth
-              variant="outlined"
-              color="error"
-              onClick={props.onCancel}
-            >
+            <Button fullWidth variant="outlined" onClick={props.onCancel}>
               {t("common.cancel")}
             </Button>
           </Grid>
@@ -271,7 +267,7 @@ export const BridgeConfigEditor = (props: BridgeConfigEditorProps) => {
           <Grid size={{ xs: 6, sm: 4, md: 3 }}>
             <Button
               fullWidth
-              variant="outlined"
+              variant="contained"
               disabled={!isValid}
               onClick={saveAction}
             >
