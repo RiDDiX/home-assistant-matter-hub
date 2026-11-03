@@ -68,6 +68,44 @@ function configToProfileEntry(
   };
 }
 
+// Exact entity id first, then the only entity of the entry's domain. Each
+// target is used once, so two entries never write the same mapping.
+export function matchProfileEntries(
+  entries: MappingProfileEntry[],
+  availableEntityIds: string[],
+) {
+  const available = [...new Set(availableEntityIds)];
+  const taken = new Set<string>();
+  const matches: MappingProfileImportMatch[] = [];
+  const rest: MappingProfileEntry[] = [];
+  for (const entry of entries) {
+    const id = entry.entityIdPattern;
+    if (id && available.includes(id) && !taken.has(id)) {
+      taken.add(id);
+      matches.push({ entry, matchedEntityId: id, matchType: "exact" });
+    } else {
+      rest.push(entry);
+    }
+  }
+  const unmatchedEntries: MappingProfileEntry[] = [];
+  for (const entry of rest) {
+    const inDomain = available.filter(
+      (id) => id.split(".")[0] === entry.domain,
+    );
+    if (inDomain.length === 1 && !taken.has(inDomain[0])) {
+      taken.add(inDomain[0]);
+      matches.push({
+        entry,
+        matchedEntityId: inDomain[0],
+        matchType: "domain",
+      });
+    } else {
+      unmatchedEntries.push(entry);
+    }
+  }
+  return { matches, unmatchedEntries };
+}
+
 export function mappingProfileApi(
   mappingStorage: EntityMappingStorage,
 ): express.Router {
@@ -124,49 +162,18 @@ export function mappingProfileApi(
     const existingMappings = mappingStorage.getMappingsForBridge(bridgeId);
     const existingMap = new Map(existingMappings.map((m) => [m.entityId, m]));
 
-    const matches: MappingProfileImportMatch[] = [];
-    const unmatchedEntries: MappingProfileEntry[] = [];
-
-    for (const entry of profile.entries) {
-      let matched = false;
-
-      if (
-        entry.entityIdPattern &&
-        availableEntityIds.includes(entry.entityIdPattern)
-      ) {
-        matches.push({
-          entry,
-          matchedEntityId: entry.entityIdPattern,
-          matchType: "exact",
-          existingMapping: existingMap.get(entry.entityIdPattern),
-        });
-        matched = true;
-      }
-
-      if (!matched) {
-        const domainEntities = availableEntityIds.filter(
-          (id: string) => id.split(".")[0] === entry.domain,
-        );
-        if (domainEntities.length === 1) {
-          matches.push({
-            entry,
-            matchedEntityId: domainEntities[0],
-            matchType: "domain",
-            existingMapping: existingMap.get(domainEntities[0]),
-          });
-          matched = true;
-        }
-      }
-
-      if (!matched) {
-        unmatchedEntries.push(entry);
-      }
-    }
+    const { matches, unmatchedEntries } = matchProfileEntries(
+      profile.entries,
+      availableEntityIds,
+    );
 
     const preview: MappingProfileImportPreview = {
       profileName: profile.name,
       totalEntries: profile.entries.length,
-      matches,
+      matches: matches.map((m) => ({
+        ...m,
+        existingMapping: existingMap.get(m.matchedEntityId),
+      })),
       unmatchedEntries,
     };
 
@@ -180,21 +187,27 @@ export function mappingProfileApi(
       selectedEntityIds: string[];
     };
 
-    if (!profile?.entries || !selectedEntityIds) {
+    if (!Array.isArray(profile?.entries) || !Array.isArray(selectedEntityIds)) {
       res.status(400).json({ error: "Missing profile or selectedEntityIds" });
       return;
     }
 
-    const selectedSet = new Set(selectedEntityIds);
+    // The selection holds the preview targets, and matching against it
+    // resolves every entry to the same target the preview showed.
+    const targets = new Map(
+      matchProfileEntries(profile.entries, selectedEntityIds).matches.map(
+        (m) => [m.entry, m.matchedEntityId],
+      ),
+    );
 
     let applied = 0;
     let skipped = 0;
     const errors: Array<{ entityId: string; error: string }> = [];
 
     for (const entry of profile.entries) {
-      const targetEntityId = entry.entityIdPattern;
+      const targetEntityId = targets.get(entry);
 
-      if (!targetEntityId || !selectedSet.has(targetEntityId)) {
+      if (!targetEntityId) {
         skipped++;
         continue;
       }

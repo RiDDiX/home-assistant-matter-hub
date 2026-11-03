@@ -216,8 +216,12 @@ export class LockCredentialStorage extends Service {
       entityId: request.entityId,
       pinCodeHash: hash,
       pinCodeSalt: salt,
-      name: request.name?.trim() || existing?.name,
-      enabled: request.enabled ?? true,
+      // An empty name clears it, a missing one keeps the stored name.
+      name:
+        typeof request.name === "string"
+          ? request.name.trim() || undefined
+          : existing?.name,
+      enabled: request.enabled ?? existing?.enabled ?? true,
       createdAt: existing?.createdAt ?? now,
       updatedAt: now,
       userName: request.userName ?? existing?.userName,

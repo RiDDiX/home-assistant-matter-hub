@@ -4,6 +4,7 @@ import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  BridgeStatus,
   type EntityMappingConfig,
   type HomeAssistantEntityRegistry,
   HomeAssistantMatcherType,
@@ -1004,7 +1005,8 @@ describe("identity lifecycle through the matter API (#404)", () => {
     let recordsSeenDuringRebuild = -1;
     const bridge = {
       id: bridgeId,
-      data: { id: bridgeId },
+      // the route refuses a reset unless the bridge runs
+      data: { id: bridgeId, status: BridgeStatus.Running },
       async factoryReset() {
         recordsSeenDuringRebuild = identity.getBridgeIdentities(bridgeId).size;
       },

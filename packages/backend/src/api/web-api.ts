@@ -114,7 +114,7 @@ export class WebApi extends Service {
           this.startTime,
         ),
       )
-      .use("/bridges", bridgeExportApi(this.bridgeStorage))
+      .use("/bridges", bridgeExportApi(this.bridgeStorage, this.bridgeService))
       .use("/bridge-icons", bridgeIconApi(this.props.storageLocation))
       .use(
         "/device-images",

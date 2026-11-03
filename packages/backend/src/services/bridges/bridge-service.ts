@@ -40,6 +40,7 @@ function clampRecoveryInterval(ms: number): number {
 }
 
 export class BridgeService extends Service {
+  private readonly pendingPorts = new Set<number>();
   private readonly log = Logger.get("BridgeService");
   public readonly bridges: Bridge[] = [];
   public autoRecoveryEnabled = false;
@@ -208,7 +209,10 @@ export class BridgeService extends Service {
   }
 
   getNextAvailablePort(startPort = 5540): number {
-    const usedPorts = new Set(this.bridges.map((b) => b.data.port));
+    const usedPorts = new Set([
+      ...this.bridges.map((b) => b.data.port),
+      ...this.pendingPorts,
+    ]);
     let port = startPort;
     while (usedPorts.has(port)) {
       port++;
@@ -303,16 +307,48 @@ export class BridgeService extends Service {
     if (this.portUsed(port)) {
       throw new Error(`Port already in use: ${port}`);
     }
-    const bridge = await this.addBridge({
-      ...request,
-      port,
-      id: crypto.randomUUID().replace(/-/g, ""),
-      basicInformation: this.props.basicInformation,
-    });
-    await this.bridgeStorage.add(bridge.data);
-    await bridge.start();
-    this.onBridgeChanged?.(bridge.id);
-    return bridge;
+    // two creates racing on the same free port must not both pass
+    this.pendingPorts.add(port);
+    try {
+      const bridge = await this.addBridge({
+        ...request,
+        port,
+        id: crypto.randomUUID().replace(/-/g, ""),
+        basicInformation: this.props.basicInformation,
+      });
+      await this.bridgeStorage.add(bridge.data);
+      await bridge.start();
+      this.onBridgeChanged?.(bridge.id);
+      return bridge;
+    } finally {
+      this.pendingPorts.delete(port);
+    }
+  }
+
+  // Apply an imported bridge live: overwrite the bridge with the same id or
+  // add and start a new one. A taken port moves like it would on startup.
+  async importBridge(data: BridgeData): Promise<Bridge> {
+    const port = this.portUsed(data.port, [data.id])
+      ? this.getNextAvailablePort(data.port)
+      : data.port;
+    const existing = this.get(data.id);
+    if (existing) {
+      const { basicInformation: _, ...config } = data;
+      await this.update({ ...config, port });
+      return existing;
+    }
+    this.pendingPorts.add(port);
+    try {
+      const bridge = await this.addBridge(
+        this.normalizeBridgeData({ ...data, port }),
+      );
+      await this.bridgeStorage.add(bridge.data);
+      await bridge.start();
+      this.onBridgeChanged?.(bridge.id);
+      return bridge;
+    } finally {
+      this.pendingPorts.delete(port);
+    }
   }
 
   async update(request: UpdateBridgeRequest): Promise<Bridge | undefined> {
@@ -361,7 +397,7 @@ export class BridgeService extends Service {
     for (const update of updates) {
       const bridge = this.get(update.id);
       if (bridge) {
-        // Update using existing update method with minimal data
+        // An update replaces the config, so carry every optional key over
         const currentData = bridge.data;
         await this.update({
           id: update.id,
@@ -371,6 +407,9 @@ export class BridgeService extends Service {
           featureFlags: currentData.featureFlags,
           countryCode: currentData.countryCode,
           icon: currentData.icon,
+          serialNumberSuffix: currentData.serialNumberSuffix,
+          uniqueIdSuffix: currentData.uniqueIdSuffix,
+          sessionMaxAgeHours: currentData.sessionMaxAgeHours,
           priority: update.priority,
         });
       }
@@ -387,6 +426,7 @@ export class BridgeService extends Service {
   }
 
   private portUsed(port: number, notId?: string[]): boolean {
+    if (this.pendingPorts.has(port)) return true;
     return this.bridges
       .filter((bridge) => notId == null || !notId.includes(bridge.id))
       .some((bridge) => bridge.data.port === port);

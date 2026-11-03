@@ -1,4 +1,5 @@
 import {
+  BridgeStatus,
   type CreateBridgeRequest,
   createBridgeRequestSchema,
   type HomeAssistantFilter,
@@ -138,6 +139,14 @@ export function matterApi(
     const bridge = bridgeService.bridges.find((b) => b.id === bridgeId);
     if (!bridge) {
       res.status(404).send("Not Found");
+      return;
+    }
+    // Bridge.factoryReset does nothing unless the bridge runs, so refuse
+    // before the identities are dropped.
+    if (bridge.data.status !== BridgeStatus.Running) {
+      res
+        .status(409)
+        .json({ error: "Bridge must be running to factory reset" });
       return;
     }
     try {

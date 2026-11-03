@@ -26,6 +26,9 @@ export class WebSocketApi {
   attach(server: http.Server, basePath = "/") {
     const wsPath = `${basePath === "/" ? "" : basePath}/api/ws`;
     this.wss = new WebSocketServer({ server, path: wsPath });
+    // A proxy that keeps its x-forwarded-prefix in the URL sends /<prefix>/api/ws.
+    this.wss.shouldHandle = (req) =>
+      (req.url ?? "").split("?")[0].endsWith(wsPath);
 
     this.wss.on("connection", (ws) => {
       this.clients.add(ws);
@@ -126,6 +129,9 @@ export class WebSocketApi {
         bridgeId,
         data: bridge.data,
       });
+    } else {
+      // Deleted bridges are gone from the service, so send the whole list.
+      this.broadcastBridgesUpdate();
     }
   }
 

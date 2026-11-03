@@ -74,3 +74,34 @@ describe("LockCredentialStorage.changed", () => {
     expect(seen).toEqual(["lock.front", "lock.front"]);
   });
 });
+
+describe("LockCredentialStorage.setCredential", () => {
+  it("clears the name on an empty one and keeps it when left out", async () => {
+    const { storage } = await load({ version: 2, credentials: [] });
+    await storage.setCredential({
+      entityId: "lock.front",
+      pinCode: "1234",
+      name: "Guest",
+    });
+
+    await storage.setCredential({ entityId: "lock.front", pinCode: "5678" });
+    expect(storage.getCredential("lock.front")?.name).toBe("Guest");
+
+    await storage.setCredential({
+      entityId: "lock.front",
+      pinCode: "5678",
+      name: " ",
+    });
+    expect(storage.getCredential("lock.front")?.name).toBeUndefined();
+  });
+
+  it("keeps a disabled credential disabled unless the request says otherwise", async () => {
+    const { storage } = await load({
+      version: 2,
+      credentials: [{ ...hashed, enabled: false }],
+    });
+
+    await storage.setCredential({ entityId: "lock.front", pinCode: "5678" });
+    expect(storage.getCredential("lock.front")?.enabled).toBe(false);
+  });
+});
