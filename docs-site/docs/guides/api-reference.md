@@ -116,7 +116,7 @@ Delete a bridge. Returns `204 No Content`.
 | `/api/matter/bridges/:bridgeId/actions/stop` | POST | Stop a running bridge |
 | `/api/matter/bridges/:bridgeId/actions/restart` | POST | Restart a bridge |
 | `/api/matter/bridges/:bridgeId/actions/refresh` | POST | Refresh devices without restart |
-| `/api/matter/bridges/:bridgeId/actions/factory-reset` | POST | Factory reset (removes fabrics) |
+| `/api/matter/bridges/:bridgeId/actions/factory-reset` | POST | Factory reset (removes fabrics). Answers 409 when the bridge is not running |
 | `/api/matter/bridges/:bridgeId/actions/force-sync` | POST | Push current state to controllers |
 | `/api/matter/bridges/:bridgeId/actions/open-commissioning-window` | POST | Open pairing window for multi-fabric |
 | `/api/matter/bridges/actions/start-all` | POST | Start all bridges |
@@ -257,7 +257,7 @@ Preview an import without applying changes.
 
 ### POST /api/bridges/import
 
-Import bridge configurations.
+Import bridge configurations. Imported bridges are created and started right away; with `overwriteExisting` an existing bridge with the same id is updated in place. A port that another bridge uses moves to the next free port, and a bridge that fails validation is reported in `errors`.
 
 **Request:**
 ```json
