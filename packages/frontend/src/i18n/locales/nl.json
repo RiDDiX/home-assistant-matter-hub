@@ -171,7 +171,9 @@
     "bridgeStatusRunning": "{{running}} actief",
     "bridgeStatusFailed": "{{failed}} mislukt",
     "devicesFailed": "{{count}} mislukt",
-    "uptimeFormat": "{{time}}"
+    "uptimeFormat": "{{time}}",
+    "deviceCount": "{{count}} Apparaten",
+    "fabricCount": "{{count}} Fabrics"
   },
   "bridge": {
     "name": "Bridgenaam",
@@ -402,7 +404,8 @@
     "sortType": "Apparaattype",
     "sortName": "Naam",
     "deviceCount": "{{count}} apparaat/apparaten",
-    "filteredCount": "{{filtered}} van {{total}} apparaten"
+    "filteredCount": "{{filtered}} van {{total}} apparaten",
+    "fabricCount": "{{count}} Fabrics"
   },
   "diagnostics": {
     "title": "Live-diagnose",

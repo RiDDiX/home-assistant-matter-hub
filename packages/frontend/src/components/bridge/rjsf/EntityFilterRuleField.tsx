@@ -8,6 +8,7 @@ import Typography from "@mui/material/Typography";
 import type { FieldProps } from "@rjsf/utils";
 import type { JSONSchema7 } from "json-schema";
 import { useCallback } from "react";
+import { useTranslation } from "react-i18next";
 import { EntityAutocomplete } from "../../entity-mapping/EntityAutocomplete.tsx";
 
 // matcher types whose value is an entity id, so suggestions help
@@ -25,6 +26,7 @@ interface TypeOption {
 }
 
 export function EntityFilterRuleField(props: FieldProps) {
+  const { t } = useTranslation();
   const { schema, formData, onChange, disabled, readonly, fieldPathId } = props;
   const data = (formData ?? {}) as MatcherData;
   const type = data.type ?? "";
@@ -35,7 +37,7 @@ export function EntityFilterRuleField(props: FieldProps) {
   const typeOptions = ((properties.type?.oneOf ?? []) as TypeOption[]).filter(
     (o) => typeof o.const === "string",
   );
-  const valueTitle = properties.value?.title ?? "Value";
+  const valueTitle = properties.value?.title ?? t("common.value");
   const selected = typeOptions.find((o) => o.const === type);
 
   const setType = useCallback(
@@ -52,10 +54,12 @@ export function EntityFilterRuleField(props: FieldProps) {
   return (
     <Stack spacing={2} sx={{ pt: 1 }}>
       <FormControl fullWidth size="small" disabled={locked}>
-        <InputLabel id={`${fieldPathId.path}-type`}>Type</InputLabel>
+        <InputLabel id={`${fieldPathId.path}-type`}>
+          {t("common.type")}
+        </InputLabel>
         <Select
           labelId={`${fieldPathId.path}-type`}
-          label="Type"
+          label={t("common.type")}
           value={type}
           onChange={(e) => setType(e.target.value)}
         >
@@ -79,7 +83,7 @@ export function EntityFilterRuleField(props: FieldProps) {
           onChange={setValue}
           label={valueTitle}
           placeholder="sensor.living_room_*"
-          helperText="Search or type an entity ID. Wildcards and regex still work."
+          helperText={t("bridge.entityRuleHint")}
           margin="none"
         />
       ) : (

@@ -2,27 +2,25 @@ import { useCallback, useState } from "react";
 
 export interface DashboardWidgetDef {
   readonly id: string;
-  readonly label: string;
-  readonly description: string;
+  readonly labelKey: string;
+  readonly descriptionKey: string;
 }
 
 export const AVAILABLE_WIDGETS: readonly DashboardWidgetDef[] = [
   {
     id: "stats",
-    label: "Status Overview",
-    description:
-      "Bridge count, device count, fabric count, and HA connection status.",
+    labelKey: "dashboard.widgetStats",
+    descriptionKey: "dashboard.widgetStatsDescription",
   },
   {
     id: "bridges",
-    label: "Bridges",
-    description: "Bridge cards with bulk actions (start/stop/restart all).",
+    labelKey: "nav.bridges",
+    descriptionKey: "dashboard.widgetBridgesDescription",
   },
   {
     id: "quickNav",
-    label: "Quick Navigation",
-    description:
-      "Shortcut cards to other pages (Devices, Network Map, Health, etc.).",
+    labelKey: "dashboard.quickNavigation",
+    descriptionKey: "dashboard.widgetQuickNavDescription",
   },
 ] as const;
 

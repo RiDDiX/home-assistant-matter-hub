@@ -34,10 +34,12 @@ export const NotificationsProvider = (props: PropsWithChildren) => {
   return (
     <NotificationsContext.Provider value={value}>
       {props.children}
-      {notifications.map((notification) => (
+      {/* one at a time, the next shows when this one closes */}
+      {notifications.slice(0, 1).map((notification) => (
         <Snackbar
           key={notification.notificationId}
           open={true}
+          anchorOrigin={{ vertical: "bottom", horizontal: "center" }}
           autoHideDuration={notification.autoHideDuration}
           onClose={() => deleteNotification(notification.notificationId)}
         >

@@ -2,6 +2,7 @@ import {
   type BridgeFeatureFlags,
   type BridgeIconType,
   type BridgeTemplate,
+  bridgeConfigSchema,
   type ControllerProfile,
   type CreateBridgeRequest,
   controllerProfiles,
@@ -35,16 +36,20 @@ import Step from "@mui/material/Step";
 import StepLabel from "@mui/material/StepLabel";
 import Stepper from "@mui/material/Stepper";
 import Switch from "@mui/material/Switch";
+import type { Theme } from "@mui/material/styles";
 import TextField from "@mui/material/TextField";
 import ToggleButton from "@mui/material/ToggleButton";
 import ToggleButtonGroup from "@mui/material/ToggleButtonGroup";
 import Tooltip from "@mui/material/Tooltip";
 import Typography from "@mui/material/Typography";
+import useMediaQuery from "@mui/material/useMediaQuery";
+import type { JSONSchema7 } from "json-schema";
 import { useCallback, useEffect, useState } from "react";
-import { useTranslation } from "react-i18next";
+import { Trans, useTranslation } from "react-i18next";
 import { createBridge as apiCreateBridge } from "../../api/bridges.js";
 import { fetchLabels, type HomeAssistantLabel } from "../../api/labels.js";
 import { BridgeTemplateSelector } from "./BridgeTemplateSelector.js";
+import { ControllerIcon } from "./ControllerIcon.tsx";
 import { LabelFilterField } from "./LabelFilterField.js";
 import { PreflightPanel } from "./PreflightPanel.js";
 import {
@@ -70,13 +75,6 @@ interface WizardBridge {
   };
 }
 
-const controllerIcons: Record<string, string> = {
-  apple_home: "🍏",
-  google_home: "🏠",
-  alexa: "🔵",
-  multi_controller: "🔀",
-};
-
 const stepKeys = [
   "bridgeWizard.stepTemplate",
   "bridgeWizard.stepController",
@@ -88,42 +86,56 @@ const stepKeys = [
 
 interface FlagOption {
   key: keyof BridgeFeatureFlags;
-  label: string;
-  description: string;
+  labelKey: string;
+  descriptionKey: string;
 }
 
 const wizardFlags: FlagOption[] = [
   {
     key: "autoComposedDevices",
-    label: "Auto Composed Devices",
-    description:
-      "Temperature, humidity and pressure sensors of one device as one device with a sub-device per reading. Forces battery, humidity and pressure auto-mapping on. Controllers see new devices.",
+    labelKey: "bridgeWizard.autoCompose",
+    descriptionKey: "bridgeWizard.autoComposeDescription",
   },
   {
     key: "autoForceSync",
-    label: "Auto Force Sync",
-    description:
-      "Periodically push all device states to controllers. Recommended for Google Home and Alexa to prevent devices from going offline.",
+    labelKey: "bridgeWizard.autoForceSyncFlag",
+    descriptionKey: "bridgeWizard.autoForceSyncDescription",
   },
   {
     key: "coverSwapOpenClose",
-    label: "Invert Cover Direction",
-    description:
-      "Swap open/close direction for covers. Use this if your covers show the wrong position in Matter controllers.",
+    labelKey: "bridgeWizard.invertCover",
+    descriptionKey: "bridgeWizard.invertCoverDescription",
   },
   {
     key: "includeHiddenEntities",
-    label: "Include Hidden Entities",
-    description:
-      "Also expose entities that are marked as hidden in Home Assistant.",
+    labelKey: "bridgeWizard.includeHidden",
+    descriptionKey: "bridgeWizard.includeHiddenDescription",
   },
 ];
 
+const flagSchemas = (bridgeConfigSchema.properties?.featureFlags as JSONSchema7)
+  ?.properties;
+
+// Wizard flags have translated labels, the others fall back to the schema title.
+function useFlagLabel() {
+  const { t } = useTranslation();
+  return (key: string) => {
+    const option = wizardFlags.find((f) => f.key === key);
+    if (option) {
+      return t(option.labelKey);
+    }
+    return (flagSchemas?.[key] as JSONSchema7 | undefined)?.title ?? key;
+  };
+}
+
 export function BridgeWizard({ open, onClose, onComplete }: BridgeWizardProps) {
   const { t } = useTranslation();
+  const flagLabel = useFlagLabel();
+  const fullScreen = useMediaQuery((theme: Theme) =>
+    theme.breakpoints.down("sm"),
+  );
   const [activeStep, setActiveStep] = useState(0);
   const [loading, setLoading] = useState(false);
-  const [nextPort, setNextPort] = useState(5540);
   const [bridges, setBridges] = useState<WizardBridge[]>([]);
   const [selectedTemplate, setSelectedTemplate] = useState<
     BridgeTemplate | undefined
@@ -179,7 +191,6 @@ export function BridgeWizard({ open, onClose, onComplete }: BridgeWizardProps) {
       const res = await fetch("api/matter/next-port");
       if (res.ok) {
         const data = (await res.json()) as { port: number };
-        setNextPort(data.port);
         setCurrentBridge((prev) => ({ ...prev, port: data.port }));
       }
     } catch {
@@ -193,12 +204,12 @@ export function BridgeWizard({ open, onClose, onComplete }: BridgeWizardProps) {
       setActiveStep(0);
       setBridges([]);
       setSelectedTemplate(undefined);
-      setCurrentBridge({
+      setCurrentBridge((prev) => ({
         name: "",
-        port: nextPort,
+        port: prev.port,
         serverMode: false,
         filter: { include: [], exclude: [] },
-      });
+      }));
       setUseWildcard(true);
       setEntityPattern("*");
       setExcludePattern("");
@@ -210,7 +221,7 @@ export function BridgeWizard({ open, onClose, onComplete }: BridgeWizardProps) {
       setLabelsLoaded(false);
       setLabelsLoading(false);
     }
-  }, [open, fetchNextPort, nextPort]);
+  }, [open, fetchNextPort]);
 
   const applyTemplate = useCallback((template: BridgeTemplate | null) => {
     setSelectedTemplate(template ?? undefined);
@@ -313,8 +324,8 @@ export function BridgeWizard({ open, onClose, onComplete }: BridgeWizardProps) {
         if (includeMatchers.length === 0) {
           setError(
             filterType === "label"
-              ? "Select at least one label, or switch the filter type."
-              : "Enter at least one value for the filter.",
+              ? t("bridgeWizard.labelRequired")
+              : t("bridgeWizard.filterRequired"),
           );
           return;
         }
@@ -337,17 +348,20 @@ export function BridgeWizard({ open, onClose, onComplete }: BridgeWizardProps) {
   };
 
   const handleAddAnother = async () => {
-    await createBridgeAsync();
-    const newPort = nextPort + bridges.length + 1;
+    // stay on the review step so the error stays visible
+    if (!(await createBridgeAsync())) {
+      return;
+    }
     setBridges((prev) => [...prev, currentBridge]);
     setSelectedTemplate(undefined);
     setSelectedController(undefined);
-    setCurrentBridge({
+    setCurrentBridge((prev) => ({
       name: "",
-      port: newPort,
+      port: prev.port,
       serverMode: false,
       filter: { include: [], exclude: [] },
-    });
+    }));
+    fetchNextPort();
     setActiveStep(0);
     setUseWildcard(true);
     setEntityPattern("*");
@@ -425,6 +439,7 @@ export function BridgeWizard({ open, onClose, onComplete }: BridgeWizardProps) {
               >
                 <CardActionArea
                   onClick={() => applyController(isSelected ? null : profile)}
+                  aria-pressed={isSelected}
                   sx={{
                     p: 0,
                     display: "flex",
@@ -437,9 +452,7 @@ export function BridgeWizard({ open, onClose, onComplete }: BridgeWizardProps) {
                     sx={{ p: 1.5, "&:last-child": { pb: 1.5 }, width: "100%" }}
                   >
                     <Box display="flex" alignItems="center" gap={1} mb={0.5}>
-                      <Typography fontSize={20}>
-                        {controllerIcons[profile.id] ?? "\uD83C\uDFE0"}
-                      </Typography>
+                      <ControllerIcon id={profile.id} />
                       <Typography variant="subtitle2" sx={{ flexGrow: 1 }}>
                         {profile.name}
                       </Typography>
@@ -460,13 +473,9 @@ export function BridgeWizard({ open, onClose, onComplete }: BridgeWizardProps) {
                           .map(([k]) => (
                             <Chip
                               key={k}
-                              label={k
-                                .replace(/^auto/, "")
-                                .replace(/([A-Z])/g, " $1")
-                                .trim()}
+                              label={flagLabel(k)}
                               size="small"
                               variant="outlined"
-                              sx={{ fontSize: "0.6rem", height: 18 }}
                             />
                           ))}
                       </Box>
@@ -503,7 +512,7 @@ export function BridgeWizard({ open, onClose, onComplete }: BridgeWizardProps) {
           setCurrentBridge((prev) => ({ ...prev, name: e.target.value }))
         }
         margin="normal"
-        placeholder="e.g., Living Room, Kitchen, All Lights"
+        placeholder={t("bridgeWizard.namePlaceholder")}
         error={!!error}
         helperText={error}
       />
@@ -521,10 +530,7 @@ export function BridgeWizard({ open, onClose, onComplete }: BridgeWizardProps) {
         margin="normal"
         helperText={t("bridgeWizard.portAutoAssign")}
       />
-      <Tooltip
-        title="Exposes the entity as a standalone Matter device, e.g. so robot vacuums work with Apple Home (Siri) and Alexa. The first entity is the primary; more than one device per node is experimental."
-        placement="right"
-      >
+      <Tooltip title={t("bridgeWizard.serverModeTooltip")} placement="right">
         <FormControlLabel
           control={
             <Checkbox
@@ -535,8 +541,6 @@ export function BridgeWizard({ open, onClose, onComplete }: BridgeWizardProps) {
                   serverMode: e.target.checked,
                 }))
               }
-              icon={<SmartToyIcon />}
-              checkedIcon={<SmartToyIcon color="primary" />}
             />
           }
           label={t("bridgeWizard.serverModeLabel")}
@@ -545,10 +549,7 @@ export function BridgeWizard({ open, onClose, onComplete }: BridgeWizardProps) {
       </Tooltip>
       {currentBridge.serverMode && (
         <Alert severity="info" sx={{ mt: 1 }}>
-          <strong>Server Mode enabled:</strong> This bridge exposes devices
-          standalone instead of bridged, required for Apple Home Siri commands
-          and Alexa discovery. The first entity is the primary and names the
-          node; more than one device per node is experimental.
+          <Trans i18nKey="bridgeWizard.serverModeEnabledInfo" />
         </Alert>
       )}
       {bridges.length > 0 && (
@@ -581,9 +582,10 @@ export function BridgeWizard({ open, onClose, onComplete }: BridgeWizardProps) {
       </Typography>
       {currentBridge.serverMode && (
         <Alert severity="warning" sx={{ mt: 1, mb: 1 }}>
-          Server Mode requires exactly <strong>one</strong> entity. Change the
-          filter to match only your device (e.g., <code>vacuum.my_vacuum</code>
-          ).
+          <Trans
+            i18nKey="bridgeWizard.serverModeFilterWarning"
+            components={{ code: <code /> }}
+          />
         </Alert>
       )}
       {!selectedTemplate && !currentBridge.serverMode && (
@@ -595,10 +597,18 @@ export function BridgeWizard({ open, onClose, onComplete }: BridgeWizardProps) {
           onChange={(_, next) => next && handleFilterTypeChange(next)}
           sx={{ mt: 1, mb: 0.5, flexWrap: "wrap" }}
         >
-          <ToggleButton value="pattern">Pattern</ToggleButton>
-          <ToggleButton value="domain">Domain</ToggleButton>
-          <ToggleButton value="area">Area</ToggleButton>
-          <ToggleButton value="label">Label</ToggleButton>
+          <ToggleButton value="pattern">
+            {t("bridgeWizard.filterTypePattern")}
+          </ToggleButton>
+          <ToggleButton value="domain">
+            {t("bridgeWizard.filterTypeDomain")}
+          </ToggleButton>
+          <ToggleButton value="area">
+            {t("bridgeWizard.filterTypeArea")}
+          </ToggleButton>
+          <ToggleButton value="label">
+            {t("bridgeWizard.filterTypeLabel")}
+          </ToggleButton>
         </ToggleButtonGroup>
       )}
       {!selectedTemplate &&
@@ -628,14 +638,14 @@ export function BridgeWizard({ open, onClose, onComplete }: BridgeWizardProps) {
           fullWidth
           label={
             currentBridge.serverMode
-              ? "Entity ID"
+              ? t("bridgeWizard.entityId")
               : filterType === "domain"
-                ? "Domains"
+                ? t("labels.domains")
                 : filterType === "area"
-                  ? "Areas"
+                  ? t("labels.areasSection")
                   : useWildcard && !selectedTemplate
-                    ? "Include Pattern"
-                    : "Entity Filters"
+                    ? t("bridgeWizard.includePattern")
+                    : t("bridgeWizard.entityFilters")
           }
           value={
             selectedTemplate && !currentBridge.serverMode
@@ -657,16 +667,16 @@ export function BridgeWizard({ open, onClose, onComplete }: BridgeWizardProps) {
           }
           helperText={
             currentBridge.serverMode
-              ? "Enter exact entity IDs (e.g., vacuum.my_vacuum). The first one is the primary device of the node."
+              ? t("bridgeWizard.serverModeEntityHint")
               : selectedTemplate
-                ? "Pre-configured by template. Edit in the full editor after creation."
+                ? t("bridgeWizard.templatePreConfigured")
                 : filterType === "domain"
-                  ? "Comma separated Home Assistant domains, e.g. light, switch, sensor."
+                  ? t("bridgeWizard.domainHint")
                   : filterType === "area"
-                    ? "Comma separated Home Assistant area IDs. Find them under Settings > Areas."
+                    ? t("bridgeWizard.areaHint")
                     : useWildcard
-                      ? "Use * for all, or patterns like light.*, switch.*"
-                      : "Enter specific entity IDs separated by commas"
+                      ? t("bridgeWizard.wildcardHint")
+                      : t("bridgeWizard.commaHint")
           }
           disabled={!!selectedTemplate && !currentBridge.serverMode}
         />
@@ -710,7 +720,7 @@ export function BridgeWizard({ open, onClose, onComplete }: BridgeWizardProps) {
                 }
               />
             }
-            label={flag.label}
+            label={t(flag.labelKey)}
           />
           <Typography
             variant="caption"
@@ -718,7 +728,7 @@ export function BridgeWizard({ open, onClose, onComplete }: BridgeWizardProps) {
             display="block"
             sx={{ ml: 7, mt: -0.5 }}
           >
-            {flag.description}
+            {t(flag.descriptionKey)}
           </Typography>
         </Box>
       ))}
@@ -745,7 +755,9 @@ export function BridgeWizard({ open, onClose, onComplete }: BridgeWizardProps) {
             </Typography>
             {selectedTemplate && (
               <Chip
-                label={`Template: ${selectedTemplate.name}`}
+                label={t("bridgeWizard.reviewTemplate", {
+                  name: selectedTemplate.name,
+                })}
                 size="small"
                 color="info"
                 variant="outlined"
@@ -755,7 +767,7 @@ export function BridgeWizard({ open, onClose, onComplete }: BridgeWizardProps) {
             {currentBridge.serverMode && (
               <Chip
                 icon={<SmartToyIcon />}
-                label="Server Mode"
+                label={t("bridge.serverMode")}
                 color="primary"
                 size="small"
                 sx={{ mt: 1 }}
@@ -768,21 +780,22 @@ export function BridgeWizard({ open, onClose, onComplete }: BridgeWizardProps) {
                   .map(([key]) => (
                     <Chip
                       key={key}
-                      label={key}
+                      label={flagLabel(key)}
                       size="small"
                       variant="outlined"
-                      sx={{ fontSize: "0.7rem", height: 22 }}
                     />
                   ))}
               </Box>
             )}
             <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-              Include:{" "}
-              {currentBridge.filter.include.length > 0
-                ? currentBridge.filter.include
-                    .map((m) => `${m.type}:${m.value}`)
-                    .join(", ")
-                : entityPattern || "*"}
+              {t("bridgeWizard.reviewInclude", {
+                value:
+                  currentBridge.filter.include.length > 0
+                    ? currentBridge.filter.include
+                        .map((m) => `${m.type}:${m.value}`)
+                        .join(", ")
+                    : entityPattern || "*",
+              })}
             </Typography>
             {error && (
               <Typography variant="body2" color="error" sx={{ mt: 1 }}>
@@ -791,10 +804,14 @@ export function BridgeWizard({ open, onClose, onComplete }: BridgeWizardProps) {
             )}
             {(excludePattern || currentBridge.filter.exclude.length > 0) && (
               <Typography variant="body2" color="text.secondary">
-                Exclude:{" "}
-                {currentBridge.filter.exclude.length > 0
-                  ? currentBridge.filter.exclude.map((m) => m.value).join(", ")
-                  : excludePattern}
+                {t("bridgeWizard.reviewExclude", {
+                  value:
+                    currentBridge.filter.exclude.length > 0
+                      ? currentBridge.filter.exclude
+                          .map((m) => m.value)
+                          .join(", ")
+                      : excludePattern,
+                })}
               </Typography>
             )}
           </CardContent>
@@ -812,7 +829,16 @@ export function BridgeWizard({ open, onClose, onComplete }: BridgeWizardProps) {
   };
 
   return (
-    <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
+    <Dialog
+      open={open}
+      onClose={(_, reason) => {
+        // a stray click outside must not throw away the entered setup
+        if (reason !== "backdropClick" && !loading) onClose();
+      }}
+      maxWidth="md"
+      fullWidth
+      fullScreen={fullScreen}
+    >
       <DialogTitle>
         <Box display="flex" alignItems="center" gap={1}>
           <SettingsIcon />
@@ -820,7 +846,16 @@ export function BridgeWizard({ open, onClose, onComplete }: BridgeWizardProps) {
         </Box>
       </DialogTitle>
       <DialogContent>
-        <Stepper activeStep={activeStep} sx={{ mt: 1 }}>
+        <Stepper
+          activeStep={activeStep}
+          alternativeLabel
+          sx={{
+            mt: 1,
+            "& .MuiStepLabel-label:not(.Mui-active)": {
+              display: { xs: "none", sm: "block" },
+            },
+          }}
+        >
           {stepKeys.map((key) => (
             <Step key={key}>
               <StepLabel>{t(key)}</StepLabel>
@@ -834,7 +869,10 @@ export function BridgeWizard({ open, onClose, onComplete }: BridgeWizardProps) {
         {activeStep === 4 && renderFeatureFlagsStep()}
         {activeStep === 5 && renderStep2()}
       </DialogContent>
-      <DialogActions sx={{ px: 3, pb: 2 }}>
+      <DialogActions
+        disableSpacing
+        sx={{ px: 3, pb: 2, flexWrap: "wrap", gap: 1 }}
+      >
         <Button onClick={onClose} disabled={loading}>
           {t("common.cancel")}
         </Button>

@@ -37,6 +37,8 @@ import {
   type HomeAssistantArea,
   type HomeAssistantLabel,
 } from "../../api/labels.ts";
+import { copyText } from "../../components/misc/copy-text.ts";
+import { useNotifications } from "../../components/notifications/use-notifications.ts";
 
 interface ValueListProps {
   values: string[];
@@ -51,6 +53,7 @@ const ValueList = ({
   onCopy,
   searchable,
 }: ValueListProps) => {
+  const { t } = useTranslation();
   const [search, setSearch] = useState("");
 
   const filtered = useMemo(() => {
@@ -63,7 +66,7 @@ const ValueList = ({
     return (
       <Box sx={{ p: 2, textAlign: "center" }}>
         <Typography color="text.secondary" variant="body2">
-          No values found.
+          {t("labels.noValues")}
         </Typography>
       </Box>
     );
@@ -76,7 +79,7 @@ const ValueList = ({
           <TextField
             size="small"
             fullWidth
-            placeholder="Search..."
+            placeholder={t("labels.searchPlaceholder")}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             slotProps={{
@@ -87,6 +90,7 @@ const ValueList = ({
                   </InputAdornment>
                 ),
               },
+              htmlInput: { "aria-label": t("common.search") },
             }}
           />
         </Box>
@@ -105,7 +109,7 @@ const ValueList = ({
         ))}
         {search && filtered.length === 0 && (
           <Typography color="text.secondary" variant="body2" sx={{ p: 1 }}>
-            No matches for &quot;{search}&quot;
+            {t("labels.noMatches", { search })}
           </Typography>
         )}
       </Box>
@@ -115,6 +119,7 @@ const ValueList = ({
 
 export const LabelsPage = () => {
   const { t } = useTranslation();
+  const notifications = useNotifications();
   const [labels, setLabels] = useState<HomeAssistantLabel[]>([]);
   const [areas, setAreas] = useState<HomeAssistantArea[]>([]);
   const [filterValues, setFilterValues] = useState<FilterValues | null>(null);
@@ -145,8 +150,15 @@ export const LabelsPage = () => {
     load();
   }, [load]);
 
-  const copyToClipboard = (text: string) => {
-    navigator.clipboard.writeText(text);
+  const copyToClipboard = async (text: string) => {
+    if (!(await copyText(text))) {
+      notifications.show({
+        message: t("common.copyFailed"),
+        severity: "error",
+      });
+      return;
+    }
+    notifications.show({ message: t("common.copied"), severity: "success" });
     setCopiedId(text);
     setTimeout(() => setCopiedId(null), 2000);
   };
@@ -160,11 +172,13 @@ export const LabelsPage = () => {
   }
 
   return (
-    <Box sx={{ p: 2 }}>
-      <Typography variant="h5" component="h1" sx={{ mb: 3 }}>
-        <FilterListIcon sx={{ mr: 1, verticalAlign: "middle" }} />
-        {t("labels.title")}
-      </Typography>
+    <Box>
+      <Box display="flex" alignItems="center" gap={2} sx={{ mb: 3 }}>
+        <FilterListIcon color="primary" fontSize="large" />
+        <Typography variant="h5" component="h1">
+          {t("labels.title")}
+        </Typography>
+      </Box>
 
       <Alert severity="info" sx={{ mb: 3 }}>
         {t("labels.info")}

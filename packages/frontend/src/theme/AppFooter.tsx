@@ -24,7 +24,7 @@ export const AppFooter = () => {
     },
   ];
   return (
-    <Container sx={{ mb: { xs: 10, sm: 4 } }}>
+    <Container sx={{ mb: 4 }}>
       <Divider sx={{ mt: 4, mb: 3 }} />
       <Grid container spacing={2} justifyContent="center">
         {links.map((link, idx) => (

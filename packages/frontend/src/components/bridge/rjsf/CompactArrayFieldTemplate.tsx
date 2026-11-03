@@ -4,6 +4,7 @@ import ArrowRightIcon from "@mui/icons-material/ArrowRight";
 import SearchIcon from "@mui/icons-material/Search";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
+import ButtonBase from "@mui/material/ButtonBase";
 import Chip from "@mui/material/Chip";
 import Collapse from "@mui/material/Collapse";
 import InputAdornment from "@mui/material/InputAdornment";
@@ -12,6 +13,7 @@ import TextField from "@mui/material/TextField";
 import Typography from "@mui/material/Typography";
 import type { ArrayFieldTemplateProps } from "@rjsf/utils";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 
 function usePrevLength(length: number): number {
   const ref = useRef(length);
@@ -26,6 +28,7 @@ interface MatcherData {
 }
 
 export function CompactArrayFieldTemplate(props: ArrayFieldTemplateProps) {
+  const { t } = useTranslation();
   const { items, canAdd, onAddClick, title, formData } = props;
   const dataArray = (formData ?? []) as MatcherData[];
 
@@ -99,7 +102,7 @@ export function CompactArrayFieldTemplate(props: ArrayFieldTemplateProps) {
           />
           {canAdd && (
             <Button size="small" startIcon={<AddIcon />} onClick={onAddClick}>
-              Add
+              {t("common.add")}
             </Button>
           )}
         </Box>
@@ -109,7 +112,7 @@ export function CompactArrayFieldTemplate(props: ArrayFieldTemplateProps) {
         <TextField
           size="small"
           fullWidth
-          placeholder="Search rules..."
+          placeholder={t("bridgeWizard.searchRules")}
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           slotProps={{
@@ -132,7 +135,7 @@ export function CompactArrayFieldTemplate(props: ArrayFieldTemplateProps) {
           textAlign="center"
           py={2}
         >
-          No matching rules
+          {t("bridge.noMatchingRules")}
         </Typography>
       )}
 
@@ -154,17 +157,19 @@ export function CompactArrayFieldTemplate(props: ArrayFieldTemplateProps) {
                 overflow: "hidden",
               }}
             >
-              <Box
-                display="flex"
-                alignItems="center"
+              <ButtonBase
+                component="div"
+                aria-expanded={isExpanded}
+                onClick={() => toggleExpanded(idx)}
                 sx={{
+                  width: "100%",
+                  justifyContent: "flex-start",
+                  textAlign: "left",
                   px: 1.5,
                   py: 0.75,
-                  cursor: "pointer",
                   "&:hover": { bgcolor: "action.hover" },
                   bgcolor: isExpanded ? "action.selected" : "transparent",
                 }}
-                onClick={() => toggleExpanded(idx)}
               >
                 {isExpanded ? (
                   <ArrowDropDownIcon fontSize="small" color="action" />
@@ -205,10 +210,10 @@ export function CompactArrayFieldTemplate(props: ArrayFieldTemplateProps) {
                     ml={0.5}
                     fontStyle="italic"
                   >
-                    New rule (click to configure)
+                    {t("bridge.newRule")}
                   </Typography>
                 )}
-              </Box>
+              </ButtonBase>
               <Collapse in={isExpanded}>
                 <Box sx={{ px: 2, pb: 1.5, pt: 0.5 }}>{items[idx]}</Box>
               </Collapse>

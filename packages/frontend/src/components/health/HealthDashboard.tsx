@@ -30,13 +30,13 @@ import Typography from "@mui/material/Typography";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { timeAgo } from "../../time.ts";
-import { BackupRestore } from "../backup/BackupRestore.tsx";
 import { bridgeStatusMessage } from "../bridge/bridge-status-message.ts";
 import { FabricIcon } from "../fabric/FabricIcon.tsx";
 import { getVendorName } from "../fabric/vendor-names.ts";
+import { useNotifications } from "../notifications/use-notifications.ts";
 import { FabricHealthCard } from "./FabricHealthCard.tsx";
 
-type SortField = "name" | "created";
+type SortField = "name" | "priority";
 type SortDirection = "asc" | "desc";
 
 interface BridgeHealthInfo {
@@ -45,6 +45,7 @@ interface BridgeHealthInfo {
   status: string;
   statusReason?: string;
   port: number;
+  priority?: number;
   deviceCount: number;
   fabricCount: number;
   fabrics: Array<{
@@ -144,6 +145,7 @@ export interface HealthDashboardProps {
 
 export function HealthDashboard(props: HealthDashboardProps = {}) {
   const { t } = useTranslation();
+  const notifications = useNotifications();
   const [health, setHealth] = useState<DetailedHealthStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -183,35 +185,46 @@ export function HealthDashboard(props: HealthDashboardProps = {}) {
   const handleDiagnosticExport = useCallback(async () => {
     try {
       const res = await fetch("api/diagnostic/export");
-      if (res.ok) {
-        const blob = await res.blob();
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        const disposition = res.headers.get("Content-Disposition");
-        const filename =
-          disposition?.match(/filename="(.+)"/)?.[1] ??
-          `hamh-diagnostic-${new Date().toISOString().replace(/[:.]/g, "-")}.json`;
-        a.download = filename;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-      }
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      const disposition = res.headers.get("Content-Disposition");
+      const filename =
+        disposition?.match(/filename="(.+)"/)?.[1] ??
+        `hamh-diagnostic-${new Date().toISOString().replace(/[:.]/g, "-")}.json`;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
     } catch {
-      setError(t("health.exportFailed"));
-    }
-  }, [t]);
-
-  const handleRestart = async (bridgeId: string) => {
-    try {
-      await fetch(`api/matter/bridges/${bridgeId}/actions/restart`, {
-        method: "POST",
+      notifications.show({
+        message: t("health.exportFailed"),
+        severity: "error",
       });
-      fetchHealth();
-    } catch {
-      setError(t("health.restartFailed"));
     }
+  }, [notifications, t]);
+
+  const handleRestart = async (bridge: BridgeHealthInfo) => {
+    try {
+      const res = await fetch(
+        `api/matter/bridges/${bridge.id}/actions/restart`,
+        { method: "POST" },
+      );
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      notifications.show({
+        message: t("health.restarting", { name: bridge.name }),
+        severity: "success",
+      });
+    } catch {
+      notifications.show({
+        message: t("health.restartFailed"),
+        severity: "error",
+      });
+    }
+    fetchHealth();
   };
 
   if (loading) {
@@ -222,12 +235,8 @@ export function HealthDashboard(props: HealthDashboardProps = {}) {
     );
   }
 
-  if (error || !health) {
-    return (
-      <Alert severity="error" sx={{ m: 2 }}>
-        {error ?? t("health.unableToLoad")}
-      </Alert>
-    );
+  if (!health) {
+    return <Alert severity="error">{error ?? t("health.unableToLoad")}</Alert>;
   }
 
   const statusIcon =
@@ -239,19 +248,29 @@ export function HealthDashboard(props: HealthDashboardProps = {}) {
       <ErrorIcon color="error" />
     );
 
+  const statusLabels = {
+    healthy: t("health.statusHealthy"),
+    degraded: t("health.statusDegraded"),
+    unhealthy: t("health.statusUnhealthy"),
+  };
+
   return (
-    <Box sx={{ p: 2 }}>
+    <Box>
       <Box
         display="flex"
         alignItems="center"
         justifyContent="space-between"
+        flexWrap="wrap"
+        gap={1}
         mb={2}
       >
         <Box display="flex" alignItems="center" gap={1}>
           {statusIcon}
-          <Typography variant="h5">{t("health.systemHealth")}</Typography>
+          <Typography variant="h5" component="h1">
+            {t("health.systemHealth")}
+          </Typography>
           <Chip
-            label={health.status.toUpperCase()}
+            label={statusLabels[health.status] ?? health.status}
             color={
               health.status === "healthy"
                 ? "success"
@@ -268,20 +287,30 @@ export function HealthDashboard(props: HealthDashboardProps = {}) {
             size="small"
             startIcon={<BugReportIcon />}
             onClick={handleDiagnosticExport}
+            sx={{ whiteSpace: "nowrap" }}
           >
             {t("health.exportDiagnostic")}
           </Button>
           <Tooltip title={t("common.refresh")}>
-            <IconButton onClick={fetchHealth} aria-label="Refresh health data">
+            <IconButton
+              onClick={fetchHealth}
+              aria-label={t("health.refreshHealth")}
+            >
               <RefreshIcon />
             </IconButton>
           </Tooltip>
         </Box>
       </Box>
 
+      {error && (
+        <Alert severity="warning" sx={{ mb: 2 }}>
+          {error}
+        </Alert>
+      )}
+
       <Grid container spacing={2}>
         <Grid size={{ xs: 12, md: 4 }}>
-          <Paper sx={{ p: 2 }}>
+          <Paper variant="outlined" sx={{ p: 2 }}>
             <Typography variant="subtitle2" color="text.secondary">
               {t("health.version")}
             </Typography>
@@ -289,7 +318,7 @@ export function HealthDashboard(props: HealthDashboardProps = {}) {
           </Paper>
         </Grid>
         <Grid size={{ xs: 12, md: 4 }}>
-          <Paper sx={{ p: 2 }}>
+          <Paper variant="outlined" sx={{ p: 2 }}>
             <Typography variant="subtitle2" color="text.secondary">
               {t("health.uptime")}
             </Typography>
@@ -297,7 +326,7 @@ export function HealthDashboard(props: HealthDashboardProps = {}) {
           </Paper>
         </Grid>
         <Grid size={{ xs: 12, md: 4 }}>
-          <Paper sx={{ p: 2 }}>
+          <Paper variant="outlined" sx={{ p: 2 }}>
             <Typography variant="subtitle2" color="text.secondary">
               {t("health.homeAssistant")}
             </Typography>
@@ -345,7 +374,7 @@ export function HealthDashboard(props: HealthDashboardProps = {}) {
               onChange={(e) => setSortField(e.target.value as SortField)}
             >
               <MenuItem value="name">{t("common.name")}</MenuItem>
-              <MenuItem value="created">{t("health.created")}</MenuItem>
+              <MenuItem value="priority">{t("startup.title")}</MenuItem>
             </Select>
           </FormControl>
           <Tooltip
@@ -360,7 +389,11 @@ export function HealthDashboard(props: HealthDashboardProps = {}) {
               onClick={() =>
                 setSortDirection(sortDirection === "asc" ? "desc" : "asc")
               }
-              aria-label={`Sort ${sortDirection === "asc" ? "descending" : "ascending"}`}
+              aria-label={
+                sortDirection === "asc"
+                  ? t("health.ascending")
+                  : t("health.descending")
+              }
             >
               {sortDirection === "asc" ? (
                 <ArrowUpwardIcon fontSize="small" />
@@ -379,7 +412,7 @@ export function HealthDashboard(props: HealthDashboardProps = {}) {
             if (sortField === "name") {
               cmp = a.name.localeCompare(b.name);
             } else {
-              cmp = a.id.localeCompare(b.id);
+              cmp = (a.priority ?? 100) - (b.priority ?? 100);
             }
             return sortDirection === "asc" ? cmp : -cmp;
           })
@@ -432,7 +465,7 @@ export function HealthDashboard(props: HealthDashboardProps = {}) {
                         variant="subtitle1"
                         fontWeight="bold"
                         noWrap
-                        sx={{ maxWidth: 140 }}
+                        title={bridge.name}
                       >
                         {bridge.name}
                       </Typography>
@@ -444,7 +477,9 @@ export function HealthDashboard(props: HealthDashboardProps = {}) {
                       flexShrink={0}
                     >
                       <Chip
-                        label={bridge.status.toUpperCase()}
+                        label={t(`common.${bridge.status}`, {
+                          defaultValue: bridge.status,
+                        })}
                         color={
                           bridge.status === "running"
                             ? "success"
@@ -458,7 +493,8 @@ export function HealthDashboard(props: HealthDashboardProps = {}) {
                         <Tooltip title={t("bridge.restart")}>
                           <IconButton
                             size="small"
-                            onClick={() => handleRestart(bridge.id)}
+                            aria-label={t("bridge.restart")}
+                            onClick={() => handleRestart(bridge)}
                           >
                             <AutorenewIcon />
                           </IconButton>
@@ -491,20 +527,26 @@ export function HealthDashboard(props: HealthDashboardProps = {}) {
                         color="default"
                       />
                       <Chip
-                        label={`${bridge.deviceCount} ${t("common.devices")}`}
+                        label={t("dashboard.deviceCount", {
+                          count: bridge.deviceCount,
+                        })}
                         size="small"
                         variant="outlined"
                         color="default"
                       />
                       <Chip
-                        label={`${bridge.fabricCount} ${t("common.fabrics")}`}
+                        label={t("dashboard.fabricCount", {
+                          count: bridge.fabricCount,
+                        })}
                         size="small"
                         variant="outlined"
                         color="default"
                       />
                       {bridge.failedEntityCount > 0 && (
                         <Chip
-                          label={`${bridge.failedEntityCount} failed`}
+                          label={t("dashboard.devicesFailed", {
+                            count: bridge.failedEntityCount,
+                          })}
                           color="error"
                           size="small"
                         />
@@ -537,19 +579,29 @@ export function HealthDashboard(props: HealthDashboardProps = {}) {
                             key={fabric.fabricIndex}
                             title={
                               <Box sx={{ fontSize: "0.75rem" }}>
-                                <div>Fabric #{fabric.fabricIndex}</div>
                                 <div>
-                                  Vendor: {getVendorName(fabric.rootVendorId)}{" "}
-                                  (0x
+                                  {t("health.fabricIndex", {
+                                    index: fabric.fabricIndex,
+                                  })}
+                                </div>
+                                <div>
+                                  {t("health.vendor")}:{" "}
+                                  {getVendorName(fabric.rootVendorId)} (0x
                                   {fabric.rootVendorId
                                     .toString(16)
                                     .toUpperCase()
                                     .padStart(4, "0")}
                                   )
                                 </div>
-                                <div>Fabric ID: {fabric.fabricId}</div>
-                                <div>Node ID: {fabric.nodeId}</div>
-                                <div>Root Node ID: {fabric.rootNodeId}</div>
+                                <div>
+                                  {t("health.fabricId")}: {fabric.fabricId}
+                                </div>
+                                <div>
+                                  {t("health.nodeId")}: {fabric.nodeId}
+                                </div>
+                                <div>
+                                  {t("health.rootNodeId")}: {fabric.rootNodeId}
+                                </div>
                               </Box>
                             }
                           >
@@ -591,11 +643,7 @@ export function HealthDashboard(props: HealthDashboardProps = {}) {
                         sx={{ mt: 1, flexShrink: 0, py: 0 }}
                       >
                         <Typography variant="caption" component="div">
-                          {t(
-                            "health.failedDevicesTitle",
-                            "Devices that failed to start:",
-                          )}{" "}
-                          ({failed.length})
+                          {t("health.failedDevicesTitle")} ({failed.length})
                         </Typography>
                         <Box sx={{ maxHeight: 160, overflowY: "auto" }}>
                           {failed.map((d) => (
@@ -635,7 +683,10 @@ export function HealthDashboard(props: HealthDashboardProps = {}) {
                               component="div"
                               color="text.secondary"
                             >
-                              {w.entityId} on {w.controllerLabel}
+                              {t("health.controllerWarningEntry", {
+                                entityId: w.entityId,
+                                controller: w.controllerLabel,
+                              })}
                               {w.note ? ` (${w.note})` : ""}
                             </Typography>
                           ))}
@@ -659,7 +710,7 @@ export function HealthDashboard(props: HealthDashboardProps = {}) {
           <Typography variant="body2" color="text.secondary">
             {t("health.recoveryAttempts")}: {health.recovery.recoveryCount}
             {health.recovery.lastRecoveryAttempt &&
-              ` | Last attempt: ${new Date(health.recovery.lastRecoveryAttempt).toLocaleString()}`}
+              ` | ${t("health.lastAttempt")}: ${new Date(health.recovery.lastRecoveryAttempt).toLocaleString()}`}
           </Typography>
           {health.recovery.history && health.recovery.history.length > 0 && (
             <Box sx={{ mt: 1 }}>
@@ -670,16 +721,17 @@ export function HealthDashboard(props: HealthDashboardProps = {}) {
                   component="div"
                   color="text.secondary"
                 >
-                  {timeAgo(h.timestamp)}: {h.bridgeName} ({h.outcome})
+                  {timeAgo(h.timestamp)}: {h.bridgeName} (
+                  {h.outcome === "success"
+                    ? t("health.recoverySucceeded")
+                    : t("common.failed")}
+                  )
                 </Typography>
               ))}
             </Box>
           )}
         </>
       )}
-
-      <Divider sx={{ my: 3 }} />
-      <BackupRestore />
     </Box>
   );
 }

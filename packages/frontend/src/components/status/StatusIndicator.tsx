@@ -1,12 +1,15 @@
 import CheckCircleIcon from "@mui/icons-material/CheckCircle";
 import ErrorIcon from "@mui/icons-material/Error";
 import SyncIcon from "@mui/icons-material/Sync";
+import WarningIcon from "@mui/icons-material/Warning";
 import Box from "@mui/material/Box";
-import Chip from "@mui/material/Chip";
+import Chip, { type ChipProps } from "@mui/material/Chip";
 import Tooltip from "@mui/material/Tooltip";
-import { useEffect, useState } from "react";
+import { type ReactElement, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { Link } from "react-router";
 import { useWebSocketStatus } from "../../contexts/WebSocketContext.tsx";
+import { navigation } from "../../routes.tsx";
 
 interface HealthStatus {
   status: "healthy" | "degraded" | "unhealthy";
@@ -26,16 +29,18 @@ interface HealthStatus {
 
 export function StatusIndicator() {
   const { t } = useTranslation();
-  const { isConnected: wsConnected } = useWebSocketStatus();
+  const { isConnected: wsConnected, closedOnce } = useWebSocketStatus();
   const [health, setHealth] = useState<HealthStatus | null>(null);
   const [healthError, setHealthError] = useState(false);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: refetch when the socket drops or comes back
   useEffect(() => {
     const fetchHealth = async () => {
       try {
         // Use relative URL to support Home Assistant ingress
         const res = await fetch("api/health");
-        if (res.ok) {
+        // unhealthy answers 503 but still sends the status body
+        if (res.ok || res.status === 503) {
           const data = (await res.json()) as HealthStatus;
           setHealth(data);
           setHealthError(false);
@@ -50,7 +55,7 @@ export function StatusIndicator() {
     fetchHealth();
     const interval = setInterval(fetchHealth, 30000);
     return () => clearInterval(interval);
-  }, []);
+  }, [wsConnected]);
 
   const formatUptime = (seconds: number): string => {
     const hours = Math.floor(seconds / 3600);
@@ -61,13 +66,14 @@ export function StatusIndicator() {
     return `${minutes}m`;
   };
 
-  const isHealthy = health?.status === "healthy" && !healthError;
   const bridges = health?.services?.bridges;
   const allBridgesRunning =
     bridges && bridges.total > 0 && bridges.running === bridges.total;
   const noBridgesConfigured = bridges && bridges.total === 0;
 
-  const tooltipContent = health ? (
+  const tooltipContent = healthError ? (
+    t("health.connectionError")
+  ) : health ? (
     <Box sx={{ p: 0.5 }}>
       <div>
         <strong>{t("health.version")}:</strong>{" "}
@@ -104,51 +110,48 @@ export function StatusIndicator() {
     t("status.loadingHealth")
   );
 
-  const getStatusIcon = () => {
-    if (healthError || !isHealthy) {
-      return <ErrorIcon fontSize="small" />;
-    }
-    if (!allBridgesRunning) {
-      return <SyncIcon fontSize="small" />;
-    }
-    return <CheckCircleIcon fontSize="small" />;
-  };
-
-  const getStatusColor = (): "success" | "warning" | "error" => {
-    if (healthError || !isHealthy) {
-      return "error";
-    }
-    if (!allBridgesRunning || !wsConnected) {
-      return "warning";
-    }
-    return "success";
-  };
-
-  const getStatusLabel = (): string => {
-    if (healthError) {
-      return t("status.error");
-    }
-    if (!isHealthy) {
-      return t("status.unhealthy");
-    }
-    if (!wsConnected) {
-      return t("common.offline");
-    }
-    if (noBridgesConfigured) {
-      return t("status.noBridges");
-    }
-    if (!allBridgesRunning) {
-      return t("common.starting");
-    }
-    return t("common.online");
-  };
+  let color: ChipProps["color"] = "success";
+  let icon: ReactElement = <CheckCircleIcon fontSize="small" />;
+  let label = t("common.online");
+  if (healthError) {
+    color = "error";
+    icon = <ErrorIcon fontSize="small" />;
+    label = t("status.error");
+  } else if (!health) {
+    color = "default";
+    icon = <SyncIcon fontSize="small" />;
+    label = t("common.loading");
+  } else if (health.status === "unhealthy") {
+    color = "error";
+    icon = <ErrorIcon fontSize="small" />;
+    label = t("status.unhealthy");
+  } else if (closedOnce && !wsConnected) {
+    color = "warning";
+    icon = <SyncIcon fontSize="small" />;
+    label = t("common.offline");
+  } else if (health.status === "degraded") {
+    color = "warning";
+    icon = <WarningIcon fontSize="small" />;
+    label = t("status.degraded");
+  } else if (noBridgesConfigured) {
+    color = "warning";
+    icon = <SyncIcon fontSize="small" />;
+    label = t("status.noBridges");
+  } else if (!allBridgesRunning) {
+    color = "warning";
+    icon = <SyncIcon fontSize="small" />;
+    label = t("common.starting");
+  }
 
   return (
     <Tooltip title={tooltipContent} arrow>
       <Chip
-        icon={getStatusIcon()}
-        label={getStatusLabel()}
-        color={getStatusColor()}
+        component={Link}
+        to={navigation.health}
+        clickable
+        icon={icon}
+        label={label}
+        color={color}
         size="small"
         variant="filled"
         sx={{

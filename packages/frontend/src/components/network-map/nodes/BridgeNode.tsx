@@ -5,9 +5,10 @@ import HourglassEmptyIcon from "@mui/icons-material/HourglassEmpty";
 import StopCircleIcon from "@mui/icons-material/StopCircle";
 import Box from "@mui/material/Box";
 import Chip from "@mui/material/Chip";
-import { useColorScheme } from "@mui/material/styles";
+import { useTheme } from "@mui/material/styles";
 import Typography from "@mui/material/Typography";
 import { Handle, type NodeProps, Position } from "@xyflow/react";
+import { useTranslation } from "react-i18next";
 
 export interface BridgeNodeData {
   label: string;
@@ -59,8 +60,8 @@ function getStatusConfig(isDark: boolean): Record<string, StatusStyle> {
 export const BridgeNode = ({ data }: NodeProps) => {
   const { label, status, port, deviceCount, failedCount, fabricCount } =
     data as unknown as BridgeNodeData;
-  const { mode } = useColorScheme();
-  const isDark = mode === "dark";
+  const { t } = useTranslation();
+  const isDark = useTheme().palette.mode === "dark";
   const statusCfg = getStatusConfig(isDark);
   const config = statusCfg[status] ?? statusCfg.stopped;
   const { Icon } = config;
@@ -106,18 +107,18 @@ export const BridgeNode = ({ data }: NodeProps) => {
       </Box>
 
       <Typography variant="caption" color="text.secondary" display="block">
-        Port {port}
+        {t("common.port")} {port}
       </Typography>
 
       <Box sx={{ display: "flex", gap: 0.5, mt: 0.5, flexWrap: "wrap" }}>
         <Chip
-          label={`${deviceCount} devices`}
+          label={t("dashboard.deviceCount", { count: deviceCount })}
           size="small"
           sx={{ fontSize: "0.65rem", height: 20 }}
         />
         {fabricCount > 0 && (
           <Chip
-            label={`${fabricCount} fabrics`}
+            label={t("dashboard.fabricCount", { count: fabricCount })}
             size="small"
             color="primary"
             variant="outlined"
@@ -126,7 +127,7 @@ export const BridgeNode = ({ data }: NodeProps) => {
         )}
         {failedCount > 0 && (
           <Chip
-            label={`${failedCount} failed`}
+            label={t("dashboard.devicesFailed", { count: failedCount })}
             size="small"
             color="error"
             sx={{ fontSize: "0.65rem", height: 20 }}

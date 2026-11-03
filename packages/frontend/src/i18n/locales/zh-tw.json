@@ -171,7 +171,9 @@
     "bridgeStatusRunning": "{{running}} 個運作中",
     "bridgeStatusFailed": "{{failed}} 個異常",
     "devicesFailed": "{{count}} 個失敗",
-    "uptimeFormat": "{{time}}"
+    "uptimeFormat": "{{time}}",
+    "deviceCount": "{{count}} 裝置",
+    "fabricCount": "{{count}} Fabrics"
   },
   "bridge": {
     "name": "橋接器名稱",
@@ -389,7 +391,8 @@
     "sortType": "類型",
     "sortName": "名稱",
     "deviceCount": "{{count}} 個裝置",
-    "filteredCount": "{{total}} 個裝置中的 {{filtered}} 個"
+    "filteredCount": "{{total}} 個裝置中的 {{filtered}} 個",
+    "fabricCount": "{{count}} Fabrics"
   },
   "diagnostics": {
     "title": "即時事件",

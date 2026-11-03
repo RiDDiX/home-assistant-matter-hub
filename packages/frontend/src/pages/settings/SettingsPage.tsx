@@ -12,7 +12,7 @@ import Divider from "@mui/material/Divider";
 import TextField from "@mui/material/TextField";
 import Typography from "@mui/material/Typography";
 import { useCallback, useEffect, useState } from "react";
-import { useTranslation } from "react-i18next";
+import { Trans, useTranslation } from "react-i18next";
 import {
   deleteAuthSettings,
   fetchAuthSettings,
@@ -69,9 +69,7 @@ export const SettingsPage = () => {
       const response = await updateAuthSettings(username.trim(), password);
       setAuthState(response);
       setPassword("");
-      setSuccess(
-        "Authentication enabled. The browser will prompt you to log in on the next request.",
-      );
+      setSuccess(t("settings.authEnabled"));
     } catch (err) {
       setError(
         err instanceof Error ? err.message : t("settings.authSaveFailed"),
@@ -106,11 +104,13 @@ export const SettingsPage = () => {
   const isEnvConfigured = authState?.source === "environment";
 
   return (
-    <Box sx={{ p: 2 }}>
-      <Typography variant="h5" component="h1" sx={{ mb: 3 }}>
-        <SettingsIcon sx={{ mr: 1, verticalAlign: "middle" }} />
-        {t("settings.title")}
-      </Typography>
+    <Box>
+      <Box display="flex" alignItems="center" gap={2} mb={3}>
+        <SettingsIcon color="primary" fontSize="large" />
+        <Typography variant="h5" component="h1">
+          {t("settings.title")}
+        </Typography>
+      </Box>
 
       <BackupRestore />
 
@@ -135,15 +135,15 @@ export const SettingsPage = () => {
               <SecurityIcon
                 sx={{ mr: 1, verticalAlign: "middle", fontSize: 20 }}
               />
-              {t("settings.title")}
+              {t("settings.authTitle")}
             </Typography>
 
             {isEnvConfigured && (
               <Alert severity="info" sx={{ mb: 2 }}>
-                Authentication is configured via environment variables (
-                <code>HAMH_HTTP_AUTH_USERNAME</code> /{" "}
-                <code>HAMH_HTTP_AUTH_PASSWORD</code>). Remove the environment
-                variables to manage authentication from here.
+                <Trans
+                  i18nKey="settings.authFromEnv"
+                  components={{ code: <code /> }}
+                />
               </Alert>
             )}
 
@@ -161,9 +161,7 @@ export const SettingsPage = () => {
 
             {authState?.enabled && !isEnvConfigured && (
               <Alert severity="info" sx={{ mb: 2 }}>
-                Authentication is currently enabled for user &quot;
-                {authState.username}&quot;. Enter a new password to change it,
-                or remove authentication entirely.
+                {t("settings.authEnabledFor", { username: authState.username })}
               </Alert>
             )}
 
@@ -223,17 +221,17 @@ export const SettingsPage = () => {
                     disabled={saving}
                     startIcon={<DeleteIcon />}
                   >
-                    {t("common.disabled")}
+                    {t("settings.disableAuth")}
                   </Button>
                 )}
               </Box>
             </Box>
 
             <Alert severity="warning" sx={{ mt: 3 }}>
-              If you get locked out, delete the settings from the storage
-              directory or set <code>HAMH_HTTP_AUTH_USERNAME</code> /{" "}
-              <code>HAMH_HTTP_AUTH_PASSWORD</code> environment variables in your
-              Docker Compose file to regain access.
+              <Trans
+                i18nKey="settings.authLockedOut"
+                components={{ code: <code /> }}
+              />
             </Alert>
           </CardContent>
         </Card>
@@ -243,6 +241,7 @@ export const SettingsPage = () => {
         title={t("settings.disableAuth")}
         message={t("settings.disableAuthMessage")}
         confirmLabel={t("settings.disableAuthConfirm")}
+        cancelLabel={t("common.cancel")}
         confirmColor="error"
         onConfirm={handleRemove}
         onCancel={() => setConfirmDisableAuth(false)}

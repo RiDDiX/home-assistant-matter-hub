@@ -53,6 +53,16 @@ export async function resetBridge(bridgeId: string) {
   return parseJsonResponse<BridgeDataWithMetadata>(res);
 }
 
+export async function startStopBridge(
+  bridgeId: string,
+  action: "start" | "stop",
+) {
+  const res = await fetch(`api/matter/bridges/${bridgeId}/actions/${action}`, {
+    method: "POST",
+  });
+  await assertOk(res, action === "start" ? "Start failed" : "Stop failed");
+}
+
 export interface OrphanCandidate {
   // Identity key for an "identity" row, mapping entityId for a "mapping" row.
   identityKey: string;

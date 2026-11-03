@@ -90,6 +90,10 @@ export const appTheme = createTheme({
         switchBase: { "&.Mui-focusVisible": { outlineOffset: -2 } },
       },
     },
+    MuiTypography: {
+      // MUI maps these to h6, which turns help texts into headings
+      defaultProps: { variantMapping: { subtitle1: "p", subtitle2: "p" } },
+    },
     MuiButton: {
       defaultProps: { disableElevation: true },
     },
@@ -117,7 +121,12 @@ export const appTheme = createTheme({
       styleOverrides: { root: { "&::before": { display: "none" } } },
     },
     MuiDialog: {
-      styleOverrides: { paper: { borderRadius: 12 } },
+      styleOverrides: {
+        paper: {
+          borderRadius: 12,
+          "&.MuiDialog-paperFullScreen": { borderRadius: 0 },
+        },
+      },
     },
     MuiChip: {
       styleOverrides: { root: { fontWeight: 500 } },

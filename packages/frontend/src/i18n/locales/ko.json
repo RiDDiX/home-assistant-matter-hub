@@ -171,7 +171,9 @@
     "bridgeStatusRunning": "{{running}}개 실행 중",
     "bridgeStatusFailed": "{{failed}}개 실패",
     "devicesFailed": "{{count}}개 실패",
-    "uptimeFormat": "{{time}}"
+    "uptimeFormat": "{{time}}",
+    "deviceCount": "{{count}} 기기",
+    "fabricCount": "{{count}} 패브릭"
   },
   "bridge": {
     "name": "브리지 이름",
@@ -402,7 +404,8 @@
     "sortType": "기기 유형",
     "sortName": "이름",
     "deviceCount": "기기 {{count}}개",
-    "filteredCount": "전체 {{total}}개 중 {{filtered}}개"
+    "filteredCount": "전체 {{total}}개 중 {{filtered}}개",
+    "fabricCount": "{{count}} 패브릭"
   },
   "diagnostics": {
     "title": "실시간 진단",

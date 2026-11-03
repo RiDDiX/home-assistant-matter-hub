@@ -55,7 +55,8 @@ interface DeviceInfo {
   endpoint: EndpointData;
 }
 
-const PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
+// multiples of 12 fill the 1, 2 and 3 column grids
+const PAGE_SIZE_OPTIONS = [12, 24, 48, 96];
 const PAGE_SIZE_KEY = "hamh-devices-page-size";
 
 interface FailedEntityInfo extends FailedEntity {
@@ -65,7 +66,11 @@ interface FailedEntityInfo extends FailedEntity {
 export const DevicesPage = () => {
   const { t } = useTranslation();
   const dispatch = useAppDispatch();
-  const { content: bridges, isLoading: bridgesLoading } = useBridges();
+  const {
+    content: bridges,
+    isInitialized: bridgesInitialized,
+    error: bridgesError,
+  } = useBridges();
   const [searchParams, setSearchParams] = useSearchParams();
   const showFailed = searchParams.get("showFailed") === "true";
   const [searchTerm, setSearchTerm] = useState("");
@@ -177,8 +182,15 @@ export const DevicesPage = () => {
     refreshImages();
   }, [refreshImages]);
 
+  // spin only while there is nothing to show yet
   const isLoading =
-    bridgesLoading || (bridges && bridges.length > 0 && devices.length === 0);
+    (!bridgesInitialized && !bridgesError) ||
+    (devices.length === 0 &&
+      (bridges ?? []).some((b) => !allDeviceStates[b.id]?.isInitialized));
+
+  const failedBridgeNames = (bridges ?? [])
+    .filter((b) => allDeviceStates[b.id]?.error)
+    .map((b) => b.name);
 
   // Collect failed entities from all bridges
   const failedEntities = useMemo<FailedEntityInfo[]>(() => {
@@ -253,10 +265,15 @@ export const DevicesPage = () => {
   // Pagination
   const totalPages =
     itemsPerPage === 0 ? 1 : Math.ceil(sortedDevices.length / itemsPerPage);
+  // filters can shrink the list below the current page
+  const currentPage = Math.min(page, Math.max(totalPages, 1));
   const paginatedDevices =
     itemsPerPage === 0
       ? sortedDevices
-      : sortedDevices.slice((page - 1) * itemsPerPage, page * itemsPerPage);
+      : sortedDevices.slice(
+          (currentPage - 1) * itemsPerPage,
+          currentPage * itemsPerPage,
+        );
 
   // Get unique device types (always sorted alphabetically)
   const deviceTypes = useMemo(() => {
@@ -287,12 +304,18 @@ export const DevicesPage = () => {
           (m) => m.entityId === entityId,
         );
         setCurrentMapping(existingMapping);
-      } catch {
-        setCurrentMapping(undefined);
+      } catch (error) {
+        // a blank dialog would overwrite the stored mapping on save
+        setSnackbar({
+          open: true,
+          message: `${t("mapping.loadFailed")}: ${error instanceof Error ? error.message : String(error)}`,
+          severity: "error",
+        });
+        return;
       }
       setMappingDialogOpen(true);
     },
-    [],
+    [t],
   );
 
   const handleSaveMapping = useCallback(
@@ -313,7 +336,9 @@ export const DevicesPage = () => {
       } catch (error) {
         setSnackbar({
           open: true,
-          message: t("mapping.saveFailed", { error: String(error) }),
+          message: t("mapping.saveFailed", {
+            error: error instanceof Error ? error.message : String(error),
+          }),
           severity: "error",
         });
       }
@@ -331,29 +356,50 @@ export const DevicesPage = () => {
 
   return (
     <Box sx={{ p: 2 }}>
-      <Typography
-        variant="h4"
-        gutterBottom
-        sx={{ display: "flex", alignItems: "center", gap: 2 }}
+      <Box
+        display="flex"
+        alignItems="center"
+        flexWrap="wrap"
+        gap={2}
+        sx={{ mb: 2 }}
       >
-        <DevicesIcon />
-        {t("nav.devices")}
+        <DevicesIcon color="primary" fontSize="large" />
+        <Typography variant="h5" component="h1" flexGrow={1}>
+          {t("nav.devices")}
+        </Typography>
         <Button
           variant="outlined"
           startIcon={<RefreshIcon />}
           onClick={handleRefresh}
-          sx={{ ml: "auto" }}
         >
           {t("common.refresh")}
         </Button>
-      </Typography>
+      </Box>
+
+      {bridgesError && (
+        <Alert severity="error" sx={{ mb: 3 }}>
+          {t("bridge.couldNotLoad")}
+          {bridgesError.message ? `: ${bridgesError.message}` : ""}
+        </Alert>
+      )}
+
+      {failedBridgeNames.length > 0 && (
+        <Alert severity="error" sx={{ mb: 3 }}>
+          {t("devices.loadFailed", { bridges: failedBridgeNames.join(", ") })}
+        </Alert>
+      )}
 
       {showFailed && failedEntities.length > 0 && (
         <Alert
           severity="warning"
           sx={{ mb: 3 }}
           action={
-            <IconButton size="small" color="inherit" onClick={dismissFailed}>
+            <IconButton
+              size="small"
+              color="inherit"
+              onClick={dismissFailed}
+              aria-label={t("common.close")}
+            >
               <CloseIcon fontSize="small" />
             </IconButton>
           }
@@ -361,7 +407,6 @@ export const DevicesPage = () => {
           <Typography variant="body2" fontWeight="bold" gutterBottom>
             {t("devices.failedEntitiesTitle", {
               count: failedEntities.length,
-              defaultValue: `${failedEntities.length} failed entities`,
             })}
           </Typography>
           <List dense disablePadding>
@@ -390,16 +435,18 @@ export const DevicesPage = () => {
           severity="success"
           sx={{ mb: 3 }}
           action={
-            <IconButton size="small" color="inherit" onClick={dismissFailed}>
+            <IconButton
+              size="small"
+              color="inherit"
+              onClick={dismissFailed}
+              aria-label={t("common.close")}
+            >
               <CloseIcon fontSize="small" />
             </IconButton>
           }
         >
           <Typography variant="body2">
-            {t("devices.noFailedEntities", {
-              defaultValue:
-                "No failed entities, all devices loaded successfully.",
-            })}
+            {t("devices.noFailedEntities")}
           </Typography>
         </Alert>
       )}
@@ -420,8 +467,11 @@ export const DevicesPage = () => {
             />
 
             <FormControl sx={{ minWidth: 200 }}>
-              <InputLabel>{t("devices.filterBridge")}</InputLabel>
+              <InputLabel id="devices-bridge-label">
+                {t("devices.filterBridge")}
+              </InputLabel>
               <Select
+                labelId="devices-bridge-label"
                 value={selectedBridge}
                 label={t("devices.filterBridge")}
                 onChange={(e) => setSelectedBridge(e.target.value)}
@@ -436,8 +486,11 @@ export const DevicesPage = () => {
             </FormControl>
 
             <FormControl sx={{ minWidth: 200 }}>
-              <InputLabel>{t("devices.filterDeviceType")}</InputLabel>
+              <InputLabel id="devices-type-label">
+                {t("devices.filterDeviceType")}
+              </InputLabel>
               <Select
+                labelId="devices-type-label"
                 value={selectedType}
                 label={t("devices.filterDeviceType")}
                 onChange={(e) => setSelectedType(e.target.value)}
@@ -452,8 +505,11 @@ export const DevicesPage = () => {
             </FormControl>
 
             <FormControl sx={{ minWidth: 150 }}>
-              <InputLabel>{t("devices.sortBy")}</InputLabel>
+              <InputLabel id="devices-sort-label">
+                {t("devices.sortBy")}
+              </InputLabel>
               <Select
+                labelId="devices-sort-label"
                 value={sortBy}
                 label={t("devices.sortBy")}
                 onChange={(e) =>
@@ -478,6 +534,11 @@ export const DevicesPage = () => {
                   setSortDirection((prev) => (prev === "asc" ? "desc" : "asc"))
                 }
                 color="primary"
+                aria-label={
+                  sortDirection === "asc"
+                    ? t("common.ascending")
+                    : t("common.descending")
+                }
               >
                 {sortDirection === "asc" ? (
                   <ArrowUpwardIcon />
@@ -518,116 +579,124 @@ export const DevicesPage = () => {
       </Grid>
 
       {/* Pagination & Page Size */}
-      <Box
-        sx={{
-          display: "flex",
-          justifyContent: "center",
-          alignItems: "center",
-          mt: 3,
-          gap: 2,
-          flexWrap: "wrap",
-        }}
-      >
-        <Stack direction="row" spacing={1} alignItems="center">
-          <Typography
-            variant="body2"
-            color="text.secondary"
-            sx={{ whiteSpace: "nowrap" }}
-          >
-            Per page:
-          </Typography>
-          <Select
-            value={
-              itemsPerPage === 0
-                ? "all"
-                : PAGE_SIZE_OPTIONS.includes(itemsPerPage)
-                  ? String(itemsPerPage)
-                  : ""
-            }
-            onChange={(e) => {
-              const val = e.target.value;
-              setCustomPageSize("");
-              if (val === "all") {
-                setItemsPerPage(0);
-              } else {
-                setItemsPerPage(parseInt(val, 10));
+      {filteredDevices.length > 0 && (
+        <Box
+          sx={{
+            display: "flex",
+            justifyContent: "center",
+            alignItems: "center",
+            mt: 3,
+            gap: 2,
+            flexWrap: "wrap",
+          }}
+        >
+          <Stack direction="row" spacing={1} alignItems="center">
+            <Typography
+              id="devices-per-page-label"
+              variant="body2"
+              color="text.secondary"
+              sx={{ whiteSpace: "nowrap" }}
+            >
+              {t("devices.perPage")}
+            </Typography>
+            <Select
+              labelId="devices-per-page-label"
+              value={
+                itemsPerPage === 0
+                  ? "all"
+                  : PAGE_SIZE_OPTIONS.includes(itemsPerPage)
+                    ? String(itemsPerPage)
+                    : ""
               }
-            }}
-            displayEmpty
-            renderValue={(value) => {
-              if (value === "all") return t("common.all");
-              if (value === "") return String(itemsPerPage);
-              return value;
-            }}
-            size="small"
-            sx={{ minWidth: 80 }}
-          >
-            {PAGE_SIZE_OPTIONS.map((opt) => (
-              <MenuItem key={opt} value={String(opt)}>
-                {opt}
-              </MenuItem>
-            ))}
-            <MenuItem value="all">{t("common.all")}</MenuItem>
-          </Select>
-          <TextField
-            size="small"
-            type="number"
-            placeholder={t("common.custom")}
-            value={customPageSize}
-            onChange={(e) => setCustomPageSize(e.target.value)}
-            onBlur={() => {
-              const num = parseInt(customPageSize, 10);
-              if (num > 0) {
-                setItemsPerPage(num);
-              }
-              setCustomPageSize("");
-            }}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
+              onChange={(e) => {
+                const val = e.target.value;
+                setCustomPageSize("");
+                if (val === "all") {
+                  setItemsPerPage(0);
+                } else {
+                  setItemsPerPage(parseInt(val, 10));
+                }
+              }}
+              displayEmpty
+              renderValue={(value) => {
+                if (value === "all") return t("common.all");
+                if (value === "") return String(itemsPerPage);
+                return value;
+              }}
+              size="small"
+              sx={{ minWidth: 80 }}
+            >
+              {PAGE_SIZE_OPTIONS.map((opt) => (
+                <MenuItem key={opt} value={String(opt)}>
+                  {opt}
+                </MenuItem>
+              ))}
+              <MenuItem value="all">{t("common.all")}</MenuItem>
+            </Select>
+            <TextField
+              size="small"
+              type="number"
+              placeholder="#"
+              value={customPageSize}
+              onChange={(e) => setCustomPageSize(e.target.value)}
+              onBlur={() => {
                 const num = parseInt(customPageSize, 10);
                 if (num > 0) {
                   setItemsPerPage(num);
                 }
                 setCustomPageSize("");
-              }
-            }}
-            slotProps={{
-              htmlInput: { min: 1, style: { textAlign: "center" } },
-            }}
-            sx={{ width: 80 }}
-          />
-        </Stack>
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  const num = parseInt(customPageSize, 10);
+                  if (num > 0) {
+                    setItemsPerPage(num);
+                  }
+                  setCustomPageSize("");
+                }
+              }}
+              slotProps={{
+                htmlInput: {
+                  min: 1,
+                  style: { textAlign: "center" },
+                  "aria-label": t("devices.customPageSize"),
+                },
+              }}
+              sx={{ width: 96 }}
+            />
+          </Stack>
 
-        {totalPages > 1 && (
-          <Pagination
-            count={totalPages}
-            page={page}
-            onChange={(_, newPage) => setPage(newPage)}
-            color="primary"
-          />
-        )}
+          {totalPages > 1 && (
+            <Pagination
+              count={totalPages}
+              page={currentPage}
+              onChange={(_, newPage) => setPage(newPage)}
+              color="primary"
+            />
+          )}
 
-        <Typography
-          variant="body2"
-          color="text.secondary"
-          sx={{ whiteSpace: "nowrap" }}
-        >
-          {filteredDevices.length === devices.length
-            ? t("devices.deviceCount", { count: devices.length })
-            : t("devices.filteredCount", {
-                filtered: filteredDevices.length,
-                total: devices.length,
-              })}
-        </Typography>
-      </Box>
+          <Typography
+            variant="body2"
+            color="text.secondary"
+            sx={{ whiteSpace: "nowrap" }}
+          >
+            {filteredDevices.length === devices.length
+              ? t("devices.deviceCount", { count: devices.length })
+              : t("devices.filteredCount", {
+                  filtered: filteredDevices.length,
+                  total: devices.length,
+                })}
+          </Typography>
+        </Box>
+      )}
 
       {filteredDevices.length === 0 && (
         <Box sx={{ textAlign: "center", py: 8 }}>
           <Typography variant="h6" color="text.secondary">
-            No devices found
+            {t("devices.noneFound")}
           </Typography>
           <Typography variant="body2" color="text.secondary">
-            Try adjusting your filters or check if any bridges are running
+            {t("devices.noneFoundHint")}
           </Typography>
         </Box>
       )}

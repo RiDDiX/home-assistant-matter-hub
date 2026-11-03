@@ -171,7 +171,9 @@
     "bridgeStatusRunning": "{{running}} em execução",
     "bridgeStatusFailed": "{{failed}} com falha",
     "devicesFailed": "{{count}} com falha",
-    "uptimeFormat": "{{time}}"
+    "uptimeFormat": "{{time}}",
+    "deviceCount": "{{count}} Dispositivos",
+    "fabricCount": "{{count}} Fabrics"
   },
   "bridge": {
     "name": "Nome",
@@ -389,7 +391,8 @@
     "sortType": "Tipo",
     "sortName": "Nome",
     "deviceCount": "{{count}} dispositivo(s)",
-    "filteredCount": "{{filtered}} de {{total}} dispositivos"
+    "filteredCount": "{{filtered}} de {{total}} dispositivos",
+    "fabricCount": "{{count}} Fabrics"
   },
   "diagnostics": {
     "title": "Eventos em Tempo Real",

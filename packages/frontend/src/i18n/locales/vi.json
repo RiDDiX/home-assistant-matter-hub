@@ -171,7 +171,9 @@
     "bridgeStatusRunning": "{{running}} đang chạy",
     "bridgeStatusFailed": "{{failed}} gặp sự cố",
     "devicesFailed": "{{count}} gặp sự cố",
-    "uptimeFormat": "{{time}}"
+    "uptimeFormat": "{{time}}",
+    "deviceCount": "{{count}} Thiết bị",
+    "fabricCount": "{{count}} Fabric"
   },
   "bridge": {
     "name": "Tên Bridge",
@@ -402,7 +404,8 @@
     "sortType": "Loại thiết bị",
     "sortName": "Tên",
     "deviceCount": "{{count}} thiết bị",
-    "filteredCount": "{{filtered}} trên tổng số {{total}} thiết bị"
+    "filteredCount": "{{filtered}} trên tổng số {{total}} thiết bị",
+    "fabricCount": "{{count}} Fabric"
   },
   "diagnostics": {
     "title": "Chẩn đoán trực tiếp",

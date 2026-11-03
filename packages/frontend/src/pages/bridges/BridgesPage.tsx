@@ -9,6 +9,7 @@ import {
   Stop,
   Upload,
 } from "@mui/icons-material";
+import Alert from "@mui/material/Alert";
 import Backdrop from "@mui/material/Backdrop";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
@@ -28,6 +29,7 @@ import {
 import { BridgeImportDialog } from "../../components/bridge/BridgeImportDialog.js";
 import { BridgeList } from "../../components/bridge/BridgeList";
 import { BridgeWizard } from "../../components/bridge/BridgeWizard.js";
+import { ConfirmDialog } from "../../components/misc/ConfirmDialog.tsx";
 import { useNotifications } from "../../components/notifications/use-notifications.ts";
 import { useBridges } from "../../hooks/data/bridges";
 import { navigation } from "../../routes.tsx";
@@ -44,6 +46,9 @@ export const BridgesPage = () => {
   const [importDialogOpen, setImportDialogOpen] = useState(false);
   const [wizardOpen, setWizardOpen] = useState(false);
   const [bulkLoading, setBulkLoading] = useState(false);
+  const [pendingBulk, setPendingBulk] = useState<"stop" | "restart" | null>(
+    null,
+  );
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleExport = useCallback(async () => {
@@ -139,23 +144,30 @@ export const BridgesPage = () => {
       </Backdrop>
 
       <Stack spacing={4}>
+        <Stack spacing={2}>
+          <Box display="flex" alignItems="center" gap={2}>
+            <Hub color="primary" fontSize="large" />
+            <Typography variant="h5" component="h1" flexGrow={1}>
+              {t("nav.bridges")}
+            </Typography>
+            <Button
+              component={Link}
+              to={navigation.createBridge}
+              startIcon={<Add />}
+              variant="contained"
+            >
+              {t("dashboard.createBridge")}
+            </Button>
+          </Box>
+          {!bridges && bridgeError && (
+            <Alert severity="error">
+              {bridgeError.message ?? t("bridge.couldNotLoad")}
+            </Alert>
+          )}
+        </Stack>
         {bridges && (
           <>
             <Stack spacing={2}>
-              <Box display="flex" alignItems="center" gap={2}>
-                <Hub color="primary" fontSize="large" />
-                <Typography variant="h5" component="h1" flexGrow={1}>
-                  {t("nav.bridges")}
-                </Typography>
-                <Button
-                  component={Link}
-                  to={navigation.createBridge}
-                  startIcon={<Add />}
-                  variant="contained"
-                >
-                  {t("dashboard.createBridge")}
-                </Button>
-              </Box>
               <Box display="flex" alignItems="center" flexWrap="wrap" gap={1}>
                 {bridges.length >= 1 && (
                   <>
@@ -170,7 +182,7 @@ export const BridgesPage = () => {
                       {t("common.startAll")}
                     </Button>
                     <Button
-                      onClick={() => handleBulkAction("stop")}
+                      onClick={() => setPendingBulk("stop")}
                       startIcon={<Stop />}
                       variant="outlined"
                       size="small"
@@ -180,7 +192,7 @@ export const BridgesPage = () => {
                       {t("common.stopAll")}
                     </Button>
                     <Button
-                      onClick={() => handleBulkAction("restart")}
+                      onClick={() => setPendingBulk("restart")}
                       startIcon={<RestartAlt />}
                       variant="outlined"
                       size="small"
@@ -189,7 +201,11 @@ export const BridgesPage = () => {
                     >
                       {t("common.restartAll")}
                     </Button>
-                    <Divider orientation="vertical" flexItem />
+                    <Divider
+                      orientation="vertical"
+                      flexItem
+                      sx={{ display: { xs: "none", sm: "block" } }}
+                    />
                   </>
                 )}
                 <Button
@@ -236,10 +252,41 @@ export const BridgesPage = () => {
               </Box>
             </Stack>
 
-            <BridgeList bridges={bridges} />
+            {bridges.length === 0 ? (
+              <Alert severity="info">{t("dashboard.noBridgesHint")}</Alert>
+            ) : (
+              <BridgeList bridges={bridges} />
+            )}
           </>
         )}
       </Stack>
+
+      <ConfirmDialog
+        open={pendingBulk === "stop"}
+        title={t("bridge.confirmStopAllTitle")}
+        message={t("bridge.confirmStopAllMessage")}
+        confirmLabel={t("common.stopAll")}
+        cancelLabel={t("common.cancel")}
+        confirmColor="error"
+        onConfirm={() => {
+          setPendingBulk(null);
+          handleBulkAction("stop");
+        }}
+        onCancel={() => setPendingBulk(null)}
+      />
+      <ConfirmDialog
+        open={pendingBulk === "restart"}
+        title={t("bridge.confirmRestartAllTitle")}
+        message={t("bridge.confirmRestartAllMessage")}
+        confirmLabel={t("common.restartAll")}
+        cancelLabel={t("common.cancel")}
+        confirmColor="warning"
+        onConfirm={() => {
+          setPendingBulk(null);
+          handleBulkAction("restart");
+        }}
+        onCancel={() => setPendingBulk(null)}
+      />
 
       <BridgeImportDialog
         open={importDialogOpen}

@@ -13,7 +13,7 @@ import { SystemInfo } from "../../components/system/SystemInfo.tsx";
 import { LiveEventLog } from "../diagnostics/DiagnosticsPage.tsx";
 
 export const HealthPage = () => {
-  const [sortField, setSortField] = useState<"name" | "created">("name");
+  const [sortField, setSortField] = useState<"name" | "priority">("name");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
   const { t } = useTranslation();
 

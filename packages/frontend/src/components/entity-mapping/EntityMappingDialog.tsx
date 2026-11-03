@@ -111,7 +111,7 @@ interface EntityMappingDialogProps {
   entityId: string;
   domain: string;
   currentMapping?: EntityMappingConfig;
-  onSave: (config: Partial<EntityMappingConfig>) => void;
+  onSave: (config: Partial<EntityMappingConfig>) => void | Promise<void>;
   onClose: () => void;
 }
 
@@ -205,6 +205,7 @@ export function EntityMappingDialog({
   >([]);
   const [availableButtons, setAvailableButtons] = useState<RelatedButton[]>([]);
   const [loadingButtons, setLoadingButtons] = useState(false);
+  const [saving, setSaving] = useState(false);
 
   const isNewMapping = !entityId;
   const [customFanSpeedTagsList, setCustomFanSpeedTagsList] = useState<
@@ -385,7 +386,7 @@ export function EntityMappingDialog({
 
   const currentDomain = editEntityId.split(".")[0] || domain;
 
-  const handleSave = useCallback(() => {
+  const handleSave = useCallback(async () => {
     if (!editEntityId.trim()) return;
     const customFanSpeedTags = customFanSpeedTagsList.reduce(
       (acc, curr) => {
@@ -410,94 +411,99 @@ export function EntityMappingDialog({
             sleep: sleepPresets.length > 0 ? sleepPresets : undefined,
           }
         : undefined;
-    onSave({
-      entityId: editEntityId.trim(),
-      matterDeviceType: matterDeviceType || undefined,
-      customName: customName.trim() || undefined,
-      customProductName: customProductName.trim() || undefined,
-      customVendorName: customVendorName.trim() || undefined,
-      customSerialNumber: customSerialNumber.trim() || undefined,
-      customVendorId: parseVendorId(customVendorId),
-      disabled,
-      filterLifeEntity: filterLifeEntity.trim() || undefined,
-      cleaningModeEntity: cleaningModeEntity.trim() || undefined,
-      temperatureEntity: temperatureEntity.trim() || undefined,
-      humidityEntity: humidityEntity.trim() || undefined,
-      pressureEntity: pressureEntity.trim() || undefined,
-      batteryEntity: batteryEntity.trim() || undefined,
-      disableBatteryMapping: disableBatteryMapping || undefined,
-      roomEntities: roomEntities.length > 0 ? roomEntities : undefined,
-      customServiceAreas:
-        customServiceAreas.length > 0 ? customServiceAreas : undefined,
-      disableLockPin: disableLockPin || undefined,
-      lockWithoutPin: lockWithoutPin || undefined,
-      lockUsercodeService: lockUsercodeService.trim() || undefined,
-      lockUsercodeSlot: parseUsercodeSlot(lockUsercodeSlot),
-      lockPinMinLength: parsePinLength(lockPinMinLength),
-      lockPinMaxLength: parsePinLength(lockPinMaxLength),
-      powerEntity: powerEntity.trim() || undefined,
-      energyEntity: energyEntity.trim() || undefined,
-      // Only meaningful on the utility meter type; sending them for other
-      // types would keep stale values alive in storage and exports.
-      meterSerialNumber:
-        matterDeviceType === "electrical_utility_meter"
-          ? meterSerialNumber.trim() || undefined
+    setSaving(true);
+    try {
+      await onSave({
+        entityId: editEntityId.trim(),
+        matterDeviceType: matterDeviceType || undefined,
+        customName: customName.trim() || undefined,
+        customProductName: customProductName.trim() || undefined,
+        customVendorName: customVendorName.trim() || undefined,
+        customSerialNumber: customSerialNumber.trim() || undefined,
+        customVendorId: parseVendorId(customVendorId),
+        disabled,
+        filterLifeEntity: filterLifeEntity.trim() || undefined,
+        cleaningModeEntity: cleaningModeEntity.trim() || undefined,
+        temperatureEntity: temperatureEntity.trim() || undefined,
+        humidityEntity: humidityEntity.trim() || undefined,
+        pressureEntity: pressureEntity.trim() || undefined,
+        batteryEntity: batteryEntity.trim() || undefined,
+        disableBatteryMapping: disableBatteryMapping || undefined,
+        roomEntities: roomEntities.length > 0 ? roomEntities : undefined,
+        customServiceAreas:
+          customServiceAreas.length > 0 ? customServiceAreas : undefined,
+        disableLockPin: disableLockPin || undefined,
+        lockWithoutPin: lockWithoutPin || undefined,
+        lockUsercodeService: lockUsercodeService.trim() || undefined,
+        lockUsercodeSlot: parseUsercodeSlot(lockUsercodeSlot),
+        lockPinMinLength: parsePinLength(lockPinMinLength),
+        lockPinMaxLength: parsePinLength(lockPinMaxLength),
+        powerEntity: powerEntity.trim() || undefined,
+        energyEntity: energyEntity.trim() || undefined,
+        // Only meaningful on the utility meter type; sending them for other
+        // types would keep stale values alive in storage and exports.
+        meterSerialNumber:
+          matterDeviceType === "electrical_utility_meter"
+            ? meterSerialNumber.trim() || undefined
+            : undefined,
+        pointOfDelivery:
+          matterDeviceType === "electrical_utility_meter"
+            ? pointOfDelivery.trim() || undefined
+            : undefined,
+        voltageEntity: voltageEntity.trim() || undefined,
+        currentEntity: currentEntity.trim() || undefined,
+        batteryPowerEntity: batteryPowerEntity.trim() || undefined,
+        batteryEnergyEntity: batteryEnergyEntity.trim() || undefined,
+        chargingSwitchEntity: chargingSwitchEntity.trim() || undefined,
+        currentLimitEntity: currentLimitEntity.trim() || undefined,
+        suctionLevelEntity: suctionLevelEntity.trim() || undefined,
+        mopIntensityEntity: mopIntensityEntity.trim() || undefined,
+        currentRoomEntity: currentRoomEntity.trim() || undefined,
+        chargingStateEntity: chargingStateEntity.trim() || undefined,
+        faultEntity: faultEntity.trim() || undefined,
+        readinessEntity: readinessEntity.trim() || undefined,
+        cleanedAreaEntity: cleanedAreaEntity.trim() || undefined,
+        vacuumAscendingRoomOrder: vacuumAscendingRoomOrder || undefined,
+        disableCustomAreaRoomModes: disableCustomAreaRoomModes || undefined,
+        vacuumRoomSwitches: vacuumRoomSwitches || undefined,
+        customFanSpeedTags:
+          Object.keys(customFanSpeedTags).length > 0
+            ? customFanSpeedTags
+            : undefined,
+        fanWindPresets,
+        valetudoIdentifier: valetudoIdentifier.trim() || undefined,
+        coverSwapOpenClose: coverSwapOpenClose || undefined,
+        coverOpenCloseAsPosition: coverOpenCloseAsPosition || undefined,
+        coverExposeAsDimmableLight: coverExposeAsDimmableLight || undefined,
+        selectExposeAsSwitch: selectExposeAsSwitch || undefined,
+        selectSwitchOnOption: selectExposeAsSwitch
+          ? selectSwitchOnOption.trim() || undefined
           : undefined,
-      pointOfDelivery:
-        matterDeviceType === "electrical_utility_meter"
-          ? pointOfDelivery.trim() || undefined
+        selectSwitchOffOption: selectExposeAsSwitch
+          ? selectSwitchOffOption.trim() || undefined
           : undefined,
-      voltageEntity: voltageEntity.trim() || undefined,
-      currentEntity: currentEntity.trim() || undefined,
-      batteryPowerEntity: batteryPowerEntity.trim() || undefined,
-      batteryEnergyEntity: batteryEnergyEntity.trim() || undefined,
-      chargingSwitchEntity: chargingSwitchEntity.trim() || undefined,
-      currentLimitEntity: currentLimitEntity.trim() || undefined,
-      suctionLevelEntity: suctionLevelEntity.trim() || undefined,
-      mopIntensityEntity: mopIntensityEntity.trim() || undefined,
-      currentRoomEntity: currentRoomEntity.trim() || undefined,
-      chargingStateEntity: chargingStateEntity.trim() || undefined,
-      faultEntity: faultEntity.trim() || undefined,
-      readinessEntity: readinessEntity.trim() || undefined,
-      cleanedAreaEntity: cleanedAreaEntity.trim() || undefined,
-      vacuumAscendingRoomOrder: vacuumAscendingRoomOrder || undefined,
-      disableCustomAreaRoomModes: disableCustomAreaRoomModes || undefined,
-      vacuumRoomSwitches: vacuumRoomSwitches || undefined,
-      customFanSpeedTags:
-        Object.keys(customFanSpeedTags).length > 0
-          ? customFanSpeedTags
-          : undefined,
-      fanWindPresets,
-      valetudoIdentifier: valetudoIdentifier.trim() || undefined,
-      coverSwapOpenClose: coverSwapOpenClose || undefined,
-      coverOpenCloseAsPosition: coverOpenCloseAsPosition || undefined,
-      coverExposeAsDimmableLight: coverExposeAsDimmableLight || undefined,
-      selectExposeAsSwitch: selectExposeAsSwitch || undefined,
-      selectSwitchOnOption: selectExposeAsSwitch
-        ? selectSwitchOnOption.trim() || undefined
-        : undefined,
-      selectSwitchOffOption: selectExposeAsSwitch
-        ? selectSwitchOffOption.trim() || undefined
-        : undefined,
-      coverSliderDebounceMs: parseDebounceMs(coverSliderDebounceMs),
-      fanSliderDebounceMs: parseDebounceMs(fanSliderDebounceMs),
-      updateThrottleMs: parseThrottleMs(updateThrottleMs),
-      disableClimateOnOff: disableClimateOnOff || undefined,
-      disableClimateFanControl: disableClimateFanControl || undefined,
-      climateKeepModeOnIdle: climateKeepModeOnIdle || undefined,
-      climateForceTurnOn: climateForceTurnOn || undefined,
-      climateBlockOff: climateBlockOff || undefined,
-      climateExposeFan: climateExposeFan || undefined,
-      fanRestoreSpeedOnPowerOn: fanRestoreSpeedOnPowerOn || undefined,
-      climateAutoMode: climateAutoMode || undefined,
-      disableMomentaryFlip: disableMomentaryFlip || undefined,
-      composedEntities:
-        composedEntities.filter((e) => e.entityId?.trim()).length > 0
-          ? composedEntities
-              .filter((e) => e.entityId?.trim())
-              .map(({ _key: _, ...rest }) => rest)
-          : undefined,
-    });
+        coverSliderDebounceMs: parseDebounceMs(coverSliderDebounceMs),
+        fanSliderDebounceMs: parseDebounceMs(fanSliderDebounceMs),
+        updateThrottleMs: parseThrottleMs(updateThrottleMs),
+        disableClimateOnOff: disableClimateOnOff || undefined,
+        disableClimateFanControl: disableClimateFanControl || undefined,
+        climateKeepModeOnIdle: climateKeepModeOnIdle || undefined,
+        climateForceTurnOn: climateForceTurnOn || undefined,
+        climateBlockOff: climateBlockOff || undefined,
+        climateExposeFan: climateExposeFan || undefined,
+        fanRestoreSpeedOnPowerOn: fanRestoreSpeedOnPowerOn || undefined,
+        climateAutoMode: climateAutoMode || undefined,
+        disableMomentaryFlip: disableMomentaryFlip || undefined,
+        composedEntities:
+          composedEntities.filter((e) => e.entityId?.trim()).length > 0
+            ? composedEntities
+                .filter((e) => e.entityId?.trim())
+                .map(({ _key: _, ...rest }) => rest)
+            : undefined,
+      });
+    } finally {
+      setSaving(false);
+    }
   }, [
     editEntityId,
     matterDeviceType,
@@ -679,19 +685,19 @@ export function EntityMappingDialog({
           <EntityAutocomplete
             value={editEntityId}
             onChange={setEditEntityId}
-            label="Entity ID"
+            label={t("mapping.entityId")}
             placeholder="light.living_room"
-            helperText="Search or enter the Home Assistant entity ID (e.g., light.living_room)"
+            helperText={t("mapping.dialog.entityIdHelp")}
           />
         )}
         <FormControl fullWidth margin="normal">
           <InputLabel id="matter-device-type-label">
-            Matter Device Type
+            {t("mapping.dialog.matterDeviceType")}
           </InputLabel>
           <Select
             labelId="matter-device-type-label"
             value={matterDeviceType}
-            label="Matter Device Type"
+            label={t("mapping.dialog.matterDeviceType")}
             onChange={(e) =>
               setMatterDeviceType(e.target.value as MatterDeviceType | "")
             }
@@ -707,7 +713,9 @@ export function EntityMappingDialog({
               <em>{t("mapping.autoDetect")}</em>
             </MenuItem>
             {suggestedTypes.length > 0 && (
-              <MenuItem disabled>Suggested for {domain}</MenuItem>
+              <MenuItem disabled>
+                {t("mapping.dialog.suggestedFor", { domain: currentDomain })}
+              </MenuItem>
             )}
             {suggestedTypes.map((type: MatterDeviceType) => (
               <MenuItem key={type} value={type}>
@@ -716,7 +724,7 @@ export function EntityMappingDialog({
               </MenuItem>
             ))}
             {suggestedTypes.length > 0 && (
-              <MenuItem disabled>All types</MenuItem>
+              <MenuItem disabled>{t("mapping.dialog.allTypes")}</MenuItem>
             )}
             {availableTypes
               .filter(([key]) => !suggestedTypes.includes(key))
@@ -737,20 +745,18 @@ export function EntityMappingDialog({
         {currentDomain === "light" &&
           matterDeviceType === "on_off_plugin_unit" && (
             <Alert severity="warning" sx={{ mt: 1 }}>
-              Every controller will see this light as a plain outlet, with no
-              brightness or color. Only worth it to get a light's wattage into
-              Apple Home.
+              {t("mapping.dialog.lightAsOutletWarning")}
             </Alert>
           )}
 
         <TextField
           fullWidth
           margin="normal"
-          label="Custom Name"
+          label={t("mapping.customName")}
           placeholder={entityId}
           value={customName}
           onChange={(e) => setCustomName(e.target.value)}
-          helperText="Override the entity name shown in Matter controllers"
+          helperText={t("mapping.dialog.customNameHelp")}
         />
 
         <TextField
@@ -794,9 +800,9 @@ export function EntityMappingDialog({
           <EntityAutocomplete
             value={filterLifeEntity}
             onChange={setFilterLifeEntity}
-            label="Filter Life Sensor (optional)"
+            label={t("mapping.dialog.filterLifeSensor")}
             placeholder="sensor.air_purifier_filter_life"
-            helperText="Sensor entity that provides filter life percentage (0-100%) for HEPA filter monitoring"
+            helperText={t("mapping.dialog.filterLifeSensorHelp")}
             domain="sensor"
           />
         )}
@@ -804,21 +810,20 @@ export function EntityMappingDialog({
         {showFanWindPresetFields && (
           <Box sx={{ mt: 2, mb: 1 }}>
             <Typography variant="subtitle2" gutterBottom>
-              Wind Preset Mapping (optional)
+              {t("mapping.dialog.windPresetTitle")}
             </Typography>
             <Typography
               variant="caption"
               color="text.secondary"
               sx={{ mb: 1, display: "block" }}
             >
-              Map localized preset names to Matter wind modes. Comma-separated
-              HA preset names, e.g. 自然风 for natural wind.
+              {t("mapping.dialog.windPresetHelp")}
             </Typography>
             <TextField
               fullWidth
               margin="normal"
               size="small"
-              label="Natural Wind Presets"
+              label={t("mapping.dialog.naturalWindPresets")}
               placeholder="自然风, Natural"
               value={fanNaturalPresets}
               onChange={(e) => setFanNaturalPresets(e.target.value)}
@@ -827,7 +832,7 @@ export function EntityMappingDialog({
               fullWidth
               margin="normal"
               size="small"
-              label="Sleep Wind Presets"
+              label={t("mapping.dialog.sleepWindPresets")}
               placeholder="睡眠风, Sleep"
               value={fanSleepPresets}
               onChange={(e) => setFanSleepPresets(e.target.value)}
@@ -843,19 +848,19 @@ export function EntityMappingDialog({
                 onChange={(e) => setFanRestoreSpeedOnPowerOn(e.target.checked)}
               />
             }
-            label="Restore the last fan speed when turned on (Apple Home's power button injects 100%). Only a 100% or High command while off is treated as power-on; lower speeds set while off are kept, so you cannot start an off fan at full speed."
+            label={t("mapping.dialog.fanRestoreSpeed")}
             sx={{ mt: 1, display: "block" }}
           />
         )}
 
         {(currentDomain === "fan" || currentDomain === "climate") && (
           <TextField
-            label="Fan slider debounce (ms)"
+            label={t("mapping.dialog.fanSliderDebounce")}
             type="number"
             size="small"
             value={fanSliderDebounceMs}
             onChange={(e) => setFanSliderDebounceMs(e.target.value)}
-            helperText="Wait this long after the last inbound fan-speed write before sending it to Home Assistant. Controllers stream writes while a slider is dragged; on IR or UART bridged ACs every write makes the unit beep. 0 / empty uses the bridge setting (default off). Try 1000-2000. Max 5000."
+            helperText={t("mapping.dialog.fanSliderDebounceHelp")}
             slotProps={{ htmlInput: { min: 0, max: 5000, step: 50 } }}
             sx={{ mt: 1, display: "block" }}
           />
@@ -870,24 +875,24 @@ export function EntityMappingDialog({
                   onChange={(e) => setSelectExposeAsSwitch(e.target.checked)}
                 />
               }
-              label="Expose as an on/off switch (controllers can't render select options over Matter). On and off each pick one option below. Re-pair after changing."
+              label={t("mapping.dialog.selectExposeAsSwitch")}
               sx={{ mt: 1, display: "block" }}
             />
             {selectExposeAsSwitch && (
               <Box sx={{ display: "flex", gap: 2, mt: 1 }}>
                 <TextField
-                  label="Option for ON"
+                  label={t("mapping.dialog.selectOnOption")}
                   size="small"
                   value={selectSwitchOnOption}
                   onChange={(e) => setSelectSwitchOnOption(e.target.value)}
-                  helperText="Exact option text"
+                  helperText={t("mapping.dialog.exactOptionText")}
                 />
                 <TextField
-                  label="Option for OFF"
+                  label={t("mapping.dialog.selectOffOption")}
                   size="small"
                   value={selectSwitchOffOption}
                   onChange={(e) => setSelectSwitchOffOption(e.target.value)}
-                  helperText="Exact option text"
+                  helperText={t("mapping.dialog.exactOptionText")}
                 />
               </Box>
             )}
@@ -899,65 +904,65 @@ export function EntityMappingDialog({
             <EntityAutocomplete
               value={cleaningModeEntity}
               onChange={setCleaningModeEntity}
-              label="Cleaning Mode Entity (optional)"
+              label={t("mapping.dialog.cleaningModeEntity")}
               placeholder="select.vacuum_cleaning_mode"
-              helperText="Select entity that controls the vacuum cleaning mode (e.g., select.r2_d2_cleaning_mode for Dreame vacuums)"
+              helperText={t("mapping.dialog.cleaningModeEntityHelp")}
               domain="select"
             />
             <EntityAutocomplete
               value={suctionLevelEntity}
               onChange={setSuctionLevelEntity}
-              label="Suction Level Entity (optional)"
+              label={t("mapping.dialog.suctionLevelEntity")}
               placeholder="select.vacuum_suction_level"
-              helperText="Select entity that controls suction level. Adds Quiet/Max intensity options to Apple Home's extra features panel."
+              helperText={t("mapping.dialog.suctionLevelEntityHelp")}
               domain="select"
             />
             <EntityAutocomplete
               value={mopIntensityEntity}
               onChange={setMopIntensityEntity}
-              label="Mop Intensity Entity (optional)"
+              label={t("mapping.dialog.mopIntensityEntity")}
               placeholder="select.vacuum_mop_pad_humidity"
-              helperText="Select entity that controls mop water level / intensity. Adds intensity options when mopping in Apple Home."
+              helperText={t("mapping.dialog.mopIntensityEntityHelp")}
               domain="select"
             />
             <EntityAutocomplete
               value={currentRoomEntity}
               onChange={setCurrentRoomEntity}
-              label="Current Room Entity (optional)"
+              label={t("mapping.dialog.currentRoomEntity")}
               placeholder="sensor.vacuum_current_room"
-              helperText="Sensor that reports which room the vacuum is currently in (e.g. Dreame current_room sensor). Enables dynamic room progress tracking during multi-room cleaning."
+              helperText={t("mapping.dialog.currentRoomEntityHelp")}
               domain="sensor"
             />
             <EntityAutocomplete
               value={faultEntity}
               onChange={setFaultEntity}
-              label="Operational Error Sensor (optional)"
+              label={t("mapping.dialog.faultEntity")}
               placeholder="sensor.vacuum_error"
-              helperText="Error enum sensor. Auto-detected for Roborock; an explicit sensor overrides automatic detection."
+              helperText={t("mapping.dialog.faultEntityHelp")}
               domain="sensor"
             />
             <EntityAutocomplete
               value={readinessEntity}
               onChange={setReadinessEntity}
-              label="Readiness Entity (optional)"
+              label={t("mapping.dialog.readinessEntity")}
               placeholder="sensor.roomba_readiness"
-              helperText="Reports map processing and start-blocking conditions. Ready must remain stable for five seconds. Requires a controller that supports the newer Matter vacuum states; leave empty for older controllers."
+              helperText={t("mapping.dialog.readinessEntityHelp")}
               domain="sensor"
             />
             <EntityAutocomplete
               value={chargingStateEntity}
               onChange={setChargingStateEntity}
-              label="Charging State Entity (optional)"
+              label={t("mapping.dialog.chargingStateEntity")}
               placeholder="sensor.vacuum_charging_state"
-              helperText="Sensor reporting the charging state (e.g. Xiaomi charging_state: charging / not_charging / full). Drives the Matter charge state directly instead of inferring it from docked + battery level."
+              helperText={t("mapping.dialog.chargingStateEntityHelp")}
               domain="sensor"
             />
             <EntityAutocomplete
               value={cleanedAreaEntity}
               onChange={setCleanedAreaEntity}
-              label="Cleaned Area Sensor (m², optional)"
+              label={t("mapping.dialog.cleanedAreaEntity")}
               placeholder="sensor.vacuum_cleaned_area"
-              helperText="Sensor reporting cumulative cleaned area in m². With a Size (m²) set on each area, advances room progress for batch vacuums that report area but not the current room."
+              helperText={t("mapping.dialog.cleanedAreaEntityHelp")}
               domain="sensor"
             />
             <FormControlLabel
@@ -969,7 +974,7 @@ export function EntityMappingDialog({
                   }
                 />
               }
-              label="Vacuum cleans rooms in ascending area ID order, not in the order they were picked (Roborock batch cleaning). Fixes the room shown as current and the room progress when the picking order differs."
+              label={t("mapping.dialog.vacuumAscendingRoomOrder")}
               sx={{ mt: 1, display: "block" }}
             />
             <FormControlLabel
@@ -981,7 +986,7 @@ export function EntityMappingDialog({
                   }
                 />
               }
-              label="Don't expose rooms as per-room cleaning modes (forces Apple Home to use the multi-room area picker). Keep off for Google Home / Alexa, which rely on the modes."
+              label={t("mapping.dialog.disableCustomAreaRoomModes")}
               sx={{ mt: 1, display: "block" }}
             />
             <FormControlLabel
@@ -991,31 +996,30 @@ export function EntityMappingDialog({
                   onChange={(e) => setVacuumRoomSwitches(e.target.checked)}
                 />
               }
-              label="Expose one momentary switch per area next to the vacuum, so platforms that can't send multi-room commands (e.g. SmartThings routines) can start cleaning a single area by turning its switch on."
+              label={t("mapping.dialog.vacuumRoomSwitches")}
               sx={{ mt: 1, display: "block" }}
             />
             {showValetudoIdentifierField && (
               <TextField
                 fullWidth
                 margin="normal"
-                label="Valetudo MQTT Identifier (optional)"
+                label={t("mapping.dialog.valetudoIdentifier")}
                 placeholder="GentleFinishedSpider"
                 value={valetudoIdentifier}
                 onChange={(e) => setValetudoIdentifier(e.target.value)}
-                helperText="Exact identifier from Valetudo Connectivity → MQTT. Only needed if it differs from the lowercase entity ID."
+                helperText={t("mapping.dialog.valetudoIdentifierHelp")}
               />
             )}
             <Box sx={{ mt: 2, mb: 1 }}>
               <Typography variant="subtitle2" gutterBottom>
-                Custom Tag Mapping
+                {t("mapping.dialog.customTagTitle")}
               </Typography>
               <Typography
                 variant="caption"
                 color="text.secondary"
                 sx={{ mb: 1, display: "block" }}
               >
-                Map home assistant speeds to matter tags. When configured these
-                will override default speeds.
+                {t("mapping.dialog.customTagHelp")}
               </Typography>
               {customFanSpeedTagsList.map((mapping, index) => (
                 <Box
@@ -1029,7 +1033,7 @@ export function EntityMappingDialog({
                 >
                   <TextField
                     size="small"
-                    label="HA Option (e.g. Max+)"
+                    label={t("mapping.dialog.haOption")}
                     value={mapping.option}
                     onChange={(e) => {
                       const updated = [...customFanSpeedTagsList];
@@ -1038,10 +1042,10 @@ export function EntityMappingDialog({
                     }}
                   />
                   <FormControl size="small" sx={{ flex: 1 }}>
-                    <InputLabel>Matter Tag</InputLabel>
+                    <InputLabel>{t("mapping.matterTag")}</InputLabel>
                     <Select
                       value={mapping.tag}
-                      label="Matter Tag"
+                      label={t("mapping.matterTag")}
                       onChange={(e) => {
                         const updated = [...customFanSpeedTagsList];
                         updated[index] = { ...mapping, tag: e.target.value };
@@ -1058,6 +1062,7 @@ export function EntityMappingDialog({
                   <IconButton
                     size="small"
                     color="error"
+                    aria-label={t("common.delete")}
                     onClick={() => {
                       setCustomFanSpeedTagsList(
                         customFanSpeedTagsList.filter((_, i) => i !== index),
@@ -1078,7 +1083,7 @@ export function EntityMappingDialog({
                   ])
                 }
               >
-                Add Tag Mapping
+                {t("mapping.dialog.addTagMapping")}
               </Button>
             </Box>
           </>
@@ -1087,7 +1092,7 @@ export function EntityMappingDialog({
         {showRoomEntitiesField && customServiceAreas.length === 0 && (
           <Box sx={{ mt: 2, mb: 1 }}>
             <Typography variant="subtitle2" gutterBottom>
-              Room Button Entities (Roborock)
+              {t("mapping.dialog.roomButtonsTitle")}
             </Typography>
             <Autocomplete
               multiple
@@ -1129,10 +1134,10 @@ export function EntityMappingDialog({
                   variant="outlined"
                   placeholder={
                     loadingButtons
-                      ? "Loading buttons..."
-                      : "Select room buttons or type entity ID"
+                      ? t("mapping.dialog.loadingButtons")
+                      : t("mapping.dialog.roomButtonsPlaceholder")
                   }
-                  helperText="Select button entities that trigger room cleaning (e.g., button.roborock_clean_kitchen). These appear as rooms in Apple Home."
+                  helperText={t("mapping.dialog.roomButtonsHelp")}
                   InputProps={{
                     ...params.InputProps,
                     endAdornment: (
@@ -1149,8 +1154,7 @@ export function EntityMappingDialog({
             />
             {availableButtons.length === 0 && !loadingButtons && (
               <Typography variant="caption" color="text.secondary">
-                No button entities found for this device. You can manually enter
-                entity IDs.
+                {t("mapping.dialog.noRoomButtons")}
               </Typography>
             )}
           </Box>
@@ -1161,25 +1165,25 @@ export function EntityMappingDialog({
             <EntityAutocomplete
               value={humidityEntity}
               onChange={setHumidityEntity}
-              label="Humidity Sensor (optional)"
+              label={t("mapping.dialog.humiditySensor")}
               placeholder="sensor.h_t_bad_humidity"
-              helperText="Combine with a humidity sensor to create a single Temperature+Humidity device"
+              helperText={t("mapping.dialog.humiditySensorHelp")}
               domain="sensor"
             />
             <EntityAutocomplete
               value={pressureEntity}
               onChange={setPressureEntity}
-              label="Pressure Sensor (optional)"
+              label={t("mapping.dialog.pressureSensor")}
               placeholder="sensor.h_t_bad_pressure"
-              helperText="Combine with a pressure sensor to create a single Temperature+Pressure device"
+              helperText={t("mapping.dialog.pressureSensorHelp")}
               domain="sensor"
             />
             <EntityAutocomplete
               value={batteryEntity}
               onChange={setBatteryEntity}
-              label="Battery Sensor (optional)"
+              label={t("mapping.dialog.batterySensor")}
               placeholder="sensor.h_t_bad_battery"
-              helperText="Include battery level from a separate sensor entity"
+              helperText={t("mapping.dialog.batterySensorHelp")}
               domain="sensor"
             />
           </>
@@ -1190,17 +1194,17 @@ export function EntityMappingDialog({
             <EntityAutocomplete
               value={temperatureEntity}
               onChange={setTemperatureEntity}
-              label="Temperature Sensor (optional)"
+              label={t("mapping.dialog.temperatureSensor")}
               placeholder="sensor.air_purifier_temperature"
-              helperText="Add temperature measurement to this air purifier from a separate sensor entity"
+              helperText={t("mapping.dialog.purifierTemperatureHelp")}
               domain="sensor"
             />
             <EntityAutocomplete
               value={humidityEntity}
               onChange={setHumidityEntity}
-              label="Humidity Sensor (optional)"
+              label={t("mapping.dialog.humiditySensor")}
               placeholder="sensor.air_purifier_humidity"
-              helperText="Add humidity measurement to this air purifier from a separate sensor entity"
+              helperText={t("mapping.dialog.purifierHumidityHelp")}
               domain="sensor"
             />
           </>
@@ -1211,33 +1215,33 @@ export function EntityMappingDialog({
             <EntityAutocomplete
               value={powerEntity}
               onChange={setPowerEntity}
-              label="Power Sensor (optional)"
+              label={t("mapping.dialog.powerSensor")}
               placeholder="sensor.smart_plug_power"
-              helperText="Sensor with device_class: power (W), adds real-time power measurement to this device"
+              helperText={t("mapping.dialog.powerSensorHelp")}
               domain="sensor"
             />
             <EntityAutocomplete
               value={energyEntity}
               onChange={setEnergyEntity}
-              label="Energy Sensor (optional)"
+              label={t("mapping.dialog.energySensor")}
               placeholder="sensor.smart_plug_energy"
-              helperText="Sensor with device_class: energy (kWh), adds cumulative energy measurement to this device"
+              helperText={t("mapping.dialog.energySensorHelp")}
               domain="sensor"
             />
             <EntityAutocomplete
               value={voltageEntity}
               onChange={setVoltageEntity}
-              label="Voltage Sensor (optional)"
+              label={t("mapping.dialog.voltageSensor")}
               placeholder="sensor.smart_plug_voltage"
-              helperText="Sensor with device_class: voltage (V), folds voltage into the power measurement"
+              helperText={t("mapping.dialog.voltageSensorHelp")}
               domain="sensor"
             />
             <EntityAutocomplete
               value={currentEntity}
               onChange={setCurrentEntity}
-              label="Current Sensor (optional)"
+              label={t("mapping.dialog.currentSensor")}
               placeholder="sensor.smart_plug_current"
-              helperText="Sensor with device_class: current (A), folds current into the power measurement"
+              helperText={t("mapping.dialog.currentSensorHelp")}
               domain="sensor"
             />
           </>
@@ -1248,33 +1252,33 @@ export function EntityMappingDialog({
             <EntityAutocomplete
               value={powerEntity}
               onChange={setPowerEntity}
-              label="Power Sensor (optional)"
+              label={t("mapping.dialog.powerSensor")}
               placeholder="sensor.grid_power"
-              helperText="Sensor with device_class: power (W). Leave empty to use this entity's own value."
+              helperText={t("mapping.dialog.meterPowerHelp")}
               domain="sensor"
             />
             <EntityAutocomplete
               value={energyEntity}
               onChange={setEnergyEntity}
-              label="Energy Sensor (optional)"
+              label={t("mapping.dialog.energySensor")}
               placeholder="sensor.grid_energy"
-              helperText="Sensor with device_class: energy (kWh), adds cumulative energy to this meter"
+              helperText={t("mapping.dialog.meterEnergyHelp")}
               domain="sensor"
             />
             <EntityAutocomplete
               value={voltageEntity}
               onChange={setVoltageEntity}
-              label="Voltage Sensor (optional)"
+              label={t("mapping.dialog.voltageSensor")}
               placeholder="sensor.grid_voltage"
-              helperText="Sensor with device_class: voltage (V), folded into this meter"
+              helperText={t("mapping.dialog.meterVoltageHelp")}
               domain="sensor"
             />
             <EntityAutocomplete
               value={currentEntity}
               onChange={setCurrentEntity}
-              label="Current Sensor (optional)"
+              label={t("mapping.dialog.currentSensor")}
               placeholder="sensor.grid_current"
-              helperText="Sensor with device_class: current (A), folded into this meter"
+              helperText={t("mapping.dialog.meterCurrentHelp")}
               domain="sensor"
             />
           </>
@@ -1285,20 +1289,20 @@ export function EntityMappingDialog({
             <TextField
               fullWidth
               margin="normal"
-              label="Meter Serial Number (optional)"
+              label={t("mapping.dialog.meterSerialNumber")}
               placeholder="1EMH0001234567"
               value={meterSerialNumber}
               onChange={(e) => setMeterSerialNumber(e.target.value)}
-              helperText="Serial number reported via MeterIdentification. Empty reports null."
+              helperText={t("mapping.dialog.meterSerialNumberHelp")}
             />
             <TextField
               fullWidth
               margin="normal"
-              label="Point of Delivery (optional)"
+              label={t("mapping.dialog.pointOfDelivery")}
               placeholder="DE0001234567890123456789012345678"
               value={pointOfDelivery}
               onChange={(e) => setPointOfDelivery(e.target.value)}
-              helperText="Metering point id reported via MeterIdentification. Empty reports null."
+              helperText={t("mapping.dialog.pointOfDeliveryHelp")}
             />
           </>
         )}
@@ -1308,33 +1312,33 @@ export function EntityMappingDialog({
             <EntityAutocomplete
               value={chargingSwitchEntity}
               onChange={setChargingSwitchEntity}
-              label="Charging Switch (optional)"
+              label={t("mapping.dialog.chargingSwitch")}
               placeholder="switch.wallbox_charging"
-              helperText="Switch that starts and stops charging. EnableCharging turns it on, Disable turns it off."
+              helperText={t("mapping.dialog.chargingSwitchHelp")}
               domain="switch"
             />
             <EntityAutocomplete
               value={currentLimitEntity}
               onChange={setCurrentLimitEntity}
-              label="Current Limit (optional)"
+              label={t("mapping.dialog.currentLimit")}
               placeholder="number.wallbox_current_limit"
-              helperText="Number entity (amperes) for the charge current limit. Feeds MaximumChargeCurrent."
+              helperText={t("mapping.dialog.currentLimitHelp")}
               domain="number"
             />
             <EntityAutocomplete
               value={powerEntity}
               onChange={setPowerEntity}
-              label="Power Sensor (optional)"
+              label={t("mapping.dialog.powerSensor")}
               placeholder="sensor.wallbox_power"
-              helperText="Sensor with device_class: power (W), adds real-time power to this charger"
+              helperText={t("mapping.dialog.evsePowerHelp")}
               domain="sensor"
             />
             <EntityAutocomplete
               value={energyEntity}
               onChange={setEnergyEntity}
-              label="Energy Sensor (optional)"
+              label={t("mapping.dialog.energySensor")}
               placeholder="sensor.wallbox_energy"
-              helperText="Sensor with device_class: energy (kWh), adds cumulative energy to this charger"
+              helperText={t("mapping.dialog.evseEnergyHelp")}
               domain="sensor"
             />
           </>
@@ -1345,17 +1349,17 @@ export function EntityMappingDialog({
             <EntityAutocomplete
               value={batteryPowerEntity}
               onChange={setBatteryPowerEntity}
-              label="Battery Power Sensor (optional)"
+              label={t("mapping.dialog.batteryPowerSensor")}
               placeholder="sensor.home_battery_power"
-              helperText="Sensor with device_class: power (W). Positive on discharge, negative on charge. Exposes the battery as an ESS."
+              helperText={t("mapping.dialog.batteryPowerSensorHelp")}
               domain="sensor"
             />
             <EntityAutocomplete
               value={batteryEnergyEntity}
               onChange={setBatteryEnergyEntity}
-              label="Battery Energy Sensor (optional)"
+              label={t("mapping.dialog.batteryEnergySensor")}
               placeholder="sensor.home_battery_energy"
-              helperText="Sensor with device_class: energy (kWh), adds lifetime throughput to the battery"
+              helperText={t("mapping.dialog.batteryEnergySensorHelp")}
               domain="sensor"
             />
           </>
@@ -1364,18 +1368,14 @@ export function EntityMappingDialog({
         {showRoomEntitiesField && (
           <Box sx={{ mt: 2, mb: 1 }}>
             <Typography variant="subtitle2" gutterBottom>
-              Custom Service Areas
+              {t("mapping.dialog.customAreasTitle")}
             </Typography>
             <Typography
               variant="caption"
               color="text.secondary"
               sx={{ mb: 1, display: "block" }}
             >
-              Define custom zones mapped to HA service calls. Works for lawn
-              mowers, pool cleaners, or any zone-based robot. When configured,
-              these replace auto-detected rooms. Data is extra JSON sent with
-              the call. Batch fires one combined call for all selected zones
-              instead of one per zone.
+              {t("mapping.dialog.customAreasHelp")}
             </Typography>
             {customServiceAreas.map((area, index) => {
               const dataValid = parseAreaData(
@@ -1401,7 +1401,7 @@ export function EntityMappingDialog({
                   >
                     <TextField
                       size="small"
-                      label="Name"
+                      label={t("common.name")}
                       value={area.name}
                       onChange={(e) => {
                         const updated = [...customServiceAreas];
@@ -1412,7 +1412,7 @@ export function EntityMappingDialog({
                     />
                     <TextField
                       size="small"
-                      label="Service"
+                      label={t("mapping.dialog.areaService")}
                       placeholder="script.start_zone"
                       value={area.service}
                       onChange={(e) => {
@@ -1424,7 +1424,7 @@ export function EntityMappingDialog({
                     />
                     <TextField
                       size="small"
-                      label="Target (optional)"
+                      label={t("mapping.dialog.areaTarget")}
                       placeholder="button.zone_1"
                       value={area.target || ""}
                       onChange={(e) => {
@@ -1440,6 +1440,7 @@ export function EntityMappingDialog({
                     <IconButton
                       size="small"
                       color="error"
+                      aria-label={t("common.delete")}
                       onClick={() => {
                         setCustomServiceAreas(
                           customServiceAreas.filter((_, i) => i !== index),
@@ -1455,12 +1456,14 @@ export function EntityMappingDialog({
                   <Box sx={{ display: "flex", gap: 1, alignItems: "center" }}>
                     <TextField
                       size="small"
-                      label="Data (JSON, optional)"
+                      label={t("mapping.dialog.areaData")}
                       placeholder={'{"segments": [16, 17]}'}
                       value={areaDataDrafts[index] ?? ""}
                       error={!dataValid}
                       helperText={
-                        !dataValid ? "Invalid JSON object" : undefined
+                        !dataValid
+                          ? t("mapping.dialog.areaDataInvalid")
+                          : undefined
                       }
                       onChange={(e) => {
                         const raw = e.target.value;
@@ -1492,12 +1495,12 @@ export function EntityMappingDialog({
                           }}
                         />
                       }
-                      label="Batch"
+                      label={t("mapping.dialog.areaBatch")}
                     />
                     <TextField
                       size="small"
                       type="number"
-                      label="Size (m²)"
+                      label={t("mapping.dialog.areaSize")}
                       placeholder="20"
                       value={area.sizeSqm != null ? String(area.sizeSqm) : ""}
                       onChange={(e) => {
@@ -1517,12 +1520,14 @@ export function EntityMappingDialog({
                   >
                     <TextField
                       size="small"
-                      label="Map (optional)"
+                      label={t("mapping.dialog.areaMap")}
                       slotProps={{ htmlInput: { maxLength: 64 } }}
                       value={area.mapName ?? ""}
                       error={mapMissing}
                       helperText={
-                        mapMissing ? "Needed on every area" : undefined
+                        mapMissing
+                          ? t("mapping.dialog.areaMapRequired")
+                          : undefined
                       }
                       onChange={(e) => {
                         const updated = [...customServiceAreas];
@@ -1537,7 +1542,7 @@ export function EntityMappingDialog({
                     <TextField
                       size="small"
                       type="number"
-                      label="Floor"
+                      label={t("mapping.dialog.areaFloor")}
                       slotProps={{ htmlInput: { step: 1 } }}
                       value={area.floorNumber ?? ""}
                       onChange={(e) => {
@@ -1569,7 +1574,7 @@ export function EntityMappingDialog({
                 setAreaDataDrafts([...areaDataDrafts, ""]);
               }}
             >
-              Add Area
+              {t("mapping.dialog.addArea")}
             </Button>
           </Box>
         )}
@@ -1583,7 +1588,7 @@ export function EntityMappingDialog({
                   onChange={(e) => setCoverSwapOpenClose(e.target.checked)}
                 />
               }
-              label="Swap open/close commands (for awnings and similar covers)"
+              label={t("mapping.dialog.coverSwapOpenClose")}
               sx={{ mt: 1, display: "block" }}
             />
             <FormControlLabel
@@ -1595,7 +1600,7 @@ export function EntityMappingDialog({
                   }
                 />
               }
-              label="Send open/close as position 100% / 0% (for covers that stop instead of reversing on open/close while moving)"
+              label={t("mapping.dialog.coverOpenCloseAsPosition")}
               sx={{ mt: 1, display: "block" }}
             />
             <FormControlLabel
@@ -1607,16 +1612,16 @@ export function EntityMappingDialog({
                   }
                 />
               }
-              label="Expose as a dimmable light (Alexa workaround: level = open %, on/off = open/close). Keep off for Apple / Google."
+              label={t("mapping.dialog.coverExposeAsDimmableLight")}
               sx={{ mt: 1, display: "block" }}
             />
             <TextField
-              label="Slider debounce (ms)"
+              label={t("mapping.dialog.coverSliderDebounce")}
               type="number"
               size="small"
               value={coverSliderDebounceMs}
               onChange={(e) => setCoverSliderDebounceMs(e.target.value)}
-              helperText="Override for slow blinds. 0 / empty uses bridge setting (default 400/150ms two-phase). Try 800-1500 for sluggish covers. Max 5000."
+              helperText={t("mapping.dialog.coverSliderDebounceHelp")}
               slotProps={{ htmlInput: { min: 0, max: 5000, step: 50 } }}
               sx={{ mt: 1, display: "block" }}
             />
@@ -1632,7 +1637,7 @@ export function EntityMappingDialog({
                   onChange={(e) => setDisableLockPin(e.target.checked)}
                 />
               }
-              label="Disable PIN requirement for this lock"
+              label={t("mapping.dialog.disableLockPin")}
               sx={{ mt: 1, display: "block" }}
             />
             <FormControlLabel
@@ -1642,45 +1647,45 @@ export function EntityMappingDialog({
                   onChange={(e) => setLockWithoutPin(e.target.checked)}
                 />
               }
-              label="Lock has no keypad: offer no PIN codes to controllers (re-pair after changing)"
+              label={t("mapping.dialog.lockWithoutPin")}
               sx={{ mt: 1, display: "block" }}
             />
             <TextField
-              label="Physical lock usercode service"
+              label={t("mapping.dialog.lockUsercodeService")}
               size="small"
               fullWidth
               value={lockUsercodeService}
               onChange={(e) => setLockUsercodeService(e.target.value)}
-              helperText="Opt-in: also program the physical lock when a controller sets/clears the PIN, e.g. zwave_js.set_lock_usercode or zha.set_lock_user_code. Leave empty to keep the PIN only in HAMH."
+              helperText={t("mapping.dialog.lockUsercodeServiceHelp")}
               sx={{ mt: 1, display: "block" }}
             />
             <TextField
-              label="Code slot"
+              label={t("mapping.dialog.lockUsercodeSlot")}
               type="number"
               size="small"
               value={lockUsercodeSlot}
               onChange={(e) => setLockUsercodeSlot(e.target.value)}
-              helperText="Code slot on the physical lock, default 1"
+              helperText={t("mapping.dialog.lockUsercodeSlotHelp")}
               slotProps={{ htmlInput: { min: 1, step: 1 } }}
               sx={{ mt: 1, display: "block" }}
             />
             <TextField
-              label="Min PIN length"
+              label={t("mapping.dialog.lockPinMinLength")}
               type="number"
               size="small"
               value={lockPinMinLength}
               onChange={(e) => setLockPinMinLength(e.target.value)}
-              helperText="Override advertised minimum PIN length (1-20). Default 4. Set min = max for locks that require an exact length."
+              helperText={t("mapping.dialog.lockPinMinLengthHelp")}
               slotProps={{ htmlInput: { min: 1, max: 20, step: 1 } }}
               sx={{ mt: 1, display: "block" }}
             />
             <TextField
-              label="Max PIN length"
+              label={t("mapping.dialog.lockPinMaxLength")}
               type="number"
               size="small"
               value={lockPinMaxLength}
               onChange={(e) => setLockPinMaxLength(e.target.value)}
-              helperText="Override advertised maximum PIN length (1-20). Default 8. Controllers cache both lengths at pairing, re-pair the bridge after changing them."
+              helperText={t("mapping.dialog.lockPinMaxLengthHelp")}
               slotProps={{ htmlInput: { min: 1, max: 20, step: 1 } }}
               sx={{ mt: 1, display: "block" }}
             />
@@ -1696,7 +1701,7 @@ export function EntityMappingDialog({
                   onChange={(e) => setDisableClimateOnOff(e.target.checked)}
                 />
               }
-              label="Disable on/off for this climate entity (keeps the thermostat running when a room is turned off by voice)"
+              label={t("mapping.dialog.disableClimateOnOff")}
               sx={{ mt: 1, display: "block" }}
             />
             <FormControlLabel
@@ -1708,7 +1713,7 @@ export function EntityMappingDialog({
                   }
                 />
               }
-              label="Expose as plain Thermostat (drop FanControl), workaround for controllers like Aqara that don't recognise the air conditioner device type. Needs a full HAMH restart, then re-pair the bridge in the controller (Aqara caches the device list)"
+              label={t("mapping.dialog.disableClimateFanControl")}
               sx={{ mt: 1, display: "block" }}
             />
             <FormControlLabel
@@ -1718,7 +1723,7 @@ export function EntityMappingDialog({
                   onChange={(e) => setClimateKeepModeOnIdle(e.target.checked)}
                 />
               }
-              label="Keep last mode on Matter while off + idle (workaround for ACs that report off + hvac_action=idle during internal cleaning, so the controller's Off button stays actionable)"
+              label={t("mapping.dialog.climateKeepModeOnIdle")}
               sx={{ mt: 1, display: "block" }}
             />
             <FormControlLabel
@@ -1728,7 +1733,7 @@ export function EntityMappingDialog({
                   onChange={(e) => setClimateForceTurnOn(e.target.checked)}
                 />
               }
-              label="Always send climate.turn_on (for IR controlled ACs, where Home Assistant can report on while the device is off)"
+              label={t("mapping.dialog.climateForceTurnOn")}
               sx={{ mt: 1, display: "block" }}
             />
             <FormControlLabel
@@ -1738,7 +1743,7 @@ export function EntityMappingDialog({
                   onChange={(e) => setClimateBlockOff(e.target.checked)}
                 />
               }
-              label="Refuse Off from Matter controllers (the entity keeps its mode, e.g. a heating schedule; changing the temperature still works)"
+              label={t("mapping.dialog.climateBlockOff")}
               sx={{ mt: 1, display: "block" }}
             />
             <FormControlLabel
@@ -1748,26 +1753,26 @@ export function EntityMappingDialog({
                   onChange={(e) => setClimateExposeFan(e.target.checked)}
                 />
               }
-              label="Expose a companion Fan device (adds a separate Apple Home fan tile for fan_only mode and speed, only for ACs with a fan mode, and re-pairs this AC once)"
+              label={t("mapping.dialog.climateExposeFan")}
               sx={{ mt: 1, display: "block" }}
             />
             <FormControl size="small" sx={{ mt: 1, minWidth: 260 }}>
               <InputLabel id="climate-auto-mode-label">
-                Auto mode direction
+                {t("mapping.dialog.climateAutoMode")}
               </InputLabel>
               <Select
                 labelId="climate-auto-mode-label"
                 value={climateAutoMode}
-                label="Auto mode direction"
+                label={t("mapping.dialog.climateAutoMode")}
                 onChange={(e) =>
                   setClimateAutoMode((e.target.value as ClimateAutoMode) || "")
                 }
               >
                 <MenuItem value="">
-                  <em>Auto-detect</em>
+                  <em>{t("mapping.autoDetect")}</em>
                 </MenuItem>
-                <MenuItem value="cool">Cool</MenuItem>
-                <MenuItem value="heat">Heat</MenuItem>
+                <MenuItem value="cool">{t("endpoints.state.cool")}</MenuItem>
+                <MenuItem value="heat">{t("endpoints.state.heat")}</MenuItem>
               </Select>
             </FormControl>
           </>
@@ -1775,16 +1780,14 @@ export function EntityMappingDialog({
 
         <Box sx={{ mt: 2, mb: 1 }}>
           <Typography variant="subtitle2" gutterBottom>
-            Composed Sub-Entities
+            {t("mapping.dialog.composedTitle")}
           </Typography>
           <Typography
             variant="caption"
             color="text.secondary"
             sx={{ mb: 1, display: "block" }}
           >
-            Group additional HA entities into this device. Each entity becomes a
-            sub-endpoint under a shared Matter device. Requires the
-            autoComposedDevices feature flag.
+            {t("mapping.dialog.composedHelp")}
           </Typography>
           {composedEntities.map((sub, index) => (
             <Box
@@ -1804,15 +1807,15 @@ export function EntityMappingDialog({
                     updated[index] = { ...sub, entityId: val };
                     setComposedEntities(updated);
                   }}
-                  label="Entity ID"
+                  label={t("mapping.entityId")}
                   placeholder="sensor.temperature"
                 />
               </Box>
               <FormControl size="small" sx={{ flex: 1, mt: 1 }}>
-                <InputLabel>Device Type</InputLabel>
+                <InputLabel>{t("mapping.deviceType")}</InputLabel>
                 <Select
                   value={sub.matterDeviceType || ""}
-                  label="Device Type"
+                  label={t("mapping.deviceType")}
                   onChange={(e) => {
                     const updated = [...composedEntities];
                     updated[index] = {
@@ -1824,7 +1827,7 @@ export function EntityMappingDialog({
                   }}
                 >
                   <MenuItem value="">
-                    <em>Auto-detect</em>
+                    <em>{t("mapping.autoDetect")}</em>
                   </MenuItem>
                   {(
                     Object.entries(matterDeviceTypeLabels) as [
@@ -1841,6 +1844,7 @@ export function EntityMappingDialog({
               <IconButton
                 size="small"
                 color="error"
+                aria-label={t("common.delete")}
                 sx={{ mt: 1.5 }}
                 onClick={() => {
                   setComposedEntities(
@@ -1862,7 +1866,7 @@ export function EntityMappingDialog({
               ])
             }
           >
-            Add Sub-Entity
+            {t("mapping.dialog.addSubEntity")}
           </Button>
         </Box>
 
@@ -1873,7 +1877,7 @@ export function EntityMappingDialog({
               onChange={(e) => setDisabled(e.target.checked)}
             />
           }
-          label="Disable this entity (exclude from bridge)"
+          label={t("mapping.dialog.disableEntity")}
         />
 
         <FormControlLabel
@@ -1883,7 +1887,7 @@ export function EntityMappingDialog({
               onChange={(e) => setDisableBatteryMapping(e.target.checked)}
             />
           }
-          label="Disable battery mapping (skip an auto-detected or manually mapped battery sensor for this entity; use when an integration like Xiaomi Home reports a bogus battery sensor on a mains-powered device, causing a false low-battery warning in Matter controllers)"
+          label={t("mapping.dialog.disableBatteryMapping")}
           sx={{ mt: 1, display: "block" }}
         />
 
@@ -1895,7 +1899,7 @@ export function EntityMappingDialog({
                 onChange={(e) => setDisableMomentaryFlip(e.target.checked)}
               />
             }
-            label="Do not report the on/off flip after a run. Try this when Alexa devices on script bridges stop responding."
+            label={t("mapping.dialog.disableMomentaryFlip")}
             sx={{ mt: 1, display: "block" }}
           />
         )}
@@ -1903,11 +1907,11 @@ export function EntityMappingDialog({
         <TextField
           fullWidth
           margin="normal"
-          label="Update throttle (ms, optional)"
+          label={t("mapping.dialog.updateThrottle")}
           type="number"
           value={updateThrottleMs}
           onChange={(e) => setUpdateThrottleMs(e.target.value)}
-          helperText="Limit Matter updates for chatty sensors (power, energy) to one per N ms. Empty / 0 keeps the default. Max 60000."
+          helperText={t("mapping.dialog.updateThrottleHelp")}
           slotProps={{ htmlInput: { min: 0, max: 60000, step: 100 } }}
         />
       </DialogContent>
@@ -1916,7 +1920,8 @@ export function EntityMappingDialog({
         <Button
           onClick={handleSave}
           variant="contained"
-          disabled={!editEntityId.trim()}
+          disabled={!editEntityId.trim() || saving}
+          startIcon={saving ? <CircularProgress size={16} /> : undefined}
         >
           {t("common.save")}
         </Button>

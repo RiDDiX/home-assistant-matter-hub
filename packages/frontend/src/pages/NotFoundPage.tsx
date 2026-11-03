@@ -21,7 +21,7 @@ export const NotFoundPage = () => {
       p={4}
     >
       <SearchOffIcon color="disabled" sx={{ fontSize: 64 }} />
-      <Typography variant="h5" fontWeight={600}>
+      <Typography variant="h5" component="h1" fontWeight={600}>
         {t("notFound.title")}
       </Typography>
       <Typography variant="body2" color="text.secondary">

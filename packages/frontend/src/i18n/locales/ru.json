@@ -171,7 +171,9 @@
     "bridgeStatusRunning": "{{running}} работает",
     "bridgeStatusFailed": "{{failed}} с ошибками",
     "devicesFailed": "{{count}} с ошибками",
-    "uptimeFormat": "{{time}}"
+    "uptimeFormat": "{{time}}",
+    "deviceCount": "{{count}} Устройства",
+    "fabricCount": "{{count}} Fabric-соединения"
   },
   "bridge": {
     "name": "Имя моста",
@@ -385,7 +387,8 @@
     "sortType": "Тип устройства",
     "sortName": "Имя",
     "deviceCount": "{{count}} устройство(а)",
-    "filteredCount": "{{filtered}} из {{total}} устройств"
+    "filteredCount": "{{filtered}} из {{total}} устройств",
+    "fabricCount": "{{count}} Fabric-соединения"
   },
   "diagnostics": {
     "title": "Диагностика в реальном времени",

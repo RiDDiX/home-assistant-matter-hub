@@ -171,7 +171,9 @@
     "bridgeStatusRunning": "{{running}} en cours",
     "bridgeStatusFailed": "{{failed}} en échec",
     "devicesFailed": "{{count}} en échec",
-    "uptimeFormat": "{{time}}"
+    "uptimeFormat": "{{time}}",
+    "deviceCount": "{{count}} Appareils",
+    "fabricCount": "{{count}} Fabrics"
   },
   "bridge": {
     "name": "Nom du Bridge",
@@ -402,7 +404,8 @@
     "sortType": "Type d'appareil",
     "sortName": "Nom",
     "deviceCount": "{{count}} appareil(s)",
-    "filteredCount": "{{filtered}} appareil(s) sur {{total}}"
+    "filteredCount": "{{filtered}} appareil(s) sur {{total}}",
+    "fabricCount": "{{count}} Fabrics"
   },
   "diagnostics": {
     "title": "Diagnostic en direct",

@@ -1,22 +1,16 @@
 import {
   type BridgeDataWithMetadata,
+  BridgeStatus,
   classifyController,
   type EndpointData,
-  type FailedEntity,
 } from "@home-assistant-matter-hub/common";
 import InfoOutlinedIcon from "@mui/icons-material/InfoOutlined";
 import RocketLaunchIcon from "@mui/icons-material/RocketLaunch";
-import WarningIcon from "@mui/icons-material/Warning";
 import Alert from "@mui/material/Alert";
 import AlertTitle from "@mui/material/AlertTitle";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
 import CircularProgress from "@mui/material/CircularProgress";
-import Collapse from "@mui/material/Collapse";
-import List from "@mui/material/List";
-import ListItem from "@mui/material/ListItem";
-import ListItemIcon from "@mui/material/ListItemIcon";
-import ListItemText from "@mui/material/ListItemText";
 import Stack from "@mui/material/Stack";
 import Tooltip from "@mui/material/Tooltip";
 import Typography from "@mui/material/Typography";
@@ -38,57 +32,11 @@ import { useTimer } from "../../hooks/timer.ts";
 import { navigation } from "../../routes.tsx";
 import { loadDevices } from "../../state/devices/device-actions.ts";
 import { useAppDispatch } from "../../state/hooks.ts";
+import { bridgeToConfig } from "../edit-bridge/bridge-to-config.ts";
+import { NotFoundPage } from "../NotFoundPage.tsx";
 import { BridgeMoreMenu } from "./BridgeMoreMenu.tsx";
 
 const MemoizedBridgeDetails = memo(BridgeDetails);
-
-const FailedEntitiesAlert = ({
-  failedEntities,
-}: {
-  failedEntities: FailedEntity[];
-}) => {
-  const { t } = useTranslation();
-  const [expanded, setExpanded] = useState(false);
-
-  if (!failedEntities || failedEntities.length === 0) {
-    return null;
-  }
-
-  return (
-    <Alert
-      severity="warning"
-      sx={{ cursor: "pointer" }}
-      onClick={() => setExpanded(!expanded)}
-    >
-      <Typography variant="body2">
-        <strong>
-          {t("bridge.failedEntitiesCount", { count: failedEntities.length })}
-        </strong>{" "}
-        {t(expanded ? "bridge.clickToHide" : "bridge.clickToShow")}
-      </Typography>
-      <Collapse in={expanded}>
-        <List dense sx={{ mt: 1 }}>
-          {failedEntities.map((entity) => (
-            <ListItem key={entity.entityId} sx={{ py: 0 }}>
-              <ListItemIcon sx={{ minWidth: 32 }}>
-                <WarningIcon color="warning" fontSize="small" />
-              </ListItemIcon>
-              <ListItemText
-                primary={entity.entityId}
-                secondary={entity.reason}
-                primaryTypographyProps={{
-                  variant: "body2",
-                  fontWeight: "bold",
-                }}
-                secondaryTypographyProps={{ variant: "caption" }}
-              />
-            </ListItem>
-          ))}
-        </List>
-      </Collapse>
-    </Alert>
-  );
-};
 
 export const BridgeDetailsPage = () => {
   const { t } = useTranslation();
@@ -109,6 +57,7 @@ export const BridgeDetailsPage = () => {
 
   const {
     content: bridge,
+    isInitialized: bridgeInitialized,
     isLoading: bridgeLoading,
     error: bridgeError,
   } = useBridge(bridgeId);
@@ -123,18 +72,24 @@ export const BridgeDetailsPage = () => {
     }
   }, [bridgeError, notifications, t]);
 
+  // an unknown bridge id shows NotFoundPage, its devices 404 is no news
+  const hasBridge = bridge != null;
   useEffect(() => {
-    if (devicesError?.message) {
+    if (hasBridge && devicesError?.message) {
       notifications.show({ message: devicesError.message, severity: "error" });
     }
-  }, [devicesError, notifications]);
+  }, [hasBridge, devicesError, notifications]);
 
-  if (!bridge && bridgeLoading) {
-    return t("common.loading");
+  if (!bridge && (!bridgeInitialized || bridgeLoading)) {
+    return (
+      <Box display="flex" justifyContent="center" p={4}>
+        <CircularProgress />
+      </Box>
+    );
   }
 
   if (!bridge) {
-    return t("common.notFound");
+    return <NotFoundPage />;
   }
 
   return (
@@ -146,11 +101,14 @@ export const BridgeDetailsPage = () => {
         ]}
       />
 
-      <Box display="flex" justifyContent="space-between">
-        <Typography variant="h4">
+      <Box display="flex" justifyContent="space-between" alignItems="center">
+        <Typography variant="h5" component="h1">
           {bridge.name} <BridgeStatusIcon status={bridge.status} />
         </Typography>
-        <BridgeMoreMenu bridge={bridgeId} />
+        <BridgeMoreMenu
+          bridge={bridgeId}
+          running={bridge.status === BridgeStatus.Running}
+        />
       </Box>
 
       <BridgeStatusHint status={bridge.status} reason={bridge.statusReason} />
@@ -167,13 +125,9 @@ export const BridgeDetailsPage = () => {
           </Alert>
         )}
 
-      {bridge.failedEntities && bridge.failedEntities.length > 0 && (
-        <FailedEntitiesAlert failedEntities={bridge.failedEntities} />
-      )}
+      <MemoizedBridgeDetails bridge={bridge} />
 
       <ServerModeRecommendation bridge={bridge} devices={devices} />
-
-      <MemoizedBridgeDetails bridge={bridge} />
 
       {devices && <DiagnosticsCard devices={devices} />}
 
@@ -251,17 +205,11 @@ const ServerModeRecommendation = ({
   const handleEnableServerMode = async () => {
     setEnabling(true);
     try {
+      // PUT replaces the whole config, so send every stored field
       await updateBridge({
+        ...bridgeToConfig(bridge),
         id: bridge.id,
-        name: bridge.name,
-        port: bridge.port,
-        filter: bridge.filter,
-        featureFlags: {
-          ...bridge.featureFlags,
-          serverMode: true,
-        },
-        icon: bridge.icon,
-        priority: bridge.priority,
+        featureFlags: { ...bridge.featureFlags, serverMode: true },
       });
       notifications.show({
         message: t("bridge.serverModeEnabled"),

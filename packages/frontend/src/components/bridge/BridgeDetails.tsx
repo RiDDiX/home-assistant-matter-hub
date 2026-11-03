@@ -39,7 +39,11 @@ import { forceSyncBridge, openCommissioningWindow } from "../../api/bridges.ts";
 import { navigation } from "../../routes.tsx";
 import { timeAgo } from "../../time.ts";
 import { FabricList } from "../fabric/FabricList.tsx";
+import { copyText } from "../misc/copy-text.ts";
 import { useNotifications } from "../notifications/use-notifications.ts";
+
+// bigger hit area on touch screens only
+const touchTarget = { "@media (pointer: coarse)": { p: 1.25 } };
 
 export interface BridgeDetailsProps {
   readonly bridge: BridgeDataWithMetadata;
@@ -88,11 +92,25 @@ export const BridgeDetails = ({ bridge }: BridgeDetailsProps) => {
   );
 };
 
+function useCopyToClipboard() {
+  const { t } = useTranslation();
+  const notification = useNotifications();
+  return async (text: string) => {
+    const copied = await copyText(text);
+    notification.show(
+      copied
+        ? { message: t("common.copied"), severity: "success" }
+        : { message: t("common.copyFailed"), severity: "error" },
+    );
+  };
+}
+
 const PairingCard = ({ bridge }: { bridge: BridgeDataWithMetadata }) => {
   const { t } = useTranslation();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [opening, setOpening] = useState(false);
   const notification = useNotifications();
+  const copyToClipboard = useCopyToClipboard();
 
   const handleOpenCommissioningWindow = async () => {
     setOpening(true);
@@ -128,10 +146,6 @@ const PairingCard = ({ bridge }: { bridge: BridgeDataWithMetadata }) => {
       </Card>
     );
   }
-
-  const copyToClipboard = (text: string) => {
-    navigator.clipboard.writeText(text);
-  };
 
   return (
     <>
@@ -196,14 +210,17 @@ const PairingCard = ({ bridge }: { bridge: BridgeDataWithMetadata }) => {
                   <Typography variant="body2" fontFamily="monospace">
                     {bridge.commissioning.manualPairingCode}
                   </Typography>
-                  <IconButton
-                    size="small"
-                    onClick={() =>
-                      copyToClipboard(bridge.commissioning!.manualPairingCode)
-                    }
-                  >
-                    <ContentCopyIcon fontSize="small" />
-                  </IconButton>
+                  <Tooltip title={t("common.copy")}>
+                    <IconButton
+                      size="small"
+                      sx={touchTarget}
+                      onClick={() =>
+                        copyToClipboard(bridge.commissioning!.manualPairingCode)
+                      }
+                    >
+                      <ContentCopyIcon fontSize="small" />
+                    </IconButton>
+                  </Tooltip>
                 </Box>
               </Box>
             </Stack>
@@ -403,6 +420,7 @@ const FiltersCard = ({ bridge }: { bridge: BridgeDataWithMetadata }) => {
           >
             <IconButton
               size="small"
+              sx={touchTarget}
               onClick={() => navigate(navigation.editBridge(bridge.id))}
             >
               {hasFilters ? <EditIcon /> : <AddIcon />}
@@ -461,13 +479,10 @@ const PairingDialog = ({
   onClose: () => void;
 }) => {
   const { t } = useTranslation();
+  const copyToClipboard = useCopyToClipboard();
   if (!bridge.commissioning) {
     return null;
   }
-
-  const copyToClipboard = (text: string) => {
-    navigator.clipboard.writeText(text);
-  };
 
   return (
     <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
@@ -507,6 +522,7 @@ const PairingDialog = ({
             <Tooltip title={t("common.copy")}>
               <IconButton
                 size="small"
+                sx={touchTarget}
                 onClick={() =>
                   copyToClipboard(bridge.commissioning!.manualPairingCode)
                 }
@@ -527,6 +543,7 @@ const PairingDialog = ({
             <Tooltip title={t("common.copy")}>
               <IconButton
                 size="small"
+                sx={touchTarget}
                 onClick={() =>
                   copyToClipboard(bridge.commissioning!.passcode.toString())
                 }
@@ -547,6 +564,7 @@ const PairingDialog = ({
             <Tooltip title={t("common.copy")}>
               <IconButton
                 size="small"
+                sx={touchTarget}
                 onClick={() =>
                   copyToClipboard(
                     bridge.commissioning!.discriminator.toString(),

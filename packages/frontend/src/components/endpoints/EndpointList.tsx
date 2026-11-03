@@ -40,7 +40,11 @@ import { collectLeafEndpoints } from "./collect-leaf-endpoints.ts";
 import { EndpointCard } from "./EndpointCard.tsx";
 import { getEndpointName } from "./EndpointName.tsx";
 import { EndpointState } from "./EndpointState.tsx";
-import { EndpointTreeView, type SortOption } from "./EndpointTreeView.tsx";
+import {
+  EndpointTreeView,
+  findSelectedEndpoint,
+  type SortOption,
+} from "./EndpointTreeView.tsx";
 
 export interface EndpointListProps {
   endpoint: EndpointData;
@@ -50,9 +54,8 @@ export interface EndpointListProps {
 
 export const EndpointList = (props: EndpointListProps) => {
   const { t } = useTranslation();
-  const [selectedItem, setSelectedItem] = useState<EndpointData | undefined>(
-    undefined,
-  );
+  // keep the id, the 10 s poll replaces the endpoint objects
+  const [selectedId, setSelectedId] = useState<string | undefined>();
   const [sortBy, setSortBy] = useState<SortOption>("name");
   const [viewMode, setViewMode] = useState<"cards" | "tree">("cards");
   const [searchTerm, setSearchTerm] = useState("");
@@ -76,8 +79,13 @@ export const EndpointList = (props: EndpointListProps) => {
     Record<string, DeviceImageInfo>
   >({});
 
-  const allEntityIds = useMemo(() => {
-    const leaves = collectLeafEndpoints(props.endpoint);
+  const leaves = useMemo(
+    () => collectLeafEndpoints(props.endpoint),
+    [props.endpoint],
+  );
+
+  // a string key, so a poll with the same entities does not resolve again
+  const entityIdsKey = useMemo(() => {
     const ids: string[] = [];
     for (const ep of leaves) {
       const state = ep.state as {
@@ -86,15 +94,15 @@ export const EndpointList = (props: EndpointListProps) => {
       const eid = state.homeAssistantEntity?.entity?.entity_id;
       if (eid) ids.push(eid);
     }
-    return ids;
-  }, [props.endpoint]);
+    return ids.join(",");
+  }, [leaves]);
 
   const refreshImages = useCallback(() => {
-    if (allEntityIds.length === 0) return;
-    resolveDeviceImages(allEntityIds)
+    if (!entityIdsKey) return;
+    resolveDeviceImages(entityIdsKey.split(","))
       .then(setImageInfoMap)
       .catch(() => {});
-  }, [allEntityIds]);
+  }, [entityIdsKey]);
 
   useEffect(() => {
     refreshImages();
@@ -114,12 +122,18 @@ export const EndpointList = (props: EndpointListProps) => {
           (m) => m.entityId === entityId,
         );
         setCurrentMapping(existingMapping);
-      } catch {
-        setCurrentMapping(undefined);
+      } catch (error) {
+        // a blank dialog would overwrite the stored mapping on save
+        setSnackbar({
+          open: true,
+          message: `${t("mapping.loadFailed")}: ${error instanceof Error ? error.message : String(error)}`,
+          severity: "error",
+        });
+        return;
       }
       setMappingDialogOpen(true);
     },
-    [],
+    [t],
   );
 
   const handleSaveMapping = useCallback(
@@ -129,7 +143,7 @@ export const EndpointList = (props: EndpointListProps) => {
         await updateEntityMapping(props.bridgeId, selectedEntityId, config);
         setSnackbar({
           open: true,
-          message: `Mapping saved for ${selectedEntityId}. Restart the bridge to apply changes.`,
+          message: t("mapping.saved", { entityId: selectedEntityId }),
           severity: "success",
         });
         setMappingDialogOpen(false);
@@ -137,12 +151,14 @@ export const EndpointList = (props: EndpointListProps) => {
       } catch (error) {
         setSnackbar({
           open: true,
-          message: `Failed to save mapping: ${error}`,
+          message: t("mapping.saveFailed", {
+            error: error instanceof Error ? error.message : String(error),
+          }),
           severity: "error",
         });
       }
     },
-    [props.bridgeId, selectedEntityId, props.onMappingSaved],
+    [props.bridgeId, selectedEntityId, props.onMappingSaved, t],
   );
 
   const getEntityAvailability = useCallback((ep: EndpointData) => {
@@ -156,14 +172,11 @@ export const EndpointList = (props: EndpointListProps) => {
   }, []);
 
   const unavailableCount = useMemo(() => {
-    return collectLeafEndpoints(props.endpoint).filter(getEntityAvailability)
-      .length;
-  }, [props.endpoint, getEntityAvailability]);
+    return leaves.filter(getEntityAvailability).length;
+  }, [leaves, getEntityAvailability]);
 
   const endpoints = useMemo(() => {
-    const leafEndpoints = collectLeafEndpoints(props.endpoint);
-
-    const filtered = leafEndpoints.filter((ep) => {
+    const filtered = leaves.filter((ep) => {
       if (showOnlyUnavailable && !getEntityAvailability(ep)) {
         return false;
       }
@@ -191,16 +204,21 @@ export const EndpointList = (props: EndpointListProps) => {
           return 0;
       }
     });
-  }, [
-    props.endpoint,
-    searchTerm,
-    sortBy,
-    showOnlyUnavailable,
-    getEntityAvailability,
-  ]);
+  }, [leaves, searchTerm, sortBy, showOnlyUnavailable, getEntityAvailability]);
+
+  // cards hold the hoisted battery, so look there before the raw tree
+  const selectedItem = useMemo(() => {
+    if (!selectedId) return undefined;
+    return (
+      leaves.find((ep) => ep.id.global === selectedId) ??
+      findSelectedEndpoint(selectedId, props.endpoint)
+    );
+  }, [selectedId, leaves, props.endpoint]);
+
+  const isCards = viewMode === "cards";
 
   const handleCardClick = (endpoint: EndpointData) => {
-    setSelectedItem(endpoint);
+    setSelectedId(endpoint.id.global);
     setDetailsOpen(true);
   };
 
@@ -216,7 +234,8 @@ export const EndpointList = (props: EndpointListProps) => {
       >
         <Box display="flex" alignItems="center" gap={2}>
           <Typography variant="h6" component="span">
-            {t("endpoints.title")} ({endpoints.length})
+            {t("endpoints.title")} ({isCards ? endpoints.length : leaves.length}
+            )
           </Typography>
           <Tooltip title={t("endpoints.viewAll")}>
             <IconButton
@@ -230,16 +249,28 @@ export const EndpointList = (props: EndpointListProps) => {
           </Tooltip>
         </Box>
 
-        <Box display="flex" alignItems="center" gap={1} flexGrow={1}>
-          <TextField
-            size="small"
-            placeholder={t("endpoints.searchPlaceholder")}
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            sx={{ flexGrow: 1, maxWidth: 300 }}
-          />
+        <Box
+          display="flex"
+          alignItems="center"
+          justifyContent="flex-end"
+          gap={1}
+          flexGrow={1}
+        >
+          {/* the tree always shows the whole bridge, so filters are card only */}
+          {isCards && (
+            <TextField
+              size="small"
+              placeholder={t("endpoints.searchPlaceholder")}
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              slotProps={{
+                htmlInput: { "aria-label": t("endpoints.searchPlaceholder") },
+              }}
+              sx={{ flexGrow: 1, maxWidth: 300 }}
+            />
+          )}
 
-          {unavailableCount > 0 && (
+          {isCards && unavailableCount > 0 && (
             <Tooltip
               title={
                 showOnlyUnavailable
@@ -253,8 +284,10 @@ export const EndpointList = (props: EndpointListProps) => {
                 onClick={() => setShowOnlyUnavailable((v) => !v)}
                 aria-label={
                   showOnlyUnavailable
-                    ? "Show all entities"
-                    : `Show ${unavailableCount} unavailable entities`
+                    ? t("endpoints.showAll")
+                    : t("endpoints.showUnavailable", {
+                        count: unavailableCount,
+                      })
                 }
               >
                 <Badge badgeContent={unavailableCount} color="warning" max={99}>
@@ -289,14 +322,14 @@ export const EndpointList = (props: EndpointListProps) => {
             exclusive
             onChange={(_, value) => value && setViewMode(value)}
             size="small"
-            aria-label="View mode"
+            aria-label={t("endpoints.viewMode")}
           >
-            <ToggleButton value="cards" aria-label="Card view">
+            <ToggleButton value="cards" aria-label={t("endpoints.cardView")}>
               <Tooltip title={t("endpoints.cardView")}>
                 <GridViewIcon />
               </Tooltip>
             </ToggleButton>
-            <ToggleButton value="tree" aria-label="Tree view">
+            <ToggleButton value="tree" aria-label={t("endpoints.treeView")}>
               <Tooltip title={t("endpoints.treeView")}>
                 <ListIcon />
               </Tooltip>
@@ -305,7 +338,13 @@ export const EndpointList = (props: EndpointListProps) => {
         </Box>
       </Box>
 
-      {viewMode === "cards" ? (
+      {isCards && endpoints.length === 0 && (
+        <Typography color="text.secondary">
+          {t("endpoints.noEndpoints")}
+        </Typography>
+      )}
+
+      {isCards ? (
         <Grid container spacing={2}>
           {endpoints.map((ep) => (
             <Grid key={ep.id.global} size={{ xs: 12, sm: 6, lg: 4 }}>
@@ -335,7 +374,7 @@ export const EndpointList = (props: EndpointListProps) => {
           <Grid size={{ xs: 12, md: 4 }}>
             <EndpointTreeView
               endpoint={props.endpoint}
-              onSelected={setSelectedItem}
+              onSelected={(ep) => setSelectedId(ep?.id.global)}
               sortBy={sortBy}
             />
           </Grid>

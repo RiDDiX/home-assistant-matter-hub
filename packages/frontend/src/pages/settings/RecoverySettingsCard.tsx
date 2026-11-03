@@ -14,12 +14,14 @@ import {
   fetchRecoverySettings,
   updateRecoverySettings,
 } from "../../api/settings.ts";
+import { useNotifications } from "../../components/notifications/use-notifications.ts";
 
 const MIN_INTERVAL_SEC = 10;
 const MAX_INTERVAL_SEC = 3600;
 
 export const RecoverySettingsCard = () => {
   const { t } = useTranslation();
+  const notifications = useNotifications();
   const [enabled, setEnabled] = useState(false);
   const [intervalSec, setIntervalSec] = useState(60);
   const [loading, setLoading] = useState(true);
@@ -46,6 +48,10 @@ export const RecoverySettingsCard = () => {
       });
       setEnabled(s.autoRecoveryEnabled);
       setIntervalSec(Math.round(s.recoveryIntervalMs / 1000));
+      notifications.show({
+        message: t("settings.recovery.saved"),
+        severity: "success",
+      });
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {

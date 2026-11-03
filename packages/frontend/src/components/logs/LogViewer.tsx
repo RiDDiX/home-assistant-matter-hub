@@ -1,8 +1,11 @@
 import BugReportIcon from "@mui/icons-material/BugReport";
+import CampaignIcon from "@mui/icons-material/Campaign";
 import CloseIcon from "@mui/icons-material/Close";
 import ErrorIcon from "@mui/icons-material/Error";
 import InfoIcon from "@mui/icons-material/Info";
+import ReportIcon from "@mui/icons-material/Report";
 import WarningIcon from "@mui/icons-material/Warning";
+import Alert from "@mui/material/Alert";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
 import Chip from "@mui/material/Chip";
@@ -20,8 +23,11 @@ import { useTheme } from "@mui/material/styles";
 import TextField from "@mui/material/TextField";
 import Tooltip from "@mui/material/Tooltip";
 import Typography from "@mui/material/Typography";
+import useMediaQuery from "@mui/material/useMediaQuery";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { ConfirmDialog } from "../misc/ConfirmDialog.tsx";
+import { useNotifications } from "../notifications/use-notifications.ts";
 
 interface LogEntry {
   timestamp: string;
@@ -35,9 +41,12 @@ interface LogViewerProps {
   onClose: () => void;
 }
 
+// matter.js traffic lands in the buffer with its own levels, notice included
 const levelIcons = {
+  fatal: ReportIcon,
   error: ErrorIcon,
   warn: WarningIcon,
+  notice: CampaignIcon,
   info: InfoIcon,
   debug: BugReportIcon,
 };
@@ -45,10 +54,14 @@ const levelIcons = {
 export const LogViewer = ({ open, onClose }: LogViewerProps) => {
   const { t } = useTranslation();
   const theme = useTheme();
+  const notifications = useNotifications();
+  const fullScreen = useMediaQuery(theme.breakpoints.down("sm"));
   const levelColors = useMemo(
     () => ({
+      fatal: theme.palette.error.dark,
       error: theme.palette.error.main,
       warn: theme.palette.warning.main,
+      notice: theme.palette.primary.main,
       info: theme.palette.info.main,
       debug: theme.palette.secondary.main,
     }),
@@ -56,9 +69,17 @@ export const LogViewer = ({ open, onClose }: LogViewerProps) => {
   );
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [loading, setLoading] = useState(true);
-  const [level, setLevel] = useState<string[]>("error,warn,info".split(","));
+  const [fetchError, setFetchError] = useState(false);
+  const [level, setLevel] = useState<string[]>([
+    "fatal",
+    "error",
+    "warn",
+    "notice",
+    "info",
+  ]);
   const [search, setSearch] = useState<string>("");
   const [autoRefresh, setAutoRefresh] = useState<boolean>(true);
+  const [confirmClear, setConfirmClear] = useState(false);
 
   const fetchLogs = useCallback(async () => {
     try {
@@ -68,12 +89,13 @@ export const LogViewer = ({ open, onClose }: LogViewerProps) => {
         ...(search && { search }),
       });
       const res = await fetch(`api/logs?${params}`);
-      if (res.ok) {
-        const data = (await res.json()) as { entries: LogEntry[] };
-        setLogs(data.entries);
-      }
-    } catch (error) {
-      console.error("Failed to fetch logs:", error);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = (await res.json()) as { entries: LogEntry[] };
+      setLogs(data.entries);
+      setFetchError(false);
+    } catch {
+      // polled every 5 s, so an inline alert instead of a toast per try
+      setFetchError(true);
     } finally {
       setLoading(false);
     }
@@ -105,11 +127,14 @@ export const LogViewer = ({ open, onClose }: LogViewerProps) => {
   };
 
   const handleClearLogs = async () => {
+    setConfirmClear(false);
     try {
-      await fetch("api/logs", { method: "DELETE" });
+      const res = await fetch("api/logs", { method: "DELETE" });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
       setLogs([]);
-    } catch (error) {
-      console.error("Failed to clear logs:", error);
+      notifications.show({ message: t("logs.cleared"), severity: "success" });
+    } catch {
+      notifications.show({ message: t("logs.clearFailed"), severity: "error" });
     }
   };
 
@@ -126,28 +151,39 @@ export const LogViewer = ({ open, onClose }: LogViewerProps) => {
   };
 
   return (
-    <Dialog open={open} onClose={onClose} maxWidth="lg" fullWidth>
+    <Dialog
+      open={open}
+      onClose={onClose}
+      maxWidth="lg"
+      fullWidth
+      fullScreen={fullScreen}
+    >
       <DialogTitle sx={{ display: "flex", alignItems: "center", gap: 1 }}>
         <BugReportIcon />
         {t("logs.title")}
         <Box sx={{ flexGrow: 1 }} />
         <Tooltip title={t("logs.autoRefresh")}>
           <Chip
-            label={autoRefresh ? "Auto" : "Manual"}
+            label={autoRefresh ? t("logs.auto") : t("logs.manual")}
             color={autoRefresh ? "success" : "default"}
             size="small"
             onClick={() => setAutoRefresh(!autoRefresh)}
             sx={{ cursor: "pointer" }}
           />
         </Tooltip>
-        <IconButton onClick={onClose}>
+        <IconButton onClick={onClose} aria-label={t("common.close")}>
           <CloseIcon />
         </IconButton>
       </DialogTitle>
 
       <DialogContent>
-        <Stack spacing={2} sx={{ mb: 2 }}>
-          <Stack direction="row" spacing={2} alignItems="center">
+        {/* pt keeps the select label clear of the content's clipping edge */}
+        <Stack spacing={2} sx={{ mb: 2, pt: 1.5 }}>
+          <Stack
+            direction={{ xs: "column", sm: "row" }}
+            spacing={2}
+            alignItems={{ sm: "center" }}
+          >
             <FormControl size="small" sx={{ minWidth: 200 }}>
               <InputLabel>{t("logs.logLevel")}</InputLabel>
               <Select
@@ -166,7 +202,10 @@ export const LogViewer = ({ open, onClose }: LogViewerProps) => {
                           sx={{
                             backgroundColor:
                               levelColors[value as keyof typeof levelColors],
-                            color: "white",
+                            color: theme.palette.getContrastText(
+                              levelColors[value as keyof typeof levelColors] ??
+                                theme.palette.grey[500],
+                            ),
                           }}
                         />
                       ),
@@ -174,8 +213,10 @@ export const LogViewer = ({ open, onClose }: LogViewerProps) => {
                   </Box>
                 )}
               >
+                <MenuItem value="fatal">{t("logs.fatal")}</MenuItem>
                 <MenuItem value="error">{t("logs.error")}</MenuItem>
                 <MenuItem value="warn">{t("logs.warning")}</MenuItem>
+                <MenuItem value="notice">{t("logs.notice")}</MenuItem>
                 <MenuItem value="info">{t("logs.info")}</MenuItem>
                 <MenuItem value="debug">{t("logs.debug")}</MenuItem>
               </Select>
@@ -193,15 +234,23 @@ export const LogViewer = ({ open, onClose }: LogViewerProps) => {
               {t("common.refresh")}
             </Button>
 
-            <Button variant="outlined" color="error" onClick={handleClearLogs}>
+            <Button
+              variant="outlined"
+              color="error"
+              onClick={() => setConfirmClear(true)}
+            >
               {t("common.delete")}
             </Button>
           </Stack>
+          {fetchError && (
+            <Alert severity="error">{t("logs.fetchFailed")}</Alert>
+          )}
         </Stack>
 
         <Box
           sx={{
-            height: 400,
+            height: fullScreen ? "auto" : 400,
+            minHeight: 200,
             overflow: "auto",
             backgroundColor: "background.paper",
             border: 1,
@@ -283,6 +332,16 @@ export const LogViewer = ({ open, onClose }: LogViewerProps) => {
       <DialogActions>
         <Button onClick={onClose}>{t("common.close")}</Button>
       </DialogActions>
+
+      <ConfirmDialog
+        open={confirmClear}
+        title={t("logs.clearConfirmTitle")}
+        message={t("logs.clearConfirmMessage")}
+        confirmLabel={t("common.delete")}
+        cancelLabel={t("common.cancel")}
+        onConfirm={handleClearLogs}
+        onCancel={() => setConfirmClear(false)}
+      />
     </Dialog>
   );
 };

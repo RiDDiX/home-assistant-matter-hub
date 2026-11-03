@@ -3,6 +3,7 @@ import Box from "@mui/material/Box";
 import { useTheme } from "@mui/material/styles";
 import Typography from "@mui/material/Typography";
 import { Handle, type NodeProps, Position } from "@xyflow/react";
+import { useTranslation } from "react-i18next";
 
 export interface HubNodeData {
   label: string;
@@ -13,6 +14,7 @@ export interface HubNodeData {
 
 export const HubNode = ({ data }: NodeProps) => {
   const { label, bridgeCount, deviceCount } = data as unknown as HubNodeData;
+  const { t } = useTranslation();
   const theme = useTheme();
   const primary = theme.palette.primary.main;
   const primaryDark = theme.palette.primary.dark;
@@ -37,7 +39,8 @@ export const HubNode = ({ data }: NodeProps) => {
         {label}
       </Typography>
       <Typography variant="caption" sx={{ opacity: 0.8, fontSize: "0.65rem" }}>
-        {bridgeCount} bridges · {deviceCount} devices
+        {t("networkMap.bridgeCount", { count: bridgeCount })} ·{" "}
+        {t("dashboard.deviceCount", { count: deviceCount })}
       </Typography>
       <Handle type="source" position={Position.Right} style={{ opacity: 0 }} />
       <Handle

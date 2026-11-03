@@ -17,7 +17,6 @@ import CardContent from "@mui/material/CardContent";
 import Checkbox from "@mui/material/Checkbox";
 import Chip from "@mui/material/Chip";
 import CircularProgress from "@mui/material/CircularProgress";
-import FormControlLabel from "@mui/material/FormControlLabel";
 import Grid from "@mui/material/Grid";
 import LinearProgress from "@mui/material/LinearProgress";
 import Stack from "@mui/material/Stack";
@@ -26,7 +25,10 @@ import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router";
 import { createBridge } from "../../api/bridges.js";
+import { assertOk, parseJsonResponse } from "../../api/fetch-utils.ts";
 import { Breadcrumbs } from "../../components/breadcrumbs/Breadcrumbs.tsx";
+import { domainIconMap } from "../../components/bridge/bridgeIconUtils.ts";
+import { ControllerIcon } from "../../components/bridge/ControllerIcon.tsx";
 import { useNotifications } from "../../components/notifications/use-notifications.ts";
 import { navigation } from "../../routes.tsx";
 import { loadBridges } from "../../state/bridges/bridge-actions.ts";
@@ -39,28 +41,6 @@ interface AreaSummary {
   domains: Record<string, number>;
 }
 
-const controllerIcons: Record<string, string> = {
-  apple_home: "\uD83C\uDF4F",
-  google_home: "\uD83C\uDFE0",
-  alexa: "\uD83D\uDD35",
-  multi_controller: "\uD83D\uDD00",
-};
-
-const domainIcons: Record<string, string> = {
-  light: "\uD83D\uDCA1",
-  switch: "\uD83D\uDD0C",
-  sensor: "\uD83D\uDCCA",
-  binary_sensor: "\uD83D\uDCCA",
-  climate: "\uD83C\uDF21\uFE0F",
-  cover: "\uD83E\uDE9F",
-  fan: "\uD83C\uDF2C\uFE0F",
-  lock: "\uD83D\uDD12",
-  media_player: "\uD83C\uDFB5",
-  vacuum: "\uD83E\uDD16",
-  valve: "\uD83D\uDEB0",
-  humidifier: "\uD83D\uDCA7",
-};
-
 export const AreaBridgeSetupPage = () => {
   const { t } = useTranslation();
   const navigate = useNavigate();
@@ -69,6 +49,7 @@ export const AreaBridgeSetupPage = () => {
 
   const [areas, setAreas] = useState<AreaSummary[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [selectedAreas, setSelectedAreas] = useState<Set<string>>(new Set());
   const [selectedController, setSelectedController] = useState<
     ControllerProfile | undefined
@@ -83,15 +64,14 @@ export const AreaBridgeSetupPage = () => {
     const fetchAreas = async () => {
       try {
         const res = await fetch("api/matter/areas/summary");
-        if (res.ok) {
-          const data = (await res.json()) as AreaSummary[];
-          setAreas(data.filter((a) => a.entityCount > 0));
-        }
-      } catch {
-        notifications.show({
-          message: t("areaSetup.loadFailed"),
-          severity: "error",
-        });
+        await assertOk(res, t("areaSetup.loadFailed"));
+        const data = await parseJsonResponse<AreaSummary[]>(res);
+        setAreas(data.filter((a) => a.entityCount > 0));
+      } catch (e) {
+        const message =
+          e instanceof Error ? e.message : t("areaSetup.loadFailed");
+        setLoadError(message);
+        notifications.show({ message, severity: "error" });
       } finally {
         setLoading(false);
       }
@@ -133,17 +113,6 @@ export const AreaBridgeSetupPage = () => {
       error?: string;
     }> = [];
 
-    let nextPortRes: { port: number } | undefined;
-    try {
-      const res = await fetch("api/matter/next-port");
-      if (res.ok) {
-        nextPortRes = (await res.json()) as { port: number };
-      }
-    } catch {
-      // Use default
-    }
-    let port = nextPortRes?.port ?? 5540;
-
     for (let i = 0; i < areasToCreate.length; i++) {
       const area = areasToCreate[i];
       setProgress(((i + 1) / areasToCreate.length) * 100);
@@ -155,9 +124,9 @@ export const AreaBridgeSetupPage = () => {
         ...(selectedController?.featureFlags ?? {}),
       };
 
+      // no port: the backend picks the lowest free one for each bridge
       const request: CreateBridgeRequest = {
         name: area.name,
-        port: port++,
         filter: {
           include: [
             {
@@ -218,12 +187,16 @@ export const AreaBridgeSetupPage = () => {
         ]}
       />
 
-      <Typography variant="h5">{t("areaSetup.heading")}</Typography>
+      <Typography variant="h5" component="h1">
+        {t("areaSetup.heading")}
+      </Typography>
       <Typography variant="body2" color="text.secondary">
         {t("areaSetup.description")}
       </Typography>
 
-      {areas.length === 0 ? (
+      {loadError ? (
+        <Alert severity="error">{loadError}</Alert>
+      ) : areas.length === 0 ? (
         <Alert severity="info">{t("areaSetup.noAreas")}</Alert>
       ) : (
         <>
@@ -254,14 +227,13 @@ export const AreaBridgeSetupPage = () => {
                             isSelected ? undefined : profile,
                           )
                         }
+                        aria-pressed={isSelected}
                       >
                         <CardContent
                           sx={{ p: 1.5, "&:last-child": { pb: 1.5 } }}
                         >
-                          <Box display="flex" alignItems="center" gap={0.5}>
-                            <Typography fontSize={18}>
-                              {controllerIcons[profile.id] ?? "\uD83C\uDFE0"}
-                            </Typography>
+                          <Box display="flex" alignItems="center" gap={1}>
+                            <ControllerIcon id={profile.id} />
                             <Typography variant="body2" fontWeight={500}>
                               {profile.name}
                             </Typography>
@@ -326,6 +298,7 @@ export const AreaBridgeSetupPage = () => {
                     >
                       <CardActionArea
                         onClick={() => toggleArea(area.area_id)}
+                        aria-pressed={isSelected}
                         sx={{
                           p: 0,
                           display: "flex",
@@ -342,16 +315,14 @@ export const AreaBridgeSetupPage = () => {
                           }}
                         >
                           <Box display="flex" alignItems="center" gap={1}>
-                            <FormControlLabel
-                              control={
-                                <Checkbox
-                                  checked={isSelected}
-                                  size="small"
-                                  sx={{ p: 0.5 }}
-                                />
-                              }
-                              label=""
-                              sx={{ m: 0, mr: -0.5 }}
+                            {/* state lives on the card button, this is only the visual */}
+                            <Checkbox
+                              checked={isSelected}
+                              size="small"
+                              tabIndex={-1}
+                              disableRipple
+                              sx={{ p: 0.5, mr: -0.5, pointerEvents: "none" }}
+                              slotProps={{ input: { "aria-hidden": true } }}
                             />
                             <Typography
                               variant="subtitle2"
@@ -359,11 +330,7 @@ export const AreaBridgeSetupPage = () => {
                             >
                               {area.name}
                             </Typography>
-                            <Chip
-                              label={`${area.entityCount}`}
-                              size="small"
-                              sx={{ fontSize: "0.7rem", height: 20 }}
-                            />
+                            <Chip label={`${area.entityCount}`} size="small" />
                           </Box>
                           <Box
                             display="flex"
@@ -372,15 +339,18 @@ export const AreaBridgeSetupPage = () => {
                             mt={0.5}
                             ml={4}
                           >
-                            {topDomains.map(([domain, count]) => (
-                              <Chip
-                                key={domain}
-                                label={`${domainIcons[domain] ?? ""} ${domain} (${count})`}
-                                size="small"
-                                variant="outlined"
-                                sx={{ fontSize: "0.6rem", height: 18 }}
-                              />
-                            ))}
+                            {topDomains.map(([domain, count]) => {
+                              const Icon = domainIconMap[domain];
+                              return (
+                                <Chip
+                                  key={domain}
+                                  icon={Icon ? <Icon /> : undefined}
+                                  label={`${domain} (${count})`}
+                                  size="small"
+                                  variant="outlined"
+                                />
+                              );
+                            })}
                           </Box>
                         </CardContent>
                       </CardActionArea>

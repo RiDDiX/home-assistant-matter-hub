@@ -141,7 +141,9 @@
     "bridgeStatusRunning": "{{running}} running",
     "bridgeStatusFailed": "{{failed}} failed",
     "devicesFailed": "{{count}} failed",
-    "uptimeFormat": "{{time}}"
+    "uptimeFormat": "{{time}}",
+    "deviceCount": "{{count}} Cihazlar",
+    "fabricCount": "{{count}} Fabric'ler"
   },
   "bridge": {
     "name": "Ad",
@@ -352,7 +354,8 @@
     "sortType": "Türe göre sırala",
     "sortName": "Ada göre sırala",
     "deviceCount": "{{count}} device(s)",
-    "filteredCount": "{{filtered}} of {{total}} devices"
+    "filteredCount": "{{filtered}} of {{total}} devices",
+    "fabricCount": "{{count}} Fabric'ler"
   },
   "diagnostics": {
     "title": "Tanılama",

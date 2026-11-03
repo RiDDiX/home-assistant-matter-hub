@@ -1,3 +1,4 @@
+import type { BridgeDataWithMetadata } from "@home-assistant-matter-hub/common";
 import { createReducer } from "@reduxjs/toolkit";
 import {
   createBridge,
@@ -22,7 +23,6 @@ export const bridgesReducer = createReducer(initialState, (builder) => {
     .addCase(loadBridges.rejected, (state, action) => {
       state.items.isInitialized = true;
       state.items.isLoading = false;
-      state.items.content = undefined;
       state.items.error = action.error;
     })
     .addCase(loadBridges.fulfilled, (state, action) => {
@@ -32,7 +32,7 @@ export const bridgesReducer = createReducer(initialState, (builder) => {
       state.items.error = undefined;
     })
     .addCase(createBridge.fulfilled, (state, action) => {
-      state.items.content?.push(action.payload);
+      upsert(state, action.payload);
     })
     .addCase(updateBridge.fulfilled, (state, action) => {
       const idx =
@@ -65,15 +65,20 @@ export const bridgesReducer = createReducer(initialState, (builder) => {
       state.items.error = undefined;
     })
     .addCase(updateBridgeFromWebSocket, (state, action) => {
-      if (state.items.content) {
-        const idx = state.items.content.findIndex(
-          (b) => b.id === action.payload.id,
-        );
-        if (idx !== -1) {
-          state.items.content[idx] = action.payload;
-        } else {
-          state.items.content.push(action.payload);
-        }
-      }
+      upsert(state, action.payload);
     });
 });
+
+// The WebSocket update for a new bridge can land before the create response.
+function upsert(state: BridgeState, bridge: BridgeDataWithMetadata) {
+  const content = state.items.content;
+  if (!content) {
+    return;
+  }
+  const idx = content.findIndex((b) => b.id === bridge.id);
+  if (idx !== -1) {
+    content[idx] = bridge;
+  } else {
+    content.push(bridge);
+  }
+}

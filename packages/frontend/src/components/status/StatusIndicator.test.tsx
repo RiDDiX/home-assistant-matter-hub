@@ -1,16 +1,18 @@
-import { ThemeProvider } from "@mui/material/styles";
-import { render, screen, waitFor } from "@testing-library/react";
+import { screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { appTheme } from "../../theme/theme.ts";
+import { renderWithProviders as renderInTheme } from "../../test/render.tsx";
 import { StatusIndicator } from "./StatusIndicator.tsx";
 
 // Mock the WebSocket context
 vi.mock("../../contexts/WebSocketContext.tsx", () => ({
-  useWebSocketStatus: () => ({ isConnected: true }),
+  useWebSocketStatus: () => ({ isConnected: true, closedOnce: false }),
 }));
 
-function renderInTheme(ui: React.ReactElement) {
-  return render(<ThemeProvider theme={appTheme}>{ui}</ThemeProvider>);
+// the real routes module pulls in every page
+vi.mock("../../routes.tsx", () => ({ navigation: { health: "/health" } }));
+
+function healthResponse(status: number, body: object) {
+  return { ok: status < 300, status, json: async () => body } as Response;
 }
 
 describe("StatusIndicator", () => {
@@ -89,5 +91,55 @@ describe("StatusIndicator", () => {
     await waitFor(() => {
       expect(screen.getByText("No Bridges")).toBeInTheDocument();
     });
+  });
+
+  it("reads the 503 body when Home Assistant is disconnected", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      healthResponse(503, {
+        status: "unhealthy",
+        version: "2.1.0",
+        uptime: 60,
+        services: {
+          bridges: { total: 1, running: 1, stopped: 0 },
+          homeAssistant: { connected: false },
+        },
+      }),
+    );
+
+    renderInTheme(<StatusIndicator />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Unhealthy")).toBeInTheDocument();
+    });
+  });
+
+  it("shows a warning, not unhealthy, when a bridge is stopped", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      healthResponse(200, {
+        status: "degraded",
+        version: "2.1.0",
+        uptime: 60,
+        services: {
+          bridges: { total: 2, running: 1, stopped: 1 },
+          homeAssistant: { connected: true },
+        },
+      }),
+    );
+
+    renderInTheme(<StatusIndicator />);
+
+    const chip = await screen.findByText(/degraded/i);
+    expect(chip.closest("a")).toHaveClass("MuiChip-colorWarning");
+  });
+
+  it("shows a neutral chip linking to health while loading", () => {
+    vi.spyOn(globalThis, "fetch").mockReturnValue(new Promise(() => {}));
+
+    renderInTheme(<StatusIndicator />);
+
+    const link = screen.getByRole("link");
+    expect(link).toHaveTextContent("Loading");
+    expect(link).toHaveClass("MuiChip-colorDefault");
+    expect(link).toHaveAttribute("href", "/health");
   });
 });

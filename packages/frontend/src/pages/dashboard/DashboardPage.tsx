@@ -52,6 +52,8 @@ import {
   getBridgeIcon,
   getBridgeIconColor,
 } from "../../components/bridge/bridgeIconUtils.ts";
+import { ConfirmDialog } from "../../components/misc/ConfirmDialog.tsx";
+import { useNotifications } from "../../components/notifications/use-notifications.ts";
 import { useBridges } from "../../hooks/data/bridges.ts";
 import { useDashboardWidgets } from "../../hooks/use-dashboard-widgets.ts";
 import { navigation } from "../../routes.tsx";
@@ -182,10 +184,12 @@ function BridgeMiniCard({
     checkBridgeIconExists(bridge.id).then(setHasCustomIcon);
   }, [bridge.id]);
 
+  // the store is fed by the websocket, the health poll lags up to 15 s
+  const status = bridgeData?.status ?? bridge.status;
   const statusColor =
-    bridge.status === "running"
+    status === "running"
       ? "success"
-      : bridge.status === "failed"
+      : status === "failed"
         ? "error"
         : "default";
 
@@ -241,17 +245,18 @@ function BridgeMiniCard({
               </Typography>
               <Stack direction="row" spacing={0.5} alignItems="center">
                 <Chip
-                  label={bridge.status}
+                  label={t(`common.${status}`, { defaultValue: status })}
                   size="small"
                   color={statusColor}
                   sx={{ height: 18, fontSize: "0.65rem" }}
                 />
                 <Typography variant="caption" color="text.secondary">
-                  {bridge.deviceCount} {t("common.devices").toLowerCase()}
+                  {t("dashboard.deviceCount", { count: bridge.deviceCount })}
                 </Typography>
                 {bridge.fabricCount > 0 && (
                   <Typography variant="caption" color="text.secondary">
-                    · {bridge.fabricCount} {t("common.fabrics").toLowerCase()}
+                    ·{" "}
+                    {t("dashboard.fabricCount", { count: bridge.fabricCount })}
                   </Typography>
                 )}
               </Stack>
@@ -310,17 +315,22 @@ export const DashboardPage = () => {
   const theme = useTheme();
   const navigate = useNavigate();
   const dispatch = useAppDispatch();
+  const notifications = useNotifications();
   const [health, setHealth] = useState<HealthSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [wizardOpen, setWizardOpen] = useState(false);
   const [bulkAction, setBulkAction] = useState(false);
   const bulkGuard = useRef(false);
+  const [confirmAction, setConfirmAction] = useState<"stop" | "restart" | null>(
+    null,
+  );
   const [customizeOpen, setCustomizeOpen] = useState(false);
   const widgets = useDashboardWidgets();
   const [successDismissed, setSuccessDismissed] = useState(
     () => localStorage.getItem("hamh-first-success-dismissed") === "true",
   );
 
+  // a failed poll keeps the last data, so only the first load can end empty
   const fetchHealth = useCallback(async () => {
     try {
       const res = await fetch("api/health/detailed");
@@ -328,11 +338,53 @@ export const DashboardPage = () => {
         setHealth(await res.json());
       }
     } catch {
-      // ignore
+      // the next poll retries
     } finally {
       setLoading(false);
     }
   }, []);
+
+  const handleBulkAction = useCallback(
+    async (action: "start" | "stop" | "restart") => {
+      setConfirmAction(null);
+      if (bulkGuard.current) return;
+      bulkGuard.current = true;
+      setBulkAction(true);
+      try {
+        const labels = {
+          start: t("bridge.actionStarted"),
+          stop: t("bridge.actionStopped"),
+          restart: t("bridge.actionRestarted"),
+        };
+        const fns = {
+          start: startAllBridges,
+          stop: stopAllBridges,
+          restart: restartAllBridges,
+        };
+        const result = await fns[action]();
+        notifications.show({
+          message: t("bridge.actionResult", {
+            label: labels[action],
+            count: result.count,
+          }),
+          severity: "success",
+        });
+        await fetchHealth();
+      } catch (e) {
+        notifications.show({
+          message:
+            e instanceof Error
+              ? e.message
+              : t("bridge.actionFailed", { action }),
+          severity: "error",
+        });
+      } finally {
+        setBulkAction(false);
+        bulkGuard.current = false;
+      }
+    },
+    [fetchHealth, notifications, t],
+  );
 
   useEffect(() => {
     fetchHealth();
@@ -365,15 +417,38 @@ export const DashboardPage = () => {
     );
   }
 
-  const bridges = health?.services.bridges;
-  const haConnected = health?.services.homeAssistant.connected ?? false;
-  const hasBridges = (bridges?.total ?? 0) > 0;
+  if (!health) {
+    return (
+      <Box>
+        <Box display="flex" alignItems="center" gap={2} mb={3}>
+          <HomeIcon color="primary" fontSize="large" />
+          <Typography variant="h5" fontWeight={600} component="h1">
+            {t("dashboard.title")}
+          </Typography>
+        </Box>
+        <Alert
+          severity="error"
+          action={
+            <Button color="inherit" size="small" onClick={fetchHealth}>
+              {t("common.refresh")}
+            </Button>
+          }
+        >
+          {t("health.unableToLoad")}
+        </Alert>
+      </Box>
+    );
+  }
+
+  const bridges = health.services.bridges;
+  const haConnected = health.services.homeAssistant.connected;
+  const hasBridges = bridges.total > 0;
 
   return (
     <Box>
       <Box display="flex" alignItems="center" gap={2} mb={3}>
         <HomeIcon color="primary" fontSize="large" />
-        <Typography variant="h5" fontWeight={600} component="h1">
+        <Typography variant="h5" component="h1">
           {t("dashboard.title")}
         </Typography>
         {hasBridges && (
@@ -382,6 +457,7 @@ export const DashboardPage = () => {
             onClick={() => setCustomizeOpen(true)}
             sx={{ ml: "auto" }}
             title={t("dashboard.customizeDashboard")}
+            aria-label={t("dashboard.customizeDashboard")}
           >
             <TuneIcon />
           </IconButton>
@@ -396,6 +472,7 @@ export const DashboardPage = () => {
             <IconButton
               size="small"
               color="inherit"
+              aria-label={t("common.close")}
               onClick={() => {
                 setSuccessDismissed(true);
                 localStorage.setItem("hamh-first-success-dismissed", "true");
@@ -409,7 +486,7 @@ export const DashboardPage = () => {
         </Alert>
       )}
 
-      {!hasBridges && !loading && (
+      {!hasBridges && (
         <Card
           sx={{
             mb: 3,
@@ -439,15 +516,15 @@ export const DashboardPage = () => {
             >
               <Button
                 variant="contained"
-                size="large"
+                size="small"
                 startIcon={<AutoFixHighIcon />}
                 onClick={() => setWizardOpen(true)}
               >
-                {t("dashboard.bridgeWizard")}
+                {t("bridgeWizard.title")}
               </Button>
               <Button
                 variant="outlined"
-                size="large"
+                size="small"
                 startIcon={<MapIcon />}
                 onClick={() => navigate(navigation.areaSetup)}
               >
@@ -455,7 +532,7 @@ export const DashboardPage = () => {
               </Button>
               <Button
                 variant="outlined"
-                size="large"
+                size="small"
                 startIcon={<AddIcon />}
                 onClick={() => navigate(navigation.createBridge)}
               >
@@ -483,21 +560,23 @@ export const DashboardPage = () => {
 
             {widgetId === "stats" && (
               <Grid container spacing={2} sx={{ mb: 3 }}>
-                <Grid size={{ xs: 6, sm: 3 }}>
+                <Grid size={{ xs: 6, md: 3 }}>
                   <StatCard
                     title={t("nav.bridges")}
-                    value={bridges?.total ?? 0}
+                    value={bridges.total}
                     icon={<HubIcon />}
                     color={theme.palette.success.main}
                     subtitle={
-                      bridges
-                        ? `${bridges.running} running${bridges.failed > 0 ? ` · ${bridges.failed} failed` : ""}`
-                        : undefined
+                      bridges.failed > 0
+                        ? `${t("dashboard.bridgeStatusRunning", { running: bridges.running })} · ${t("dashboard.bridgeStatusFailed", { failed: bridges.failed })}`
+                        : t("dashboard.bridgeStatusRunning", {
+                            running: bridges.running,
+                          })
                     }
                     onClick={() => navigate(navigation.bridges)}
                   />
                 </Grid>
-                <Grid size={{ xs: 6, sm: 3 }}>
+                <Grid size={{ xs: 6, md: 3 }}>
                   <StatCard
                     title={t("common.devices")}
                     value={totalDevices}
@@ -507,7 +586,9 @@ export const DashboardPage = () => {
                       totalFailed > 0 ? (
                         <Chip
                           icon={<WarningIcon sx={{ fontSize: 14 }} />}
-                          label={`${totalFailed} failed`}
+                          label={t("dashboard.devicesFailed", {
+                            count: totalFailed,
+                          })}
                           size="small"
                           color="warning"
                           variant="outlined"
@@ -523,7 +604,7 @@ export const DashboardPage = () => {
                     onClick={() => navigate(navigation.devices)}
                   />
                 </Grid>
-                <Grid size={{ xs: 6, sm: 3 }}>
+                <Grid size={{ xs: 6, md: 3 }}>
                   <StatCard
                     title={t("common.fabrics")}
                     value={totalFabrics}
@@ -532,7 +613,7 @@ export const DashboardPage = () => {
                     onClick={() => navigate(navigation.networkMap)}
                   />
                 </Grid>
-                <Grid size={{ xs: 6, sm: 3 }}>
+                <Grid size={{ xs: 6, md: 3 }}>
                   <StatCard
                     title={t("dashboard.haConnection")}
                     value={
@@ -544,11 +625,7 @@ export const DashboardPage = () => {
                         ? theme.palette.success.main
                         : theme.palette.error.main
                     }
-                    subtitle={
-                      health?.uptime != null
-                        ? `${t("health.uptime")} ${formatUptime(health.uptime)}`
-                        : undefined
-                    }
+                    subtitle={`${t("health.uptime")} ${formatUptime(health.uptime)}`}
                   />
                 </Grid>
               </Grid>
@@ -604,18 +681,7 @@ export const DashboardPage = () => {
                     color="success"
                     startIcon={<PlayArrowIcon />}
                     disabled={bulkAction}
-                    onClick={async () => {
-                      if (bulkGuard.current) return;
-                      bulkGuard.current = true;
-                      setBulkAction(true);
-                      try {
-                        await startAllBridges();
-                        await fetchHealth();
-                      } finally {
-                        setBulkAction(false);
-                        bulkGuard.current = false;
-                      }
-                    }}
+                    onClick={() => handleBulkAction("start")}
                   >
                     {t("dashboard.startAll")}
                   </Button>
@@ -624,18 +690,7 @@ export const DashboardPage = () => {
                     color="error"
                     startIcon={<StopIcon />}
                     disabled={bulkAction}
-                    onClick={async () => {
-                      if (bulkGuard.current) return;
-                      bulkGuard.current = true;
-                      setBulkAction(true);
-                      try {
-                        await stopAllBridges();
-                        await fetchHealth();
-                      } finally {
-                        setBulkAction(false);
-                        bulkGuard.current = false;
-                      }
-                    }}
+                    onClick={() => setConfirmAction("stop")}
                   >
                     {t("dashboard.stopAll")}
                   </Button>
@@ -644,24 +699,13 @@ export const DashboardPage = () => {
                     color="warning"
                     startIcon={<RestartAltIcon />}
                     disabled={bulkAction}
-                    onClick={async () => {
-                      if (bulkGuard.current) return;
-                      bulkGuard.current = true;
-                      setBulkAction(true);
-                      try {
-                        await restartAllBridges();
-                        await fetchHealth();
-                      } finally {
-                        setBulkAction(false);
-                        bulkGuard.current = false;
-                      }
-                    }}
+                    onClick={() => setConfirmAction("restart")}
                   >
                     {t("dashboard.restartAll")}
                   </Button>
                 </Stack>
 
-                {health?.bridgeDetails && health.bridgeDetails.length > 0 ? (
+                {health.bridgeDetails.length > 0 ? (
                   <Grid container spacing={1.5}>
                     {[...health.bridgeDetails]
                       .sort((a, b) => (a.priority ?? 100) - (b.priority ?? 100))
@@ -763,6 +807,27 @@ export const DashboardPage = () => {
             )}
           </Box>
         ))}
+
+      <ConfirmDialog
+        open={confirmAction === "stop"}
+        title={t("bridge.confirmStopAllTitle")}
+        message={t("bridge.confirmStopAllMessage")}
+        confirmLabel={t("common.stopAll")}
+        cancelLabel={t("common.cancel")}
+        confirmColor="error"
+        onConfirm={() => handleBulkAction("stop")}
+        onCancel={() => setConfirmAction(null)}
+      />
+      <ConfirmDialog
+        open={confirmAction === "restart"}
+        title={t("bridge.confirmRestartAllTitle")}
+        message={t("bridge.confirmRestartAllMessage")}
+        confirmLabel={t("common.restartAll")}
+        cancelLabel={t("common.cancel")}
+        confirmColor="warning"
+        onConfirm={() => handleBulkAction("restart")}
+        onCancel={() => setConfirmAction(null)}
+      />
 
       <DashboardCustomizeDialog
         open={customizeOpen}

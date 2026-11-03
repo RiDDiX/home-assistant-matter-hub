@@ -141,7 +141,9 @@
     "bridgeStatusRunning": "{{running}} uruchomione",
     "bridgeStatusFailed": "{{failed}} nieudane",
     "devicesFailed": "{{count}} nieudane",
-    "uptimeFormat": "{{time}}"
+    "uptimeFormat": "{{time}}",
+    "deviceCount": "{{count}} Urządzenia",
+    "fabricCount": "{{count}} Fabryki"
   },
   "bridge": {
     "name": "Nazwa mostka",
@@ -352,7 +354,8 @@
     "sortType": "Typ urządzenia",
     "sortName": "Nazwa",
     "deviceCount": "{{count}} urządzeń",
-    "filteredCount": "{{filtered}} z {{total}} urządzeń"
+    "filteredCount": "{{filtered}} z {{total}} urządzeń",
+    "fabricCount": "{{count}} Fabryki"
   },
   "diagnostics": {
     "title": "Diagnostyka na żywo",

@@ -23,7 +23,7 @@ import zhTW from "./locales/zh-tw.json";
 const STORAGE_KEY = "hamh-translation-overrides";
 const CUSTOM_LANGS_KEY = "hamh-custom-languages";
 
-function flattenObject(
+export function flattenObject(
   obj: Record<string, unknown>,
   prefix = "",
 ): Record<string, string> {
@@ -39,7 +39,7 @@ function flattenObject(
   return result;
 }
 
-function unflattenObject(
+export function unflattenObject(
   flat: Record<string, string>,
 ): Record<string, unknown> {
   const result: Record<string, unknown> = {};
@@ -57,6 +57,20 @@ function unflattenObject(
   return result;
 }
 
+// Shipped texts plus local edits. The bundle is replaced, not merged, so a
+// reset key falls back to the shipped text again.
+export function applyTranslationOverrides(
+  lang: string,
+  overrides: Record<string, string>,
+) {
+  const merged = flattenObject(bundledResources[lang]?.translation ?? {});
+  for (const [key, value] of Object.entries(overrides)) {
+    if (value) merged[key] = value;
+  }
+  i18n.removeResourceBundle(lang, "translation");
+  i18n.addResourceBundle(lang, "translation", unflattenObject(merged));
+}
+
 function restoreOverrides() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
@@ -64,13 +78,7 @@ function restoreOverrides() {
     const all = JSON.parse(raw) as Record<string, Record<string, string>>;
     for (const [lang, overrides] of Object.entries(all)) {
       if (!overrides || Object.keys(overrides).length === 0) continue;
-      const base = i18n.getResourceBundle(lang, "translation") as
-        | Record<string, unknown>
-        | undefined;
-      const baseFlat = base ? flattenObject(base) : {};
-      const merged = { ...baseFlat, ...overrides };
-      const nested = unflattenObject(merged);
-      i18n.addResourceBundle(lang, "translation", nested, true, true);
+      applyTranslationOverrides(lang, overrides);
     }
   } catch {
     // ignore storage errors
@@ -95,30 +103,65 @@ function restoreCustomLanguages() {
   }
 }
 
+const resources = {
+  en: { translation: en },
+  de: { translation: de },
+  hu: { translation: hu },
+  fr: { translation: fr },
+  it: { translation: it },
+  ja: { translation: ja },
+  ko: { translation: ko },
+  es: { translation: es },
+  zh: { translation: zh },
+  "zh-TW": { translation: zhTW },
+  th: { translation: th },
+  sv: { translation: sv },
+  tr: { translation: tr },
+  ru: { translation: ru },
+  nl: { translation: nl },
+  pl: { translation: pl },
+  "pt-BR": { translation: ptBR },
+  vi: { translation: vi },
+};
+
+// The switcher and the translation editor list these.
+export const LANGUAGES: { code: string; name: string }[] = [
+  { code: "en", name: "English" },
+  { code: "de", name: "Deutsch" },
+  { code: "fr", name: "Français" },
+  { code: "es", name: "Español" },
+  { code: "it", name: "Italiano" },
+  { code: "hu", name: "Magyar" },
+  { code: "pl", name: "Polski" },
+  { code: "zh", name: "中文" },
+  { code: "zh-TW", name: "繁體中文" },
+  { code: "ja", name: "日本語" },
+  { code: "ko", name: "한국어" },
+  { code: "th", name: "ไทย" },
+  { code: "nl", name: "Nederlands" },
+  { code: "sv", name: "Svenska" },
+  { code: "tr", name: "Türkçe" },
+  { code: "ru", name: "Русский" },
+  { code: "pt-BR", name: "Português (Brasil)" },
+  { code: "vi", name: "Tiếng Việt" },
+];
+
+// The shipped texts without local edits. i18next merges edits into the
+// object it gets, so it gets a copy.
+export const bundledResources: Record<
+  string,
+  { translation: Record<string, unknown> } | undefined
+> = resources;
+
+i18n.on("languageChanged", (lng) => {
+  document.documentElement.lang = lng;
+});
+
 i18n
   .use(LanguageDetector)
   .use(initReactI18next)
   .init({
-    resources: {
-      en: { translation: en },
-      de: { translation: de },
-      hu: { translation: hu },
-      fr: { translation: fr },
-      it: { translation: it },
-      ja: { translation: ja },
-      ko: { translation: ko },
-      es: { translation: es },
-      zh: { translation: zh },
-      "zh-TW": { translation: zhTW },
-      th: { translation: th },
-      sv: { translation: sv },
-      tr: { translation: tr },
-      ru: { translation: ru },
-      nl: { translation: nl },
-      pl: { translation: pl },
-      "pt-BR": { translation: ptBR },
-      vi: { translation: vi },
-    },
+    resources: structuredClone(resources),
     fallbackLng: "en",
     interpolation: {
       escapeValue: false,
@@ -127,6 +170,8 @@ i18n
       order: ["localStorage", "navigator", "htmlTag"],
       caches: ["localStorage"],
     },
+    // re-render on bundle changes so translation edits show up live
+    react: { bindI18nStore: "added removed" },
   });
 
 restoreCustomLanguages();

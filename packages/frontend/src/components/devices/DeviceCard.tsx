@@ -10,6 +10,7 @@ import CardContent from "@mui/material/CardContent";
 import Stack from "@mui/material/Stack";
 import Typography from "@mui/material/Typography";
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Link as RouterLink } from "react-router";
 import {
   checkBridgeIconExists,
@@ -24,6 +25,7 @@ export interface DeviceCardProps {
 }
 
 export const DeviceCard = ({ bridge }: DeviceCardProps) => {
+  const { t } = useTranslation();
   const fabricCount = bridge.commissioning?.fabrics.length ?? 0;
   const DeviceIcon = getBridgeIcon(bridge);
   const deviceColor = getBridgeIconColor(bridge);
@@ -84,21 +86,21 @@ export const DeviceCard = ({ bridge }: DeviceCardProps) => {
                 <Box display="flex" alignItems="center" gap={1}>
                   <Devices sx={{ fontSize: 16, color: "text.secondary" }} />
                   <Typography variant="body2" color="text.secondary">
-                    {bridge.deviceCount} devices
+                    {t("devices.deviceCount", { count: bridge.deviceCount })}
                   </Typography>
                 </Box>
 
                 <Box display="flex" alignItems="center" gap={1}>
                   <Wifi sx={{ fontSize: 16, color: "text.secondary" }} />
                   <Typography variant="body2" color="text.secondary">
-                    {fabricCount} fabric{fabricCount !== 1 ? "s" : ""}
+                    {t("devices.fabricCount", { count: fabricCount })}
                   </Typography>
                 </Box>
 
                 <Box display="flex" alignItems="center" gap={1}>
                   <Sensors sx={{ fontSize: 16, color: "text.secondary" }} />
                   <Typography variant="body2" color="text.secondary">
-                    Port {bridge.port}
+                    {t("common.port")} {bridge.port}
                   </Typography>
                 </Box>
               </Stack>

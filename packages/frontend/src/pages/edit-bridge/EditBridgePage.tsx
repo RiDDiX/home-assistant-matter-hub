@@ -1,5 +1,8 @@
 import type { BridgeConfig } from "@home-assistant-matter-hub/common";
+import Box from "@mui/material/Box";
+import CircularProgress from "@mui/material/CircularProgress";
 import Stack from "@mui/material/Stack";
+import Typography from "@mui/material/Typography";
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate, useParams } from "react-router";
@@ -12,6 +15,7 @@ import {
   useUsedPorts,
 } from "../../hooks/data/bridges.ts";
 import { navigation } from "../../routes.tsx";
+import { NotFoundPage } from "../NotFoundPage.tsx";
 import { bridgeToConfig } from "./bridge-to-config.ts";
 
 export const EditBridgePage = () => {
@@ -24,15 +28,13 @@ export const EditBridgePage = () => {
   const usedPorts = useUsedPorts();
   const updateBridge = useUpdateBridge();
 
-  const bridgeConfig = useMemo<BridgeConfig | undefined>(() => {
-    if (isLoading || !bridge) {
-      return undefined;
-    }
-    return bridgeToConfig(bridge);
-  }, [isLoading, bridge]);
+  const bridgeConfig = useMemo<BridgeConfig | undefined>(
+    () => (bridge ? bridgeToConfig(bridge) : undefined),
+    [bridge],
+  );
 
   const cancelAction = () => {
-    navigate(-1);
+    navigate(navigation.bridge(bridgeId));
   };
 
   const saveAction = async (config: BridgeConfig) => {
@@ -49,22 +51,32 @@ export const EditBridgePage = () => {
       );
   };
 
-  if (isLoading || !usedPorts) {
-    return t("common.loading");
+  // a background reload must not remount the editor and drop unsaved edits
+  if (!usedPorts || (!bridge && isLoading)) {
+    return (
+      <Box display="flex" justifyContent="center" p={4}>
+        <CircularProgress />
+      </Box>
+    );
   }
   if (!bridge || !bridgeConfig) {
-    return t("notFound.title");
+    return <NotFoundPage />;
   }
 
   return (
     <Stack spacing={4}>
-      <Breadcrumbs
-        items={[
-          { name: t("nav.bridges"), to: navigation.bridges },
-          { name: bridge.name, to: navigation.bridge(bridgeId) },
-          { name: t("common.edit"), to: navigation.editBridge(bridgeId) },
-        ]}
-      />
+      <Stack spacing={1}>
+        <Breadcrumbs
+          items={[
+            { name: t("nav.bridges"), to: navigation.bridges },
+            { name: bridge.name, to: navigation.bridge(bridgeId) },
+            { name: t("common.edit"), to: navigation.editBridge(bridgeId) },
+          ]}
+        />
+        <Typography variant="h5" component="h1">
+          {bridge.name}
+        </Typography>
+      </Stack>
 
       <BridgeConfigEditor
         bridgeId={bridgeId}

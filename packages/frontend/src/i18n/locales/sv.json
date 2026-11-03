@@ -141,7 +141,9 @@
     "bridgeStatusRunning": "{{running}} Körs",
     "bridgeStatusFailed": "{{failed}} misslyckades",
     "devicesFailed": "{{count}} misslyckades",
-    "uptimeFormat": "{{time}}"
+    "uptimeFormat": "{{time}}",
+    "deviceCount": "{{count}} Enheter",
+    "fabricCount": "{{count}} Märken"
   },
   "bridge": {
     "name": "Brygg-namn",
@@ -352,7 +354,8 @@
     "sortType": "Enhetstyp",
     "sortName": "Namn",
     "deviceCount": "{{count}} Enheter",
-    "filteredCount": "{{filtered}} av {{total}} enheter"
+    "filteredCount": "{{filtered}} av {{total}} enheter",
+    "fabricCount": "{{count}} Märken"
   },
   "diagnostics": {
     "title": "Live diagnostik",

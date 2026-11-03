@@ -24,6 +24,7 @@ import Grid from "@mui/material/Grid";
 import IconButton from "@mui/material/IconButton";
 import List from "@mui/material/List";
 import ListItem from "@mui/material/ListItem";
+import ListItemButton from "@mui/material/ListItemButton";
 import ListItemIcon from "@mui/material/ListItemIcon";
 import ListItemText from "@mui/material/ListItemText";
 import Paper from "@mui/material/Paper";
@@ -44,6 +45,7 @@ import {
   restoreBackupSnapshot,
   updateBackupSettings,
 } from "../../api/backup.js";
+import { useNotifications } from "../notifications/use-notifications.ts";
 
 interface BackupPreview {
   version: number;
@@ -76,6 +78,7 @@ function formatSize(bytes: number): string {
 
 export function BackupRestore() {
   const { t } = useTranslation();
+  const notifications = useNotifications();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
@@ -94,6 +97,8 @@ export function BackupRestore() {
   const [snapshots, setSnapshots] = useState<BackupMetadata[]>([]);
   const [snapshotsLoading, setSnapshotsLoading] = useState(true);
   const [settings, setSettings] = useState<BackupSettings | null>(null);
+  // draft while typing, null shows the saved value
+  const [retentionDraft, setRetentionDraft] = useState<string | null>(null);
   const [snapshotRestoreTarget, setSnapshotRestoreTarget] = useState<
     string | null
   >(null);
@@ -151,7 +156,10 @@ export function BackupRestore() {
       const result = await restoreBackupSnapshot(filename);
       if (result.errors.length > 0) {
         setError(
-          `Restored ${result.bridgesRestored} bridges with ${result.errors.length} errors`,
+          t("backup.restoredWithErrors", {
+            bridges: result.bridgesRestored,
+            errors: result.errors.length,
+          }),
         );
       } else {
         setSuccess(
@@ -183,13 +191,40 @@ export function BackupRestore() {
     }
   };
 
+  // toasts here: the card's own alerts sit far above the settings fields
   const handleSettingsChange = async (changes: Partial<BackupSettings>) => {
     try {
       const updated = await updateBackupSettings(changes);
       setSettings(updated);
+      notifications.show({
+        message: t("backup.settingsSaved"),
+        severity: "success",
+      });
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to update settings");
+      notifications.show({
+        message: e instanceof Error ? e.message : "Failed to update settings",
+        severity: "error",
+      });
     }
+  };
+
+  const retentionValue =
+    retentionDraft ?? String(settings?.backupRetentionCount);
+  const retentionNumber = Number(retentionValue);
+  const retentionValid =
+    Number.isInteger(retentionNumber) &&
+    retentionNumber >= 1 &&
+    retentionNumber <= 100;
+
+  const handleRetentionBlur = async () => {
+    if (
+      retentionDraft !== null &&
+      retentionValid &&
+      retentionNumber !== settings?.backupRetentionCount
+    ) {
+      await handleSettingsChange({ backupRetentionCount: retentionNumber });
+    }
+    setRetentionDraft(null);
   };
 
   const handleDownloadBackup = async (withIdentity: boolean = false) => {
@@ -310,17 +345,19 @@ export function BackupRestore() {
 
       if (result.errors.length > 0) {
         setError(
-          `Restored ${result.bridgesRestored} bridges with ${result.errors.length} errors`,
+          t("backup.restoredWithErrors", {
+            bridges: result.bridgesRestored,
+            errors: result.errors.length,
+          }),
         );
       } else {
-        const parts = [`Restored ${result.bridgesRestored} bridges`];
-        if (result.mappingsRestored > 0) {
-          parts.push(`${result.mappingsRestored} entity mappings`);
-        }
-        if (result.identitiesRestored > 0) {
-          parts.push(`${result.identitiesRestored} identities`);
-        }
-        setSuccess(`${parts.join(", ")}!`);
+        setSuccess(
+          t("backup.snapshotRestored", {
+            bridges: result.bridgesRestored,
+            mappings: result.mappingsRestored,
+            identities: result.identitiesRestored,
+          }),
+        );
       }
 
       setDialogOpen(false);
@@ -350,11 +387,13 @@ export function BackupRestore() {
   const handleRestart = async () => {
     setLoading(true);
     try {
-      await fetch("api/backup/restart", { method: "POST" });
+      const res = await fetch("api/backup/restart", { method: "POST" });
+      if (!res.ok)
+        throw new Error(`${t("backup.restartFailed")} (HTTP ${res.status})`);
       // The app will restart, so we just wait
-      setSuccess("Application is restarting...");
+      setSuccess(t("backup.restarting"));
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to restart");
+      setError(e instanceof Error ? e.message : t("backup.restartFailed"));
     } finally {
       setLoading(false);
       setRestartDialogOpen(false);
@@ -392,6 +431,7 @@ export function BackupRestore() {
         <Grid container spacing={2}>
           <Grid size={{ xs: 12, md: 4 }}>
             <Paper
+              variant="outlined"
               sx={{
                 p: 2,
                 height: "100%",
@@ -434,6 +474,7 @@ export function BackupRestore() {
 
           <Grid size={{ xs: 12, md: 4 }}>
             <Paper
+              variant="outlined"
               sx={{
                 p: 2,
                 height: "100%",
@@ -477,6 +518,7 @@ export function BackupRestore() {
 
           <Grid size={{ xs: 12, md: 4 }}>
             <Paper
+              variant="outlined"
               sx={{
                 p: 2,
                 height: "100%",
@@ -523,6 +565,8 @@ export function BackupRestore() {
           display="flex"
           alignItems="center"
           justifyContent="space-between"
+          flexWrap="wrap"
+          gap={1}
           mb={2}
         >
           <Box display="flex" alignItems="center" gap={1}>
@@ -551,6 +595,7 @@ export function BackupRestore() {
             }
             onClick={handleCreateSnapshot}
             disabled={creatingSnapshot}
+            sx={{ whiteSpace: "nowrap" }}
           >
             {t("backup.createSnapshot")}
           </Button>
@@ -573,11 +618,14 @@ export function BackupRestore() {
             {snapshots.map((snap) => (
               <ListItem
                 key={snap.filename}
+                // three actions, MUI reserves room for one
+                sx={{ pr: 15 }}
                 secondaryAction={
                   <Box display="flex" gap={0.5}>
                     <Tooltip title={t("backup.downloadSnapshot")}>
                       <IconButton
                         size="small"
+                        aria-label={t("backup.downloadSnapshot")}
                         onClick={() => handleDownloadSnapshot(snap.filename)}
                       >
                         <DownloadIcon fontSize="small" />
@@ -587,6 +635,7 @@ export function BackupRestore() {
                       <IconButton
                         size="small"
                         color="warning"
+                        aria-label={t("backup.restoreSnapshot")}
                         onClick={() => setSnapshotRestoreTarget(snap.filename)}
                       >
                         <RestoreIcon fontSize="small" />
@@ -596,6 +645,7 @@ export function BackupRestore() {
                       <IconButton
                         size="small"
                         color="error"
+                        aria-label={t("common.delete")}
                         onClick={() => setSnapshotDeleteTarget(snap.filename)}
                       >
                         <DeleteIcon fontSize="small" />
@@ -612,7 +662,12 @@ export function BackupRestore() {
                 </ListItemIcon>
                 <ListItemText
                   primary={
-                    <Box display="flex" alignItems="center" gap={1}>
+                    <Box
+                      display="flex"
+                      alignItems="center"
+                      flexWrap="wrap"
+                      gap={1}
+                    >
                       <Typography variant="body2">v{snap.version}</Typography>
                       <Chip
                         label={
@@ -670,15 +725,16 @@ export function BackupRestore() {
               label={t("backup.retentionCount")}
               type="number"
               size="small"
-              value={settings.backupRetentionCount}
-              onChange={(e) => {
-                const val = parseInt(e.target.value, 10);
-                if (val >= 1 && val <= 100) {
-                  handleSettingsChange({ backupRetentionCount: val });
-                }
-              }}
-              inputProps={{ min: 1, max: 100 }}
-              helperText={t("backup.retentionCountDesc")}
+              value={retentionValue}
+              onChange={(e) => setRetentionDraft(e.target.value)}
+              onBlur={handleRetentionBlur}
+              error={!retentionValid}
+              slotProps={{ htmlInput: { min: 1, max: 100 } }}
+              helperText={
+                retentionValid
+                  ? t("backup.retentionCountDesc")
+                  : t("backup.retentionCountRange")
+              }
               sx={{ maxWidth: 200 }}
             />
           </Box>
@@ -696,13 +752,13 @@ export function BackupRestore() {
           {preview && (
             <>
               <Typography variant="body2" color="text.secondary" gutterBottom>
-                Backup created: {new Date(preview.createdAt).toLocaleString()}
+                {t("backup.createdAt", {
+                  date: new Date(preview.createdAt).toLocaleString(),
+                })}
               </Typography>
               {preview.includesIdentity && (
                 <Alert severity="info" sx={{ mt: 1 }}>
-                  This backup includes Matter identity data (keypairs, fabric
-                  credentials). Restoring identities allows bridges to reconnect
-                  without re-commissioning.
+                  {t("backup.identityIncluded")}
                 </Alert>
               )}
 
@@ -712,38 +768,42 @@ export function BackupRestore() {
 
               <List dense>
                 {preview.bridges.map((bridge) => (
-                  <ListItem
-                    key={bridge.id}
-                    onClick={() => toggleBridge(bridge.id)}
-                    sx={{ cursor: "pointer" }}
-                  >
-                    <ListItemIcon>
-                      <Checkbox
-                        edge="start"
-                        checked={selectedBridges.has(bridge.id)}
-                        tabIndex={-1}
-                        disableRipple
+                  <ListItem key={bridge.id} disablePadding>
+                    <ListItemButton onClick={() => toggleBridge(bridge.id)}>
+                      <ListItemIcon>
+                        <Checkbox
+                          edge="start"
+                          checked={selectedBridges.has(bridge.id)}
+                          tabIndex={-1}
+                          disableRipple
+                          slotProps={{
+                            input: {
+                              "aria-labelledby": `restore-bridge-${bridge.id}`,
+                            },
+                          }}
+                        />
+                      </ListItemIcon>
+                      <ListItemText
+                        id={`restore-bridge-${bridge.id}`}
+                        primary={bridge.name}
+                        secondary={
+                          <>
+                            {t("common.port")} {bridge.port}
+                            {bridge.hasMappings &&
+                              ` • ${t("backup.mappingCount", { count: bridge.mappingCount })}`}
+                            {bridge.exists && (
+                              <Typography
+                                component="span"
+                                color="warning.main"
+                                sx={{ ml: 1 }}
+                              >
+                                ({t("backup.bridgeExists")})
+                              </Typography>
+                            )}
+                          </>
+                        }
                       />
-                    </ListItemIcon>
-                    <ListItemText
-                      primary={bridge.name}
-                      secondary={
-                        <>
-                          Port: {bridge.port}
-                          {bridge.hasMappings &&
-                            ` • ${bridge.mappingCount} entity mappings`}
-                          {bridge.exists && (
-                            <Typography
-                              component="span"
-                              color="warning.main"
-                              sx={{ ml: 1 }}
-                            >
-                              (exists)
-                            </Typography>
-                          )}
-                        </>
-                      }
-                    />
+                    </ListItemButton>
                   </ListItem>
                 ))}
               </List>

@@ -22,7 +22,12 @@ import List from "@mui/material/List";
 import ListItemButton from "@mui/material/ListItemButton";
 import ListItemIcon from "@mui/material/ListItemIcon";
 import ListItemText from "@mui/material/ListItemText";
-import { alpha, type Theme, useColorScheme } from "@mui/material/styles";
+import {
+  alpha,
+  type SxProps,
+  type Theme,
+  useColorScheme,
+} from "@mui/material/styles";
 import Toolbar from "@mui/material/Toolbar";
 import Tooltip from "@mui/material/Tooltip";
 import useMediaQuery from "@mui/material/useMediaQuery";
@@ -30,11 +35,28 @@ import { Fragment, type ReactNode, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useLocation } from "react-router";
 import { LogViewer } from "../components/logs/LogViewer.tsx";
+import { LanguageSwitcher } from "../components/misc/LanguageSwitcher.tsx";
 import { StatusIndicator } from "../components/status/StatusIndicator.tsx";
 import { navigation } from "../routes.tsx";
 import { AppLogo } from "./AppLogo.tsx";
 
 export const NAV_WIDTH = 240;
+const APP_TITLE = "Home-Assistant-Matter-Hub";
+
+const navItemSx: SxProps<Theme> = (theme) => ({
+  borderRadius: 1,
+  minHeight: 44,
+  mb: 0.25,
+  color: "text.secondary",
+  "& .MuiListItemIcon-root": {
+    color: "inherit",
+    minWidth: 40,
+  },
+  "&.Mui-selected, &.Mui-selected:hover": {
+    color: "primary.main",
+    bgcolor: alpha(theme.palette.primary.main, 0.12),
+  },
+});
 
 interface NavItem {
   label: string;
@@ -121,6 +143,11 @@ export const AppTopBar = () => {
     ],
   ];
 
+  const activeLabel = navGroups.flat().find((item) => isActive(item.to))?.label;
+  useEffect(() => {
+    document.title = activeLabel ? `${activeLabel} - ${APP_TITLE}` : APP_TITLE;
+  }, [activeLabel]);
+
   const themeLabel = isDark ? t("nav.lightMode") : t("nav.darkMode");
   const logsLabel = t("nav.systemLogs");
 
@@ -140,20 +167,7 @@ export const AppTopBar = () => {
                   selected={active}
                   aria-current={active ? "page" : undefined}
                   onClick={() => setDrawerOpen(false)}
-                  sx={(theme) => ({
-                    borderRadius: 1,
-                    minHeight: 44,
-                    mb: 0.25,
-                    color: "text.secondary",
-                    "& .MuiListItemIcon-root": {
-                      color: "inherit",
-                      minWidth: 40,
-                    },
-                    "&.Mui-selected, &.Mui-selected:hover": {
-                      color: "primary.main",
-                      bgcolor: alpha(theme.palette.primary.main, 0.12),
-                    },
-                  })}
+                  sx={navItemSx}
                 >
                   <ListItemIcon>{item.icon}</ListItemIcon>
                   <ListItemText
@@ -236,7 +250,11 @@ export const AppTopBar = () => {
         }}
       >
         {isDesktop && <Toolbar />}
-        <Box sx={{ py: 1, overflowY: "auto" }}>{navList}</Box>
+        <Box sx={{ py: 1, overflowY: "auto", flexGrow: 1 }}>{navList}</Box>
+        <Divider />
+        <Box sx={{ p: 1 }}>
+          <LanguageSwitcher sx={navItemSx} />
+        </Box>
       </Drawer>
       <LogViewer open={logViewerOpen} onClose={() => setLogViewerOpen(false)} />
     </>

@@ -8,6 +8,7 @@ import Collapse from "@mui/material/Collapse";
 import Link from "@mui/material/Link";
 import Typography from "@mui/material/Typography";
 import { useCallback, useEffect, useState } from "react";
+import { Trans, useTranslation } from "react-i18next";
 import {
   mapDiagnosticsToPreflightRows,
   type NetworkDiagnosticResult,
@@ -32,6 +33,7 @@ const severityFor = (
 };
 
 function RemediationRow({ row }: { row: PreflightRow }) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   return (
     <Alert severity={severityFor(row.status)} sx={{ mb: 1 }}>
@@ -42,25 +44,27 @@ function RemediationRow({ row }: { row: PreflightRow }) {
         </Typography>
       )}
       <Button size="small" onClick={() => setOpen((v) => !v)} sx={{ mt: 0.5 }}>
-        {open ? "Hide fix" : "How to fix"}
+        {open ? t("preflight.hideFix") : t("preflight.howToFix")}
       </Button>
       <Collapse in={open}>
         <Box sx={{ mt: 1 }}>
           {row.remediation.addonOption ? (
             <Typography variant="body2">
-              Add-on: set the <code>{row.remediation.addonOption}</code> option
-              {row.remediation.containerFlag && (
-                <>
-                  {" "}
-                  (container: <code>{row.remediation.containerFlag}</code>)
-                </>
-              )}
-              . This is a start option, so restart the add-on after changing it.
+              <Trans
+                i18nKey={
+                  row.remediation.containerFlag
+                    ? "preflight.addonOptionWithFlag"
+                    : "preflight.addonOption"
+                }
+                values={{
+                  option: row.remediation.addonOption,
+                  flag: row.remediation.containerFlag,
+                }}
+                components={{ code: <code /> }}
+              />
             </Typography>
           ) : (
-            <Typography variant="body2">
-              This one is fixed on the host or network side, not from here.
-            </Typography>
+            <Typography variant="body2">{t("preflight.hostSide")}</Typography>
           )}
           <Link
             href={row.remediation.docsUrl}
@@ -69,7 +73,7 @@ function RemediationRow({ row }: { row: PreflightRow }) {
             variant="body2"
             sx={{ display: "inline-block", mt: 0.5 }}
           >
-            Connectivity troubleshooting docs
+            {t("preflight.docs")}
           </Link>
         </Box>
       </Collapse>
@@ -80,6 +84,7 @@ function RemediationRow({ row }: { row: PreflightRow }) {
 // Surfaces the existing network diagnostics inside the wizard so problems show
 // up before the user pairs. Never blocks: it is advisory only.
 export function PreflightPanel({ port }: PreflightPanelProps) {
+  const { t } = useTranslation();
   const [data, setData] = useState<NetworkDiagnosticResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -92,14 +97,14 @@ export function PreflightPanel({ port }: PreflightPanelProps) {
       if (res.ok) {
         setData((await res.json()) as NetworkDiagnosticResult);
       } else {
-        setError("Could not load network diagnostics.");
+        setError(t("preflight.loadFailed"));
       }
     } catch {
-      setError("Could not reach the server for network diagnostics.");
+      setError(t("preflight.unreachable"));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     fetchDiagnostics();
@@ -112,14 +117,12 @@ export function PreflightPanel({ port }: PreflightPanelProps) {
   return (
     <Box sx={{ mt: 2 }}>
       <Typography variant="subtitle2" gutterBottom>
-        Network preflight
+        {t("preflight.title")}
       </Typography>
 
       {alexaPortHint && (
         <Alert severity="warning" sx={{ mb: 1 }}>
-          Alexa only pairs on port <strong>5540</strong>. This bridge uses port{" "}
-          <strong>{port}</strong>, so Alexa will roll back the pairing. Keep the
-          port at 5540 if you plan to use Alexa.
+          <Trans i18nKey="preflight.alexaPort" values={{ port }} />
         </Alert>
       )}
 
@@ -135,7 +138,7 @@ export function PreflightPanel({ port }: PreflightPanelProps) {
         <Box display="flex" gap={1} mb={1} flexWrap="wrap">
           {summary.pass > 0 && (
             <Chip
-              label={`${summary.pass} passed`}
+              label={t("preflight.passed", { count: summary.pass })}
               color="success"
               size="small"
               variant="outlined"
@@ -143,7 +146,7 @@ export function PreflightPanel({ port }: PreflightPanelProps) {
           )}
           {summary.warn > 0 && (
             <Chip
-              label={`${summary.warn} warnings`}
+              label={t("preflight.warnings", { count: summary.warn })}
               color="warning"
               size="small"
               variant="outlined"
@@ -151,7 +154,7 @@ export function PreflightPanel({ port }: PreflightPanelProps) {
           )}
           {summary.fail > 0 && (
             <Chip
-              label={`${summary.fail} failed`}
+              label={t("preflight.failed", { count: summary.fail })}
               color="error"
               size="small"
               variant="outlined"
@@ -161,9 +164,7 @@ export function PreflightPanel({ port }: PreflightPanelProps) {
       )}
 
       {data && rows.length === 0 && (
-        <Alert severity="success">
-          All network checks passed. You are good to pair.
-        </Alert>
+        <Alert severity="success">{t("preflight.allPassed")}</Alert>
       )}
 
       {rows.map((row) => (

@@ -21,11 +21,14 @@ interface WebSocketMessage {
 
 interface WebSocketContextValue {
   isConnected: boolean;
+  // false until the first close, so the first handshake is not shown as lost
+  closedOnce: boolean;
   error: Error | null;
 }
 
 const WebSocketContext = createContext<WebSocketContextValue>({
   isConnected: false,
+  closedOnce: false,
   error: null,
 });
 
@@ -40,6 +43,7 @@ interface WebSocketProviderProps {
 export function WebSocketProvider({ children }: WebSocketProviderProps) {
   const dispatch = useAppDispatch();
   const [isConnected, setIsConnected] = useState(false);
+  const [closedOnce, setClosedOnce] = useState(false);
   const [error, setError] = useState<Error | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(
@@ -99,7 +103,9 @@ export function WebSocketProvider({ children }: WebSocketProviderProps) {
       };
 
       ws.onclose = () => {
+        if (wsRef.current !== ws) return;
         setIsConnected(false);
+        setClosedOnce(true);
         wsRef.current = null;
         reconnectTimeoutRef.current = setTimeout(connect, 3000);
       };
@@ -120,12 +126,18 @@ export function WebSocketProvider({ children }: WebSocketProviderProps) {
       if (reconnectTimeoutRef.current) {
         clearTimeout(reconnectTimeoutRef.current);
       }
-      wsRef.current?.close();
+      const ws = wsRef.current;
+      wsRef.current = null;
+      if (ws) {
+        ws.onclose = null;
+        ws.onerror = null;
+        ws.close();
+      }
     };
   }, [connect]);
 
   return (
-    <WebSocketContext.Provider value={{ isConnected, error }}>
+    <WebSocketContext.Provider value={{ isConnected, closedOnce, error }}>
       {children}
     </WebSocketContext.Provider>
   );

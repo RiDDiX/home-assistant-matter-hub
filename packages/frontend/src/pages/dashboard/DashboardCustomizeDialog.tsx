@@ -14,6 +14,7 @@ import ListItem from "@mui/material/ListItem";
 import ListItemIcon from "@mui/material/ListItemIcon";
 import ListItemText from "@mui/material/ListItemText";
 import Tooltip from "@mui/material/Tooltip";
+import { useTranslation } from "react-i18next";
 import {
   AVAILABLE_WIDGETS,
   type DashboardWidgetConfig,
@@ -36,27 +37,31 @@ export function DashboardCustomizeDialog({
   onReset,
   onClose,
 }: DashboardCustomizeDialogProps) {
+  const { t } = useTranslation();
   const widgetMap = new Map(AVAILABLE_WIDGETS.map((w) => [w.id, w]));
 
   return (
     <Dialog open={open} onClose={onClose} maxWidth="xs" fullWidth>
-      <DialogTitle>Customize Dashboard</DialogTitle>
+      <DialogTitle>{t("dashboard.customizeDashboard")}</DialogTitle>
       <DialogContent dividers>
         <List disablePadding>
           {config.order.map((id, index) => {
             const widget = widgetMap.get(id);
             if (!widget) return null;
             const hidden = config.hidden.includes(id);
+            const label = t(widget.labelKey);
             return (
               <ListItem
                 key={id}
-                sx={{ opacity: hidden ? 0.5 : 1 }}
+                // room for both arrow buttons, MUI only reserves one
+                sx={{ opacity: hidden ? 0.5 : 1, pr: 11 }}
                 secondaryAction={
                   <>
-                    <Tooltip title="Move up">
+                    <Tooltip title={t("common.moveUp")}>
                       <span>
                         <IconButton
                           size="small"
+                          aria-label={t("common.moveUp")}
                           disabled={index === 0}
                           onClick={() => onMove(id, "up")}
                         >
@@ -64,10 +69,11 @@ export function DashboardCustomizeDialog({
                         </IconButton>
                       </span>
                     </Tooltip>
-                    <Tooltip title="Move down">
+                    <Tooltip title={t("common.moveDown")}>
                       <span>
                         <IconButton
                           size="small"
+                          aria-label={t("common.moveDown")}
                           disabled={index === config.order.length - 1}
                           onClick={() => onMove(id, "down")}
                         >
@@ -79,7 +85,15 @@ export function DashboardCustomizeDialog({
                 }
               >
                 <ListItemIcon sx={{ minWidth: 36 }}>
-                  <IconButton size="small" onClick={() => onToggle(id)}>
+                  <IconButton
+                    size="small"
+                    aria-label={
+                      hidden
+                        ? t("dashboard.showWidget", { name: label })
+                        : t("dashboard.hideWidget", { name: label })
+                    }
+                    onClick={() => onToggle(id)}
+                  >
                     {hidden ? (
                       <VisibilityOffIcon fontSize="small" />
                     ) : (
@@ -88,8 +102,8 @@ export function DashboardCustomizeDialog({
                   </IconButton>
                 </ListItemIcon>
                 <ListItemText
-                  primary={widget.label}
-                  secondary={widget.description}
+                  primary={label}
+                  secondary={t(widget.descriptionKey)}
                   secondaryTypographyProps={{ variant: "caption" }}
                 />
               </ListItem>
@@ -99,10 +113,10 @@ export function DashboardCustomizeDialog({
       </DialogContent>
       <DialogActions>
         <Button startIcon={<RestoreIcon />} onClick={onReset} color="warning">
-          Reset
+          {t("common.reset")}
         </Button>
         <Button onClick={onClose} variant="contained">
-          Done
+          {t("common.close")}
         </Button>
       </DialogActions>
     </Dialog>

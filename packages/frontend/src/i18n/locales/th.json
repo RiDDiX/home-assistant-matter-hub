@@ -125,7 +125,9 @@
     "filterReference": "อ้างอิงตัวกรอง",
     "successMessage": "Bridge ของคุณเชื่อมต่อกับ {{count}} Fabric คอนโทรลเลอร์แล้ว อุปกรณ์ควรปรากฏในแอปคอนโทรลเลอร์ของคุณ",
     "noBridgesHint": "ยังไม่มี Bridge ที่กำหนดค่า ใช้ตัวช่วยสร้าง Bridge หรือสร้างด้วยตนเอง",
-    "customizeDashboard": "ปรับแต่งแดชบอร์ด"
+    "customizeDashboard": "ปรับแต่งแดชบอร์ด",
+    "deviceCount": "{{count}} อุปกรณ์",
+    "fabricCount": "{{count}} Fabrics"
   },
   "bridge": {
     "name": "ชื่อ Bridge",
@@ -325,5 +327,8 @@
   "footer": {
     "github": "GitHub",
     "documentation": "เอกสาร"
+  },
+  "devices": {
+    "fabricCount": "{{count}} Fabrics"
   }
 }

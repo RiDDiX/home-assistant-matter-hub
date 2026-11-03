@@ -41,6 +41,8 @@ import TextField from "@mui/material/TextField";
 import Tooltip from "@mui/material/Tooltip";
 import Typography from "@mui/material/Typography";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
+import { ConfirmDialog } from "../../components/misc/ConfirmDialog.tsx";
 import { useBridges } from "../../hooks/data/bridges.ts";
 
 interface PluginDevice {
@@ -165,6 +167,7 @@ async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
 }
 
 export const PluginsPage = () => {
+  const { t } = useTranslation();
   const { content: bridges } = useBridges();
   const [bridgePlugins, setBridgePlugins] = useState<BridgePlugins[]>([]);
   const [installed, setInstalled] = useState<InstalledPlugin[]>([]);
@@ -195,6 +198,7 @@ export const PluginsPage = () => {
   >({});
   const [configError, setConfigError] = useState<string>();
   const [savingConfig, setSavingConfig] = useState(false);
+  const [uninstallTarget, setUninstallTarget] = useState<string>();
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -287,6 +291,7 @@ export const PluginsPage = () => {
   };
 
   const handleUninstall = async (pkg: string) => {
+    setUninstallTarget(undefined);
     try {
       await fetchJson("api/plugins/uninstall", {
         method: "POST",
@@ -423,23 +428,25 @@ export const PluginsPage = () => {
     bridges?.filter((b) => b.featureFlags?.serverMode) ?? [];
 
   return (
-    <Box sx={{ display: "flex", flexDirection: "column", gap: 3, p: 2 }}>
+    <Box sx={{ display: "flex", flexDirection: "column", gap: 3 }}>
       <Box
         sx={{
           display: "flex",
           justifyContent: "space-between",
           alignItems: "center",
+          flexWrap: "wrap",
+          gap: 1,
         }}
       >
-        <Typography
-          variant="h5"
-          sx={{ display: "flex", alignItems: "center", gap: 1 }}
-        >
-          <ExtensionIcon /> Plugins
-        </Typography>
-        <Stack direction="row" spacing={1}>
-          <Tooltip title="Refresh">
-            <IconButton onClick={refresh}>
+        <Box display="flex" alignItems="center" gap={2}>
+          <ExtensionIcon color="primary" fontSize="large" />
+          <Typography variant="h5" component="h1">
+            {t("nav.plugins")}
+          </Typography>
+        </Box>
+        <Stack direction="row" spacing={1} alignItems="center">
+          <Tooltip title={t("common.refresh")}>
+            <IconButton onClick={refresh} aria-label={t("common.refresh")}>
               <RefreshIcon />
             </IconButton>
           </Tooltip>
@@ -452,7 +459,7 @@ export const PluginsPage = () => {
             }}
             size="small"
           >
-            Install Plugin
+            {t("plugins.install")}
           </Button>
         </Stack>
       </Box>
@@ -464,50 +471,37 @@ export const PluginsPage = () => {
       )}
 
       {emptyState === "no-bridges" && (
-        <Alert severity="info">
-          No bridges configured. Create a bridge first, then plugins registered
-          on it appear here.
-        </Alert>
+        <Alert severity="info">{t("plugins.emptyNoBridges")}</Alert>
       )}
 
       {emptyState === "all-server-mode" && (
-        <Alert severity="info">
-          Plugins run on standard bridges. Server mode bridges host none,
-          including the built-in camera. Create a standard bridge to use
-          plugins.
-        </Alert>
+        <Alert severity="info">{t("plugins.emptyAllServerMode")}</Alert>
       )}
 
       {emptyState === "bridge-not-running" && (
-        <Alert severity="info">
-          No plugins reported yet. Plugins load when the bridge starts, so start
-          the bridge and refresh this page.
-        </Alert>
+        <Alert severity="info">{t("plugins.emptyNotRunning")}</Alert>
       )}
 
       {emptyState === "none-installed" && (
-        <Alert severity="info">
-          No plugins installed. Click &quot;Install Plugin&quot; to add an npm
-          plugin package, or plugins will appear here when registered by the
-          bridge.
-        </Alert>
+        <Alert severity="info">{t("plugins.emptyNoneInstalled")}</Alert>
       )}
 
       {installed.length > 0 && (
         <Card variant="outlined">
           <CardContent>
             <Typography variant="h6" gutterBottom>
-              Installed Packages
+              {t("plugins.installedPackages")}
             </Typography>
             <List dense>
               {installed.map((pkg) => (
                 <ListItem
                   key={pkg.packageName}
                   secondaryAction={
-                    <Tooltip title="Uninstall">
+                    <Tooltip title={t("plugins.uninstall")}>
                       <IconButton
                         edge="end"
-                        onClick={() => handleUninstall(pkg.packageName)}
+                        aria-label={t("plugins.uninstall")}
+                        onClick={() => setUninstallTarget(pkg.packageName)}
                         color="error"
                         size="small"
                       >
@@ -521,7 +515,10 @@ export const PluginsPage = () => {
                   </ListItemIcon>
                   <ListItemText
                     primary={pkg.packageName}
-                    secondary={`v${pkg.version}, installed ${new Date(pkg.installedAt).toLocaleDateString()}`}
+                    secondary={t("plugins.installedAt", {
+                      version: pkg.version,
+                      date: new Date(pkg.installedAt).toLocaleDateString(),
+                    })}
                   />
                 </ListItem>
               ))}
@@ -538,7 +535,7 @@ export const PluginsPage = () => {
             </Typography>
             {bridge.plugins.length === 0 ? (
               <Typography variant="body2" color="text.secondary">
-                No active plugins on this bridge.
+                {t("plugins.noActivePlugins")}
               </Typography>
             ) : (
               <List dense>
@@ -546,12 +543,19 @@ export const PluginsPage = () => {
                   <Box key={plugin.name}>
                     <ListItem
                       disablePadding
+                      // the row button sits under the actions, pad it past all of them
+                      sx={{
+                        "& > .MuiListItemButton-root": {
+                          pr: plugin.circuitBreaker?.disabled ? 15 : 12,
+                        },
+                      }}
                       secondaryAction={
                         <Stack direction="row" spacing={0.5}>
                           {plugin.circuitBreaker?.disabled && (
-                            <Tooltip title="Reset circuit breaker">
+                            <Tooltip title={t("plugins.resetCircuitBreaker")}>
                               <IconButton
                                 size="small"
+                                aria-label={t("plugins.resetCircuitBreaker")}
                                 onClick={() =>
                                   handlePluginAction(
                                     bridge.bridgeId,
@@ -564,9 +568,10 @@ export const PluginsPage = () => {
                               </IconButton>
                             </Tooltip>
                           )}
-                          <Tooltip title="Settings">
+                          <Tooltip title={t("settings.title")}>
                             <IconButton
                               size="small"
+                              aria-label={t("settings.title")}
                               onClick={() =>
                                 openPluginConfig(bridge.bridgeId, plugin)
                               }
@@ -575,10 +580,19 @@ export const PluginsPage = () => {
                             </IconButton>
                           </Tooltip>
                           <Tooltip
-                            title={plugin.enabled ? "Disable" : "Enable"}
+                            title={
+                              plugin.enabled
+                                ? t("plugins.disable")
+                                : t("plugins.enable")
+                            }
                           >
                             <IconButton
                               size="small"
+                              aria-label={
+                                plugin.enabled
+                                  ? t("plugins.disable")
+                                  : t("plugins.enable")
+                              }
                               onClick={() =>
                                 handlePluginAction(
                                   bridge.bridgeId,
@@ -615,6 +629,7 @@ export const PluginsPage = () => {
                               sx={{
                                 display: "flex",
                                 alignItems: "center",
+                                flexWrap: "wrap",
                                 gap: 1,
                               }}
                             >
@@ -625,18 +640,21 @@ export const PluginsPage = () => {
                                 variant="outlined"
                               />
                               {plugin.source === "builtin" && (
-                                <Chip label="built-in" size="small" />
+                                <Chip
+                                  label={t("plugins.builtIn")}
+                                  size="small"
+                                />
                               )}
                               {!plugin.enabled && (
                                 <Chip
-                                  label="disabled"
+                                  label={t("common.disabled")}
                                   size="small"
                                   color="warning"
                                 />
                               )}
                               {plugin.circuitBreaker?.disabled && (
                                 <Chip
-                                  label="circuit breaker open"
+                                  label={t("plugins.circuitBreakerOpen")}
                                   size="small"
                                   color="error"
                                 />
@@ -645,8 +663,10 @@ export const PluginsPage = () => {
                           }
                           secondary={
                             plugin.devices.length > 0
-                              ? `${plugin.devices.length} device(s)`
-                              : "No devices registered"
+                              ? t("dashboard.deviceCount", {
+                                  count: plugin.devices.length,
+                                })
+                              : t("plugins.noDevices")
                           }
                         />
                       </ListItemButton>
@@ -687,7 +707,7 @@ export const PluginsPage = () => {
               {bridge.name}
             </Typography>
             <Typography variant="body2" color="text.secondary">
-              Server mode bridge, hosts no plugins.
+              {t("plugins.serverModeBridge")}
             </Typography>
           </CardContent>
         </Card>
@@ -699,9 +719,11 @@ export const PluginsPage = () => {
         maxWidth="sm"
         fullWidth
       >
-        <DialogTitle>Install Plugin</DialogTitle>
+        <DialogTitle>{t("plugins.install")}</DialogTitle>
         <DialogContent>
           <Tabs
+            variant="scrollable"
+            allowScrollButtonsMobile
             value={installTab}
             onChange={(_e, v: number) => {
               setInstallTab(v);
@@ -710,8 +732,8 @@ export const PluginsPage = () => {
             sx={{ mb: 2 }}
           >
             <Tab label="npm" />
-            <Tab label="Upload .tgz" />
-            <Tab label="Local Path" />
+            <Tab label={t("plugins.tabUpload")} />
+            <Tab label={t("plugins.tabLocal")} />
           </Tabs>
 
           {installTab === 0 && (
@@ -719,8 +741,8 @@ export const PluginsPage = () => {
               <TextField
                 autoFocus
                 margin="dense"
-                label="npm package name"
-                placeholder="e.g. hamh-plugin-example"
+                label={t("plugins.packageName")}
+                placeholder={t("plugins.packageNamePlaceholder")}
                 fullWidth
                 value={packageName}
                 onChange={(e) => {
@@ -735,8 +757,7 @@ export const PluginsPage = () => {
                 }}
               />
               <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-                The plugin will be installed via npm. After installation,
-                restart the bridge to load the plugin.
+                {t("plugins.npmHint")}
               </Typography>
             </>
           )}
@@ -751,7 +772,7 @@ export const PluginsPage = () => {
                 sx={{ mt: 1 }}
                 disabled={installing}
               >
-                {selectedFile ? selectedFile.name : "Choose .tgz file"}
+                {selectedFile ? selectedFile.name : t("plugins.chooseFile")}
                 <input
                   ref={fileInputRef}
                   type="file"
@@ -769,8 +790,7 @@ export const PluginsPage = () => {
                 </FormHelperText>
               )}
               <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-                Upload a packaged plugin (.tgz). Restart the bridge after
-                installation.
+                {t("plugins.uploadHint")}
               </Typography>
             </>
           )}
@@ -780,7 +800,7 @@ export const PluginsPage = () => {
               <TextField
                 autoFocus
                 margin="dense"
-                label="Absolute path to plugin folder"
+                label={t("plugins.localPath")}
                 placeholder="/path/to/your/plugin"
                 fullWidth
                 value={localPath}
@@ -799,15 +819,14 @@ export const PluginsPage = () => {
                 }}
               />
               <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-                Link a local plugin directory (creates a symlink). Useful for
-                development. Restart the bridge after linking.
+                {t("plugins.localHint")}
               </Typography>
             </>
           )}
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setInstallOpen(false)} disabled={installing}>
-            Cancel
+            {t("common.cancel")}
           </Button>
           {installTab === 0 && (
             <Button
@@ -815,7 +834,11 @@ export const PluginsPage = () => {
               variant="contained"
               disabled={installing || !packageName.trim()}
             >
-              {installing ? <CircularProgress size={20} /> : "Install"}
+              {installing ? (
+                <CircularProgress size={20} />
+              ) : (
+                t("plugins.installAction")
+              )}
             </Button>
           )}
           {installTab === 1 && (
@@ -824,7 +847,11 @@ export const PluginsPage = () => {
               variant="contained"
               disabled={installing || !selectedFile}
             >
-              {installing ? <CircularProgress size={20} /> : "Upload"}
+              {installing ? (
+                <CircularProgress size={20} />
+              ) : (
+                t("plugins.uploadAction")
+              )}
             </Button>
           )}
           {installTab === 2 && (
@@ -833,7 +860,11 @@ export const PluginsPage = () => {
               variant="contained"
               disabled={installing || !localPath.trim()}
             >
-              {installing ? <CircularProgress size={20} /> : "Link"}
+              {installing ? (
+                <CircularProgress size={20} />
+              ) : (
+                t("plugins.linkAction")
+              )}
             </Button>
           )}
         </DialogActions>
@@ -848,7 +879,9 @@ export const PluginsPage = () => {
         fullWidth
       >
         <DialogTitle>
-          {configSchema?.title ?? configTarget?.pluginName} Settings
+          {t("plugins.settingsTitle", {
+            name: configSchema?.title ?? configTarget?.pluginName,
+          })}
         </DialogTitle>
         <DialogContent>
           {configSchema === undefined && (
@@ -858,7 +891,7 @@ export const PluginsPage = () => {
           )}
           {configSchema === null && !configError && (
             <Typography variant="body2" color="text.secondary">
-              This plugin has no settings.
+              {t("plugins.noSettings")}
             </Typography>
           )}
           {configSchema && (
@@ -920,7 +953,7 @@ export const PluginsPage = () => {
                     }
                     error={badNumber}
                     helperText={
-                      badNumber ? "Must be a number" : prop.description
+                      badNumber ? t("plugins.mustBeNumber") : prop.description
                     }
                     disabled={savingConfig}
                   >
@@ -943,17 +976,27 @@ export const PluginsPage = () => {
         </DialogContent>
         <DialogActions>
           <Button onClick={closeConfigDialog} disabled={savingConfig}>
-            Cancel
+            {t("common.cancel")}
           </Button>
           <Button
             onClick={handleSaveConfig}
             variant="contained"
             disabled={savingConfig || configBlocked}
           >
-            {savingConfig ? <CircularProgress size={20} /> : "Save"}
+            {savingConfig ? <CircularProgress size={20} /> : t("common.save")}
           </Button>
         </DialogActions>
       </Dialog>
+
+      <ConfirmDialog
+        open={uninstallTarget !== undefined}
+        title={t("plugins.uninstallTitle")}
+        message={t("plugins.uninstallMessage", { name: uninstallTarget })}
+        confirmLabel={t("plugins.uninstall")}
+        cancelLabel={t("common.cancel")}
+        onConfirm={() => uninstallTarget && handleUninstall(uninstallTarget)}
+        onCancel={() => setUninstallTarget(undefined)}
+      />
     </Box>
   );
 };

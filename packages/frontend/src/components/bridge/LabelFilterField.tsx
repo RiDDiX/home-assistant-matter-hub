@@ -6,6 +6,7 @@ import Chip from "@mui/material/Chip";
 import CircularProgress from "@mui/material/CircularProgress";
 import Link from "@mui/material/Link";
 import Typography from "@mui/material/Typography";
+import { Trans, useTranslation } from "react-i18next";
 import type { HomeAssistantLabel } from "../../api/labels.ts";
 import type { WizardFilterType } from "./wizard-filter.ts";
 
@@ -30,6 +31,7 @@ export function LabelFilterField({
   onChange,
   onSwitchType,
 }: LabelFilterFieldProps) {
+  const { t } = useTranslation();
   if (loading) {
     return (
       <Box sx={{ display: "flex", justifyContent: "center", p: 2 }}>
@@ -41,25 +43,24 @@ export function LabelFilterField({
   if (labels.length === 0) {
     return (
       <Alert severity="info" sx={{ mt: 1 }}>
-        <AlertTitle>No labels found</AlertTitle>
+        <AlertTitle>{t("labelFilter.noLabels")}</AlertTitle>
         <Typography variant="body2">
-          Home Assistant has no labels yet, so there is nothing to filter by.
-          Create them under{" "}
-          <Link href={haLabelsPath} target="_top" rel="noopener">
-            Settings &gt; Labels
-          </Link>{" "}
-          in Home Assistant, then reopen this wizard. Or pick a different filter
-          type:
+          <Trans
+            i18nKey="labelFilter.noLabelsHint"
+            components={{
+              link: <Link href={haLabelsPath} target="_top" rel="noopener" />,
+            }}
+          />
         </Typography>
         <Box display="flex" gap={1} flexWrap="wrap" mt={1}>
           <Button size="small" onClick={() => onSwitchType("domain")}>
-            Use domains
+            {t("labelFilter.useDomains")}
           </Button>
           <Button size="small" onClick={() => onSwitchType("area")}>
-            Use areas
+            {t("labelFilter.useAreas")}
           </Button>
           <Button size="small" onClick={() => onSwitchType("pattern")}>
-            Use patterns
+            {t("labelFilter.usePatterns")}
           </Button>
         </Box>
       </Alert>
@@ -77,8 +78,7 @@ export function LabelFilterField({
   return (
     <Box sx={{ mt: 1 }}>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-        Pick the labels to include. Entities carrying any selected label are
-        exposed.
+        {t("labelFilter.pickHint")}
       </Typography>
       <Box display="flex" gap={0.75} flexWrap="wrap">
         {labels.map((label) => {
@@ -91,6 +91,7 @@ export function LabelFilterField({
               color={selected ? "primary" : "default"}
               variant={selected ? "filled" : "outlined"}
               onClick={() => toggle(label.label_id)}
+              aria-pressed={selected}
             />
           );
         })}

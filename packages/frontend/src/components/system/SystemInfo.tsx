@@ -7,9 +7,11 @@ import Card from "@mui/material/Card";
 import CardContent from "@mui/material/CardContent";
 import Chip from "@mui/material/Chip";
 import Grid from "@mui/material/Grid";
+import LinearProgress from "@mui/material/LinearProgress";
 import Stack from "@mui/material/Stack";
 import Typography from "@mui/material/Typography";
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 
 interface NetworkInterface {
   name: string;
@@ -80,7 +82,31 @@ const formatUptime = (seconds: number): string => {
   return `${minutes}m`;
 };
 
+function UsageBar({
+  percent,
+  warnAt,
+  errorAt,
+  label,
+}: {
+  percent: number;
+  warnAt: number;
+  errorAt: number;
+  label: string;
+}) {
+  const value = Math.min(Math.max(percent, 0), 100);
+  return (
+    <LinearProgress
+      variant="determinate"
+      value={value}
+      aria-label={label}
+      color={value > errorAt ? "error" : value > warnAt ? "warning" : "success"}
+      sx={{ height: 8, borderRadius: 4 }}
+    />
+  );
+}
+
 export const SystemInfo = () => {
+  const { t } = useTranslation();
   const [systemInfo, setSystemInfo] = useState<SystemInfo | null>(null);
   const [loading, setLoading] = useState(true);
   const [apiAvailable, setApiAvailable] = useState(true);
@@ -129,7 +155,7 @@ export const SystemInfo = () => {
     return (
       <Card>
         <CardContent>
-          <Typography>Loading system information...</Typography>
+          <Typography>{t("system.loading")}</Typography>
         </CardContent>
       </Card>
     );
@@ -139,18 +165,19 @@ export const SystemInfo = () => {
     return (
       <Card>
         <CardContent>
-          <Typography color="error">
-            Failed to load system information
-          </Typography>
+          <Typography color="error">{t("system.loadFailed")}</Typography>
         </CardContent>
       </Card>
     );
   }
 
-  const memoryUsagePercent =
-    (systemInfo.memory.used / systemInfo.memory.total) * 100;
-  const storageUsagePercent =
-    (systemInfo.storage.used / systemInfo.storage.total) * 100;
+  // the API guards against a zero total, local division showed NaN
+  const memoryUsagePercent = systemInfo.memory.usagePercent;
+  const storageUsagePercent = systemInfo.storage.usagePercent;
+  const heapPercent =
+    systemInfo.process.heapSizeLimit > 0
+      ? (systemInfo.process.heapUsed / systemInfo.process.heapSizeLimit) * 100
+      : 0;
 
   return (
     <Card>
@@ -161,7 +188,7 @@ export const SystemInfo = () => {
           sx={{ display: "flex", alignItems: "center", gap: 1 }}
         >
           <ComputerIcon />
-          System Information
+          {t("system.title")}
         </Typography>
 
         <Grid container spacing={3}>
@@ -170,13 +197,15 @@ export const SystemInfo = () => {
             <Stack spacing={2}>
               <Box>
                 <Typography variant="subtitle2" color="text.secondary">
-                  Application
+                  {t("system.application")}
                 </Typography>
                 <Stack spacing={1} sx={{ mt: 1 }}>
                   <Box
                     sx={{ display: "flex", justifyContent: "space-between" }}
                   >
-                    <Typography variant="body2">Version:</Typography>
+                    <Typography variant="body2">
+                      {t("common.version")}:
+                    </Typography>
                     <Chip
                       label={systemInfo.version}
                       size="small"
@@ -186,7 +215,9 @@ export const SystemInfo = () => {
                   <Box
                     sx={{ display: "flex", justifyContent: "space-between" }}
                   >
-                    <Typography variant="body2">Environment:</Typography>
+                    <Typography variant="body2">
+                      {t("system.environment")}:
+                    </Typography>
                     <Chip
                       label={systemInfo.environment}
                       size="small"
@@ -209,7 +240,9 @@ export const SystemInfo = () => {
                   <Box
                     sx={{ display: "flex", justifyContent: "space-between" }}
                   >
-                    <Typography variant="body2">Process Uptime:</Typography>
+                    <Typography variant="body2">
+                      {t("system.processUptime")}:
+                    </Typography>
                     <Typography variant="body2" color="text.secondary">
                       {formatUptime(systemInfo.process.uptime)}
                     </Typography>
@@ -219,13 +252,15 @@ export const SystemInfo = () => {
 
               <Box>
                 <Typography variant="subtitle2" color="text.secondary">
-                  System
+                  {t("system.system")}
                 </Typography>
                 <Stack spacing={1} sx={{ mt: 1 }}>
                   <Box
                     sx={{ display: "flex", justifyContent: "space-between" }}
                   >
-                    <Typography variant="body2">Hostname:</Typography>
+                    <Typography variant="body2">
+                      {t("system.hostname")}:
+                    </Typography>
                     <Typography variant="body2" color="text.secondary">
                       {systemInfo.hostname}
                     </Typography>
@@ -233,7 +268,9 @@ export const SystemInfo = () => {
                   <Box
                     sx={{ display: "flex", justifyContent: "space-between" }}
                   >
-                    <Typography variant="body2">Platform:</Typography>
+                    <Typography variant="body2">
+                      {t("system.platform")}:
+                    </Typography>
                     <Typography variant="body2" color="text.secondary">
                       {systemInfo.platform} ({systemInfo.arch})
                     </Typography>
@@ -241,7 +278,7 @@ export const SystemInfo = () => {
                   <Box
                     sx={{ display: "flex", justifyContent: "space-between" }}
                   >
-                    <Typography variant="body2">CPU:</Typography>
+                    <Typography variant="body2">{t("system.cpu")}:</Typography>
                     <Typography
                       variant="body2"
                       color="text.secondary"
@@ -256,7 +293,9 @@ export const SystemInfo = () => {
                   <Box
                     sx={{ display: "flex", justifyContent: "space-between" }}
                   >
-                    <Typography variant="body2">System Uptime:</Typography>
+                    <Typography variant="body2">
+                      {t("system.systemUptime")}:
+                    </Typography>
                     <Typography variant="body2" color="text.secondary">
                       {formatUptime(systemInfo.uptime)}
                     </Typography>
@@ -276,7 +315,7 @@ export const SystemInfo = () => {
                   sx={{ display: "flex", alignItems: "center", gap: 1 }}
                 >
                   <MemoryIcon />
-                  Memory Usage
+                  {t("system.memoryUsage")}
                 </Typography>
                 <Box sx={{ mt: 1 }}>
                   <Box
@@ -294,28 +333,12 @@ export const SystemInfo = () => {
                       {memoryUsagePercent.toFixed(1)}%
                     </Typography>
                   </Box>
-                  <Box
-                    sx={{
-                      height: 8,
-                      backgroundColor: "action.hover",
-                      borderRadius: 4,
-                      overflow: "hidden",
-                    }}
-                  >
-                    <Box
-                      sx={{
-                        height: "100%",
-                        width: `${memoryUsagePercent}%`,
-                        backgroundColor:
-                          memoryUsagePercent > 80
-                            ? "error.main"
-                            : memoryUsagePercent > 60
-                              ? "warning.main"
-                              : "success.main",
-                        transition: "width 0.3s ease",
-                      }}
-                    />
-                  </Box>
+                  <UsageBar
+                    percent={memoryUsagePercent}
+                    warnAt={60}
+                    errorAt={80}
+                    label={t("system.memoryUsage")}
+                  />
                 </Box>
               </Box>
 
@@ -326,7 +349,7 @@ export const SystemInfo = () => {
                   sx={{ display: "flex", alignItems: "center", gap: 1 }}
                 >
                   <MemoryIcon />
-                  HAMH Process Memory
+                  {t("system.processMemory")}
                 </Typography>
                 <Box sx={{ mt: 1 }}>
                   <Box
@@ -337,39 +360,20 @@ export const SystemInfo = () => {
                     }}
                   >
                     <Typography variant="body2">
-                      RSS: {formatBytes(systemInfo.process.rss)}
+                      {t("health.rss")}: {formatBytes(systemInfo.process.rss)}
                     </Typography>
                     <Typography variant="body2" color="text.secondary">
-                      Heap: {formatBytes(systemInfo.process.heapUsed)} /{" "}
+                      {t("health.heap")}:{" "}
+                      {formatBytes(systemInfo.process.heapUsed)} /{" "}
                       {formatBytes(systemInfo.process.heapSizeLimit)}
                     </Typography>
                   </Box>
-                  <Box
-                    sx={{
-                      height: 8,
-                      backgroundColor: "action.hover",
-                      borderRadius: 4,
-                      overflow: "hidden",
-                    }}
-                  >
-                    <Box
-                      sx={{
-                        height: "100%",
-                        width: `${Math.min((systemInfo.process.heapUsed / systemInfo.process.heapSizeLimit) * 100, 100)}%`,
-                        backgroundColor:
-                          systemInfo.process.heapUsed /
-                            systemInfo.process.heapSizeLimit >
-                          0.85
-                            ? "error.main"
-                            : systemInfo.process.heapUsed /
-                                  systemInfo.process.heapSizeLimit >
-                                0.6
-                              ? "warning.main"
-                              : "success.main",
-                        transition: "width 0.3s ease",
-                      }}
-                    />
-                  </Box>
+                  <UsageBar
+                    percent={heapPercent}
+                    warnAt={60}
+                    errorAt={85}
+                    label={t("system.processMemory")}
+                  />
                 </Box>
               </Box>
 
@@ -380,7 +384,7 @@ export const SystemInfo = () => {
                   sx={{ display: "flex", alignItems: "center", gap: 1 }}
                 >
                   <StorageIcon />
-                  Storage Usage
+                  {t("system.storageUsage")}
                 </Typography>
                 <Box sx={{ mt: 1 }}>
                   <Box
@@ -398,28 +402,12 @@ export const SystemInfo = () => {
                       {storageUsagePercent.toFixed(1)}%
                     </Typography>
                   </Box>
-                  <Box
-                    sx={{
-                      height: 8,
-                      backgroundColor: "action.hover",
-                      borderRadius: 4,
-                      overflow: "hidden",
-                    }}
-                  >
-                    <Box
-                      sx={{
-                        height: "100%",
-                        width: `${storageUsagePercent}%`,
-                        backgroundColor:
-                          storageUsagePercent > 80
-                            ? "error.main"
-                            : storageUsagePercent > 60
-                              ? "warning.main"
-                              : "success.main",
-                        transition: "width 0.3s ease",
-                      }}
-                    />
-                  </Box>
+                  <UsageBar
+                    percent={storageUsagePercent}
+                    warnAt={60}
+                    errorAt={80}
+                    label={t("system.storageUsage")}
+                  />
                 </Box>
               </Box>
             </Stack>
@@ -433,7 +421,7 @@ export const SystemInfo = () => {
               sx={{ display: "flex", alignItems: "center", gap: 1 }}
             >
               <NetworkIcon />
-              Network Interfaces
+              {t("health.networkInterfaces")}
             </Typography>
             <Stack spacing={1} sx={{ mt: 1 }}>
               {systemInfo.network.interfaces.map((iface) => (

@@ -158,7 +158,9 @@
     "bridgeStatusRunning": "{{running}} fut",
     "bridgeStatusFailed": "{{failed}} sikertelen",
     "devicesFailed": "{{count}} sikertelen",
-    "uptimeFormat": "{{time}}"
+    "uptimeFormat": "{{time}}",
+    "deviceCount": "{{count}} Eszközök",
+    "fabricCount": "{{count}} Fabricok"
   },
   "bridge": {
     "name": "Bridge neve",
@@ -371,7 +373,8 @@
     "sortType": "Eszköztípus",
     "sortName": "Név",
     "deviceCount": "{{count}} eszköz",
-    "filteredCount": "{{total}} eszközből {{filtered}}"
+    "filteredCount": "{{total}} eszközből {{filtered}}",
+    "fabricCount": "{{count}} Fabricok"
   },
   "diagnostics": {
     "title": "Élő diagnosztika",

@@ -141,7 +141,9 @@
     "bridgeStatusRunning": "{{running}} 動作中",
     "bridgeStatusFailed": "{{failed}} 失敗",
     "devicesFailed": "{{count}} 失敗",
-    "uptimeFormat": "稼働時間 {{time}}"
+    "uptimeFormat": "稼働時間 {{time}}",
+    "deviceCount": "{{count}} デバイス",
+    "fabricCount": "{{count}} ファブリック"
   },
   "bridge": {
     "name": "ブリッジ名",
@@ -352,7 +354,8 @@
     "sortType": "デバイスタイプ",
     "sortName": "名前",
     "deviceCount": "{{count}} デバイス",
-    "filteredCount": "{{total}} 中 {{filtered}} のデバイス"
+    "filteredCount": "{{total}} 中 {{filtered}} のデバイス",
+    "fabricCount": "{{count}} ファブリック"
   },
   "diagnostics": {
     "title": "ライブ診断",

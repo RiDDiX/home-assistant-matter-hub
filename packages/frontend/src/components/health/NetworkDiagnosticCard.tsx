@@ -8,6 +8,7 @@ import Paper from "@mui/material/Paper";
 import Table from "@mui/material/Table";
 import TableBody from "@mui/material/TableBody";
 import TableCell from "@mui/material/TableCell";
+import TableContainer from "@mui/material/TableContainer";
 import TableHead from "@mui/material/TableHead";
 import TableRow from "@mui/material/TableRow";
 import Typography from "@mui/material/Typography";
@@ -173,76 +174,80 @@ export function NetworkDiagnosticCard() {
             <Typography variant="subtitle2" sx={{ mt: 1, mb: 0.5 }}>
               {t("health.allChecks")}
             </Typography>
-            <Table size="small">
-              <TableHead>
-                <TableRow>
-                  <TableCell>{t("health.check")}</TableCell>
-                  <TableCell>{t("health.statusLabel")}</TableCell>
-                  <TableCell>{t("health.message")}</TableCell>
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {data.checks.map((check) => (
-                  <TableRow key={check.name}>
-                    <TableCell>
-                      <Typography variant="body2">{check.name}</Typography>
-                    </TableCell>
-                    <TableCell>
-                      <Chip
-                        label={check.status}
-                        color={statusColor(check.status)}
-                        size="small"
-                      />
-                    </TableCell>
-                    <TableCell>
-                      <Typography variant="body2">{check.message}</Typography>
-                      {check.detail && (
-                        <Typography
-                          variant="caption"
-                          color="text.secondary"
-                          display="block"
-                        >
-                          {check.detail}
-                        </Typography>
-                      )}
-                    </TableCell>
+            <TableContainer>
+              <Table size="small">
+                <TableHead>
+                  <TableRow>
+                    <TableCell>{t("health.check")}</TableCell>
+                    <TableCell>{t("health.statusLabel")}</TableCell>
+                    <TableCell>{t("health.message")}</TableCell>
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+                </TableHead>
+                <TableBody>
+                  {data.checks.map((check) => (
+                    <TableRow key={check.name}>
+                      <TableCell>
+                        <Typography variant="body2">{check.name}</Typography>
+                      </TableCell>
+                      <TableCell>
+                        <Chip
+                          label={check.status}
+                          color={statusColor(check.status)}
+                          size="small"
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <Typography variant="body2">{check.message}</Typography>
+                        {check.detail && (
+                          <Typography
+                            variant="caption"
+                            color="text.secondary"
+                            display="block"
+                          >
+                            {check.detail}
+                          </Typography>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </TableContainer>
 
             <Typography variant="subtitle2" sx={{ mt: 2, mb: 0.5 }}>
               {t("health.networkInterfaces")}
             </Typography>
-            <Table size="small">
-              <TableHead>
-                <TableRow>
-                  <TableCell>{t("health.interfaceName")}</TableCell>
-                  <TableCell>IPv4</TableCell>
-                  <TableCell>IPv6</TableCell>
-                  <TableCell>MAC</TableCell>
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {data.interfaces
-                  .filter((i) => !i.internal)
-                  .map((iface) => (
-                    <TableRow key={iface.name}>
-                      <TableCell>{iface.name}</TableCell>
-                      <TableCell>{iface.ipv4.join(", ") || "-"}</TableCell>
-                      <TableCell>
-                        <Typography
-                          variant="body2"
-                          sx={{ wordBreak: "break-all", maxWidth: 240 }}
-                        >
-                          {iface.ipv6.join(", ") || "-"}
-                        </Typography>
-                      </TableCell>
-                      <TableCell>{iface.mac}</TableCell>
-                    </TableRow>
-                  ))}
-              </TableBody>
-            </Table>
+            <TableContainer>
+              <Table size="small">
+                <TableHead>
+                  <TableRow>
+                    <TableCell>{t("health.interfaceName")}</TableCell>
+                    <TableCell>IPv4</TableCell>
+                    <TableCell>IPv6</TableCell>
+                    <TableCell>MAC</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {data.interfaces
+                    .filter((i) => !i.internal)
+                    .map((iface) => (
+                      <TableRow key={iface.name}>
+                        <TableCell>{iface.name}</TableCell>
+                        <TableCell>{iface.ipv4.join(", ") || "-"}</TableCell>
+                        <TableCell>
+                          <Typography
+                            variant="body2"
+                            sx={{ wordBreak: "break-all", maxWidth: 240 }}
+                          >
+                            {iface.ipv6.join(", ") || "-"}
+                          </Typography>
+                        </TableCell>
+                        <TableCell>{iface.mac}</TableCell>
+                      </TableRow>
+                    ))}
+                </TableBody>
+              </Table>
+            </TableContainer>
           </Collapse>
         </>
       )}

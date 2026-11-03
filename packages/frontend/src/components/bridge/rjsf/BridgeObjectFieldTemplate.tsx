@@ -9,6 +9,7 @@ import Typography from "@mui/material/Typography";
 import { generateTemplates } from "@rjsf/mui";
 import type { ObjectFieldTemplateProps } from "@rjsf/utils";
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 
 const muiTemplates = generateTemplates();
 const DefaultObjectFieldTemplate = muiTemplates.ObjectFieldTemplate!;
@@ -24,6 +25,7 @@ export function BridgeObjectFieldTemplate(props: ObjectFieldTemplateProps) {
 }
 
 function CollapsibleFilterTemplate(props: ObjectFieldTemplateProps) {
+  const { t } = useTranslation();
   const includeCount =
     (props.formData?.include as unknown[] | undefined)?.length ?? 0;
   const excludeCount =
@@ -56,7 +58,7 @@ function CollapsibleFilterTemplate(props: ObjectFieldTemplateProps) {
       >
         <FilterListIcon fontSize="small" color="action" />
         <Typography variant="subtitle1" fontWeight={600}>
-          Entity Filters
+          {t("bridge.entityFilters")}
         </Typography>
         <Badge
           badgeContent={totalRules}
@@ -68,8 +70,8 @@ function CollapsibleFilterTemplate(props: ObjectFieldTemplateProps) {
         </Badge>
         <Typography variant="caption" color="text.secondary" sx={{ ml: 1 }}>
           {expanded
-            ? "Click to collapse"
-            : `${totalRules} rule${totalRules !== 1 ? "s" : ""} configured`}
+            ? t("bridge.clickToCollapse")
+            : t("bridge.rulesConfigured", { count: totalRules })}
         </Typography>
       </AccordionSummary>
       <AccordionDetails sx={{ px: 2, pb: 2 }}>

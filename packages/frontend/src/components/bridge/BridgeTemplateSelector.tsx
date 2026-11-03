@@ -10,19 +10,8 @@ import CardContent from "@mui/material/CardContent";
 import Chip from "@mui/material/Chip";
 import Grid from "@mui/material/Grid";
 import Typography from "@mui/material/Typography";
-
-const templateIcons: Record<string, string> = {
-  light: "💡",
-  switch: "🔌",
-  sensor: "📊",
-  climate: "🌡️",
-  lock: "🔒",
-  vacuum: "🤖",
-  media_player: "🎵",
-  cover: "🪟",
-  remote: "⚡",
-  default: "🏠",
-};
+import { useTranslation } from "react-i18next";
+import { iconTypeMap } from "./bridgeIconUtils.ts";
 
 interface BridgeTemplateSelectorProps {
   selectedTemplate?: string;
@@ -33,19 +22,20 @@ export function BridgeTemplateSelector({
   selectedTemplate,
   onSelect,
 }: BridgeTemplateSelectorProps) {
+  const { t } = useTranslation();
   return (
     <Box>
       <Typography variant="subtitle1" gutterBottom fontWeight={600}>
-        Start from a Template (optional)
+        {t("bridge.templateHeading")}
       </Typography>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-        Choose a preset to pre-fill the bridge configuration with recommended
-        settings. You can customize everything afterwards.
+        {t("bridge.templateHint")}
       </Typography>
 
       <Grid container spacing={1.5} alignItems="flex-start">
         {bridgeTemplates.map((template) => {
           const isSelected = selectedTemplate === template.id;
+          const Icon = iconTypeMap[template.icon] ?? iconTypeMap.default;
           return (
             <Grid key={template.id} size={{ xs: 12, sm: 6, md: 4 }}>
               <Card
@@ -60,6 +50,7 @@ export function BridgeTemplateSelector({
               >
                 <CardActionArea
                   onClick={() => onSelect(isSelected ? null : template)}
+                  aria-pressed={isSelected}
                   sx={{
                     p: 0,
                     display: "flex",
@@ -70,9 +61,7 @@ export function BridgeTemplateSelector({
                 >
                   <CardContent sx={{ p: 1.5, "&:last-child": { pb: 1.5 } }}>
                     <Box display="flex" alignItems="center" gap={1} mb={0.5}>
-                      <Typography fontSize={20}>
-                        {templateIcons[template.icon] ?? templateIcons.default}
-                      </Typography>
+                      <Icon fontSize="small" color="action" />
                       <Typography variant="subtitle2" sx={{ flexGrow: 1 }}>
                         {template.name}
                       </Typography>
@@ -97,25 +86,20 @@ export function BridgeTemplateSelector({
                     </Typography>
                     {template.featureFlags?.serverMode && (
                       <Chip
-                        label="Server Mode"
+                        label={t("bridge.serverMode")}
                         size="small"
                         color="warning"
                         variant="outlined"
-                        sx={{ mt: 0.5, height: 20, fontSize: "0.65rem" }}
+                        sx={{ mt: 0.5 }}
                       />
                     )}
                     {template.featureFlags?.autoForceSync && (
                       <Chip
-                        label="Auto Force Sync"
+                        label={t("bridge.autoForceSync")}
                         size="small"
                         color="info"
                         variant="outlined"
-                        sx={{
-                          mt: 0.5,
-                          ml: 0.5,
-                          height: 20,
-                          fontSize: "0.65rem",
-                        }}
+                        sx={{ mt: 0.5, ml: 0.5 }}
                       />
                     )}
                   </CardContent>
