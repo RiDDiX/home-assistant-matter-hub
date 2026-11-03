@@ -10,14 +10,21 @@ import { FloatingLanguageSwitcher } from "../components/misc/FloatingLanguageSwi
 import { useWebSocketStatus } from "../contexts/WebSocketContext.tsx";
 import { useAppInfo } from "../hooks/app-info.ts";
 import { AppFooter } from "./AppFooter.tsx";
-import { AppTopBar } from "./AppTopBar.tsx";
+import { AppTopBar, NAV_WIDTH } from "./AppTopBar.tsx";
 
 export const AppLayout: FC = () => {
   const { versionMismatch, frontendVersion, backendVersion } = useAppInfo();
   const { isConnected } = useWebSocketStatus();
 
   return (
-    <Box>
+    <Box
+      sx={{
+        minHeight: "100dvh",
+        display: "flex",
+        flexDirection: "column",
+        ml: { md: `${NAV_WIDTH}px` },
+      }}
+    >
       <AppTopBar />
       <Toolbar />
       {versionMismatch && (
@@ -44,7 +51,7 @@ export const AppLayout: FC = () => {
           Connection lost, data may be outdated. Reconnecting…
         </Alert>
       )}
-      <Container sx={{ p: 2 }}>
+      <Container component="main" sx={{ p: 2, flexGrow: 1 }}>
         <ErrorBoundary>
           <Outlet />
         </ErrorBoundary>

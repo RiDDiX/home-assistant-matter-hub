@@ -34,17 +34,7 @@ export const DeviceCard = ({ bridge }: DeviceCardProps) => {
   }, [bridge.id]);
 
   return (
-    <Card
-      variant="elevation"
-      sx={{
-        height: "100%",
-        transition: "transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out",
-        "&:hover": {
-          transform: "translateY(-4px)",
-          boxShadow: 4,
-        },
-      }}
-    >
+    <Card sx={{ height: "100%" }}>
       <CardActionArea
         component={RouterLink}
         to={navigation.bridge(bridge.id)}

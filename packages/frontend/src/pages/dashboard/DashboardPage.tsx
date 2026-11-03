@@ -370,7 +370,7 @@ export const DashboardPage = () => {
   const hasBridges = (bridges?.total ?? 0) > 0;
 
   return (
-    <Box sx={{ p: 2 }}>
+    <Box>
       <Box display="flex" alignItems="center" gap={2} mb={3}>
         <HomeIcon color="primary" fontSize="large" />
         <Typography variant="h5" fontWeight={600} component="h1">

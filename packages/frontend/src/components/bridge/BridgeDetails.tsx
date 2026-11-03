@@ -78,10 +78,10 @@ export const BridgeDetails = ({ bridge }: BridgeDetailsProps) => {
       <Grid size={{ xs: 12 }}>
         <FiltersCard bridge={bridge} />
       </Grid>
-      <Grid size={{ xs: 12 }}>
+      <Grid size={{ xs: 12 }} sx={{ "&:empty": { display: "none" } }}>
         <ControllerWarnings bridge={bridge} />
       </Grid>
-      <Grid size={{ xs: 12 }}>
+      <Grid size={{ xs: 12 }} sx={{ "&:empty": { display: "none" } }}>
         <FailedEntities bridge={bridge} />
       </Grid>
     </Grid>
