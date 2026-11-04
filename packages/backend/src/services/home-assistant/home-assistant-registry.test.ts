@@ -55,6 +55,101 @@ describe("HomeAssistantRegistry", () => {
     vi.useRealTimers();
   });
 
+  describe("group sensor startup", () => {
+    function makeGroupRegistry(
+      state: string | undefined,
+      attributes: Record<string, string> = {},
+      entityOverrides: Record<string, string> = {},
+    ) {
+      const fake = makeConnection();
+      const entity = {
+        entity_id: "sensor.bathroom_temperature",
+        platform: "group",
+        ...entityOverrides,
+      };
+      const snapshot = {
+        states:
+          state === undefined
+            ? []
+            : [{ entity_id: entity.entity_id, state, attributes }],
+      };
+      fake.connection.sendMessagePromise = vi.fn((message: { type: string }) =>
+        Promise.resolve(
+          message.type === "config/entity_registry/list"
+            ? [entity]
+            : message.type === "get_states"
+              ? snapshot.states
+              : [],
+        ),
+      ) as unknown as Connection["sendMessagePromise"];
+      const registry = new HomeAssistantRegistry(
+        { connection: fake.connection, haRunning: true } as HomeAssistantClient,
+        defaultOptions,
+      );
+      return { registry, snapshot, connection: fake.connection };
+    }
+
+    it.each([
+      undefined,
+      "unknown",
+      "unavailable",
+    ])("waits for a %s group sensor before allowing bridges to initialize", async (state) => {
+      const { registry, snapshot } = makeGroupRegistry(state);
+      const initialized = vi.fn();
+      void registry.construction.then(initialized);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(initialized).not.toHaveBeenCalled();
+
+      snapshot.states = [
+        {
+          entity_id: "sensor.bathroom_temperature",
+          state: "23.7",
+          attributes: {
+            device_class: "temperature",
+            unit_of_measurement: "°C",
+          },
+        },
+      ];
+      await vi.advanceTimersByTimeAsync(2998);
+      expect(initialized).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+      await registry.construction;
+      expect(initialized).toHaveBeenCalledOnce();
+      expect(
+        registry.states["sensor.bathroom_temperature"].attributes,
+      ).toMatchObject({ device_class: "temperature" });
+    });
+
+    it.each<[string, Record<string, string>, Record<string, string>]>([
+      ["unavailable", { device_class: "temperature" }, {}],
+      ["42", {}, {}],
+      ["unavailable", {}, { disabled_by: "user" }],
+      ["unavailable", {}, { platform: "mqtt" }],
+      ["unavailable", {}, { entity_id: "light.group" }],
+    ])("does not delay a usable or unrelated entity (%j)", async (state, attributes, overrides) => {
+      const { registry } = makeGroupRegistry(state, attributes, overrides);
+      const initialized = vi.fn();
+      void registry.construction.then(initialized);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(initialized).toHaveBeenCalledOnce();
+    });
+
+    it("bounds the wait for a group whose members stay offline", async () => {
+      const { registry, connection } = makeGroupRegistry("unavailable");
+      const initialized = vi.fn();
+      void registry.construction.then(initialized);
+      await vi.advanceTimersByTimeAsync(59_999);
+      expect(initialized).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(initialized).toHaveBeenCalledOnce();
+      expect(
+        vi
+          .mocked(connection.sendMessagePromise)
+          .mock.calls.filter(([message]) => message.type === "get_states"),
+      ).toHaveLength(21);
+    });
+  });
+
   it("initialize survives a registry fetch that never recovers", async () => {
     const fake = makeConnection();
     fake.connection.sendMessagePromise = vi.fn().mockRejectedValue(lostError());

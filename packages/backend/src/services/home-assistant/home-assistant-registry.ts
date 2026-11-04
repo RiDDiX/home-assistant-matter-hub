@@ -24,6 +24,8 @@ import type {
 } from "./home-assistant-client.js";
 
 const logger = Logger.get("HomeAssistantRegistry");
+// shortcut: groups still incomplete after 60s use auto-refresh; revisit if controllers still rediscover devices.
+const GROUP_SENSOR_STARTUP_WAIT_MS = 60_000;
 
 export type HomeAssistantDevices = Record<string, HomeAssistantDeviceRegistry>;
 export type HomeAssistantEntities = Record<string, HomeAssistantEntityRegistry>;
@@ -82,15 +84,45 @@ export class HomeAssistantRegistry extends Service {
   protected override async initialize(): Promise<void> {
     try {
       await this.reload();
+      // HA can report RUNNING before group sensors inherit their members' classes.
+      const deadline = Date.now() + GROUP_SENSOR_STARTUP_WAIT_MS;
+      let pending = this.pendingGroupSensors();
+      if (pending.length > 0) {
+        logger.info(
+          "Waiting for group sensor attributes before starting bridges",
+        );
+      }
+      while (pending.length > 0 && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 3000));
+        await this.reload();
+        pending = this.pendingGroupSensors();
+      }
+      if (pending.length > 0) {
+        logger.warn(
+          `Group sensors still initializing after the startup wait, continuing with auto-refresh: ${pending.join(", ")}`,
+        );
+      }
     } catch (e) {
       // HA's WS endpoint can drop in-flight queries during HA's own startup,
-      // and after maxAttempts withRetry gives up. Start empty rather than
-      // tear down the addon. enableAutoRefresh keeps trying every tick.
-      logger.warn(
-        "Initial registry fetch failed, starting empty and relying on auto-refresh:",
-        e,
-      );
+      // and after maxAttempts withRetry gives up. Keep any cached snapshot;
+      // enableAutoRefresh keeps trying every tick.
+      logger.warn("Initial registry fetch failed, relying on auto-refresh:", e);
     }
+  }
+
+  private pendingGroupSensors(): string[] {
+    return Object.values(this._entities)
+      .filter((entity) => {
+        const state = this._states[entity.entity_id];
+        return (
+          entity.disabled_by == null &&
+          entity.platform === "group" &&
+          entity.entity_id.startsWith("sensor.") &&
+          !state?.attributes.device_class &&
+          (!state || state.state === "unknown" || state.state === "unavailable")
+        );
+      })
+      .map((entity) => entity.entity_id);
   }
 
   override async dispose(): Promise<void> {
