@@ -931,3 +931,17 @@ describe("battery sensor of a composed temperature sensor (#498)", () => {
     expect(candidates.get("dev498")).toBe(VACUUM);
   });
 });
+
+describe("overlapping refreshes", () => {
+  it("a second refresh waits for the first, the endpoint is built once", async () => {
+    const ha = makeHa();
+    const { manager } = await buildManager(ha);
+    // HA restart: the recovery start and a registry tick refresh at once
+    await Promise.all([manager.refreshDevices(), manager.refreshDevices()]);
+    expect(manager.failedEntities).toEqual([]);
+    const vacuums = [...manager.root.parts].filter(
+      (p) => (p as EntityEndpoint).entityId === VACUUM,
+    );
+    expect(vacuums).toHaveLength(1);
+  });
+});

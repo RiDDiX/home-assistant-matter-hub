@@ -187,6 +187,41 @@ describe.each(Object.entries(modes))("port edit, %s", (_, mode) => {
     expect(node.state.network.operationalPort).toBe(b);
   });
 
+  it("a stop issued during start waits for it and ends stopped", async () => {
+    const [a] = await freePorts();
+    const { bridge } = await make(a);
+
+    const starting = bridge.start();
+    await bridge.stop();
+    await starting;
+
+    expect(bridge.data.status).toBe(BridgeStatus.Stopped);
+    expect(await inUse(a)).toBe(false);
+  });
+
+  it("a port edit issued during start ends on the new port", async () => {
+    const [a, b] = await freePorts();
+    const { bridge, node, update } = await make(a);
+    // hold the edit until the start has already bound the old port
+    const nodeStart = node.start.bind(node);
+    let bound!: () => void;
+    const onOldPort = new Promise<void>((r) => (bound = r));
+    node.start = async () => {
+      await nodeStart();
+      bound();
+    };
+
+    const starting = bridge.start();
+    await onOldPort;
+    expect(bridge.data.status).toBe(BridgeStatus.Starting);
+    await bridge.update(update(b));
+    await starting;
+
+    expect(bridge.data.status).toBe(BridgeStatus.Running);
+    expect(node.state.network.operationalPort).toBe(b);
+    expect(await inUse(a)).toBe(false);
+  });
+
   it("does not restart for an edit that keeps the port", async () => {
     const [a] = await freePorts();
     const { bridge, node, update } = await make(a);

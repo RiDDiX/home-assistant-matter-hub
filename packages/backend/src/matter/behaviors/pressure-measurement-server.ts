@@ -2,17 +2,16 @@ import type {
   HomeAssistantEntityInformation,
   HomeAssistantEntityState,
 } from "@home-assistant-matter-hub/common";
-import { Logger } from "@matter/general";
 import { PressureMeasurementServer as Base } from "@matter/main/behaviors";
 import { applyPatchState } from "../../utils/apply-patch-state.js";
 import { HomeAssistantEntityBehavior } from "./home-assistant-entity-behavior.js";
 import type { ValueGetter } from "./utils/cluster-config.js";
 
-const logger = Logger.get("PressureMeasurementServer");
-
-// min/max values in dkPa (decikiloPascals): 300-1100 hPa typical atmospheric range
-const MIN_PRESSURE = 300;
-const MAX_PRESSURE = 1100;
+// min/max values in dkPa (decikiloPascals). The declared window must cover
+// everything getPressure can write, or matter.js rejects the value and the
+// attribute freezes, so boiler and tyre sensors in bar or psi fit as well.
+const MIN_PRESSURE = 0;
+const MAX_PRESSURE = 32767;
 
 export interface PressureMeasurementConfig {
   getValue: ValueGetter<number | undefined>;
@@ -52,14 +51,7 @@ export class PressureMeasurementServerBase extends Base {
     // Home Assistant typically reports in hPa (hectoPascals)
     // 1 hPa = 0.1 kPa, so hPa / 10 = kPa, then * 10 = dkPa
     // Result: hPa value directly equals dkPa
-    const rounded = Math.round(value);
-    if (rounded < MIN_PRESSURE || rounded > MAX_PRESSURE) {
-      logger.warn(
-        `Pressure value ${rounded} (raw: ${value}) for ${entity.entity_id} is outside valid range [${MIN_PRESSURE}-${MAX_PRESSURE}], ignoring`,
-      );
-      return null;
-    }
-    return rounded;
+    return Math.min(MAX_PRESSURE, Math.max(MIN_PRESSURE, Math.round(value)));
   }
 }
 

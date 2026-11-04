@@ -1,3 +1,4 @@
+import { Logger } from "@matter/general";
 import type { StorageContext, SupportedStorageTypes } from "@matter/main";
 import { Service } from "../../core/ioc/service.js";
 import type { AppStorage } from "./app-storage.js";
@@ -34,10 +35,15 @@ const CURRENT_VERSION = 1;
 // the initial burst into a single write. dispose flushes any pending write.
 const PERSIST_DEBOUNCE_MS = 500;
 
+const logger = Logger.get("EntityIdentityStorage");
+
 export class EntityIdentityStorage extends Service {
   private storage!: StorageContext;
   private identities: Map<string, Map<string, IdentityRecord>> = new Map();
   private persistTimer: ReturnType<typeof setTimeout> | null = null;
+  // Only a change writes, so a file this build could not read stays on disk
+  // until a record changes.
+  private dirty = false;
 
   constructor(private readonly appStorage: AppStorage) {
     super("EntityIdentityStorage");
@@ -63,12 +69,19 @@ export class EntityIdentityStorage extends Service {
     }
 
     const data = stored as unknown as StoredIdentities;
-    if (data.version !== CURRENT_VERSION) {
+    if (data.version < CURRENT_VERSION) {
       await this.migrate(data);
       return;
     }
+    if (data.version > CURRENT_VERSION) {
+      // A file written by a newer build. Starting empty would let the next
+      // write persist an empty set over it.
+      logger.warn(
+        `Identity file has unsupported version ${data.version}, reading the records that look readable`,
+      );
+    }
 
-    for (const [bridgeId, records] of Object.entries(data.identities)) {
+    for (const [bridgeId, records] of Object.entries(data.identities ?? {})) {
       const bridgeMap = new Map<string, IdentityRecord>();
       for (const [key, record] of Object.entries(records)) {
         bridgeMap.set(key, record);
@@ -104,14 +117,24 @@ export class EntityIdentityStorage extends Service {
       data.identities[bridgeId] = records;
     }
 
-    await this.storage.set("data", data as unknown as StorageObjectType);
+    this.dirty = false;
+    try {
+      await this.storage.set("data", data as unknown as StorageObjectType);
+    } catch (e) {
+      this.dirty = true;
+      throw e;
+    }
   }
 
   private schedulePersist(): void {
+    this.dirty = true;
     if (this.persistTimer) return;
     this.persistTimer = setTimeout(() => {
       this.persistTimer = null;
-      void this.persist();
+      // Still dirty on failure, the next change or dispose writes again.
+      this.persist().catch((e) =>
+        logger.warn("Failed to persist entity identities:", e),
+      );
     }, PERSIST_DEBOUNCE_MS);
   }
 
@@ -121,7 +144,7 @@ export class EntityIdentityStorage extends Service {
       clearTimeout(this.persistTimer);
       this.persistTimer = null;
     }
-    await this.persist();
+    if (this.dirty) await this.persist();
   }
 
   getIdentity(bridgeId: string, key: string): IdentityRecord | undefined {
@@ -143,8 +166,10 @@ export class EntityIdentityStorage extends Service {
   }
 
   async deleteBridgeIdentities(bridgeId: string): Promise<void> {
-    this.identities.delete(bridgeId);
-    await this.flush();
+    if (this.identities.delete(bridgeId)) {
+      this.dirty = true;
+      await this.flush();
+    }
   }
 
   // Drop a single identity record. Used by the manual orphan cleanup after the
@@ -152,6 +177,7 @@ export class EntityIdentityStorage extends Service {
   async deleteIdentity(bridgeId: string, key: string): Promise<void> {
     const bridgeMap = this.identities.get(bridgeId);
     if (bridgeMap?.delete(key)) {
+      this.dirty = true;
       await this.flush();
     }
   }

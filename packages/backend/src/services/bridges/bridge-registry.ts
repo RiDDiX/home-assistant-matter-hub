@@ -72,6 +72,27 @@ export class BridgeRegistry {
   private _usedEnergyEntities: Set<string> = new Set();
   // Track entities consumed by composed devices (e.g., sensors/climate grouped under air purifier)
   private _usedComposedSubEntities: Set<string> = new Set();
+  // The find*ForDevice lookups scanned the whole HA registry per call. Index
+  // it once, and again whenever a reload swaps the map.
+  private _entitiesByDevice?: {
+    source: HomeAssistantEntities;
+    byDevice: Map<string, HomeAssistantEntityRegistry[]>;
+  };
+
+  /** Entities of one HA device from the full registry, in registry order. */
+  private entitiesOfDevice(deviceId: string): HomeAssistantEntityRegistry[] {
+    const source = this.registry.entities;
+    if (this._entitiesByDevice?.source !== source) {
+      const byDevice = new Map<string, HomeAssistantEntityRegistry[]>();
+      for (const entity of values(source)) {
+        const list = byDevice.get(entity.device_id);
+        if (list) list.push(entity);
+        else byDevice.set(entity.device_id, [entity]);
+      }
+      this._entitiesByDevice = { source, byDevice };
+    }
+    return this._entitiesByDevice.byDevice.get(deviceId) ?? [];
+  }
 
   deviceOf(entityId: string): HomeAssistantDeviceRegistry {
     const entity = this._entities[entityId];
@@ -160,8 +181,7 @@ export class BridgeRegistry {
     // Search the FULL HA registry, not the filtered bridge entities.
     // The battery sensor might not match the bridge filter (e.g., vacuum
     // server bridges only include vacuum.* entities, not sensor.*).
-    const entities = values(this.registry.entities);
-    const sameDevice = entities.filter((e) => e.device_id === deviceId);
+    const sameDevice = this.entitiesOfDevice(deviceId);
 
     // Prefer numeric sensor.* battery entities (percentage values).
     for (const entity of sameDevice) {
@@ -247,8 +267,7 @@ export class BridgeRegistry {
   // An enum with a running and a paused state: run (Home Connect, SmartThings),
   // in_use (Miele), running (LG) (#486).
   findOperationalStateEntityForDevice(deviceId: string): string | undefined {
-    for (const entity of values(this.registry.entities)) {
-      if (entity.device_id !== deviceId) continue;
+    for (const entity of this.entitiesOfDevice(deviceId)) {
       if (!entity.entity_id.startsWith("sensor.")) continue;
       const attrs = this.registry.states[entity.entity_id]?.attributes as
         | { device_class?: string; options?: unknown }
@@ -278,8 +297,7 @@ export class BridgeRegistry {
 
     // Search the FULL HA registry, not the filtered bridge entities, the
     // problem sensor may not match the bridge filter (same as battery).
-    const entities = values(this.registry.entities);
-    const sameDevice = entities.filter((e) => e.device_id === deviceId);
+    const sameDevice = this.entitiesOfDevice(deviceId);
 
     let safety: string | undefined;
     for (const entity of sameDevice) {
@@ -356,9 +374,7 @@ export class BridgeRegistry {
   findHumidityEntityForDevice(deviceId: string): string | undefined {
     // Search the FULL HA registry, not the filtered bridge entities.
     // Same reasoning as findBatteryEntityForDevice.
-    const entities = values(this.registry.entities);
-    for (const entity of entities) {
-      if (entity.device_id !== deviceId) continue;
+    for (const entity of this.entitiesOfDevice(deviceId)) {
       if (!entity.entity_id.startsWith("sensor.")) continue;
 
       const state = this.registry.states[entity.entity_id];
@@ -377,9 +393,7 @@ export class BridgeRegistry {
    * Returns the entity_id of the temperature sensor, or undefined if none found.
    */
   findTemperatureEntityForDevice(deviceId: string): string | undefined {
-    const entities = values(this.registry.entities);
-    for (const entity of entities) {
-      if (entity.device_id !== deviceId) continue;
+    for (const entity of this.entitiesOfDevice(deviceId)) {
       if (!entity.entity_id.startsWith("sensor.")) continue;
 
       const state = this.registry.states[entity.entity_id];
@@ -398,9 +412,7 @@ export class BridgeRegistry {
    * Returns the entity_id of the climate entity, or undefined if none found.
    */
   findClimateEntityForDevice(deviceId: string): string | undefined {
-    const entities = values(this.registry.entities);
-    for (const entity of entities) {
-      if (entity.device_id !== deviceId) continue;
+    for (const entity of this.entitiesOfDevice(deviceId)) {
       if (!entity.entity_id.startsWith("climate.")) continue;
 
       const state = this.registry.states[entity.entity_id];
@@ -490,9 +502,9 @@ export class BridgeRegistry {
     mopIntensityEntity?: string;
     currentRoomEntity?: string;
   } {
-    const entities = values(this.registry.entities);
-    const sameDevice = entities.filter(
-      (e) => e.device_id === deviceId && e.entity_id.startsWith("select."),
+    const entities = this.entitiesOfDevice(deviceId);
+    const sameDevice = entities.filter((e) =>
+      e.entity_id.startsWith("select."),
     );
 
     let cleaningModeEntity: string | undefined;
@@ -551,8 +563,8 @@ export class BridgeRegistry {
     // Current room sensor: Dreame (Tasshack) exposes sensor.*_current_room
     // which reports the room name the vacuum is currently in.
     let currentRoomEntity: string | undefined;
-    const sameDeviceSensors = entities.filter(
-      (e) => e.device_id === deviceId && e.entity_id.startsWith("sensor."),
+    const sameDeviceSensors = entities.filter((e) =>
+      e.entity_id.startsWith("sensor."),
     );
     for (const entity of sameDeviceSensors) {
       if (entity.entity_id.toLowerCase().endsWith("_current_room")) {
@@ -581,10 +593,8 @@ export class BridgeRegistry {
    * - Named segments:   { "1": "Kitchen", "2": "Living Room" }
    */
   findValetudoMapSegments(deviceId: string): VacuumRoom[] {
-    const entities = values(this.registry.entities);
-    const mapSensor = entities.find(
+    const mapSensor = this.entitiesOfDevice(deviceId).find(
       (e) =>
-        e.device_id === deviceId &&
         e.entity_id.startsWith("sensor.") &&
         e.entity_id.endsWith("_map_segments"),
     );
@@ -796,8 +806,7 @@ export class BridgeRegistry {
    * "docked and below full means charging" guess (#450).
    */
   findChargingEntityForDevice(deviceId: string): string | undefined {
-    const entities = values(this.registry.entities);
-    const sameDevice = entities.filter((e) => e.device_id === deviceId);
+    const sameDevice = this.entitiesOfDevice(deviceId);
 
     // Home Assistant's own charging class first.
     for (const entity of sameDevice) {
@@ -828,9 +837,7 @@ export class BridgeRegistry {
    * Returns the entity_id of the pressure sensor, or undefined if none found.
    */
   findPressureEntityForDevice(deviceId: string): string | undefined {
-    const entities = values(this.registry.entities);
-    for (const entity of entities) {
-      if (entity.device_id !== deviceId) continue;
+    for (const entity of this.entitiesOfDevice(deviceId)) {
       if (!entity.entity_id.startsWith("sensor.")) continue;
 
       const state = this.registry.states[entity.entity_id];
@@ -872,8 +879,7 @@ export class BridgeRegistry {
     forEntityId?: string,
   ): string | undefined {
     const candidates: string[] = [];
-    for (const entity of values(this.registry.entities)) {
-      if (entity.device_id !== deviceId) continue;
+    for (const entity of this.entitiesOfDevice(deviceId)) {
       if (!entity.entity_id.startsWith("sensor.")) continue;
 
       const state = this.registry.states[entity.entity_id];
@@ -950,10 +956,15 @@ export class BridgeRegistry {
     this.refresh();
   }
 
-  mergeExternalStates(states: HomeAssistantStates): void {
+  mergeExternalStates(
+    states: HomeAssistantStates,
+    changed: ReadonlySet<string> | null = null,
+  ): void {
     const registryStates = this.registry.states;
-    for (const entityId of Object.keys(states)) {
-      registryStates[entityId] = states[entityId];
+    for (const entityId of changed ?? Object.keys(states)) {
+      // changed also names removed entities, those never were written here
+      const state = states[entityId];
+      if (state) registryStates[entityId] = state;
     }
   }
 
@@ -994,6 +1005,8 @@ export class BridgeRegistry {
     // Clear lookup caches
     this._batteryEntityCache.clear();
     this._problemEntityCache.clear();
+    // rebuilt per refresh too, an in-place edit keeps the map identity
+    this._entitiesByDevice = undefined;
 
     this._entities = pickBy(this.registry.entities, (entity) => {
       const device = this.registry.devices[entity.device_id];
@@ -1019,11 +1032,8 @@ export class BridgeRegistry {
       this.registry.states,
       (e) => !!this._entities[e.entity_id],
     );
-    this._devices = pickBy(this.registry.devices, (d) =>
-      values(this._entities)
-        .map((e) => e.device_id)
-        .some((id) => d.id === id),
-    );
+    const deviceIds = new Set(values(this._entities).map((e) => e.device_id));
+    this._devices = pickBy(this.registry.devices, (d) => deviceIds.has(d.id));
 
     // Pre-calculate auto-assignments before endpoint creation so entities
     // are marked "used" regardless of the order they're processed later.

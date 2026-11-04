@@ -11,7 +11,7 @@ export function accessLogger(
   return (req, res, next) => {
     res.on("finish", () => {
       logger.debug(
-        `${req.method} ${decodeURI(req.originalUrl)} ${res.statusCode} ${res.statusMessage} from ${req.socket.remoteAddress}`,
+        `${req.method} ${req.originalUrl} ${res.statusCode} ${res.statusMessage} from ${req.socket.remoteAddress}`,
       );
     });
     next();

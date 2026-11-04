@@ -95,7 +95,10 @@ export class FilePluginStorage implements PluginStorage {
       if (!fs.existsSync(dir)) {
         fs.mkdirSync(dir, { recursive: true });
       }
-      fs.writeFileSync(this.filePath, JSON.stringify(this.data, null, 2));
+      // A crash mid-write leaves the old file, a torn one would load as {}.
+      const tmpPath = `${this.filePath}.tmp`;
+      fs.writeFileSync(tmpPath, JSON.stringify(this.data, null, 2));
+      fs.renameSync(tmpPath, this.filePath);
       this.dirty = false;
     } catch (e) {
       logger.warn(`Failed to save plugin storage to ${this.filePath}:`, e);

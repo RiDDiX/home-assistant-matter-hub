@@ -161,4 +161,18 @@ describe("EntityIdentityStorage", () => {
     await reloaded.construction;
     expect(reloaded.getIdentity("bridge1", "hue light abc")).toEqual(record);
   });
+
+  it("leaves a file from a newer build alone until a record changes", async () => {
+    const ctx = appStorage.createContext("entity-identities");
+    const newer = { version: 2, identities: { bridge1: { k1: record } } };
+    // biome-ignore lint/suspicious/noExplicitAny: raw stored shape
+    await ctx.set("data", newer as any);
+
+    const storage = new EntityIdentityStorage(appStorage);
+    await storage.construction;
+    expect(storage.getIdentity("bridge1", "k1")).toEqual(record);
+    await storage.dispose();
+
+    expect(await ctx.get("data")).toEqual(newer);
+  });
 });

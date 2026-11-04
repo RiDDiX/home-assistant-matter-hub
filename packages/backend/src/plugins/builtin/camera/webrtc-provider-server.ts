@@ -5,8 +5,10 @@ import {
   WebRtcTransportDefinitions,
   type WebRtcTransportProvider,
 } from "@matter/main/clusters";
+import { StatusCode, StatusResponseError } from "@matter/main/types";
 import type { SecureSession } from "@matter/protocol";
 import { StreamUsage } from "@matter/types";
+import { errText } from "../../../utils/err-text.js";
 import { CameraAvStreamServer } from "./av-stream-server.js";
 import {
   deliverAnswerDeferred,
@@ -35,7 +37,7 @@ function mintSessionId(): number {
 }
 
 // The 5 WebRtcTransportProvider commands, media delegated to WebRtcBridge.
-// provideOffer is wired; solicitOffer's deferred-offer push is unverified.
+// Only provideOffer is wired, solicitOffer is refused.
 export class CameraWebRtcProviderServer extends WebRtcTransportProviderServer {
   declare state: CameraWebRtcProviderServer.State;
 
@@ -49,40 +51,14 @@ export class CameraWebRtcProviderServer extends WebRtcTransportProviderServer {
     });
   }
 
-  override solicitOffer(
-    request: WebRtcTransportProvider.SolicitOfferRequest,
-  ): MaybePromise<WebRtcTransportProvider.SolicitOfferResponse> {
-    const id = mintSessionId();
-    const videoStreams = this.videoStreamsFor(request, request.streamUsage);
-    // startSession offers video only
-    const audioStreams: number[] = [];
-    this.trackSession(
-      id,
-      request.streamUsage,
-      request.originatingEndpointId,
-      videoStreams,
-      audioStreams,
+  // Nothing pushes an Offer to the requestor yet, a session started here would
+  // stream into nowhere. SmartThings, HA and CHIP controllers send ProvideOffer.
+  override solicitOffer(): WebRtcTransportProvider.SolicitOfferResponse {
+    logger.info(`solicitOffer refused (${this.state.entityId})`);
+    throw new StatusResponseError(
+      "SolicitOffer is not supported, use ProvideOffer",
+      StatusCode.ResourceExhausted,
     );
-    logger.info(
-      `solicitOffer session=${id} (${this.state.entityId}), deferred offer`,
-    );
-    // deferredOffer: the offer is delivered later via WebRtcTransportRequestor
-    // (camera -> controller). That client-side push is not wired yet.
-    void this.state.bridge
-      .startSession(id, this.state.entityId, {
-        iceServers: request.iceServers,
-        iceTransportPolicy: request.iceTransportPolicy,
-      })
-      .catch((err) =>
-        logger.info(
-          `solicitOffer startSession failed for ${this.state.entityId}: ${errText(err)}`,
-        ),
-      );
-    return {
-      webRtcSessionId: id,
-      deferredOffer: true,
-      ...echoStreamIds(request, videoStreams, audioStreams),
-    };
   }
 
   override provideOffer(
@@ -350,7 +326,13 @@ async function answerOffer(
 ): Promise<void> {
   let answerSdp: string;
   try {
-    answerSdp = await bridge.acceptControllerOffer(id, entityId, offerSdp, ice);
+    answerSdp = await bridge.acceptControllerOffer(
+      id,
+      entityId,
+      offerSdp,
+      ice,
+      cleanup,
+    );
   } catch (err) {
     logger.info(
       `provideOffer failed for ${entityId} session=${id}: ${errText(err)}`,
@@ -365,10 +347,6 @@ async function answerOffer(
   // The answer SDP already embeds our gathered candidates (werift blocks on
   // ICE gathering in setLocalDescription), no ICE trickle needed.
   deliverAnswerDeferred(id, answerSdp, cleanup);
-}
-
-function errText(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
 }
 
 export namespace CameraWebRtcProviderServer {

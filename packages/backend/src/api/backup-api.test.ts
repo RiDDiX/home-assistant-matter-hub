@@ -1,5 +1,6 @@
 import {
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
@@ -9,9 +10,12 @@ import {
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import archiver from "archiver";
 import express from "express";
-import { afterAll, describe, expect, it } from "vitest";
+import unzipper from "unzipper";
+import { afterAll, describe, expect, it, vi } from "vitest";
 import type { BackupService } from "../services/backup/backup-service.js";
+import type { BridgeService } from "../services/bridges/bridge-service.js";
 import type { AppSettingsStorage } from "../services/storage/app-settings-storage.js";
 import type { BridgeStorage } from "../services/storage/bridge-storage.js";
 import type { EntityMappingStorage } from "../services/storage/entity-mapping-storage.js";
@@ -24,10 +28,15 @@ import { backupApi } from "./backup-api.js";
 const dir = mkdtempSync(join(tmpdir(), "hamh-backup-api-"));
 afterAll(() => rmSync(dir, { recursive: true, force: true }));
 
+const ID = "0123456789abcdef0123456789abcdef";
 const bridgeStorage = {
-  bridges: [{ id: "b1", name: "Bridge One", port: 5540 }],
+  bridges: [{ id: ID, name: "Bridge One", port: 5540 }],
   add: async () => {},
 } as unknown as BridgeStorage;
+const noBridges = {
+  bridges: [],
+  get: () => undefined,
+} as unknown as BridgeService;
 const mappingStorage = {
   getMappingsForBridge: () => [],
   setMapping: async () => {},
@@ -36,17 +45,21 @@ const mappingStorage = {
 async function withRouter(
   fn: (base: string) => Promise<void>,
   settingsStorage = {} as unknown as AppSettingsStorage,
+  bridgeService = noBridges,
+  storage = bridgeStorage,
+  storageLocation = dir,
 ): Promise<void> {
   const app = express();
   app.use(express.json());
   app.use(
     "/backup",
     backupApi(
-      bridgeStorage,
+      storage,
       mappingStorage,
-      dir,
+      storageLocation,
       {} as unknown as BackupService,
       settingsStorage,
+      bridgeService,
     ),
   );
   const server = app.listen(0);
@@ -61,8 +74,13 @@ async function withRouter(
 
 describe("plugin state in backup and restore (#439 review)", () => {
   it("round-trips the plugin-state file through download and restore", async () => {
-    const stateFile = join(dir, "plugin-state-b1.json");
+    const stateFile = join(dir, `plugin-state-${ID}.json`);
     writeFileSync(stateFile, JSON.stringify({ camera: false }));
+    const configFile = join(dir, `plugin-${ID}-vesync.json`);
+    writeFileSync(configFile, JSON.stringify({ password: "p" }));
+    const lockFile = join(dir, "app", "lock-credentials.data");
+    mkdirSync(join(dir, "app"), { recursive: true });
+    writeFileSync(lockFile, "pins");
     await withRouter(async (base) => {
       const res = await fetch(`${base}/backup/download?includeIdentity=true`);
       expect(res.status).toBe(200);
@@ -70,6 +88,8 @@ describe("plugin state in backup and restore (#439 review)", () => {
 
       // The clean restore: the disabled state is gone from disk.
       unlinkSync(stateFile);
+      unlinkSync(configFile);
+      unlinkSync(lockFile);
 
       const form = new FormData();
       form.append("file", new Blob([zip]), "backup.zip");
@@ -84,6 +104,8 @@ describe("plugin state in backup and restore (#439 review)", () => {
       expect(JSON.parse(readFileSync(stateFile, "utf-8"))).toEqual({
         camera: false,
       });
+      expect(readFileSync(configFile, "utf-8")).toContain("password");
+      expect(readFileSync(lockFile, "utf-8")).toBe("pins");
     });
   });
 });
@@ -167,6 +189,7 @@ describe("mapping restore keeps every field", () => {
         dir,
         { getBackupPath: () => zipPath } as unknown as BackupService,
         {} as unknown as AppSettingsStorage,
+        noBridges,
       ),
     );
     const server = app.listen(0);
@@ -195,9 +218,138 @@ describe("mapping restore keeps every field", () => {
         });
       }
       expect(res.status).toBe(200);
-      expect(restored).toEqual([{ ...mapping, bridgeId: "b1" }]);
+      expect(restored).toEqual([{ ...mapping, bridgeId: ID }]);
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }
+  });
+});
+
+async function zipOf(entries: Record<string, string>): Promise<Blob> {
+  const archive = archiver("zip");
+  const chunks: Buffer[] = [];
+  archive.on("data", (c: Buffer) => chunks.push(c));
+  for (const [name, content] of Object.entries(entries)) {
+    archive.append(content, { name });
+  }
+  await archive.finalize();
+  return new Blob([Buffer.concat(chunks)]);
+}
+
+function restoreForm(zip: Blob) {
+  const form = new FormData();
+  form.append("file", zip, "backup.zip");
+  form.append("options", JSON.stringify({ overwriteExisting: true }));
+  return { method: "POST", body: form };
+}
+
+describe("restore input checks", () => {
+  it("refuses a bridge id that leaves the storage directory", async () => {
+    const legacyId = "0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0";
+    const storageLocation = join(dir, "a", "b");
+    mkdirSync(storageLocation, { recursive: true });
+    const zip = await zipOf({
+      "backup.json": JSON.stringify({
+        version: 2,
+        bridges: [
+          { id: "../../x", name: "Evil", port: 5540 },
+          { id: legacyId, name: "Legacy", port: 5541 },
+        ],
+        entityMappings: {},
+        includesIdentity: true,
+      }),
+      "identity/../../x/keys": "k",
+      [`identity/${legacyId}/keys`]: "k",
+    });
+    await withRouter(
+      async (base) => {
+        const res = await fetch(`${base}/backup/restore`, restoreForm(zip));
+        expect(res.status).toBe(200);
+        const body = await res.json();
+        expect(body.bridgesRestored).toBe(1);
+        expect(
+          body.errors.map((e: { bridgeId: string }) => e.bridgeId),
+        ).toEqual(["../../x"]);
+        expect(existsSync(join(dir, "x"))).toBe(false);
+        expect(existsSync(join(storageLocation, legacyId, "keys"))).toBe(true);
+      },
+      undefined,
+      undefined,
+      undefined,
+      storageLocation,
+    );
+  });
+
+  it("rejects a backup.json larger than 50 MB", async () => {
+    vi.spyOn(unzipper.Open, "buffer").mockResolvedValueOnce({
+      files: [
+        {
+          path: "backup.json",
+          type: "File",
+          uncompressedSize: 60 * 1024 * 1024,
+          buffer: async () => Buffer.from("{}"),
+        },
+      ],
+    } as unknown as unzipper.CentralDirectory);
+    await withRouter(async (base) => {
+      const res = await fetch(
+        `${base}/backup/restore/preview`,
+        restoreForm(new Blob(["zip"])),
+      );
+      expect(res.status).toBe(400);
+      expect((await res.json()).error).toMatch(/50 MB/);
+    });
+  });
+});
+
+describe("restore while the bridge runs", () => {
+  it("stops the bridge before writing and keeps the app files", async () => {
+    const storageLocation = join(dir, "running");
+    mkdirSync(storageLocation, { recursive: true });
+    const order: string[] = [];
+    const live = {
+      data: { status: "running" },
+      stop: vi.fn(async () => {
+        order.push("stop");
+      }),
+    };
+    const bridgeService = {
+      bridges: [live],
+      get: (id: string) => (id === ID ? live : undefined),
+    } as unknown as BridgeService;
+    const storage = {
+      bridges: [{ id: ID, name: "Bridge One", port: 5540 }],
+      add: async () => {
+        order.push("add");
+      },
+    } as unknown as BridgeStorage;
+    const zip = await zipOf({
+      "backup.json": JSON.stringify({
+        version: 2,
+        bridges: [{ id: ID, name: "Bridge One", port: 5540 }],
+        entityMappings: {},
+        includesIdentity: true,
+      }),
+      "app/settings.data": "{}",
+    });
+    await withRouter(
+      async (base) => {
+        const res = await fetch(`${base}/backup/restore`, restoreForm(zip));
+        expect(res.status).toBe(200);
+        const body = await res.json();
+        expect(body.bridgesRestored).toBe(1);
+        expect(
+          body.errors.map((e: { bridgeId: string }) => e.bridgeId),
+        ).toEqual(["app"]);
+      },
+      undefined,
+      bridgeService,
+      storage,
+      storageLocation,
+    );
+    expect(order).toEqual(["stop", "add"]);
+    expect(existsSync(join(storageLocation, "app", "settings.data"))).toBe(
+      false,
+    );
   });
 });

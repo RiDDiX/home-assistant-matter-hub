@@ -100,12 +100,4 @@ export class PluginRegistry {
     this.save();
     return true;
   }
-
-  setAutoLoad(packageName: string, autoLoad: boolean): boolean {
-    const plugin = this.get(packageName);
-    if (!plugin) return false;
-    plugin.autoLoad = autoLoad;
-    this.save();
-    return true;
-  }
 }

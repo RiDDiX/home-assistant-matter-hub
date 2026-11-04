@@ -756,6 +756,12 @@ export class LegacyEndpoint extends EntityEndpoint {
         last_updated: new Date().toISOString(),
       };
     }
-    await updateEntityState(this, effectiveState);
+    // debounce and the event path drop this promise, a rejection would
+    // otherwise surface as an unhandled rejection without the entity id
+    try {
+      await updateEntityState(this, effectiveState);
+    } catch (e) {
+      logger.warn(`State update failed for ${this.entityId}:`, e);
+    }
   }
 }

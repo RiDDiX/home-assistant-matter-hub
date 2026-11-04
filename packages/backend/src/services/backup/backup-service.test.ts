@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import unzipper from "unzipper";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppSettingsStorage } from "../storage/app-settings-storage.js";
 import type { BridgeStorage } from "../storage/bridge-storage.js";
@@ -11,11 +12,15 @@ const bridgeStorage = { bridges: [] } as unknown as BridgeStorage;
 const mappingStorage = {
   getMappingsForBridge: () => [],
 } as unknown as EntityMappingStorage;
-function createService(storageLocation: string, backupRetentionCount = 5) {
+function createService(
+  storageLocation: string,
+  backupRetentionCount = 5,
+  bridges = bridgeStorage,
+) {
   const settingsStorage = {
     backupSettings: { autoBackup: true, backupRetentionCount },
   } as unknown as AppSettingsStorage;
-  return new BackupService(bridgeStorage, mappingStorage, settingsStorage, {
+  return new BackupService(bridges, mappingStorage, settingsStorage, {
     storageLocation,
     appVersion: "2.0.56",
   });
@@ -91,5 +96,52 @@ describe("BackupService", () => {
     });
     await expect(service.createBackup(false)).rejects.toThrow("ENOSPC");
     expect(fs.readdirSync(backupDir)).toHaveLength(0);
+  });
+
+  it("only hands out backup archives", async () => {
+    const service = createService(storageLocation);
+    const { filename } = await service.createBackup(false);
+    expect(service.getBackupPath(filename)).toBe(
+      path.join(backupDir, filename),
+    );
+    expect(service.getBackupPath(".")).toBeNull();
+    expect(service.getBackupPath("")).toBeNull();
+  });
+
+  it("archives lock PINs, login, entity identities and plugin configs", async () => {
+    const id = "0123456789abcdef0123456789abcdef";
+    fs.mkdirSync(path.join(storageLocation, "app"));
+    for (const name of [
+      "settings.data",
+      "lock-credentials.data",
+      "entity-identities.data",
+      "bridges.ids",
+    ]) {
+      fs.writeFileSync(path.join(storageLocation, "app", name), "{}");
+    }
+    fs.writeFileSync(
+      path.join(storageLocation, `plugin-${id}-vesync.json`),
+      "{}",
+    );
+    fs.writeFileSync(
+      path.join(storageLocation, "plugin-other-vesync.json"),
+      "{}",
+    );
+    const service = createService(storageLocation, 5, {
+      bridges: [{ id, name: "B", port: 5540 }],
+    } as unknown as BridgeStorage);
+    const { filename } = await service.createBackup(false);
+    const zip = await unzipper.Open.file(path.join(backupDir, filename));
+    const names = zip.files.map((f) => f.path);
+    expect(names).toEqual(
+      expect.arrayContaining([
+        "app/settings.data",
+        "app/lock-credentials.data",
+        "app/entity-identities.data",
+        `plugins/plugin-${id}-vesync.json`,
+      ]),
+    );
+    expect(names).not.toContain("app/bridges.ids");
+    expect(names).not.toContain("plugins/plugin-other-vesync.json");
   });
 });

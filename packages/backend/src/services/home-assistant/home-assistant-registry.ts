@@ -254,7 +254,16 @@ export class HomeAssistantRegistry extends Service {
 
     // Always update states (values change via WebSocket, but fresh data
     // is needed for the UI and initial endpoint state)
-    this._states = keyBy(statesList, "entity_id");
+    // Subscription events merged into the old map while the fetch was in
+    // flight, keep those over the older snapshot.
+    const states: HomeAssistantStates = keyBy(statesList, "entity_id");
+    for (const [id, current] of Object.entries(this._states)) {
+      const fetched = states[id];
+      if (fetched && current.last_updated > fetched.last_updated) {
+        states[id] = current;
+      }
+    }
+    this._states = states;
 
     if (fingerprint === this.lastRegistryFingerprint) {
       logger.debug("Registry unchanged, skipping full refresh");

@@ -138,6 +138,7 @@ export class WebApi extends Service {
           this.props.storageLocation,
           this.backupService,
           this.settingsStorage,
+          this.bridgeService,
         ),
       )
       .use("/home-assistant", homeAssistantApi(this.haRegistry, this.haClient))

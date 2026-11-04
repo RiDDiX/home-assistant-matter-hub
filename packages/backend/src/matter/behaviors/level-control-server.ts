@@ -378,7 +378,15 @@ export class LevelControlServerBase extends FeaturedBase {
       homeAssistant.entity.state,
       this.agent,
     );
-    if (levelPercent === current) {
+    // Skip a level HA already shows, but not while an earlier write is still
+    // in flight: HA's stale value would swallow the newer target.
+    const pending = optimisticLevelState.get(entityId);
+    if (
+      current != null &&
+      Math.round(current * this.maxLevel) === level &&
+      (pending == null ||
+        Date.now() - pending.timestamp > OPTIMISTIC_TIMEOUT_MS)
+    ) {
       return;
     }
     const action = config.moveToLevelPercent(levelPercent, this.agent);

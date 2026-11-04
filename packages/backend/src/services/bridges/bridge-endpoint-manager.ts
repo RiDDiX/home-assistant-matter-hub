@@ -761,7 +761,18 @@ export class BridgeEndpointManager extends Service {
     this.mappingSync.cancelRetry();
   }
 
-  async refreshDevices() {
+  // Start, update, the API, registry ticks and retry timers all refresh. Two
+  // overlapping runs build every endpoint twice and the second add throws, so
+  // runs queue up. Chained, not joined: a tick mid-run carries a newer registry.
+  private refreshChain: Promise<unknown> = Promise.resolve();
+
+  refreshDevices(): Promise<void> {
+    const next = this.refreshChain.then(() => this.runRefreshDevices());
+    this.refreshChain = next.catch(() => undefined);
+    return next;
+  }
+
+  private async runRefreshDevices() {
     this.registry.refresh();
     const lifecycle = this.lifecycle;
 
@@ -1428,7 +1439,7 @@ export class BridgeEndpointManager extends Service {
 
     // Merge subscription states into registry so EntityStateProvider
     // reads fresh values for mapped entities (battery, humidity, etc.)
-    this.registry.mergeExternalStates(states);
+    this.registry.mergeExternalStates(states, changed);
 
     this.mappingSync.maybeRetry(states, changed, this.observingRequested, () =>
       this.refreshDevices(),

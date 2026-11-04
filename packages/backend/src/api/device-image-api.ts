@@ -138,7 +138,9 @@ export function deviceImageApi(
 
     const customImage = findCustomImage(imagesDir, entityId);
     if (customImage) {
-      res.sendFile(customImage);
+      res.sendFile(customImage, {
+        headers: { "Content-Security-Policy": "sandbox" },
+      });
       return;
     }
 

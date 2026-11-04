@@ -329,7 +329,8 @@ export class Bridge {
     } catch (e) {
       const reason = "Failed to start bridge due to error:";
       this.log.error(reason, e);
-      await this.stop(BridgeStatus.Failed, `${reason}\n${e?.toString()}`);
+      // not stop(), that waits for this very start
+      await this.runStop(BridgeStatus.Failed, `${reason}\n${e?.toString()}`);
     }
   }
 
@@ -337,6 +338,9 @@ export class Bridge {
     code: BridgeStatus = BridgeStatus.Stopped,
     reason = "Manually stopped",
   ) {
+    // a stop racing a start would cancel the node mid start, and the start
+    // then finishes and brings it back up
+    await this.startInFlight;
     if (this.stopInFlight) {
       return this.stopInFlight;
     }
@@ -402,6 +406,8 @@ export class Bridge {
   }
 
   async update(update: UpdateBridgeRequest) {
+    // a port edit during Starting would skip the rebind below
+    await this.startInFlight;
     try {
       const { code } = this.status;
       const rebind =

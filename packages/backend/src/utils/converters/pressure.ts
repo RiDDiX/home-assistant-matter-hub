@@ -4,7 +4,7 @@
  * which is numerically equal to hPa.
  *
  * @param pressure - The raw pressure value
- * @param unit - The unit of measurement (e.g. "hPa", "mbar", "kPa", "Pa", "inHg", "mmHg")
+ * @param unit - The unit of measurement (e.g. "hPa", "mbar", "kPa", "Pa", "bar", "cbar", "psi", "inHg", "mmHg")
  * @returns The pressure in hPa, or undefined if conversion is not possible
  */
 export function convertPressureToHpa(
@@ -20,6 +20,15 @@ export function convertPressureToHpa(
   }
   if (normalizedUnit === "mbar" || normalizedUnit === "hpa") {
     return pressure;
+  }
+  if (normalizedUnit === "bar") {
+    return pressure * 1000;
+  }
+  if (normalizedUnit === "cbar") {
+    return pressure * 10;
+  }
+  if (normalizedUnit === "psi") {
+    return pressure * 68.9476;
   }
   if (normalizedUnit === "inhg") {
     return pressure * 33.8639;

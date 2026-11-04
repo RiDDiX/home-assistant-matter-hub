@@ -122,10 +122,10 @@ export function matterApi(
     const bridgeId = req.params.bridgeId;
     try {
       await bridgeService.delete(bridgeId);
-      // Drop the bridge's frozen identities too, so a re-created bridge never
-      // inherits stale anchors. Mirrors the entity-mapping whole-bridge delete
-      // (#404).
+      // Drop the bridge's frozen identities and mappings too, so a re-created
+      // bridge never inherits stale anchors and backups carry no orphans (#404).
       await identityStorage?.deleteBridgeIdentities(bridgeId);
+      await mappingStorage?.deleteBridgeMappings(bridgeId);
       res.status(204).send();
     } catch (e) {
       res.status(500).json({

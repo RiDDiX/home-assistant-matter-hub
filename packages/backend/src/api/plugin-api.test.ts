@@ -202,6 +202,24 @@ describe("secret config values in the listing", () => {
       [noToken],
     );
   });
+
+  it("keeps registry config out of the installed listing", async () => {
+    await withRouter(async (base) => {
+      await fetch(`${base}/plugins/install`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          packageName: "hamh-plugin-secretive",
+          config: { apiKey: "very-secret" },
+        }),
+      });
+      const res = await fetch(`${base}/plugins/installed`);
+      const body = (await res.json()) as Array<Record<string, unknown>>;
+      const entry = body.find((p) => p.packageName === "hamh-plugin-secretive");
+      expect(entry).toBeDefined();
+      expect(entry).not.toHaveProperty("config");
+    });
+  });
 });
 
 // #439 review: the enable/disable routes answered {enabled:true/false} no

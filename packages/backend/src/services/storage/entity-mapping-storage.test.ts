@@ -223,3 +223,20 @@ it("accepts an explicit vacuum fault source through the actual mapping API", asy
     );
   }
 });
+
+it("leaves a file from a newer build alone until a mapping changes", async () => {
+  const ctx = appStorage.createContext("entity-mappings");
+  const newer = {
+    version: 2,
+    mappings: { b: [{ entityId: "light.a", customName: "A" }] },
+  };
+  // biome-ignore lint/suspicious/noExplicitAny: raw stored shape
+  await ctx.set("data", newer as any);
+
+  const storage = new EntityMappingStorage(appStorage);
+  await storage.construction;
+  expect(storage.getMapping("b", "light.a")?.customName).toBe("A");
+  await storage.dispose();
+
+  expect(await ctx.get("data")).toEqual(newer);
+});

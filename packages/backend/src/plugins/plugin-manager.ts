@@ -71,6 +71,9 @@ interface PluginInstance {
   metadata: PluginMetadata;
   devices: Map<string, PluginDevice>;
   started: boolean;
+  // onStart cannot be cancelled: one that outlived its timeout still runs and
+  // still needs its onShutdown, so the stop paths key on this, not started.
+  startCalled: boolean;
   // Config saved while the plugin was disabled, applied on enable so the
   // save cannot remount devices behind the disable.
   pendingConfig?: Record<string, unknown>;
@@ -252,6 +255,11 @@ export class PluginManager {
       }
 
       const plugin = new PluginClass(config);
+      if (plugin.name !== manifest.name) {
+        logger.warn(
+          `Plugin class name "${plugin.name}" differs from package name "${manifest.name}", saved config will not survive a restart`,
+        );
+      }
       const metadata: PluginMetadata = {
         name: plugin.name,
         version: plugin.version,
@@ -403,6 +411,7 @@ export class PluginManager {
       metadata,
       devices,
       started: false,
+      startCalled: false,
       queue: Promise.resolve(),
       epoch: 0,
       contextAt: (epoch) => ({
@@ -453,6 +462,7 @@ export class PluginManager {
     }
     logger.info(`Starting plugin: ${name}`);
     const epoch = ++instance.epoch;
+    instance.startCalled = true;
     await this.runner.run(name, "onStart", () =>
       instance.plugin.onStart(instance.contextAt(epoch)),
     );
@@ -494,7 +504,7 @@ export class PluginManager {
         instance.epoch++;
         instance.suspending = true;
         try {
-          if (instance.started && instance.plugin.onShutdown) {
+          if (instance.startCalled && instance.plugin.onShutdown) {
             await this.runner.runCleanup(name, "onShutdown", () =>
               instance.plugin.onShutdown!(reason),
             );
@@ -507,6 +517,7 @@ export class PluginManager {
           storage.flush();
         }
         instance.started = false;
+        instance.startCalled = false;
         logger.info(`Plugin "${name}" shut down`);
       });
     }
@@ -563,12 +574,13 @@ export class PluginManager {
       this.persistEnabled(pluginName, false);
       instance.suspending = true;
       try {
-        if (instance.started && instance.plugin.onShutdown) {
+        if (instance.startCalled && instance.plugin.onShutdown) {
           await this.runner.runCleanup(pluginName, "onShutdown", () =>
             instance.plugin.onShutdown!("Plugin disabled"),
           );
         }
         instance.started = false;
+        instance.startCalled = false;
         // Sweep whatever the shutdown left mounted.
         for (const deviceId of [...instance.devices.keys()]) {
           instance.devices.delete(deviceId);
@@ -622,6 +634,7 @@ export class PluginManager {
       }
       logger.info(`Starting plugin: ${pluginName}`);
       const epoch = ++instance.epoch;
+      instance.startCalled = true;
       await this.runner.run(pluginName, "onStart", () =>
         instance.plugin.onStart(instance.contextAt(epoch)),
       );
@@ -660,7 +673,9 @@ export class PluginManager {
       const state = this.readEnabledState();
       state[pluginName] = enabled;
       fs.mkdirSync(path.dirname(this.stateFile), { recursive: true });
-      fs.writeFileSync(this.stateFile, JSON.stringify(state, null, 2));
+      const tmp = `${this.stateFile}.tmp`;
+      fs.writeFileSync(tmp, JSON.stringify(state, null, 2));
+      fs.renameSync(tmp, this.stateFile);
     } catch (e) {
       logger.warn(
         `Failed to persist enabled=${enabled} for "${pluginName}":`,
@@ -701,7 +716,12 @@ export class PluginManager {
         }
       }
       instance.metadata.config = config;
-      this.registry?.updateConfig(pluginName, config);
+      const saved = this.registry?.updateConfig(pluginName, config);
+      if (saved === false && instance.metadata.source !== "builtin") {
+        logger.warn(
+          `No installed package named "${pluginName}", the saved config will not survive a restart`,
+        );
+      }
       if (instance.plugin.onConfigChanged) {
         if (!instance.metadata.enabled) {
           instance.pendingConfig = config;

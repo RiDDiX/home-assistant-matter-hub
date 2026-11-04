@@ -835,24 +835,42 @@ describe("audio streams", () => {
     expect(res.audioStreamId).toBe(3);
   });
 
-  it("solicitOffer leaves audio out, its offer is video only", async () => {
-    const bridge = {
-      ...fakeBridge().bridge,
-      startSession: async () => ({ sdp: "", iceCandidates: [] }),
-    } as unknown as WebRtcBridge;
+  it("solicitOffer is refused without a session or media", async () => {
+    const bridgeCalls: string[] = [];
+    const bridge = new Proxy(fakeBridge().bridge, {
+      get: (target, key) => {
+        bridgeCalls.push(String(key));
+        return Reflect.get(target, key);
+      },
+    });
     const endpoint = await mountCamera(bridge);
-
-    const res = (await endpoint.act((agent) =>
-      // biome-ignore lint/suspicious/noExplicitAny: invoke solicitOffer directly
-      (agent as any).webRtcTransportProvider.solicitOffer({
+    bridgeCalls.length = 0;
+    // biome-ignore lint/suspicious/noExplicitAny: invoke solicitOffer directly
+    const invoke = (agent: any) =>
+      agent.webRtcTransportProvider.solicitOffer({
         streamUsage: StreamUsage.LiveView,
         originatingEndpointId: EndpointNumber(1),
         videoStreamId: null,
         audioStreamId: null,
-      }),
-    )) as { audioStreamId: number | null };
+      });
+    // from a peer, so a session with a fabric could be listed
+    const session = {
+      isClosed: false,
+      peerNodeId: NodeId(1),
+      associatedFabric: { fabricIndex: FabricIndex(1) },
+    };
 
-    expect(res.audioStreamId).toBeNull();
+    expect(
+      await statusOf(() =>
+        LocalActorContext.act(
+          "solicitOffer from a peer",
+          (context) => invoke(endpoint.agentFor(context)),
+          { session } as never,
+        ),
+      ),
+    ).toBe(StatusCode.ResourceExhausted);
+    expect(currentSessions(endpoint)).toEqual([]);
+    expect(bridgeCalls).toEqual([]);
     expect(allocatedAudioStreams(endpoint)).toEqual([]);
   });
 

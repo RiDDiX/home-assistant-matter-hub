@@ -101,28 +101,6 @@ describe("SafePluginRunner", () => {
     });
   });
 
-  describe("sync runner", () => {
-    it("should catch sync throws", () => {
-      const runner = new SafePluginRunner();
-      const result = runner.runSync("sync-bad", "op", () => {
-        throw new Error("sync boom");
-      });
-      expect(result).toBeUndefined();
-      expect(runner.getState("sync-bad").failures).toBe(1);
-      expect(runner.getState("sync-bad").lastError).toBe("sync boom");
-    });
-
-    it("should disable after 3 sync failures", () => {
-      const runner = new SafePluginRunner();
-      for (let i = 0; i < 3; i++) {
-        runner.runSync("sync-bad", "op", () => {
-          throw new Error("fail");
-        });
-      }
-      expect(runner.isDisabled("sync-bad")).toBe(true);
-    });
-  });
-
   describe("runCleanup (#439 review)", () => {
     it("runs the callback with the breaker open", async () => {
       const runner = new SafePluginRunner();

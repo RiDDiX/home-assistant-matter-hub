@@ -156,7 +156,7 @@ export class ServerModeEndpointManager extends Service {
     const subscriptionIds = this.collectSubscriptionEntityIds();
     this.unsubscribe = subscribeEntities(
       this.client.connection,
-      (e) => this.updateStates(e),
+      (e, changed) => this.updateStates(e, changed),
       subscriptionIds,
     );
   }
@@ -300,7 +300,17 @@ export class ServerModeEndpointManager extends Service {
     this.endpoints.delete(entityId);
   }
 
-  async refreshDevices(): Promise<void> {
+  // Overlapping runs both build the device, the second add fails and drops
+  // the map entry of the mounted endpoint, so runs queue up like in bridge mode.
+  private refreshChain: Promise<unknown> = Promise.resolve();
+
+  refreshDevices(): Promise<void> {
+    const next = this.refreshChain.then(() => this.runRefreshDevices());
+    this.refreshChain = next.catch(() => undefined);
+    return next;
+  }
+
+  private async runRefreshDevices(): Promise<void> {
     this.registry.refresh();
 
     const lifecycle = this.lifecycle;
@@ -701,12 +711,15 @@ export class ServerModeEndpointManager extends Service {
     }
   }
 
-  async updateStates(states: HomeAssistantStates): Promise<void> {
+  async updateStates(
+    states: HomeAssistantStates,
+    changed: ReadonlySet<string> | null = null,
+  ): Promise<void> {
     // Merge subscription states into registry so EntityStateProvider
     // reads fresh values for mapped entities (battery, humidity, etc.)
-    this.registry.mergeExternalStates(states);
+    this.registry.mergeExternalStates(states, changed);
 
-    this.mappingSync.maybeRetry(states, null, this.observingRequested, () =>
+    this.mappingSync.maybeRetry(states, changed, this.observingRequested, () =>
       this.refreshDevices(),
     );
 

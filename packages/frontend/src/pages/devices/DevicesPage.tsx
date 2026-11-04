@@ -31,7 +31,7 @@ import Stack from "@mui/material/Stack";
 import TextField from "@mui/material/TextField";
 import Tooltip from "@mui/material/Tooltip";
 import Typography from "@mui/material/Typography";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useSearchParams } from "react-router";
 import type { DeviceImageInfo } from "../../api/device-images";
@@ -113,12 +113,16 @@ export const DevicesPage = () => {
     dispatch(loadBridges());
   }, [dispatch]);
 
-  // Load devices for each bridge
+  // Load devices for each bridge. Every bridge_update replaces the array, so
+  // reload a bridge only when its status or device count changed.
+  const loadedBridges = useRef(new Map<string, string>());
   useEffect(() => {
-    if (bridges) {
-      bridges.forEach((bridge) => {
+    for (const bridge of bridges ?? []) {
+      const key = `${bridge.status}:${bridge.deviceCount}`;
+      if (loadedBridges.current.get(bridge.id) !== key) {
+        loadedBridges.current.set(bridge.id, key);
         dispatch(loadDevices(bridge.id));
-      });
+      }
     }
   }, [dispatch, bridges]);
 

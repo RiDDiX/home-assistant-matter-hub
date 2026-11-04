@@ -236,7 +236,6 @@ export function pluginApi(
       return {
         packageName: entry.packageName,
         version: npm?.version ?? "unknown",
-        config: entry.config,
         autoLoad: entry.autoLoad,
         installedAt: entry.installedAt,
         path: installer.getPluginPath(entry.packageName),

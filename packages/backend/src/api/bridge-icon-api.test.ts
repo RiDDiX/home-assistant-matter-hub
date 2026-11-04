@@ -50,4 +50,14 @@ describe("bridge icon upload", () => {
       );
     });
   });
+
+  it("refuses a bridge id that climbs out of the icons dir", async () => {
+    await withRouter(async (base) => {
+      const res = await upload(base, "..%2F..%2Fescaped", 16);
+      expect(res.status).toBe(400);
+      expect(await res.json()).toEqual({ error: "Invalid bridge id" });
+      expect(readdirSync(dir)).toEqual(["bridge-icons"]);
+      expect(readdirSync(join(dir, ".."))).not.toContain("escaped.png");
+    });
+  });
 });

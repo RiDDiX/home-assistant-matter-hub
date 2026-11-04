@@ -111,6 +111,8 @@ describe("SecurityPlugin", () => {
 
     expect(ctx.registerDevice).not.toHaveBeenCalled();
     await plugin.onShutdown();
+    // No "Device ... not found" warning per never-registered id on bridge stop.
+    expect(ctx.unregisterDevice).not.toHaveBeenCalled();
   });
 
   it("registers devices for a source alarm panel without dummy triggers", async () => {

@@ -16,7 +16,7 @@ import {
 } from "../../matter/legacy-spec-version.js";
 import { applyTcpFlagBeforeStart } from "../../plugins/builtin/camera/camera-tcp-requirement.js";
 import { ensureCommissioningConfig } from "../../utils/ensure-commissioning-config.js";
-import { logMemoryUsage } from "../../utils/log-memory.js";
+import { isHeapUnderPressure, logMemoryUsage } from "../../utils/log-memory.js";
 import { diagnosticEventBus } from "../diagnostics/diagnostic-event-bus.js";
 import type {
   BridgeDataProvider,
@@ -59,6 +59,10 @@ export class ServerModeBridge {
 
   private autoForceSyncTimer: ReturnType<typeof setInterval> | null = null;
   private warmStartTimer: ReturnType<typeof setTimeout> | null = null;
+
+  // Serialize concurrent lifecycle calls, same as the aggregator bridge.
+  private startInFlight?: Promise<void>;
+  private stopInFlight?: Promise<void>;
 
   // Tracks the last synced state JSON per entity to avoid pushing unchanged states.
   private readonly lastSyncedStates = new Map<string, string>();
@@ -138,6 +142,15 @@ export class ServerModeBridge {
 
   async refreshDevices(): Promise<void> {
     await this.endpointManager.refreshDevices();
+    // Prune stale entries from lastSyncedStates for entities that were removed
+    const currentEntityIds = new Set(
+      this.endpointManager.devices.map((d) => d.entityId),
+    );
+    for (const entityId of this.lastSyncedStates.keys()) {
+      if (!currentEntityIds.has(entityId)) {
+        this.lastSyncedStates.delete(entityId);
+      }
+    }
   }
 
   private setStatus(status: BridgeServerStatus) {
@@ -149,6 +162,16 @@ export class ServerModeBridge {
     if (this.status.code === BridgeStatus.Running) {
       return;
     }
+    if (this.startInFlight) {
+      return this.startInFlight;
+    }
+    this.startInFlight = this.runStart().finally(() => {
+      this.startInFlight = undefined;
+    });
+    return this.startInFlight;
+  }
+
+  private async runStart(): Promise<void> {
     this.lastSyncedStates.clear();
     try {
       this.setStatus({
@@ -196,7 +219,8 @@ export class ServerModeBridge {
     } catch (e) {
       const reason = "Failed to start server mode bridge due to error:";
       this.log.error(reason, e);
-      await this.stop(BridgeStatus.Failed, `${reason}\n${e?.toString()}`);
+      // not stop(), that waits for this very start
+      await this.runStop(BridgeStatus.Failed, `${reason}\n${e?.toString()}`);
     }
   }
 
@@ -204,6 +228,19 @@ export class ServerModeBridge {
     code: BridgeStatus = BridgeStatus.Stopped,
     reason = "Manually stopped",
   ): Promise<void> {
+    // a stop racing a start would cancel the node mid start, and the start
+    // then finishes and brings it back up
+    await this.startInFlight;
+    if (this.stopInFlight) {
+      return this.stopInFlight;
+    }
+    this.stopInFlight = this.runStop(code, reason).finally(() => {
+      this.stopInFlight = undefined;
+    });
+    return this.stopInFlight;
+  }
+
+  private async runStop(code: BridgeStatus, reason: string): Promise<void> {
     this.sessions.stop();
     this.cancelWarmStart();
     this.stopAutoForceSync();
@@ -232,6 +269,8 @@ export class ServerModeBridge {
   }
 
   async update(update: UpdateBridgeRequest): Promise<void> {
+    // a port edit during Starting would skip the rebind below
+    await this.startInFlight;
     try {
       const { code } = this.status;
       const rebind =
@@ -398,6 +437,13 @@ export class ServerModeBridge {
     }
 
     if (!this.dataProvider.featureFlags?.autoForceSync) {
+      return 0;
+    }
+
+    if (isHeapUnderPressure()) {
+      this.log.warn(
+        "Force sync skipped: heap under pressure, reduce entities or raise the heap (add-on: heap_size_mb, container: NODE_OPTIONS=--max-old-space-size)",
+      );
       return 0;
     }
 

@@ -769,6 +769,37 @@ describe("ServerModeEndpointManager (#301)", () => {
     ]);
   });
 
+  it("a second refresh waits for the first instead of building the device again", async () => {
+    const h = makeHarness(["light.a"], "light.a");
+    let release!: () => void;
+    h.serverNode.addDevice.mockImplementationOnce(
+      () => new Promise<void>((r) => (release = r)),
+    );
+    const first = h.manager.refreshDevices();
+    const second = h.manager.refreshDevices();
+    await vi.waitFor(() =>
+      expect(h.serverNode.addDevice).toHaveBeenCalledTimes(1),
+    );
+    expect(h.registry.refresh).toHaveBeenCalledTimes(1);
+
+    release();
+    await Promise.all([first, second]);
+    expect(h.registry.refresh).toHaveBeenCalledTimes(2);
+    expect(legacyCreate).toHaveBeenCalledTimes(1);
+    expect(h.manager.devices).toHaveLength(1);
+    expect(h.manager.failedEntities).toEqual([]);
+  });
+
+  it("a failed refresh does not block the next one", async () => {
+    const h = makeHarness(["light.a"], "light.a");
+    h.registry.refresh.mockImplementationOnce(() => {
+      throw new Error("boom");
+    });
+    await expect(h.manager.refreshDevices()).rejects.toThrow("boom");
+    await h.manager.refreshDevices();
+    expect(h.manager.devices).toHaveLength(1);
+  });
+
   it("fans state updates out to every endpoint after merging states", async () => {
     const h = makeHarness(["light.a", "light.b"], "light.a");
     await h.manager.refreshDevices();
@@ -779,7 +810,7 @@ describe("ServerModeEndpointManager (#301)", () => {
     const states = { "light.a": { state: "on" } } as never;
     await h.manager.updateStates(states);
 
-    expect(h.registry.mergeExternalStates).toHaveBeenCalledWith(states);
+    expect(h.registry.mergeExternalStates).toHaveBeenCalledWith(states, null);
     for (const endpoint of endpoints) {
       expect(endpoint.updateStates).toHaveBeenCalledWith(states);
     }

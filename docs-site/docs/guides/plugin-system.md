@@ -11,6 +11,8 @@ Home Assistant Matter Hub supports plugins that register additional Matter devic
 3. Click **Install**
 4. Restart the bridge to load the plugin
 
+npm runs with `--ignore-scripts`, so install scripts of a plugin and its dependencies never run, and the name takes a version or tag, not a URL or path.
+
 ### From a local `.tgz` file
 
 Upload a packaged plugin via the API:
@@ -182,6 +184,8 @@ Experimental. Until the [#373](https://github.com/RiDDiX/home-assistant-matter-h
 Setting up a stream asks Google's STUN server for the host's public address. If the host can't reach it, each side waits up to 5 s, so the first picture can take about 10 s.
 
 A 1440p keyframe arrives as a burst of several hundred UDP packets. The bridge asks for a 4 MB socket receive buffer, which HAOS allows. Other Docker hosts cap it at `net.core.rmem_max`, often about 208 KB. If a high resolution camera stays black there, raise it with `sysctl -w net.core.rmem_max=4194304`. The `HA peer UDP receive buffer` log line shows what the bridge got.
+
+Live view uses the ProvideOffer flow. SolicitOffer is refused with `RESOURCE_EXHAUSTED`, the bridge can't push an offer of its own yet. When the controller or HA stops answering for about 10 s, the bridge ends the live view by itself, and a snapshot HA doesn't deliver fails after 15 s instead of hanging.
 
 **Security** is experimental and turns the bridge into a small alarm system for setups that have no alarm integration. It registers four exclusive mode switches (Home, Away, Night, Vacation) and an Alarm contact sensor. Arming is turning a mode switch on, from any controller or by voice: "Alexa, turn on Away". Turning the active switch off disarms, and all switches off means disarmed; the plugin turns the other three off whenever one goes on. The Alarm sensor opens while the alarm is tripped, so controller automations can react to it. There is no PIN: anything that can flip the mode switches can also disarm, so expose them only to controllers you trust.
 

@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { errText } from "../../../utils/err-text.js";
 import type {
   MatterHubPlugin,
   PluginConfigSchema,
@@ -67,8 +68,6 @@ const deviceKey = (device: VeSyncDeviceInfo) =>
 
 const same = (a: unknown, b: unknown) =>
   a === b || JSON.stringify(a) === JSON.stringify(b);
-
-const errorText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 // VeSync cloud devices (Levoit, Cosori, Etekcity). Every device is hidden until
 // its switch in the config dialog is turned on.
@@ -371,7 +370,7 @@ export class VeSyncPlugin implements MatterHubPlugin {
           value,
         );
       } catch (e) {
-        this.warn(`${mounted.device.name}: write failed: ${errorText(e)}`);
+        this.warn(`${mounted.device.name}: write failed: ${errText(e)}`);
       }
     }
     if (this.mounted.get(id) !== mounted) return;
@@ -395,7 +394,7 @@ export class VeSyncPlugin implements MatterHubPlugin {
     const timer = setTimeout(() => {
       this.earlyPolls.delete(key);
       this.poll(key, generation).catch((e) =>
-        this.warn(`status read failed: ${errorText(e)}`),
+        this.warn(`status read failed: ${errText(e)}`),
       );
     }, EARLY_POLL_MS);
     timer.unref?.();
@@ -482,7 +481,7 @@ export class VeSyncPlugin implements MatterHubPlugin {
   }
 
   private failed(e: unknown): number | undefined {
-    this.warn(errorText(e));
+    this.warn(errText(e));
     const kind = e instanceof VeSyncError ? e.kind : undefined;
     if (kind === "credentials" || kind === "mfa") {
       this.stopped = true;
@@ -525,7 +524,7 @@ export class VeSyncPlugin implements MatterHubPlugin {
         for (const m of units) this.push(m, REACHABLE, { reachable: false });
         return;
       }
-      const message = errorText(e);
+      const message = errText(e);
       if (this.failures.get(key) !== message) {
         this.warn(`${device.name}: status read failed: ${message}`);
       }

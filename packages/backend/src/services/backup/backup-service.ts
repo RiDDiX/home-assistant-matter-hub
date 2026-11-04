@@ -21,6 +21,42 @@ export interface BackupServiceProps {
   appVersion: string;
 }
 
+// The app namespace files that hold lock PINs, the login and the entity
+// identities. Bridges and mappings already travel in backup.json.
+export const APP_BACKUP_FILES = [
+  "settings.data",
+  "lock-credentials.data",
+  "entity-identities.data",
+];
+
+// Secrets that only go into a backup with identity data: the files above and
+// every plugin-<bridgeId>-<plugin>.json config of the given bridges.
+export function archiveSecretFiles(
+  archive: archiver.Archiver,
+  storageLocation: string,
+  bridgeIds: string[],
+): void {
+  for (const name of APP_BACKUP_FILES) {
+    const file = path.join(storageLocation, "app", name);
+    if (fs.existsSync(file)) {
+      archive.file(file, { name: `app/${name}` });
+    }
+  }
+  for (const file of fs.readdirSync(storageLocation)) {
+    if (
+      file.endsWith(".json") &&
+      bridgeIds.some((id) => file.startsWith(`plugin-${id}-`))
+    ) {
+      archive.file(path.join(storageLocation, file), {
+        name: `plugins/${file}`,
+      });
+    }
+  }
+}
+
+const isBackupFile = (file: string) =>
+  file.startsWith("hamh-") && file.endsWith(".zip");
+
 export class BackupService {
   private readonly log = Logger.get("BackupService");
   private readonly backupDir: string;
@@ -136,6 +172,12 @@ export class BackupService {
         }
       }
 
+      archiveSecretFiles(
+        archive,
+        this.props.storageLocation,
+        bridges.map((b) => b.id),
+      );
+
       if (includesIcons) {
         const iconFiles = fs.readdirSync(iconsDir);
         for (const iconFile of iconFiles) {
@@ -193,9 +235,7 @@ export class BackupService {
       return [];
     }
 
-    const files = fs
-      .readdirSync(this.backupDir)
-      .filter((f) => f.startsWith("hamh-") && f.endsWith(".zip"));
+    const files = fs.readdirSync(this.backupDir).filter(isBackupFile);
 
     return files
       .map((filename) => {
@@ -221,7 +261,11 @@ export class BackupService {
   }
 
   getBackupPath(filename: string): string | null {
-    if (filename.includes("..") || filename.includes("/")) {
+    if (
+      filename.includes("..") ||
+      filename.includes("/") ||
+      !isBackupFile(filename)
+    ) {
       return null;
     }
     const filepath = path.join(this.backupDir, filename);

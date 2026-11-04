@@ -995,7 +995,8 @@ export default class TestPlugin {
   });
 
   describe("shutdown safety", () => {
-    it("should not call onShutdown on plugins that failed to start", async () => {
+    // A crashed onStart may have opened timers or sockets before it threw.
+    it("calls onShutdown on a plugin whose onStart threw", async () => {
       const pm = new PluginManager("bridge-1", storageDir);
       const onShutdown = vi.fn(async () => {});
 
@@ -1011,7 +1012,30 @@ export default class TestPlugin {
       await pm.startAll();
       await pm.shutdownAll("test");
 
-      expect(onShutdown).not.toHaveBeenCalled();
+      expect(onShutdown).toHaveBeenCalledTimes(1);
+    });
+
+    it("calls onShutdown on a plugin whose onStart never settled", async () => {
+      vi.useFakeTimers();
+      try {
+        const pm = new PluginManager("bridge-1", storageDir);
+        const onShutdown = vi.fn(async () => {});
+        await pm.registerBuiltIn(
+          createMockPlugin({
+            onStart: () => new Promise(() => {}),
+            onShutdown,
+          }),
+        );
+
+        const start = pm.startAll();
+        await vi.advanceTimersByTimeAsync(10_000);
+        await start;
+        await pm.shutdownAll("test");
+
+        expect(onShutdown).toHaveBeenCalledWith("test");
+      } finally {
+        vi.useRealTimers();
+      }
     });
   });
 

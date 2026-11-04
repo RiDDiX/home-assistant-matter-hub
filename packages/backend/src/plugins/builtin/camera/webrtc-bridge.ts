@@ -12,6 +12,7 @@ import {
   useOPUS,
   usePCMU,
 } from "werift";
+import { errText } from "../../../utils/err-text.js";
 
 // Bridges an HA camera to a Matter controller. Both sides want to be the
 // offerer, so we run two werift peers per session and forward the tracks.
@@ -55,13 +56,6 @@ export interface ControllerIceConfig {
   iceTransportPolicy?: string;
 }
 
-export interface MatterOffer {
-  /** SDP offer to hand to the Matter controller (ProvideAnswer flow). */
-  sdp: string;
-  /** Local ICE candidates gathered for the controller peer. */
-  iceCandidates: { candidate: string; sdpMid: string | null }[];
-}
-
 // Shape of the messages HA streams back on a camera/webrtc/offer subscription.
 interface HaWebRtcMessage {
   type?: string;
@@ -86,7 +80,7 @@ interface BridgeSession {
 
 export class WebRtcBridge {
   // private fields: the devices API dumps every enumerable key of the camera state (#155)
-  #connection?: Connection;
+  #connection?: Promise<Connection>;
   readonly #sessions = new Map<number, BridgeSession>();
   readonly #mutedMicrophones = new Set<string>();
   readonly #config: WebRtcBridgeConfig;
@@ -97,100 +91,35 @@ export class WebRtcBridge {
     this.#deps = deps;
   }
 
-  private async ha(): Promise<Connection> {
-    if (this.#connection) return this.#connection;
-    if (this.#deps.connect) {
-      this.#connection = await this.#deps.connect(this.#config);
-    } else {
-      const auth = createLongLivedTokenAuth(
-        this.#config.haUrl,
-        this.#config.haToken,
-      );
-      this.#connection = await createConnection({ auth });
+  // Concurrent sessions share one dial, a failed dial is retried by the next.
+  private ha(): Promise<Connection> {
+    if (!this.#connection) {
+      const dial = this.#deps.connect
+        ? this.#deps.connect(this.#config)
+        : createConnection({
+            auth: createLongLivedTokenAuth(
+              this.#config.haUrl,
+              this.#config.haToken,
+            ),
+          });
+      const pending = dial.catch((err) => {
+        if (this.#connection === pending) this.#connection = undefined;
+        throw err;
+      });
+      this.#connection = pending;
     }
     return this.#connection;
   }
 
-  // We offer to the controller; it answers. Pulls HA media first, then forwards.
-  async startSession(
-    matterSessionId: number,
-    entityId: string,
-    ice?: ControllerIceConfig,
-  ): Promise<MatterOffer> {
-    const haPeer = new RTCPeerConnection({ codecs: CODECS });
-    const controllerPeer = new RTCPeerConnection(
-      this.controllerConfig(entityId, ice),
-    );
-    this.wireStateLogging(haPeer, "haPeer", entityId);
-    this.wireStateLogging(controllerPeer, "controllerPeer", entityId);
-
-    // Pre-add the sendonly transceivers so our own offer advertises media; a
-    // late addTransceiver (inside onTrack) never renegotiates and never sends.
-    const senders = new Map<string, RTCRtpTransceiver>();
-    // Video only: the deferred-offer path has no controller m-lines to
-    // constrain against.
-    senders.set(
-      "video",
-      controllerPeer.addTransceiver("video", { direction: "sendonly" }),
-    );
-    this.forwardHaTracks(haPeer, senders, entityId);
-
-    // Re-offer on an existing id: tear down the prior peers before replacing so
-    // we do not leak werift connections.
-    await this.closeExistingPeers(matterSessionId);
-    this.#sessions.set(matterSessionId, { entityId, haPeer, controllerPeer });
-
-    try {
-      // 1) Offer to HA so HA answers and starts sending media to us.
-      haPeer.addTransceiver("video", { direction: "recvonly" });
-      haPeer.addTransceiver("audio", { direction: "recvonly" });
-      const haOffer = await haPeer.createOffer();
-      await haPeer.setLocalDescription(haOffer);
-      growRecvBuffers(haPeer, entityId);
-      const haOfferSdp = this.localSdp(haPeer);
-      logger.info(`HA offer sent for ${entityId} (${haOfferSdp.length} chars)`);
-      const { answer, sessionId, unsubscribe } = await this.requestHaWebRtc(
-        entityId,
-        haOfferSdp,
-        haPeer,
-      );
-      const session = this.#sessions.get(matterSessionId);
-      if (session) {
-        session.haSessionId = sessionId;
-        session.haUnsubscribe = unsubscribe;
-      }
-      await haPeer.setRemoteDescription({ type: "answer", sdp: answer });
-
-      // 2) Build the controller-facing offer (controller will ProvideAnswer).
-      const iceCandidates: { candidate: string; sdpMid: string | null }[] = [];
-      controllerPeer.onIceCandidate.subscribe((c) => {
-        if (c?.candidate)
-          iceCandidates.push({
-            candidate: c.candidate,
-            sdpMid: c.sdpMid ?? null,
-          });
-      });
-      const controllerOffer = await controllerPeer.createOffer();
-      await controllerPeer.setLocalDescription(controllerOffer);
-      const sdp = this.localSdp(controllerPeer);
-      logger.info(
-        `controller offer created for ${entityId} (${sdp.length} chars)`,
-      );
-      return { sdp, iceCandidates };
-    } catch (err) {
-      logger.info(`startSession failed for ${entityId}: ${errText(err)}`);
-      await this.endSession(matterSessionId);
-      throw err;
-    }
-  }
-
   // ProvideOffer flow: controller sent its offer. Pull HA media, answer it.
   // Returning the answer to the controller is the unverified Requestor path.
+  // onLost runs when a peer's transport dies, default is endSession.
   async acceptControllerOffer(
     matterSessionId: number,
     entityId: string,
     controllerOfferSdp: string,
     ice?: ControllerIceConfig,
+    onLost: () => Promise<void> = () => this.endSession(matterSessionId),
   ): Promise<string> {
     const haPeer = new RTCPeerConnection({ codecs: CODECS });
     const controllerPeer = new RTCPeerConnection(
@@ -213,7 +142,9 @@ export class WebRtcBridge {
     // Re-offer on an existing id: tear down the prior peers before replacing so
     // we do not leak werift connections.
     await this.closeExistingPeers(matterSessionId);
-    this.#sessions.set(matterSessionId, { entityId, haPeer, controllerPeer });
+    const session: BridgeSession = { entityId, haPeer, controllerPeer };
+    this.#sessions.set(matterSessionId, session);
+    this.endOnTransportLoss(matterSessionId, session, onLost);
 
     try {
       // Pull media from HA (we offer, HA answers).
@@ -229,11 +160,8 @@ export class WebRtcBridge {
         haOfferSdp,
         haPeer,
       );
-      const session = this.#sessions.get(matterSessionId);
-      if (session) {
-        session.haSessionId = sessionId;
-        session.haUnsubscribe = unsubscribe;
-      }
+      session.haSessionId = sessionId;
+      session.haUnsubscribe = unsubscribe;
       await haPeer.setRemoteDescription({ type: "answer", sdp: answer });
 
       // Answer the controller's offer.
@@ -295,15 +223,8 @@ export class WebRtcBridge {
     logger.info(
       `replacing session ${matterSessionId} (${prior.entityId}), closing prior peers`,
     );
-    if (prior.haUnsubscribe) {
-      await Promise.resolve(prior.haUnsubscribe()).catch((err) =>
-        logger.debug(`HA unsubscribe failed: ${errText(err)}`),
-      );
-    }
-    await prior.haPeer.close().catch(() => {});
-    await prior.controllerPeer.close().catch(() => {});
-    // The old HA stream would keep running server-side, stop it too.
-    await this.stopHaStream(prior).catch(() => {});
+    // also stops the old HA stream, it would keep running server-side
+    await this.endSession(matterSessionId);
   }
 
   async endSession(matterSessionId: number): Promise<void> {
@@ -348,8 +269,10 @@ export class WebRtcBridge {
     const url = `${this.#config.haUrl}/api/camera_proxy/${entityId}`;
     let res: Response;
     try {
+      // CaptureSnapshot holds the AV state lock while this runs
       res = await fetch(url, {
         headers: { Authorization: `Bearer ${this.#config.haToken}` },
+        signal: AbortSignal.timeout(haWebRtcTimeoutMs),
       });
     } catch (err) {
       logger.info(`snapshot fetch failed for ${entityId}: ${errText(err)}`);
@@ -368,8 +291,12 @@ export class WebRtcBridge {
     for (const id of [...this.#sessions.keys()]) {
       await this.endSession(id);
     }
-    this.#connection?.close();
+    const connection = this.#connection;
     this.#connection = undefined;
+    void connection?.then(
+      (c) => c.close(),
+      () => {},
+    );
   }
 
   // Forward every track HA sends into the matching pre-added controller sender.
@@ -398,6 +325,32 @@ export class WebRtcBridge {
         transceiver.sender.sendRtp(rtp);
       });
     });
+  }
+
+  // No EndSession comes when a controller walks away or HA drops its end, so a
+  // dead transport ends the session. werift never leaves ICE "disconnected",
+  // it stops consent checks after ~6 s without an answer.
+  private endOnTransportLoss(
+    matterSessionId: number,
+    session: BridgeSession,
+    onLost: () => Promise<void>,
+  ): void {
+    const lost = (state: string) => {
+      if (state !== "disconnected" && state !== "failed" && state !== "closed")
+        return;
+      // our own endSession or a re-offer already took it out
+      if (this.#sessions.get(matterSessionId) !== session) return;
+      logger.info(
+        `session ${matterSessionId} transport ${state}, ending (${session.entityId})`,
+      );
+      void onLost().catch((err) =>
+        logger.debug(`session ${matterSessionId} end failed: ${errText(err)}`),
+      );
+    };
+    for (const peer of [session.haPeer, session.controllerPeer]) {
+      peer.connectionStateChange.subscribe(lost);
+      peer.iceConnectionStateChange.subscribe(lost);
+    }
   }
 
   // Log connection/ice state transitions (these events fire on change only).
@@ -542,6 +495,8 @@ export class WebRtcBridge {
             }
           },
           { type: "camera/webrtc/offer", entity_id: entityId, offer: offerSdp },
+          // a resubscribe after an HA reconnect would replay this stale offer
+          { resubscribe: false },
         )
         .then((unsub) => {
           unsubscribe = unsub;
@@ -602,15 +557,4 @@ function offerKinds(sdp: string): ("video" | "audio")[] {
     kinds.push(m[1] as "video" | "audio");
   }
   return kinds;
-}
-
-// HA's websocket rejects with a plain { code, message } object
-function errText(err: unknown): string {
-  if (err instanceof Error) return err.message;
-  const { code, message } = (err ?? {}) as {
-    code?: unknown;
-    message?: unknown;
-  };
-  if (message !== undefined) return code ? `${code}: ${message}` : `${message}`;
-  return String(err);
 }

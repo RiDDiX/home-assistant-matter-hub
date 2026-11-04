@@ -1,5 +1,6 @@
 import type { BridgeData } from "@home-assistant-matter-hub/common";
 import type { StorageContext, SupportedStorageTypes } from "@matter/main";
+import { pick } from "lodash-es";
 import { Service } from "../../core/ioc/service.js";
 import type { AppStorage } from "./app-storage.js";
 import { migrateBridgeV1ToV2 } from "./migrations/bridge/v1-to-v2.js";
@@ -9,6 +10,23 @@ import { migrateBridgeV4ToV5 } from "./migrations/bridge/v4-to-v5.js";
 import { migrateBridgeV5ToV6 } from "./migrations/bridge/v5-to-v6.js";
 
 type StorageObjectType = { [key: string]: SupportedStorageTypes };
+
+// Bridge.data adds runtime state (status, pairing codes, fabrics) to the
+// config. Only the config belongs in the store and in backups.
+const bridgeDataKeys: Record<keyof BridgeData, true> = {
+  id: true,
+  name: true,
+  port: true,
+  filter: true,
+  featureFlags: true,
+  countryCode: true,
+  icon: true,
+  priority: true,
+  serialNumberSuffix: true,
+  uniqueIdSuffix: true,
+  sessionMaxAgeHours: true,
+  basicInformation: true,
+};
 
 export class BridgeStorage extends Service {
   private storage!: StorageContext;
@@ -38,15 +56,18 @@ export class BridgeStorage extends Service {
     return this._bridges;
   }
 
-  async add(bridge: BridgeData): Promise<void> {
+  async add(data: BridgeData): Promise<void> {
+    const bridge = pick(data, Object.keys(bridgeDataKeys)) as BridgeData;
     const idx = this._bridges.findIndex((b) => b.id === bridge.id);
     if (idx !== -1) {
       this._bridges[idx] = bridge;
     } else {
       this._bridges.push(bridge);
     }
-    await this.storage.set(bridge.id, bridge as unknown as StorageObjectType);
+    // Ids first: load skips an id without a record, but never finds a record
+    // the ids list does not name.
     await this.persistIds();
+    await this.storage.set(bridge.id, bridge as unknown as StorageObjectType);
   }
 
   async remove(bridgeId: string): Promise<void> {

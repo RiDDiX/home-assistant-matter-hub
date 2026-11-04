@@ -5,9 +5,22 @@ import { Logger } from "@matter/general";
 
 const logger = Logger.get("PluginInstaller");
 
-// Validate package name to prevent command injection
-const VALID_PACKAGE_RE =
-  /^(@[a-z0-9-~][a-z0-9-._~]*\/)?[a-z0-9-~][a-z0-9-._~]*(@[^@\s]+)?$/;
+// Validate package name to prevent command injection. The version part
+// takes no "/" or ":", or npm would install from a URL, git or file path.
+export const VALID_PACKAGE_RE =
+  /^(@[a-z0-9-~][a-z0-9-._~]*\/)?[a-z0-9-~][a-z0-9-._~]*(@[^@\s/:]+)?$/;
+
+// npm gets no HAMH secrets (HA token, supervisor token) and runs no scripts.
+const NPM_ENV = {
+  ...Object.fromEntries(
+    Object.entries(process.env).filter(([k]) =>
+      /^(https?_proxy|no_proxy|npm_config_)/i.test(k),
+    ),
+  ),
+  PATH: process.env.PATH,
+  HOME: process.env.HOME,
+  NODE_ENV: "production",
+};
 
 export interface InstallResult {
   success: boolean;
@@ -69,11 +82,11 @@ export class PluginInstaller {
     return new Promise((resolve) => {
       execFile(
         "npm",
-        ["install", packageName, "--save"],
+        ["install", packageName, "--save", "--ignore-scripts"],
         {
           cwd: this.pluginDir,
           timeout: 120_000,
-          env: { ...process.env, NODE_ENV: "production" },
+          env: NPM_ENV,
         },
         (error, _stdout, stderr) => {
           if (error) {
@@ -116,10 +129,11 @@ export class PluginInstaller {
     return new Promise((resolve) => {
       execFile(
         "npm",
-        ["uninstall", packageName, "--save"],
+        ["uninstall", packageName, "--save", "--ignore-scripts"],
         {
           cwd: this.pluginDir,
           timeout: 60_000,
+          env: NPM_ENV,
         },
         (error, _stdout, stderr) => {
           if (error) {
@@ -208,11 +222,11 @@ export class PluginInstaller {
     return new Promise((resolve) => {
       execFile(
         "npm",
-        ["install", target, "--save"],
+        ["install", target, "--save", "--ignore-scripts"],
         {
           cwd: this.pluginDir,
           timeout: 120_000,
-          env: { ...process.env, NODE_ENV: "production" },
+          env: NPM_ENV,
         },
         (error, _stdout, stderr) => {
           if (error) {
@@ -279,6 +293,14 @@ export class PluginInstaller {
         success: false,
         packageName: "unknown",
         error: "Invalid package.json: missing 'name' field",
+      };
+    }
+    // The name becomes a path under node_modules that gets rm -rf'd below.
+    if (!VALID_PACKAGE_RE.test(packageName)) {
+      return {
+        success: false,
+        packageName,
+        error: `Invalid package name: "${packageName}"`,
       };
     }
 

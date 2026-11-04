@@ -1,7 +1,6 @@
 import { Logger } from "@matter/general";
 import {
   type Connection,
-  callService,
   createConnection,
   createLongLivedTokenAuth,
   type HassEntity,
@@ -239,7 +238,9 @@ export class SecurityPlugin implements MatterHubPlugin {
   }
 
   private async tearDown(): Promise<void> {
-    this.machine?.shutdown();
+    // Never brought up (unconfigured): no devices and no connection to drop.
+    if (!this.machine) return;
+    this.machine.shutdown();
     this.machine = undefined;
     // Queued effects belong to the closed connection and its config; the
     // next bring-up must not replay them (#439 review).
@@ -806,28 +807,16 @@ export class SecurityPlugin implements MatterHubPlugin {
     service: string,
     entityId: string,
   ): Promise<void> {
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    try {
-      await Promise.race([
-        callService(connection, domain, service, undefined, {
-          entity_id: entityId,
-        }),
-        new Promise<never>((_, reject) => {
-          timer = setTimeout(
-            () =>
-              reject(
-                new Error(
-                  `${domain}.${service} for ${entityId} timed out after ${CALL_DEADLINE_MS}ms`,
-                ),
-              ),
-            CALL_DEADLINE_MS,
-          );
-          timer.unref?.();
-        }),
-      ]);
-    } finally {
-      if (timer) clearTimeout(timer);
-    }
+    await sendHaMessage(
+      connection,
+      {
+        type: "call_service",
+        domain,
+        service,
+        target: { entity_id: entityId },
+      },
+      CALL_DEADLINE_MS,
+    );
   }
 
   private startConnection(): void {

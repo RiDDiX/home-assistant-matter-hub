@@ -50,6 +50,13 @@ export function bridgeIconApi(storageLocation: string): express.Router {
 
   const router = express.Router();
 
+  // Express decodes %2F in params and multer joins the name onto iconsDir.
+  // Imported legacy bridges can carry dashed UUIDs, so not only 32 hex.
+  router.param("bridgeId", (_req, res, next, bridgeId: string) => {
+    if (/^[\w-]+$/.test(bridgeId)) next();
+    else res.status(400).json({ error: "Invalid bridge id" });
+  });
+
   // Upload icon for a bridge
   router.post(
     "/:bridgeId",
@@ -89,7 +96,9 @@ export function bridgeIconApi(storageLocation: string): express.Router {
     }
 
     const filePath = path.join(iconsDir, iconFile);
-    res.sendFile(filePath);
+    res.sendFile(filePath, {
+      headers: { "Content-Security-Policy": "sandbox" },
+    });
   });
 
   // Delete icon for a bridge

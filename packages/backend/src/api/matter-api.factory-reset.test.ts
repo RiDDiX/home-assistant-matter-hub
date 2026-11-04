@@ -4,6 +4,7 @@ import express from "express";
 import { describe, expect, it, vi } from "vitest";
 import type { BridgeService } from "../services/bridges/bridge-service.js";
 import type { EntityIdentityStorage } from "../services/storage/entity-identity-storage.js";
+import type { EntityMappingStorage } from "../services/storage/entity-mapping-storage.js";
 import { matterApi } from "./matter-api.js";
 
 async function factoryReset(status: BridgeStatus) {
@@ -56,5 +57,39 @@ describe("POST /bridges/:id/actions/factory-reset", () => {
     expect(status).toBe(200);
     expect(deleteBridgeIdentities).toHaveBeenCalledWith("b1");
     expect(bridge.factoryReset).toHaveBeenCalled();
+  });
+});
+
+describe("DELETE /bridges/:id", () => {
+  // The mapping-only delete route is never called by the UI, so the
+  // mappings of a deleted bridge stayed in the store and in every backup.
+  it("drops the bridge's identities and mappings", async () => {
+    const deleteBridgeIdentities = vi.fn().mockResolvedValue(undefined);
+    const deleteBridgeMappings = vi.fn().mockResolvedValue(undefined);
+    const app = express();
+    app.use(
+      "/matter",
+      matterApi(
+        {
+          delete: vi.fn().mockResolvedValue(undefined),
+        } as unknown as BridgeService,
+        undefined,
+        { deleteBridgeIdentities } as unknown as EntityIdentityStorage,
+        { deleteBridgeMappings } as unknown as EntityMappingStorage,
+      ),
+    );
+    const server = app.listen(0);
+    try {
+      await new Promise<void>((resolve) => server.once("listening", resolve));
+      const { port } = server.address() as AddressInfo;
+      const res = await fetch(`http://127.0.0.1:${port}/matter/bridges/b1`, {
+        method: "DELETE",
+      });
+      expect(res.status).toBe(204);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+    expect(deleteBridgeIdentities).toHaveBeenCalledWith("b1");
+    expect(deleteBridgeMappings).toHaveBeenCalledWith("b1");
   });
 });

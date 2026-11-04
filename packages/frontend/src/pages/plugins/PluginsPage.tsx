@@ -77,7 +77,6 @@ interface BridgePlugins {
 interface InstalledPlugin {
   packageName: string;
   version: string;
-  config: Record<string, unknown>;
   autoLoad: boolean;
   installedAt: number;
   path: string;
@@ -90,6 +89,7 @@ interface ConfigSchemaProperty {
   description?: string;
   default?: unknown;
   required?: boolean;
+  secret?: boolean;
   options?: Array<{ label: string; value: string }>;
 }
 
@@ -106,11 +106,6 @@ interface ConfigDialogTarget {
 
 function invalidNumber(text: string): boolean {
   return text.trim() !== "" && Number.isNaN(Number(text));
-}
-
-// The schema has no secret flag, so mask by field name (haToken etc).
-function isSecretField(key: string): boolean {
-  return /token|password|secret/i.test(key);
 }
 
 /**
@@ -939,7 +934,7 @@ export const PluginsPage = () => {
                     type={
                       prop.type === "number"
                         ? "number"
-                        : isSecretField(key)
+                        : prop.secret || /token|password|secret/i.test(key)
                           ? "password"
                           : "text"
                     }

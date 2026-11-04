@@ -137,43 +137,6 @@ export class SafePluginRunner {
     }
   }
 
-  /**
-   * Run a synchronous plugin function with try/catch + circuit breaker.
-   */
-  runSync<T>(
-    pluginName: string,
-    operation: string,
-    fn: () => T,
-  ): T | undefined {
-    const state = this.getState(pluginName);
-    if (state.disabled) {
-      return undefined;
-    }
-
-    try {
-      const result = fn();
-      state.failures = 0;
-      return result;
-    } catch (error) {
-      state.failures++;
-      state.lastError = error instanceof Error ? error.message : String(error);
-
-      logger.error(
-        `Plugin "${pluginName}" failed during ${operation} (sync, failure ${state.failures}/${CIRCUIT_BREAKER_THRESHOLD}): ${state.lastError}`,
-      );
-
-      if (state.failures >= CIRCUIT_BREAKER_THRESHOLD) {
-        state.disabled = true;
-        state.disabledAt = Date.now();
-        logger.error(
-          `Plugin "${pluginName}" DISABLED after ${CIRCUIT_BREAKER_THRESHOLD} consecutive failures.`,
-        );
-      }
-
-      return undefined;
-    }
-  }
-
   getAllStates(): Map<string, CircuitBreakerState> {
     return new Map(this.states);
   }

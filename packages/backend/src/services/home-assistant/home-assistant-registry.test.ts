@@ -471,4 +471,39 @@ describe("HomeAssistantRegistry", () => {
     await vi.runAllTimersAsync();
     await expect(race).resolves.toBe("rejected");
   });
+
+  it("keeps a subscription state newer than the fetched snapshot", async () => {
+    const fake = makeConnection();
+    const at = (id: string, state: string, ts: string) => ({
+      entity_id: id,
+      state,
+      attributes: {},
+      last_updated: ts,
+    });
+    let statesList = [
+      at("light.a", "off", "2026-01-01T00:00:01.000000+00:00"),
+      at("light.b", "off", "2026-01-01T00:00:01.000000+00:00"),
+    ];
+    fake.connection.sendMessagePromise = vi.fn((message: { type: string }) =>
+      Promise.resolve(message.type === "get_states" ? statesList : []),
+    ) as unknown as Connection["sendMessagePromise"];
+    const client = {
+      connection: fake.connection,
+      haRunning: true,
+    } as unknown as HomeAssistantClient;
+    const registry = new HomeAssistantRegistry(client, defaultOptions);
+    await vi.runAllTimersAsync();
+    await registry.construction;
+
+    // an event merged while the next get_states was in flight
+    const merged = at("light.a", "on", "2026-01-01T00:00:03.000Z");
+    registry.states["light.a"] = merged as never;
+    statesList = [
+      at("light.a", "off", "2026-01-01T00:00:02.000000+00:00"),
+      at("light.b", "on", "2026-01-01T00:00:02.000000+00:00"),
+    ];
+    await registry.reload();
+    expect(registry.states["light.a"]).toBe(merged);
+    expect(registry.states["light.b"].state).toBe("on");
+  });
 });

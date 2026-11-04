@@ -1,8 +1,9 @@
 import fs from "node:fs";
 import path from "node:path";
-import type {
-  BridgeData,
-  EntityMappingConfig,
+import {
+  type BridgeData,
+  BridgeStatus,
+  type EntityMappingConfig,
 } from "@home-assistant-matter-hub/common";
 import archiver from "archiver";
 import type { Request } from "express";
@@ -10,7 +11,11 @@ import express from "express";
 import multer from "multer";
 import unzipper from "unzipper";
 import { pluginStateFilePath } from "../plugins/plugin-storage.js";
-import type { BackupService } from "../services/backup/backup-service.js";
+import {
+  APP_BACKUP_FILES,
+  archiveSecretFiles,
+  type BackupService,
+} from "../services/backup/backup-service.js";
 import type { BridgeService } from "../services/bridges/bridge-service.js";
 import type {
   AppSettingsStorage,
@@ -19,10 +24,24 @@ import type {
 import type { BridgeStorage } from "../services/storage/bridge-storage.js";
 import type { EntityMappingStorage } from "../services/storage/entity-mapping-storage.js";
 
-const upload = multer({ storage: multer.memoryStorage() });
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 100 * 1024 * 1024 },
+});
+const MAX_BACKUP_JSON_BYTES = 50 * 1024 * 1024;
+// Bridge ids become directory names below the storage location on restore.
+// Imported legacy bridges keep dashed UUIDs or their old id.
+const BRIDGE_ID = /^[\w-]+$/;
 
 interface MulterRequest extends Request {
   file?: Express.Multer.File;
+}
+
+interface RestoreOptions {
+  bridgeIds?: string[];
+  overwriteExisting?: boolean;
+  includeMappings?: boolean;
+  restoreIdentity?: boolean;
 }
 
 export interface BackupData {
@@ -40,9 +59,132 @@ export function backupApi(
   storageLocation: string,
   backupService: BackupService,
   settingsStorage: AppSettingsStorage,
-  _bridgeService?: BridgeService,
+  bridgeService: BridgeService,
 ): express.Router {
   const router = express.Router();
+
+  async function restore(
+    buffer: Buffer,
+    options: RestoreOptions,
+    res: express.Response,
+  ) {
+    const { backupData, zipDirectory } = await extractBackupData(buffer);
+    const existingIds = new Set(bridgeStorage.bridges.map((b) => b.id));
+
+    const bridgeIds = options.bridgeIds;
+    const bridgesToRestore = bridgeIds
+      ? backupData.bridges.filter((b) => bridgeIds.includes(b.id))
+      : backupData.bridges;
+    const restoreIdentity =
+      options.restoreIdentity !== false && !!backupData.includesIdentity;
+
+    let bridgesRestored = 0;
+    let bridgesSkipped = 0;
+    let mappingsRestored = 0;
+    let identitiesRestored = 0;
+    let iconsRestored = 0;
+    const errors: Array<{ bridgeId: string; error: string }> = [];
+
+    for (const bridge of bridgesToRestore) {
+      try {
+        if (!BRIDGE_ID.test(bridge.id)) {
+          throw new Error(`Invalid bridge id: ${bridge.id}`);
+        }
+        const exists = existingIds.has(bridge.id);
+        if (exists && !options.overwriteExisting) {
+          bridgesSkipped++;
+          continue;
+        }
+
+        // A running bridge keeps writing its old fabrics and sessions over
+        // the restored files until the restart.
+        const live = bridgeService.get(bridge.id);
+        if (live && live.data.status !== BridgeStatus.Stopped) {
+          await live.stop();
+        }
+
+        await bridgeStorage.add(bridge);
+        bridgesRestored++;
+
+        if (options.includeMappings !== false) {
+          const mappings = backupData.entityMappings[bridge.id];
+          if (mappings) {
+            for (const mapping of mappings) {
+              const config = mapping as EntityMappingConfig;
+              if (typeof config?.entityId !== "string") continue;
+              // setMapping sanitizes field by field, no list here to drift
+              await mappingStorage.setMapping({
+                ...config,
+                bridgeId: bridge.id,
+              });
+              mappingsRestored++;
+            }
+          }
+        }
+
+        if (restoreIdentity) {
+          const identityRestored = await restoreIdentityFiles(
+            zipDirectory,
+            bridge.id,
+            storageLocation,
+          );
+          if (identityRestored) {
+            identitiesRestored++;
+          }
+          await restorePluginConfigs(zipDirectory, bridge.id, storageLocation);
+        }
+
+        if (backupData.includesIcons) {
+          const iconRestored = await restoreBridgeIcon(
+            zipDirectory,
+            bridge.id,
+            storageLocation,
+          );
+          if (iconRestored) {
+            iconsRestored++;
+          }
+        }
+
+        await restorePluginState(zipDirectory, bridge.id, storageLocation);
+      } catch (e) {
+        errors.push({
+          bridgeId: bridge.id,
+          error: e instanceof Error ? e.message : "Unknown error",
+        });
+      }
+    }
+
+    let appRestored = false;
+    if (restoreIdentity) {
+      try {
+        appRestored = await restoreAppFiles(
+          zipDirectory,
+          storageLocation,
+          bridgeService.bridges.some(
+            (b) =>
+              b.data.status === BridgeStatus.Running ||
+              b.data.status === BridgeStatus.Starting,
+          ),
+        );
+      } catch (e) {
+        errors.push({
+          bridgeId: "app",
+          error: e instanceof Error ? e.message : "Unknown error",
+        });
+      }
+    }
+
+    res.status(bridgesRestored === 0 && errors.length > 0 ? 207 : 200).json({
+      bridgesRestored,
+      bridgesSkipped,
+      mappingsRestored,
+      identitiesRestored,
+      iconsRestored,
+      errors,
+      restartRequired:
+        bridgesRestored > 0 || identitiesRestored > 0 || appRestored,
+    });
+  }
 
   router.get("/download", async (req, res) => {
     try {
@@ -78,6 +220,7 @@ export function backupApi(
       };
 
       const archive = archiver("zip", { zlib: { level: 9 } });
+      archive.on("error", () => res.destroy());
       const dateStr = new Date().toISOString().split("T")[0];
       const filename = includeIdentity
         ? `hamh-full-backup-${dateStr}.zip`
@@ -115,6 +258,11 @@ export function backupApi(
             archive.directory(bridgeStoragePath, `identity/${bridge.id}`);
           }
         }
+        archiveSecretFiles(
+          archive,
+          storageLocation,
+          bridges.map((b) => b.id),
+        );
 
         // Include bridge icons
         if (includesIcons) {
@@ -185,101 +333,8 @@ export function backupApi(
           return;
         }
 
-        const options = JSON.parse(req.body.options || "{}") as {
-          bridgeIds?: string[];
-          overwriteExisting?: boolean;
-          includeMappings?: boolean;
-          restoreIdentity?: boolean;
-        };
-
-        const { backupData, zipDirectory } = await extractBackupData(
-          req.file.buffer,
-        );
-        const existingIds = new Set(bridgeStorage.bridges.map((b) => b.id));
-
-        const bridgeIds = options.bridgeIds;
-        const bridgesToRestore = bridgeIds
-          ? backupData.bridges.filter((b) => bridgeIds.includes(b.id))
-          : backupData.bridges;
-
-        let bridgesRestored = 0;
-        let bridgesSkipped = 0;
-        let mappingsRestored = 0;
-        let identitiesRestored = 0;
-        let iconsRestored = 0;
-        const errors: Array<{ bridgeId: string; error: string }> = [];
-
-        for (const bridge of bridgesToRestore) {
-          try {
-            const exists = existingIds.has(bridge.id);
-            if (exists && !options.overwriteExisting) {
-              bridgesSkipped++;
-              continue;
-            }
-
-            await bridgeStorage.add(bridge);
-            bridgesRestored++;
-
-            if (options.includeMappings !== false) {
-              const mappings = backupData.entityMappings[bridge.id];
-              if (mappings) {
-                for (const mapping of mappings) {
-                  const config = mapping as EntityMappingConfig;
-                  if (typeof config?.entityId !== "string") continue;
-                  // setMapping sanitizes field by field, no list here to drift
-                  await mappingStorage.setMapping({
-                    ...config,
-                    bridgeId: bridge.id,
-                  });
-                  mappingsRestored++;
-                }
-              }
-            }
-
-            if (
-              options.restoreIdentity !== false &&
-              backupData.includesIdentity
-            ) {
-              const identityRestored = await restoreIdentityFiles(
-                zipDirectory,
-                bridge.id,
-                storageLocation,
-              );
-              if (identityRestored) {
-                identitiesRestored++;
-              }
-            }
-
-            // Restore bridge icons
-            if (backupData.includesIcons) {
-              const iconRestored = await restoreBridgeIcon(
-                zipDirectory,
-                bridge.id,
-                storageLocation,
-              );
-              if (iconRestored) {
-                iconsRestored++;
-              }
-            }
-
-            await restorePluginState(zipDirectory, bridge.id, storageLocation);
-          } catch (e) {
-            errors.push({
-              bridgeId: bridge.id,
-              error: e instanceof Error ? e.message : "Unknown error",
-            });
-          }
-        }
-
-        res.json({
-          bridgesRestored,
-          bridgesSkipped,
-          mappingsRestored,
-          identitiesRestored,
-          iconsRestored,
-          errors,
-          restartRequired: bridgesRestored > 0 || identitiesRestored > 0,
-        });
+        const options = JSON.parse(req.body.options || "{}") as RestoreOptions;
+        await restore(req.file.buffer, options, res);
       } catch (error) {
         const message =
           error instanceof Error ? error.message : "Failed to restore backup";
@@ -335,6 +390,8 @@ export function backupApi(
         `attachment; filename="${req.params.filename}"`,
       );
       const stream = fs.createReadStream(filepath);
+      // An unhandled stream error (a file deleted meanwhile) exits the process
+      stream.on("error", () => res.destroy());
       stream.pipe(res);
     } catch (error) {
       const message =
@@ -351,99 +408,11 @@ export function backupApi(
         return;
       }
 
-      const buffer = fs.readFileSync(filepath);
-      const options = (req.body || {}) as {
-        bridgeIds?: string[];
-        overwriteExisting?: boolean;
-        includeMappings?: boolean;
-        restoreIdentity?: boolean;
-      };
-
-      const { backupData, zipDirectory } = await extractBackupData(buffer);
-      const existingIds = new Set(bridgeStorage.bridges.map((b) => b.id));
-
-      const bridgeIds = options.bridgeIds;
-      const bridgesToRestore = bridgeIds
-        ? backupData.bridges.filter((b) => bridgeIds.includes(b.id))
-        : backupData.bridges;
-
-      let bridgesRestored = 0;
-      let bridgesSkipped = 0;
-      let mappingsRestored = 0;
-      let identitiesRestored = 0;
-      let iconsRestored = 0;
-      const errors: Array<{ bridgeId: string; error: string }> = [];
-
-      for (const bridge of bridgesToRestore) {
-        try {
-          const exists = existingIds.has(bridge.id);
-          if (exists && !options.overwriteExisting) {
-            bridgesSkipped++;
-            continue;
-          }
-
-          await bridgeStorage.add(bridge);
-          bridgesRestored++;
-
-          if (options.includeMappings !== false) {
-            const mappings = backupData.entityMappings[bridge.id];
-            if (mappings) {
-              for (const mapping of mappings) {
-                const config = mapping as EntityMappingConfig;
-                if (typeof config?.entityId !== "string") continue;
-                // setMapping sanitizes field by field, no list here to drift
-                await mappingStorage.setMapping({
-                  ...config,
-                  bridgeId: bridge.id,
-                });
-                mappingsRestored++;
-              }
-            }
-          }
-
-          if (
-            options.restoreIdentity !== false &&
-            backupData.includesIdentity
-          ) {
-            const identityRestored = await restoreIdentityFiles(
-              zipDirectory,
-              bridge.id,
-              storageLocation,
-            );
-            if (identityRestored) {
-              identitiesRestored++;
-            }
-          }
-
-          if (backupData.includesIcons) {
-            const iconRestored = await restoreBridgeIcon(
-              zipDirectory,
-              bridge.id,
-              storageLocation,
-            );
-            if (iconRestored) {
-              iconsRestored++;
-            }
-          }
-
-          await restorePluginState(zipDirectory, bridge.id, storageLocation);
-        } catch (e) {
-          errors.push({
-            bridgeId: bridge.id,
-            error: e instanceof Error ? e.message : "Unknown error",
-          });
-        }
-      }
-
-      res.json({
-        bridgesRestored,
-        bridgesSkipped,
-        mappingsRestored,
-        identitiesRestored,
-        iconsRestored,
-        errors,
-        restartRequired: bridgesRestored > 0 || identitiesRestored > 0,
-      });
+      await restore(
+        fs.readFileSync(filepath),
+        (req.body || {}) as RestoreOptions,
+        res,
+      );
     } catch (error) {
       const message =
         error instanceof Error
@@ -519,6 +488,20 @@ export function backupApi(
     }
   });
 
+  // multer reports an oversized upload through next(err)
+  router.use(
+    (
+      err: unknown,
+      _req: Request,
+      res: express.Response,
+      _next: express.NextFunction,
+    ) => {
+      res.status(err instanceof multer.MulterError ? 413 : 400).json({
+        error: err instanceof Error ? err.message : "Upload failed",
+      });
+    },
+  );
+
   return router;
 }
 
@@ -534,6 +517,9 @@ async function extractBackupData(buffer: Buffer): Promise<ExtractedBackup> {
   );
   if (!backupFile) {
     throw new Error("Invalid backup: backup.json not found");
+  }
+  if (backupFile.uncompressedSize > MAX_BACKUP_JSON_BYTES) {
+    throw new Error("Invalid backup: backup.json is larger than 50 MB");
   }
   const content = await backupFile.buffer();
   const data = JSON.parse(content.toString()) as BackupData;
@@ -589,6 +575,65 @@ async function restoreIdentityFiles(
     fs.writeFileSync(targetPath, content);
   }
 
+  return true;
+}
+
+// Plugin configs of a bridge, plugin-<bridgeId>-<plugin>.json at the storage
+// root. They hold credentials, so only full backups carry them.
+async function restorePluginConfigs(
+  zipDirectory: unzipper.CentralDirectory,
+  bridgeId: string,
+  storageLocation: string,
+): Promise<void> {
+  for (const file of zipDirectory.files) {
+    const name = file.path.slice("plugins/".length);
+    if (
+      file.type !== "File" ||
+      !file.path.startsWith(`plugins/plugin-${bridgeId}-`) ||
+      !name.endsWith(".json")
+    ) {
+      continue;
+    }
+    const targetPath = name.includes("/")
+      ? null
+      : resolveWithin(storageLocation, name);
+    if (!targetPath) {
+      throw new Error(
+        `Refusing to restore plugin file with unsafe path: ${file.path}`,
+      );
+    }
+    fs.writeFileSync(targetPath, await file.buffer());
+  }
+}
+
+// Lock PINs, login and entity identities live in the app namespace that the
+// running storages rewrite from memory, so they only go back while no bridge
+// runs and the restart follows.
+async function restoreAppFiles(
+  zipDirectory: unzipper.CentralDirectory,
+  storageLocation: string,
+  bridgesRunning: boolean,
+): Promise<boolean> {
+  const entries = zipDirectory.files.filter(
+    (f: { path: string; type: string }) =>
+      f.type === "File" && APP_BACKUP_FILES.some((n) => f.path === `app/${n}`),
+  );
+  if (entries.length === 0) {
+    return false;
+  }
+  if (bridgesRunning) {
+    throw new Error(
+      "Lock PINs, login and entity identities were not restored because bridges are running. Stop all bridges and restore again.",
+    );
+  }
+  const appDir = path.join(storageLocation, "app");
+  fs.mkdirSync(appDir, { recursive: true });
+  for (const entry of entries) {
+    fs.writeFileSync(
+      path.join(appDir, entry.path.slice("app/".length)),
+      await entry.buffer(),
+    );
+  }
   return true;
 }
 

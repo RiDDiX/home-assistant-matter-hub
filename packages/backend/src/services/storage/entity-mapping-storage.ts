@@ -2,6 +2,7 @@ import type {
   EntityMappingConfig,
   EntityMappingRequest,
 } from "@home-assistant-matter-hub/common";
+import { Logger } from "@matter/general";
 import type { StorageContext, SupportedStorageTypes } from "@matter/main";
 import { Service } from "../../core/ioc/service.js";
 import type { AppStorage } from "./app-storage.js";
@@ -32,10 +33,15 @@ const CURRENT_VERSION = 1;
 // dispose flushes any pending write.
 const PERSIST_DEBOUNCE_MS = 500;
 
+const logger = Logger.get("EntityMappingStorage");
+
 export class EntityMappingStorage extends Service {
   private storage!: StorageContext;
   private mappings: Map<string, Map<string, StoredMapping>> = new Map();
   private persistTimer: ReturnType<typeof setTimeout> | null = null;
+  // Only a change writes, so a file this build could not read stays on disk
+  // until the user edits a mapping.
+  private dirty = false;
 
   constructor(private readonly appStorage: AppStorage) {
     super("EntityMappingStorage");
@@ -61,12 +67,19 @@ export class EntityMappingStorage extends Service {
     }
 
     const data = stored as unknown as StoredMappings;
-    if (data.version !== CURRENT_VERSION) {
+    if (data.version < CURRENT_VERSION) {
       await this.migrate(data);
       return;
     }
+    if (data.version > CURRENT_VERSION) {
+      // A file written by a newer build. Starting empty would let the next
+      // write persist an empty set over it.
+      logger.warn(
+        `Mapping file has unsupported version ${data.version}, reading the records that look readable`,
+      );
+    }
 
-    for (const [bridgeId, configs] of Object.entries(data.mappings)) {
+    for (const [bridgeId, configs] of Object.entries(data.mappings ?? {})) {
       const bridgeMap = new Map<string, StoredMapping>();
       for (const config of configs) {
         bridgeMap.set(config.entityId, config);
@@ -104,20 +117,30 @@ export class EntityMappingStorage extends Service {
       data.mappings[bridgeId] = Array.from(bridgeMap.values());
     }
 
-    await this.storage.set("data", data as unknown as StorageObjectType);
+    this.dirty = false;
+    try {
+      await this.storage.set("data", data as unknown as StorageObjectType);
+    } catch (e) {
+      this.dirty = true;
+      throw e;
+    }
   }
 
   private schedulePersist(): void {
+    this.dirty = true;
     if (this.persistTimer) return;
     this.persistTimer = setTimeout(() => {
       this.persistTimer = null;
-      void this.persist();
+      // Still dirty on failure, the next change or dispose writes again.
+      this.persist().catch((e) =>
+        logger.warn("Failed to persist entity mappings:", e),
+      );
     }, PERSIST_DEBOUNCE_MS);
   }
 
   // Flush any pending debounced write, used on dispose and by tests.
   async flush(): Promise<void> {
-    await this.persist();
+    if (this.dirty) await this.persist();
   }
 
   getMappingsForBridge(bridgeId: string): EntityMappingConfig[] {
@@ -320,8 +343,9 @@ export class EntityMappingStorage extends Service {
   }
 
   async deleteBridgeMappings(bridgeId: string): Promise<void> {
-    this.mappings.delete(bridgeId);
-    await this.persist();
+    if (this.mappings.delete(bridgeId)) {
+      await this.persist();
+    }
   }
 
   // Stamp the tombstone the first time a mapping's entity is absent from HA.

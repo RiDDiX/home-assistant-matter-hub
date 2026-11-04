@@ -89,3 +89,40 @@ describe("POST /import/apply", () => {
     }
   });
 });
+
+describe("export then import", () => {
+  it("round-trips every mapping field", async () => {
+    const setMapping = vi.fn().mockResolvedValue(undefined);
+    const mapping = {
+      entityId: "select.boiler",
+      selectExposeAsSwitch: true,
+      selectSwitchOnOption: "on",
+      composedEntities: [{ entityId: "sensor.boiler_temp" }],
+    };
+    const app = express();
+    app.use(express.json());
+    app.use(
+      "/profiles",
+      mappingProfileApi({
+        getMappingsForBridge: () => [mapping],
+        setMapping,
+      } as unknown as EntityMappingStorage),
+    );
+    const server = app.listen(0);
+    try {
+      await new Promise<void>((resolve) => server.once("listening", resolve));
+      const { port } = server.address() as AddressInfo;
+      const base = `http://127.0.0.1:${port}/profiles`;
+      const profile = await (await fetch(`${base}/export/b1`)).json();
+      await fetch(`${base}/import/apply/b2`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ profile, selectedEntityIds: ["select.boiler"] }),
+      });
+
+      expect(setMapping).toHaveBeenCalledWith({ ...mapping, bridgeId: "b2" });
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+});

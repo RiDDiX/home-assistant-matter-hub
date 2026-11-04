@@ -385,6 +385,12 @@ export class ServerModeVacuumEndpoint extends EntityEndpoint {
         last_updated: new Date().toISOString(),
       };
     }
-    await updateEntityState(this, effectiveState);
+    // debounce drops this promise, a rejection would otherwise surface as an
+    // unhandled rejection without the entity id
+    try {
+      await updateEntityState(this, effectiveState);
+    } catch (e) {
+      logger.warn(`State update failed for ${this.entityId}:`, e);
+    }
   }
 }

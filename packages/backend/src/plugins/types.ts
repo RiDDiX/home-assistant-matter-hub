@@ -97,8 +97,6 @@ export interface PluginDomainMapping {
   domain: string;
   /** Matter device type key (must be in the supported device types list) */
   matterDeviceType: string;
-  /** Default cluster state for newly created endpoints */
-  defaultClusters?: PluginClusterConfig[];
 }
 
 /**
@@ -193,8 +191,6 @@ export type MatterHubPluginConstructor = new (
 export interface PluginMetadata {
   name: string;
   version: string;
-  description?: string;
-  author?: string;
   /** "builtin" for built-in plugins, npm package path for external */
   source: "builtin" | string;
   /** Whether the plugin is currently enabled */
