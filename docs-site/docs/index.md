@@ -421,6 +421,16 @@ Home, ...) are not placed in the same network segment. Please make sure to revie
 <details>
 <summary><strong>🧪 Alpha (v2.1.0-alpha.x)</strong></summary>
 
+**v2.1.0-alpha.962:**
+- **Web API hardening**: a request with a broken percent escape, a backup download named `.` or an oversized backup upload no longer stops the hub; backup restore and bridge icon upload refuse bridge ids that point outside the storage folder; the installed plugins list no longer returns plugin secrets; plugin install accepts a version or tag only, not a URL or path, and npm runs without the hub's tokens
+- **Backups carry more and restore cleanly**: the zip now includes lock PINs, the web UI login, frozen device identities and plugin settings, backup.json no longer carries the pairing code or runtime status, restore stops the affected bridges first and migrates bridge settings from older releases, and a restore that applied nothing answers with its errors
+- **Bridges no longer trip over themselves**: two device refreshes at once (for example a recovery start during a Home Assistant restart) ran in parallel and could mark devices as failed or, in server mode, leave one device broken until restart; refreshes now run one after another, and Stop, Delete or a port change wait for a start that is still running (at most 60 s)
+- **Shared bridge lifecycle**: Bridge Mode and Server Mode now share one lifecycle implementation, so guards and fixes can no longer drift apart
+- **Cameras**: a live view whose connection dropped is cleaned up instead of leaving the stream open, snapshots give up after 15 s, a Home Assistant reconnect no longer replays old stream offers, and the unsupported SolicitOffer flow is refused instead of starting a stream nobody receives
+- **Sensors**: pressure in bar, cbar and psi is reported (it was dropped before), out-of-range pressure is clamped, humidity above 100 % no longer sticks at the previous value
+- **Mapping profiles keep every field**: export and import round-trip composed devices, select-as-switch, custom names and all other mapping settings
+- **Smaller fixes**: deleting a bridge drops its mappings, the device refresh no longer scans the whole Home Assistant registry per device, a registry poll no longer overwrites a newer sensor value, plugin settings are written atomically, repeated brightness writes at the same level skip the Home Assistant call, the Devices and Network Map pages reload only the bridge that changed, SVG icons are served sandboxed, and the never-working `vacuumIncludeUnnamedRooms` flag is gone from the docs
+
 **v2.1.0-alpha.961:**
 - **Bridge import applies right away**: imported bridges show up and start without an app restart, an overwrite import changes the running bridge, and a port that is already taken moves to the next free one. A bridge that fails validation is listed with a short reason
 - **Cleared bridge fields stay cleared**: emptying Country Code, the serial number or unique ID suffix or the session age, or picking the Auto icon, now removes the stored value instead of keeping it
