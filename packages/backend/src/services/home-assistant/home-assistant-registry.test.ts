@@ -86,7 +86,7 @@ describe("HomeAssistantRegistry", () => {
         { connection: fake.connection, haRunning: true } as HomeAssistantClient,
         defaultOptions,
       );
-      return { registry, snapshot };
+      return { registry, snapshot, connection: fake.connection };
     }
 
     it.each([
@@ -110,7 +110,9 @@ describe("HomeAssistantRegistry", () => {
           },
         },
       ];
-      await vi.advanceTimersByTimeAsync(1000);
+      await vi.advanceTimersByTimeAsync(2998);
+      expect(initialized).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
       await registry.construction;
       expect(initialized).toHaveBeenCalledOnce();
       expect(
@@ -133,13 +135,18 @@ describe("HomeAssistantRegistry", () => {
     });
 
     it("bounds the wait for a group whose members stay offline", async () => {
-      const { registry } = makeGroupRegistry("unavailable");
+      const { registry, connection } = makeGroupRegistry("unavailable");
       const initialized = vi.fn();
       void registry.construction.then(initialized);
-      await vi.advanceTimersByTimeAsync(1000);
+      await vi.advanceTimersByTimeAsync(59_999);
       expect(initialized).not.toHaveBeenCalled();
-      await vi.advanceTimersByTimeAsync(30_000);
+      await vi.advanceTimersByTimeAsync(1);
       expect(initialized).toHaveBeenCalledOnce();
+      expect(
+        vi
+          .mocked(connection.sendMessagePromise)
+          .mock.calls.filter(([message]) => message.type === "get_states"),
+      ).toHaveLength(21);
     });
   });
 

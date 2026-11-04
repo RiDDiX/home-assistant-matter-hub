@@ -24,8 +24,8 @@ import type {
 } from "./home-assistant-client.js";
 
 const logger = Logger.get("HomeAssistantRegistry");
-// shortcut: groups still incomplete after 30s use auto-refresh; revisit if controllers still rediscover devices.
-const GROUP_SENSOR_STARTUP_WAIT_MS = 30_000;
+// shortcut: groups still incomplete after 60s use auto-refresh; revisit if controllers still rediscover devices.
+const GROUP_SENSOR_STARTUP_WAIT_MS = 60_000;
 
 export type HomeAssistantDevices = Record<string, HomeAssistantDeviceRegistry>;
 export type HomeAssistantEntities = Record<string, HomeAssistantEntityRegistry>;
@@ -93,7 +93,7 @@ export class HomeAssistantRegistry extends Service {
         );
       }
       while (pending.length > 0 && Date.now() < deadline) {
-        await new Promise((resolve) => setTimeout(resolve, 1000));
+        await new Promise((resolve) => setTimeout(resolve, 3000));
         await this.reload();
         pending = this.pendingGroupSensors();
       }

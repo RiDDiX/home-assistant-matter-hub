@@ -217,7 +217,7 @@ describe("composed sensor endpoint with out-of-filter humidity and pressure subs
       await vi.advanceTimersByTimeAsync(1);
       expect(initialized).not.toHaveBeenCalled();
       ready = true;
-      await vi.advanceTimersByTimeAsync(1000);
+      await vi.advanceTimersByTimeAsync(3000);
       await registry.construction;
     } finally {
       vi.useRealTimers();
