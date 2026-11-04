@@ -8,7 +8,8 @@ import {
 import { Environment, VariableService } from "@matter/general";
 import { VendorId } from "@matter/main";
 import { ServerNode } from "@matter/main/node";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import type { Connection } from "home-assistant-js-websocket";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { BridgeDataProvider } from "../../../services/bridges/bridge-data-provider.js";
 import { BridgeRegistry } from "../../../services/bridges/bridge-registry.js";
 import { EntityStateProvider } from "../../../services/bridges/entity-state-provider.js";
@@ -16,10 +17,11 @@ import {
   type HomeAssistantAction,
   HomeAssistantActions,
 } from "../../../services/home-assistant/home-assistant-actions.js";
+import type { HomeAssistantClient } from "../../../services/home-assistant/home-assistant-client.js";
 import { HomeAssistantConfig } from "../../../services/home-assistant/home-assistant-config.js";
-import type {
+import {
   HomeAssistantRegistry,
-  HomeAssistantStates,
+  type HomeAssistantStates,
 } from "../../../services/home-assistant/home-assistant-registry.js";
 import { HomeAssistantEntityBehavior } from "../../behaviors/home-assistant-entity-behavior.js";
 import { AggregatorEndpoint } from "../aggregator-endpoint.js";
@@ -173,6 +175,69 @@ async function mount(endpoint: ComposedSensorEndpoint) {
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 describe("composed sensor endpoint with out-of-filter humidity and pressure subs (#426)", () => {
+  it("mounts the complete composed sensor on the first startup after group attributes arrive", async () => {
+    vi.useFakeTimers();
+    const snapshot = haRegistry();
+    let ready = false;
+    const connection = {
+      connected: true,
+      sendMessagePromise: vi.fn((message: { type: string }) => {
+        if (message.type === "config/entity_registry/list") {
+          return Promise.resolve(
+            Object.values(snapshot.entities).map((entity) => ({
+              ...entity,
+              platform: "group",
+            })),
+          );
+        }
+        if (message.type === "get_states") {
+          return Promise.resolve(
+            Object.values(snapshot.states).map((value) =>
+              ready
+                ? value
+                : { ...value, state: "unavailable", attributes: {} },
+            ),
+          );
+        }
+        return Promise.resolve([]);
+      }),
+    } as unknown as Connection;
+    const registry = new HomeAssistantRegistry(
+      { connection, haRunning: true } as HomeAssistantClient,
+      {
+        url: "http://x",
+        accessToken: "t",
+        refreshInterval: 60,
+        messageTimeoutMs: 60_000,
+      },
+    );
+    try {
+      const initialized = vi.fn();
+      void registry.construction.then(initialized);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(initialized).not.toHaveBeenCalled();
+      ready = true;
+      await vi.advanceTimersByTimeAsync(1000);
+      await registry.construction;
+    } finally {
+      vi.useRealTimers();
+    }
+
+    const endpoint = await LegacyEndpoint.create(
+      new BridgeRegistry(registry, dataProvider()),
+      TEMPERATURE,
+    );
+    expect(endpoint).toBeDefined();
+    await mount(endpoint as unknown as ComposedSensorEndpoint);
+    expect(
+      [...endpoint!.parts]
+        .map(
+          (part) => part.stateOf(HomeAssistantEntityBehavior).entity.entity_id,
+        )
+        .sort(),
+    ).toEqual([TEMPERATURE, HUMIDITY, PRESSURE].sort());
+  });
+
   it("composes humidity and pressure sub-endpoints that do not match the bridge filter", async () => {
     const endpoint = await create();
 
