@@ -282,7 +282,7 @@ To migrate your configuration (bridges, entity mappings, custom names, and Matte
 
 The built-in backup includes Matter identity data (keypairs, fabric credentials), so your controllers (Google Home, Apple Home, Alexa) will recognize the devices without re-commissioning. Without this step, all devices will appear as new and need to be set up again.
 
-A full backup also carries the lock PINs, the WebUI login, the entity identities and the plugin settings (VeSync login, camera config). Those come back only while no bridge runs, so stop all bridges before you restore.
+A full backup also carries the lock PINs, the WebUI login, the entity identities and the plugin settings (VeSync login, camera config). The restore stops every running bridge before it writes them back, then asks for a restart.
 
 ### Why clearing old data matters
 

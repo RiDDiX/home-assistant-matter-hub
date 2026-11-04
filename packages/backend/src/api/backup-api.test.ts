@@ -10,6 +10,7 @@ import {
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { BridgeData } from "@home-assistant-matter-hub/common";
 import archiver from "archiver";
 import express from "express";
 import unzipper from "unzipper";
@@ -280,6 +281,46 @@ describe("restore input checks", () => {
     );
   });
 
+  it("migrates bridges from an older bridge schema", async () => {
+    const added: BridgeData[] = [];
+    const storage = {
+      bridges: [],
+      add: async (bridge: BridgeData) => {
+        added.push(bridge);
+      },
+    } as unknown as BridgeStorage;
+    const zip = await zipOf({
+      "backup.json": JSON.stringify({
+        version: 2,
+        bridgeVersion: 5,
+        bridges: [
+          {
+            id: ID,
+            name: "Old",
+            port: 5540,
+            featureFlags: {
+              omitEventsInPriming: true,
+              autoBatteryMapping: true,
+            },
+          },
+        ],
+        entityMappings: {},
+      }),
+    });
+    await withRouter(
+      async (base) => {
+        const res = await fetch(`${base}/backup/restore`, restoreForm(zip));
+        expect(res.status).toBe(200);
+      },
+      undefined,
+      undefined,
+      storage,
+    );
+    expect(added.map((b) => b.featureFlags)).toEqual([
+      { autoBatteryMapping: true },
+    ]);
+  });
+
   it("rejects a backup.json larger than 50 MB", async () => {
     vi.spyOn(unzipper.Open, "buffer").mockResolvedValueOnce({
       files: [
@@ -303,7 +344,48 @@ describe("restore input checks", () => {
 });
 
 describe("restore while the bridge runs", () => {
-  it("stops the bridge before writing and keeps the app files", async () => {
+  it("stops every running bridge and restores the app files", async () => {
+    const storageLocation = join(dir, "running-all");
+    mkdirSync(storageLocation, { recursive: true });
+    const data = { status: "running" };
+    const other = {
+      data,
+      stop: vi.fn(async () => {
+        data.status = "stopped";
+      }),
+    };
+    const bridgeService = {
+      bridges: [other],
+      get: () => undefined,
+    } as unknown as BridgeService;
+    const zip = await zipOf({
+      "backup.json": JSON.stringify({
+        version: 2,
+        bridges: [],
+        entityMappings: {},
+        includesIdentity: true,
+      }),
+      "app/settings.data": "{}",
+    });
+    await withRouter(
+      async (base) => {
+        const res = await fetch(`${base}/backup/restore`, restoreForm(zip));
+        const body = await res.json();
+        expect(body.errors).toEqual([]);
+        expect(body.restartRequired).toBe(true);
+      },
+      undefined,
+      bridgeService,
+      undefined,
+      storageLocation,
+    );
+    expect(other.stop).toHaveBeenCalledOnce();
+    expect(
+      readFileSync(join(storageLocation, "app", "settings.data"), "utf-8"),
+    ).toBe("{}");
+  });
+
+  it("keeps the app files when a bridge does not stop", async () => {
     const storageLocation = join(dir, "running");
     mkdirSync(storageLocation, { recursive: true });
     const order: string[] = [];
@@ -347,7 +429,7 @@ describe("restore while the bridge runs", () => {
       storage,
       storageLocation,
     );
-    expect(order).toEqual(["stop", "add"]);
+    expect(order).toEqual(["stop", "add", "stop"]);
     expect(existsSync(join(storageLocation, "app", "settings.data"))).toBe(
       false,
     );

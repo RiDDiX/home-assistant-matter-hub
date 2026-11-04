@@ -5,6 +5,7 @@ import {
   BridgeStatus,
   type EntityMappingConfig,
 } from "@home-assistant-matter-hub/common";
+import { StorageBackendMemory, StorageContext } from "@matter/general";
 import archiver from "archiver";
 import type { Request } from "express";
 import express from "express";
@@ -21,7 +22,11 @@ import type {
   AppSettingsStorage,
   BackupSettings,
 } from "../services/storage/app-settings-storage.js";
-import type { BridgeStorage } from "../services/storage/bridge-storage.js";
+import {
+  BRIDGE_SCHEMA_VERSION,
+  type BridgeStorage,
+  bridgeMigrations,
+} from "../services/storage/bridge-storage.js";
 import type { EntityMappingStorage } from "../services/storage/entity-mapping-storage.js";
 
 const upload = multer({
@@ -32,6 +37,9 @@ const MAX_BACKUP_JSON_BYTES = 50 * 1024 * 1024;
 // Bridge ids become directory names below the storage location on restore.
 // Imported legacy bridges keep dashed UUIDs or their old id.
 const BRIDGE_ID = /^[\w-]+$/;
+// Bridge schema in use when backups were introduced, for backups that predate
+// bridgeVersion.
+const FIRST_BACKUP_BRIDGE_VERSION = 5;
 
 interface MulterRequest extends Request {
   file?: Express.Multer.File;
@@ -46,6 +54,7 @@ interface RestoreOptions {
 
 export interface BackupData {
   version: number;
+  bridgeVersion?: number;
   createdAt: string;
   bridges: BridgeData[];
   entityMappings: Record<string, unknown[]>;
@@ -77,6 +86,8 @@ export function backupApi(
       : backupData.bridges;
     const restoreIdentity =
       options.restoreIdentity !== false && !!backupData.includesIdentity;
+    const bridgeVersion =
+      backupData.bridgeVersion ?? FIRST_BACKUP_BRIDGE_VERSION;
 
     let bridgesRestored = 0;
     let bridgesSkipped = 0;
@@ -103,7 +114,7 @@ export function backupApi(
           await live.stop();
         }
 
-        await bridgeStorage.add(bridge);
+        await bridgeStorage.add(await migrateBridge(bridge, bridgeVersion));
         bridgesRestored++;
 
         if (options.includeMappings !== false) {
@@ -160,11 +171,7 @@ export function backupApi(
         appRestored = await restoreAppFiles(
           zipDirectory,
           storageLocation,
-          bridgeService.bridges.some(
-            (b) =>
-              b.data.status === BridgeStatus.Running ||
-              b.data.status === BridgeStatus.Starting,
-          ),
+          bridgeService,
         );
       } catch (e) {
         errors.push({
@@ -212,6 +219,7 @@ export function backupApi(
 
       const backupData: BackupData = {
         version: 2,
+        bridgeVersion: BRIDGE_SCHEMA_VERSION,
         createdAt: new Date().toISOString(),
         bridges,
         entityMappings,
@@ -526,6 +534,23 @@ async function extractBackupData(buffer: Buffer): Promise<ExtractedBackup> {
   return { backupData: data, zipDirectory: directory };
 }
 
+// The store migrations run on a whole store, so the record goes through a
+// throwaway one.
+async function migrateBridge(
+  bridge: BridgeData,
+  version: number,
+): Promise<BridgeData> {
+  const backend = new StorageBackendMemory();
+  backend.initialize();
+  const storage = new StorageContext(backend, ["bridges"]);
+  await storage.set("ids", [bridge.id]);
+  await storage.set(bridge.id, bridge as unknown as Record<string, string>);
+  while (bridgeMigrations[version]) {
+    version = await bridgeMigrations[version](storage);
+  }
+  return (await storage.get(bridge.id)) as unknown as BridgeData;
+}
+
 function resolveWithin(baseDir: string, relative: string): string | null {
   if (relative.length === 0 || path.isAbsolute(relative)) {
     return null;
@@ -607,12 +632,12 @@ async function restorePluginConfigs(
 }
 
 // Lock PINs, login and entity identities live in the app namespace that the
-// running storages rewrite from memory, so they only go back while no bridge
-// runs and the restart follows.
+// running storages rewrite from memory, so every bridge stops first and the
+// restart follows.
 async function restoreAppFiles(
   zipDirectory: unzipper.CentralDirectory,
   storageLocation: string,
-  bridgesRunning: boolean,
+  bridgeService: BridgeService,
 ): Promise<boolean> {
   const entries = zipDirectory.files.filter(
     (f: { path: string; type: string }) =>
@@ -621,9 +646,16 @@ async function restoreAppFiles(
   if (entries.length === 0) {
     return false;
   }
-  if (bridgesRunning) {
+  const active = () =>
+    bridgeService.bridges.filter(
+      (b) =>
+        b.data.status === BridgeStatus.Running ||
+        b.data.status === BridgeStatus.Starting,
+    );
+  await Promise.allSettled(active().map((b) => b.stop()));
+  if (active().length > 0) {
     throw new Error(
-      "Lock PINs, login and entity identities were not restored because bridges are running. Stop all bridges and restore again.",
+      "Lock PINs, login and entity identities were not restored because a bridge did not stop. Stop all bridges and restore again.",
     );
   }
   const appDir = path.join(storageLocation, "app");

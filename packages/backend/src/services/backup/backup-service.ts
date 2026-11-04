@@ -5,7 +5,10 @@ import { Logger } from "@matter/general";
 import archiver from "archiver";
 import { pluginStateFilePath } from "../../plugins/plugin-storage.js";
 import type { AppSettingsStorage } from "../storage/app-settings-storage.js";
-import type { BridgeStorage } from "../storage/bridge-storage.js";
+import {
+  BRIDGE_SCHEMA_VERSION,
+  type BridgeStorage,
+} from "../storage/bridge-storage.js";
 import type { EntityMappingStorage } from "../storage/entity-mapping-storage.js";
 
 export interface BackupMetadata {
@@ -116,6 +119,7 @@ export class BackupService {
 
     const backupData = {
       version: 2,
+      bridgeVersion: BRIDGE_SCHEMA_VERSION,
       createdAt: now.toISOString(),
       bridges,
       entityMappings,

@@ -11,6 +11,19 @@ import { migrateBridgeV5ToV6 } from "./migrations/bridge/v5-to-v6.js";
 
 type StorageObjectType = { [key: string]: SupportedStorageTypes };
 
+// Each step takes a whole store from the version it is keyed by to the next.
+export const bridgeMigrations: Record<
+  number,
+  (storage: StorageContext) => Promise<number>
+> = {
+  1: migrateBridgeV1ToV2,
+  2: migrateBridgeV2ToV3,
+  3: migrateBridgeV3ToV4,
+  4: migrateBridgeV4ToV5,
+  5: migrateBridgeV5ToV6,
+};
+export const BRIDGE_SCHEMA_VERSION = 6;
+
 // Bridge.data adds runtime state (status, pairing codes, fabrics) to the
 // config. Only the config belongs in the store and in backups.
 const bridgeDataKeys: Record<keyof BridgeData, true> = {
@@ -87,22 +100,10 @@ export class BridgeStorage extends Service {
   }
 
   private async migrate(): Promise<void> {
-    const version = await this.storage.get<number>("version", 1);
-    let migratedVersion: number = version;
-    if (version === 1) {
-      migratedVersion = await migrateBridgeV1ToV2(this.storage);
-    } else if (version === 2) {
-      migratedVersion = await migrateBridgeV2ToV3(this.storage);
-    } else if (version === 3) {
-      migratedVersion = await migrateBridgeV3ToV4(this.storage);
-    } else if (version === 4) {
-      migratedVersion = await migrateBridgeV4ToV5(this.storage);
-    } else if (version === 5) {
-      migratedVersion = await migrateBridgeV5ToV6(this.storage);
-    }
-    if (migratedVersion !== version) {
-      await this.storage.set("version", migratedVersion);
-      return this.migrate();
+    let version = await this.storage.get<number>("version", 1);
+    while (bridgeMigrations[version]) {
+      version = await bridgeMigrations[version](this.storage);
+      await this.storage.set("version", version);
     }
   }
 }

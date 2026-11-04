@@ -1,5 +1,5 @@
 import { BridgeStatus } from "@home-assistant-matter-hub/common";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { Bridge } from "./bridge.js";
 import type { BridgeServerStatus } from "./bridge-data-provider.js";
 import { ServerModeBridge } from "./server-mode-bridge.js";
@@ -138,5 +138,35 @@ describe("Bridge factory reset plugins", () => {
 
     expect(calls).toContain("stopPlugins");
     expect(calls.indexOf("stopPlugins")).toBeLessThan(calls.indexOf("start"));
+  });
+});
+
+describe.each([
+  ["Bridge", Bridge],
+  ["ServerModeBridge", ServerModeBridge],
+])("%s stop during a start that never settles", (_name, Ctor) => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("stops anyway once the start wait runs out", async () => {
+    vi.useFakeTimers();
+    const calls: string[] = [];
+    const bridge = Object.create(Ctor.prototype);
+    prepare(bridge, calls);
+    bridge.log.warn = vi.fn();
+    bridge.startInFlight = new Promise(() => {});
+
+    const stopping = bridge.stop();
+    await vi.advanceTimersByTimeAsync(59_999);
+    expect(calls).not.toContain("server.cancel");
+    await vi.advanceTimersByTimeAsync(1);
+    await stopping;
+
+    expect(calls).toContain("server.cancel");
+    expect(bridge.status.code).toBe(BridgeStatus.Stopped);
+    expect(bridge.log.warn).toHaveBeenCalledWith(
+      "b: start still pending after 60s, stopping anyway",
+    );
   });
 });

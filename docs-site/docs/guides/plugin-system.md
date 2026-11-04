@@ -11,7 +11,7 @@ Home Assistant Matter Hub supports plugins that register additional Matter devic
 3. Click **Install**
 4. Restart the bridge to load the plugin
 
-npm runs with `--ignore-scripts`, so install scripts of a plugin and its dependencies never run, and the name takes a version or tag, not a URL or path.
+The name takes a version or tag, not a URL or path, and npm runs without the hub's tokens in its environment.
 
 ### From a local `.tgz` file
 

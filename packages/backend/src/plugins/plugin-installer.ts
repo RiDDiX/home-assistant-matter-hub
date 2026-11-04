@@ -10,7 +10,7 @@ const logger = Logger.get("PluginInstaller");
 export const VALID_PACKAGE_RE =
   /^(@[a-z0-9-~][a-z0-9-._~]*\/)?[a-z0-9-~][a-z0-9-._~]*(@[^@\s/:]+)?$/;
 
-// npm gets no HAMH secrets (HA token, supervisor token) and runs no scripts.
+// npm and plugin install scripts get no HAMH secrets (HA token, supervisor token).
 const NPM_ENV = {
   ...Object.fromEntries(
     Object.entries(process.env).filter(([k]) =>
@@ -82,7 +82,7 @@ export class PluginInstaller {
     return new Promise((resolve) => {
       execFile(
         "npm",
-        ["install", packageName, "--save", "--ignore-scripts"],
+        ["install", packageName, "--save"],
         {
           cwd: this.pluginDir,
           timeout: 120_000,
@@ -129,7 +129,7 @@ export class PluginInstaller {
     return new Promise((resolve) => {
       execFile(
         "npm",
-        ["uninstall", packageName, "--save", "--ignore-scripts"],
+        ["uninstall", packageName, "--save"],
         {
           cwd: this.pluginDir,
           timeout: 60_000,
@@ -222,7 +222,7 @@ export class PluginInstaller {
     return new Promise((resolve) => {
       execFile(
         "npm",
-        ["install", target, "--save", "--ignore-scripts"],
+        ["install", target, "--save"],
         {
           cwd: this.pluginDir,
           timeout: 120_000,

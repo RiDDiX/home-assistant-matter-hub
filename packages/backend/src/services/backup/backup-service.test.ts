@@ -4,7 +4,10 @@ import path from "node:path";
 import unzipper from "unzipper";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppSettingsStorage } from "../storage/app-settings-storage.js";
-import type { BridgeStorage } from "../storage/bridge-storage.js";
+import {
+  BRIDGE_SCHEMA_VERSION,
+  type BridgeStorage,
+} from "../storage/bridge-storage.js";
 import type { EntityMappingStorage } from "../storage/entity-mapping-storage.js";
 import { BackupService } from "./backup-service.js";
 
@@ -133,6 +136,10 @@ describe("BackupService", () => {
     const { filename } = await service.createBackup(false);
     const zip = await unzipper.Open.file(path.join(backupDir, filename));
     const names = zip.files.map((f) => f.path);
+    const json = zip.files.find((f) => f.path === "backup.json");
+    expect(JSON.parse(`${await json?.buffer()}`).bridgeVersion).toBe(
+      BRIDGE_SCHEMA_VERSION,
+    );
     expect(names).toEqual(
       expect.arrayContaining([
         "app/settings.data",
