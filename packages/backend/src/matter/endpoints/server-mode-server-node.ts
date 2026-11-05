@@ -15,7 +15,7 @@ import { trimToLength } from "../../utils/trim-to-length.js";
 import { legacySpecBasicInformation } from "../legacy-spec-version.js";
 import { matterSubscriptionOptions } from "../subscription-options.js";
 import { rootEndpointType } from "../tc-general-commissioning.js";
-import { renewRootUniqueId } from "./bridge-server-node.js";
+import { factoryResetNode } from "./bridge-server-node.js";
 
 const logger = Logger.get("ServerModeServerNode");
 
@@ -193,9 +193,7 @@ export class ServerModeServerNode extends ServerNode {
   }
 
   async factoryReset(): Promise<void> {
-    await this.cancel();
-    await this.erase();
-    await renewRootUniqueId(this);
+    await factoryResetNode(this);
   }
 }
 
