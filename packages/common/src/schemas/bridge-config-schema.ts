@@ -522,8 +522,10 @@ export const bridgeConfigSchema: JSONSchema7 = {
         "Mixed into the unique ID of every bridged device on this bridge " +
         "(standard bridge mode). Controllers like Alexa cache device records " +
         "keyed on the unique ID, so setting or changing this can help mint " +
-        "fresh identities. Applies after a bridge restart, then re-discover " +
-        "in the controller. Leave empty for default behavior.",
+        "fresh identities. Applies after a restart of the whole app " +
+        "(add-on), a bridge restart is not enough; a new bridge uses it " +
+        "right away. Then re-discover in the controller. Leave empty for " +
+        "default behavior.",
       maxLength: 16,
     },
     sessionMaxAgeHours: {
