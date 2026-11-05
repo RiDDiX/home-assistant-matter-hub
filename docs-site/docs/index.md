@@ -421,6 +421,9 @@ Home, ...) are not placed in the same network segment. Please make sure to revie
 <details>
 <summary><strong>🧪 Alpha (v2.1.0-alpha.x)</strong></summary>
 
+**v2.1.0-alpha.963:**
+- **Group sensors are ready before bridges start**: after a Home Assistant restart, a sensor group helper can still lack its device class when Home Assistant reports running, so its temperature, humidity or pressure devices were missing from the first device list and appeared a minute later as new devices on Google Home. The hub now waits up to 60 s for such groups before bridges start. A group that stays incomplete is named in the log and picked up by the next registry refresh as before (#540, thanks @KRZ303)
+
 **v2.1.0-alpha.962:**
 - **Web API hardening**: a request with a broken percent escape, a backup download named `.` or an oversized backup upload no longer stops the hub; backup restore and bridge icon upload refuse bridge ids that point outside the storage folder; the installed plugins list no longer returns plugin secrets; plugin install accepts a version or tag only, not a URL or path, and npm runs without the hub's tokens
 - **Backups carry more and restore cleanly**: the zip now includes lock PINs, the web UI login, frozen device identities and plugin settings, backup.json no longer carries the pairing code or runtime status, restore stops the affected bridges first and migrates bridge settings from older releases, and a restore that applied nothing answers with its errors

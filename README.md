@@ -39,7 +39,7 @@ of port forwarding etc.
 | Channel | Branch | Current Version | Description |
 |---------|--------|-----------------|-------------|
 | **Stable** | `main` | v2.0.59 | Production-ready, recommended for most users |
-| **Alpha** | `alpha` | v2.1.0-alpha.962 | Ahead of Stable, carries the additions listed under Alpha Features |
+| **Alpha** | `alpha` | v2.1.0-alpha.963 | Ahead of Stable, carries the additions listed under Alpha Features |
 | **Testing** | `testing` | v4.1.0-testing.x | ⚠️ **Highly unstable!** Experimental features, may break |
 
 ### Which version should I use?
@@ -421,6 +421,9 @@ Re-assign the affected devices to their rooms after they reconnect. See the [doc
 
 <details>
 <summary><strong>🧪 Alpha Features (v2.1.0-alpha.x)</strong> - Click to expand</summary>
+
+**v2.1.0-alpha.963:**
+- **Group sensors are ready before bridges start**: after a Home Assistant restart, a sensor group helper can still lack its device class when Home Assistant reports running, so its temperature, humidity or pressure devices were missing from the first device list and appeared a minute later as new devices on Google Home. The hub now waits up to 60 s for such groups before bridges start. A group that stays incomplete is named in the log and picked up by the next registry refresh as before (#540, thanks @KRZ303)
 
 **v2.1.0-alpha.962:**
 - **Web API hardening**: a request with a broken percent escape, a backup download named `.` or an oversized backup upload no longer stops the hub; backup restore and bridge icon upload refuse bridge ids that point outside the storage folder; the installed plugins list no longer returns plugin secrets; plugin install accepts a version or tag only, not a URL or path, and npm runs without the hub's tokens
