@@ -421,6 +421,12 @@ Home, ...) are not placed in the same network segment. Please make sure to revie
 <details>
 <summary><strong>🧪 Alpha (v2.1.0-alpha.x)</strong></summary>
 
+**v2.1.0-alpha.965:**
+- **Unique ID Suffix help text**: the setting takes effect after a restart of the whole app (add-on), a bridge restart is not enough; a new bridge uses it right away.
+
+**v2.1.0-alpha.964:**
+- **Factory reset during pairing**: a factory reset while a controller was still pairing (fail-safe armed after AddNOC) logged "Datasource not yet initialized" errors. The hub now rolls the open pairing back before it erases the bridge ([#541](https://github.com/RiDDiX/home-assistant-matter-hub/discussions/541)).
+
 **v2.1.0-alpha.963:**
 - **Group sensors are ready before bridges start**: after a Home Assistant restart, a sensor group helper can still lack its device class when Home Assistant reports running, so its temperature, humidity or pressure devices were missing from the first device list and appeared a minute later as new devices on Google Home. The hub now waits up to 60 s for such groups before bridges start. A group that stays incomplete is named in the log and picked up by the next registry refresh as before (#540, thanks @KRZ303)
 
