@@ -32,6 +32,16 @@ const WebSocketContext = createContext<WebSocketContextValue>({
   error: null,
 });
 
+export function wsUrl() {
+  const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+  // Use the base URL from the document to support Home Assistant ingress
+  const base = document.querySelector("base")?.href || window.location.origin;
+  const baseUrl = new URL(base);
+  return `${protocol}//${baseUrl.host}${baseUrl.pathname}api/ws`
+    .replace(/\/+/g, "/")
+    .replace(":/", "://");
+}
+
 export function useWebSocketStatus() {
   return useContext(WebSocketContext);
 }
@@ -76,16 +86,8 @@ export function WebSocketProvider({ children }: WebSocketProviderProps) {
       return;
     }
 
-    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    // Use the base URL from the document to support Home Assistant ingress
-    const base = document.querySelector("base")?.href || window.location.origin;
-    const baseUrl = new URL(base);
-    const wsUrl = `${protocol}//${baseUrl.host}${baseUrl.pathname}api/ws`
-      .replace(/\/+/g, "/")
-      .replace(":/", "://");
-
     try {
-      const ws = new WebSocket(wsUrl);
+      const ws = new WebSocket(wsUrl());
       wsRef.current = ws;
 
       ws.onopen = () => {

@@ -77,9 +77,10 @@ export const BridgeConfigEditor = (props: BridgeConfigEditorProps) => {
     [props.bridgeId, props.usedPorts, t],
   );
 
+  const [iconRevision, setIconRevision] = useState(0);
+
   const onChange = (data: object | undefined, isValid: boolean) => {
-    // Preserve the icon field when FormEditor/JsonEditor updates
-    // since icon is managed separately by BridgeIconUpload
+    // FormEditor hides the icon, BridgeIconUpload manages it
     const prevIcon = (prev: object | undefined) => (prev as BridgeConfig)?.icon;
     setConfig((prev) => {
       const icon = prevIcon(prev);
@@ -88,7 +89,16 @@ export const BridgeConfigEditor = (props: BridgeConfigEditorProps) => {
     setIsValid(isValid);
   };
 
+  // the JSON text shows the icon, so its value wins; unparsable text keeps
+  // the last parsed config
+  const onJsonChange = (data: object | undefined, isValid: boolean) => {
+    setConfig((prev) => (data ? { ...data } : prev));
+    setIsValid(isValid);
+  };
+
   const handleIconChange = useCallback((icon: BridgeIconType | undefined) => {
+    // remount the JSON editor so its text shows the picked icon
+    setIconRevision((r) => r + 1);
     setConfig((prev) => {
       if (icon != null) {
         return { ...prev, icon };
@@ -205,15 +215,21 @@ export const BridgeConfigEditor = (props: BridgeConfigEditorProps) => {
 
         {editorMode === BridgeEditorMode.JSON_EDITOR && (
           <JsonEditor
+            key={iconRevision}
             value={config ?? {}}
-            onChange={onChange}
+            onChange={onJsonChange}
             schema={bridgeConfigSchema}
             customValidate={validatePort}
           />
         )}
 
         {(config as BridgeConfig)?.filter && (
-          <FilterPreview filter={(config as BridgeConfig).filter} />
+          <FilterPreview
+            filter={(config as BridgeConfig).filter}
+            includeHiddenEntities={
+              (config as BridgeConfig).featureFlags?.includeHiddenEntities
+            }
+          />
         )}
 
         <Card variant="outlined">

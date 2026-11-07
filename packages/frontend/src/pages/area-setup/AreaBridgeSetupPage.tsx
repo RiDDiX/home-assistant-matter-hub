@@ -126,7 +126,8 @@ export const AreaBridgeSetupPage = () => {
 
       // no port: the backend picks the lowest free one for each bridge
       const request: CreateBridgeRequest = {
-        name: area.name,
+        // bridge names are capped at 32 code points, as ajv counts them
+        name: Array.from(area.name).slice(0, 32).join("").trimEnd(),
         filter: {
           include: [
             {

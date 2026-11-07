@@ -591,7 +591,9 @@ export function matterApi(
       res.status(503).json({ error: "Home Assistant registry not available" });
       return;
     }
-    const filter = req.body as HomeAssistantFilter;
+    const filter = req.body as HomeAssistantFilter & {
+      includeHiddenEntities?: boolean;
+    };
     if (!filter?.include || !filter?.exclude) {
       res.status(400).json({ error: "Invalid filter configuration" });
       return;
@@ -609,6 +611,9 @@ export function matterApi(
     }> = [];
 
     for (const entity of entities) {
+      // same gates as BridgeRegistry before the filter runs
+      if (entity.disabled_by != null) continue;
+      if (entity.hidden_by != null && !filter.includeHiddenEntities) continue;
       const device = entity.device_id ? devices[entity.device_id] : undefined;
       const state = states[entity.entity_id];
 
@@ -637,8 +642,14 @@ export function matterApi(
 
     matchingEntities.sort((a, b) => a.entity_id.localeCompare(b.entity_id));
 
+    const domains: Record<string, number> = {};
+    for (const e of matchingEntities) {
+      domains[e.domain] = (domains[e.domain] ?? 0) + 1;
+    }
+
     res.status(200).json({
       total: matchingEntities.length,
+      domains,
       entities: matchingEntities.slice(0, 100),
       truncated: matchingEntities.length > 100,
     });

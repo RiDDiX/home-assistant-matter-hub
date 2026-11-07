@@ -4,6 +4,7 @@ import type {
   WebSocketMessage,
 } from "@home-assistant-matter-hub/common";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { wsUrl } from "../contexts/WebSocketContext.tsx";
 
 const MAX_EVENTS = 200;
 
@@ -19,14 +20,7 @@ export function useDiagnostics() {
   const connect = useCallback(() => {
     if (wsRef.current?.readyState === WebSocket.OPEN) return;
 
-    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const base = document.querySelector("base")?.href || window.location.origin;
-    const baseUrl = new URL(base);
-    const wsUrl = `${protocol}//${baseUrl.host}${baseUrl.pathname}api/ws`
-      .replace(/\/+/g, "/")
-      .replace(":/", "://");
-
-    const ws = new WebSocket(wsUrl);
+    const ws = new WebSocket(wsUrl());
     wsRef.current = ws;
 
     ws.onopen = () => {

@@ -21,10 +21,12 @@ interface FilterPreviewProps {
     exclude: Array<{ type: string; value: string }>;
     includeMode?: string;
   };
+  includeHiddenEntities?: boolean;
 }
 
 interface PreviewResult {
   total: number;
+  domains: Record<string, number>;
   entities: Array<{
     entity_id: string;
     friendly_name?: string;
@@ -45,6 +47,7 @@ const domainToMatterType: Record<string, string> = {
   media_player: "Speaker / Video Player",
   vacuum: "Robot Vacuum Cleaner",
   humidifier: "Humidifier",
+  lawn_mower: "Robotic Lawn Mower",
   valve: "Water Valve",
   alarm_control_panel: "On/Off Plug-in Unit",
   event: "Generic Switch",
@@ -70,7 +73,10 @@ const tryParseJson = (text: string): unknown => {
   }
 };
 
-export function FilterPreview({ filter }: FilterPreviewProps) {
+export function FilterPreview({
+  filter,
+  includeHiddenEntities,
+}: FilterPreviewProps) {
   const { t } = useTranslation();
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<PreviewResult | null>(null);
@@ -86,7 +92,7 @@ export function FilterPreview({ filter }: FilterPreviewProps) {
       const response = await fetch("api/matter/filter-preview", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(filter),
+        body: JSON.stringify({ ...filter, includeHiddenEntities }),
       });
 
       const text = await response.text();
@@ -108,7 +114,7 @@ export function FilterPreview({ filter }: FilterPreviewProps) {
     } finally {
       setLoading(false);
     }
-  }, [filter, t]);
+  }, [filter, includeHiddenEntities, t]);
 
   // Auto-refresh when filter changes (debounced 800ms)
   useEffect(() => {
@@ -123,7 +129,7 @@ export function FilterPreview({ filter }: FilterPreviewProps) {
       return;
     }
 
-    const newJson = JSON.stringify(filter);
+    const newJson = JSON.stringify({ ...filter, includeHiddenEntities });
     if (newJson === filterJsonRef.current) return;
 
     if (debounceRef.current) clearTimeout(debounceRef.current);
@@ -137,22 +143,14 @@ export function FilterPreview({ filter }: FilterPreviewProps) {
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
     };
-  }, [filter, fetchPreview]);
+  }, [filter, includeHiddenEntities, fetchPreview]);
 
-  const domainCounts = result
-    ? result.entities.reduce(
-        (acc, e) => {
-          acc[e.domain] = (acc[e.domain] || 0) + 1;
-          return acc;
-        },
-        {} as Record<string, number>,
-      )
-    : {};
+  // counted server side, the entity list stops at 100
+  const domainCounts = result?.domains ?? {};
 
   const warnings: { text: string; vacuum?: boolean }[] = [];
   if (result) {
-    const hasVacuum = result.entities.some((e) => e.domain === "vacuum");
-    if (hasVacuum) {
+    if (domainCounts.vacuum) {
       warnings.push({ text: t("filterPreview.vacuumHint"), vacuum: true });
     }
     if (result.total > 50) {

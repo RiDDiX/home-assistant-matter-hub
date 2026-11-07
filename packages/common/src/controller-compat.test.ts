@@ -207,6 +207,28 @@ describe("energy device type support", () => {
   });
 });
 
+describe("plug override device types", () => {
+  it("dimmable plug-in unit (0x010B) warns on Google only", () => {
+    const warnings = computeControllerWarnings(
+      ["apple", "google", "alexa"],
+      [{ entityId: "light.lamp", deviceTypeId: 0x10b }],
+    );
+    expect(warnings.map((w) => w.controller)).toEqual(["google"]);
+  });
+
+  it("mounted on/off control (0x010F) warns outside Aqara and SmartThings", () => {
+    const warnings = computeControllerWarnings(
+      ["apple", "google", "alexa", "aqara", "smartthings"],
+      [{ entityId: "switch.wall", deviceTypeId: 0x10f }],
+    );
+    expect(warnings.map((w) => w.controller).sort()).toEqual([
+      "alexa",
+      "apple",
+      "google",
+    ]);
+  });
+});
+
 describe("controllerWarningsForFabrics", () => {
   it("derives warnings from a fabric's root vendor id", () => {
     const warnings = controllerWarningsForFabrics(

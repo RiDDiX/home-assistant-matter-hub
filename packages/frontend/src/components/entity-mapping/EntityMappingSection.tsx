@@ -175,7 +175,11 @@ export function EntityMappingSection({ bridgeId }: EntityMappingSectionProps) {
 
   const handleExportConfirm = useCallback(async () => {
     try {
-      const entityIds = [...exportSelected];
+      // no ids = every mapping; hundreds of ids overflow the request line
+      const entityIds =
+        exportSelected.size === mappingsList.length
+          ? undefined
+          : [...exportSelected];
       const profile = await exportMappingProfile(
         bridgeId,
         exportProfileName,
@@ -194,7 +198,7 @@ export function EntityMappingSection({ bridgeId }: EntityMappingSectionProps) {
     } catch {
       setError(t("mapping.exportFailed"));
     }
-  }, [bridgeId, exportSelected, exportProfileName, t]);
+  }, [bridgeId, exportSelected, exportProfileName, mappingsList.length, t]);
 
   const handleExportCancel = useCallback(() => {
     setExportDialogOpen(false);
