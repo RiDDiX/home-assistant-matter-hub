@@ -411,7 +411,6 @@
     "namePlaceholder": "Ytterdörr",
     "nameHelperText": "Vänligt namn för denna autentiseringsuppgift",
     "entityRequired": "Enhets-ID krävs",
-    "pinLength": "PIN-koden måste vara 4-8 siffror",
     "pinDigitsOnly": "PIN-koden får endast innehålla siffror",
     "saveFailed": "Misslyckades med att spara",
     "loadFailed": "Misslyckades med att ladda inloggningsuppgifterna",
@@ -500,8 +499,7 @@
     "settings": "Säkerhetskopieringsinställningar",
     "autoBackupLabel": "Automatisk säkerhetskopiering",
     "autoBackupDesc": "Skapar automatiskt en fullständig säkerhetskopia när programmet stängs av eller startas om.",
-    "retentionCount": "Behåll säkerhetskopior",
-    "retentionCountDesc": "Antal säkerhetskopior att behålla (de äldsta raderas automatiskt)"
+    "retentionCount": "Behåll säkerhetskopior"
   },
   "networkMap": {
     "title": "Nätverkskarta",

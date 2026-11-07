@@ -448,7 +448,6 @@
     "namePlaceholder": "Ex: PIN de Visitante",
     "nameHelperText": "Um nome para identificar facilmente esta credencial",
     "entityRequired": "A entidade da fechadura é obrigatória",
-    "pinLength": "O código PIN deve ter no mínimo 4 dígitos",
     "pinDigitsOnly": "O código PIN deve conter apenas números",
     "saveFailed": "Falha ao salvar credencial",
     "loadFailed": "Falha ao carregar credenciais",
@@ -537,8 +536,7 @@
     "settings": "Configurações",
     "autoBackupLabel": "Backups Automáticos",
     "autoBackupDesc": "Cria automaticamente um backup completo quando o aplicativo é encerrado ou reiniciado.",
-    "retentionCount": "Limite de Retenção",
-    "retentionCountDesc": "Quantidade de backups a manter (os mais antigos são excluídos automaticamente)"
+    "retentionCount": "Limite de Retenção"
   },
   "networkMap": {
     "title": "Mapa de Rede",

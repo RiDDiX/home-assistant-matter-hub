@@ -90,9 +90,9 @@ async function invoke(
   await aggregator.add(endpoint);
 
   calls.length = 0;
-  await endpoint.act((agent) => {
+  await endpoint.act(async (agent) => {
     // biome-ignore lint/suspicious/noExplicitAny: invoke the door lock command
-    (agent as any).doorLock[command]({});
+    await (agent as any).doorLock[command]({});
   });
   await server.close().catch(() => {});
   return calls[calls.length - 1];

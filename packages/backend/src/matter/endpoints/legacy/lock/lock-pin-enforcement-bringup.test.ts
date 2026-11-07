@@ -8,8 +8,9 @@ import { join } from "node:path";
 import type { HomeAssistantEntityInformation } from "@home-assistant-matter-hub/common";
 import { Environment, VariableService } from "@matter/general";
 import { Endpoint, VendorId } from "@matter/main";
+import { DoorLock } from "@matter/main/clusters";
 import { ServerNode } from "@matter/main/node";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { BridgeDataProvider } from "../../../../services/bridges/bridge-data-provider.js";
 import {
   type HomeAssistantAction,
@@ -71,6 +72,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  vi.useRealTimers();
   await server?.close().catch(() => {});
   server = undefined;
   rmSync(dir, { recursive: true, force: true });
@@ -156,6 +158,37 @@ describe("PIN enforcement follows the credential store (#464 follow-up)", () => 
     await requirePin(endpoint).toBe(false);
     calls.length = 0;
     await unlock(endpoint);
+    expect(calls.length).toBe(1);
+  });
+
+  it("locks out after the advertised number of wrong PINs", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const endpoint = await mount();
+    await storage.setCredential({
+      entityId: "lock.front_door",
+      pinCode: "4321",
+    });
+    await requirePin(endpoint).toBe(true);
+    const alarms: unknown[] = [];
+    // biome-ignore lint/suspicious/noExplicitAny: subscribe to the cluster event
+    (endpoint.events as any).doorLock.doorLockAlarm.on((e: unknown) =>
+      alarms.push(e),
+    );
+    const good = new TextEncoder().encode("4321");
+    const bad = new TextEncoder().encode("0000");
+    calls.length = 0;
+    await expect(unlock(endpoint, bad)).rejects.toThrow("Invalid PIN");
+    await expect(unlock(endpoint)).rejects.toThrow("PIN code required");
+    expect(alarms).toHaveLength(0);
+    await expect(unlock(endpoint, bad)).rejects.toThrow("Invalid PIN");
+    expect(alarms).toEqual([
+      { alarmCode: DoorLock.AlarmCode.WrongCodeEntryLimit },
+    ]);
+
+    // The right PIN is refused too until UserCodeTemporaryDisableTime is over.
+    await expect(unlock(endpoint, good)).rejects.toThrow("lockout");
+    vi.setSystemTime(Date.now() + 10_000);
+    await unlock(endpoint, good);
     expect(calls.length).toBe(1);
   });
 });

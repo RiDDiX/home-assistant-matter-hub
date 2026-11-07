@@ -461,7 +461,6 @@
     "namePlaceholder": "Voordeur",
     "nameHelperText": "Weergavenaam voor deze toegangscode",
     "entityRequired": "Entiteit-ID is verplicht",
-    "pinLength": "Pincode moet 4-8 cijfers lang zijn",
     "pinDigitsOnly": "Pincode mag alleen cijfers bevatten",
     "saveFailed": "Opslaan mislukt",
     "loadFailed": "Toegangscodes konden niet worden geladen",
@@ -550,8 +549,7 @@
     "settings": "Back-upinstellingen",
     "autoBackupLabel": "Automatische back-up",
     "autoBackupDesc": "Maakt automatisch een volledige back-up wanneer de applicatie wordt afgesloten of herstart.",
-    "retentionCount": "Back-ups bewaren",
-    "retentionCountDesc": "Aantal te bewaren back-ups (de oudste worden automatisch verwijderd)"
+    "retentionCount": "Back-ups bewaren"
   },
   "networkMap": {
     "title": "Netwerkkaart",

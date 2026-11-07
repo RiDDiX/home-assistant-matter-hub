@@ -1,5 +1,5 @@
 import type { HomeAssistantEntityInformation } from "@home-assistant-matter-hub/common";
-import { Logger, Seconds, Time, type Timer } from "@matter/general";
+import { Logger, Seconds, Time, type Timer, Timestamp } from "@matter/general";
 import { DoorLockServer as Base } from "@matter/main/behaviors";
 import { DoorLock } from "@matter/main/clusters";
 import {
@@ -120,17 +120,17 @@ function clampPinLength(value: number | undefined): number | undefined {
 
 // Per-entity PIN length override (#418). A lock that wants an exact length sets
 // min == max so controllers advertise the right bounds. Falls back to 4/8 when
-// unset or inconsistent (min > max).
-function effectivePinCodeLengths(homeAssistant: HomeAssistantEntityBehavior): {
+// unset or inconsistent (min > max). The web API checks its PINs with it too.
+export function effectivePinCodeLengths(
+  mapping: { lockPinMinLength?: number; lockPinMaxLength?: number } | undefined,
+): {
   min: number;
   max: number;
 } {
   const min =
-    clampPinLength(homeAssistant.state.mapping?.lockPinMinLength) ??
-    DEFAULT_MIN_PIN_LENGTH;
+    clampPinLength(mapping?.lockPinMinLength) ?? DEFAULT_MIN_PIN_LENGTH;
   const max =
-    clampPinLength(homeAssistant.state.mapping?.lockPinMaxLength) ??
-    DEFAULT_MAX_PIN_LENGTH;
+    clampPinLength(mapping?.lockPinMaxLength) ?? DEFAULT_MAX_PIN_LENGTH;
   if (min > max) {
     return { min: DEFAULT_MIN_PIN_LENGTH, max: DEFAULT_MAX_PIN_LENGTH };
   }
@@ -706,6 +706,100 @@ function clearStaleSendPinOverTheAir(state: object) {
   }
 }
 
+type PinLockServer = LockServerWithPinBase | LockServerWithPinAndUnboltBase;
+
+// Required PinCredential defaults have to be in place before super.initialize(),
+// or matter.js fails validation with "Behaviors have errors".
+function applyPinDefaults(state: PinLockServer["state"]) {
+  clearStaleSendPinOverTheAir(state);
+  state.numberOfPinUsersSupported ??= 1;
+  state.maxPinCodeLength ??= DEFAULT_MAX_PIN_LENGTH;
+  state.minPinCodeLength ??= DEFAULT_MIN_PIN_LENGTH;
+  state.requirePinForRemoteOperation ??= false;
+  state.numberOfTotalUsersSupported ??= 1;
+  state.numberOfCredentialsSupportedPerUser ??= 1;
+}
+
+function pinLockState(
+  server: PinLockServer,
+  entity: HomeAssistantEntityInformation,
+) {
+  const homeAssistant = server.agent.get(HomeAssistantEntityBehavior);
+  const pinLengths = effectivePinCodeLengths(homeAssistant.state.mapping);
+  return {
+    ...plainLockState(server.state.config, entity, server.agent),
+    numberOfPinUsersSupported: 1,
+    numberOfTotalUsersSupported: 1,
+    numberOfCredentialsSupportedPerUser: 1,
+    maxPinCodeLength: pinLengths.max,
+    minPinCodeLength: pinLengths.min,
+    requirePinForRemoteOperation: pinIsRequired(server.env, homeAssistant),
+  };
+}
+
+/**
+ * The remote PIN gate of unlock, unlockWithTimeout and unbolt. matter.js counts
+ * wrong codes and locks out in its private #authorize, which these overrides
+ * never reach, so the same internal counter is kept here. Returns the PIN to
+ * pass on to Home Assistant, undefined when the lock needs none.
+ */
+async function assertRemotePin(
+  server: PinLockServer,
+  pinCode: DoorLock.UnlockDoorRequest["pinCode"],
+  operation: string,
+): Promise<string | undefined> {
+  const homeAssistant = server.agent.get(HomeAssistantEntityBehavior);
+  const { entityId } = homeAssistant;
+  if (!pinIsRequired(server.env, homeAssistant)) {
+    return undefined;
+  }
+  const { internal } = server;
+  if (
+    internal.lockoutEndsAt !== undefined &&
+    Time.nowMs < internal.lockoutEndsAt
+  ) {
+    logger.info(`${operation} REJECTED for ${entityId} - wrong code lockout`);
+    throw new StatusResponseError(
+      "Lock operations are ignored during the wrong code lockout",
+      StatusCode.Failure,
+    );
+  }
+  const pin = pinCode ? new TextDecoder().decode(pinCode) : undefined;
+  if (
+    pin !== undefined &&
+    (await verifyStoredPinHelper(server.env, entityId, pin))
+  ) {
+    internal.wrongCodeCount = 0;
+    logger.debug(`${operation} PIN verified for ${entityId}`);
+    return pin;
+  }
+  logger.info(
+    `${operation} REJECTED for ${entityId} - ${pin === undefined ? "no PIN provided" : "invalid PIN"}`,
+  );
+  // A missing PIN counts as a wrong one, as in matter.js.
+  const { wrongCodeEntryLimit, userCodeTemporaryDisableTime } = server.state;
+  if (
+    wrongCodeEntryLimit !== undefined &&
+    userCodeTemporaryDisableTime !== undefined &&
+    ++internal.wrongCodeCount >= wrongCodeEntryLimit
+  ) {
+    internal.wrongCodeCount = 0;
+    internal.lockoutEndsAt = Timestamp(
+      Time.nowMs + Seconds(userCodeTemporaryDisableTime),
+    );
+    server.events.doorLockAlarm.emit(
+      { alarmCode: DoorLock.AlarmCode.WrongCodeEntryLimit },
+      server.context,
+    );
+  }
+  throw new StatusResponseError(
+    pin === undefined
+      ? "PIN code required for remote operation"
+      : "Invalid PIN code",
+    StatusCode.Failure,
+  );
+}
+
 const PinCredentialBase = Base.with(
   "User",
   "PinCredential",
@@ -718,33 +812,11 @@ const PinCredentialBase = Base.with(
   credentialRulesSupport: { single: true, dual: false, tri: false },
 });
 
-// biome-ignore lint/correctness/noUnusedVariables: Biome thinks this is unused, but it's used by the function below
 class LockServerWithPinBase extends PinCredentialBase {
   declare state: LockServerWithPinBase.State;
 
   override async initialize() {
-    clearStaleSendPinOverTheAir(this.state);
-    // Set required PinCredential defaults BEFORE super.initialize() to prevent
-    // "Behaviors have errors" validation failures
-    if (this.state.numberOfPinUsersSupported === undefined) {
-      this.state.numberOfPinUsersSupported = 1;
-    }
-    if (this.state.maxPinCodeLength === undefined) {
-      this.state.maxPinCodeLength = 8;
-    }
-    if (this.state.minPinCodeLength === undefined) {
-      this.state.minPinCodeLength = 4;
-    }
-    if (this.state.requirePinForRemoteOperation === undefined) {
-      this.state.requirePinForRemoteOperation = false;
-    }
-    if (this.state.numberOfTotalUsersSupported === undefined) {
-      this.state.numberOfTotalUsersSupported = 1;
-    }
-    if (this.state.numberOfCredentialsSupportedPerUser === undefined) {
-      this.state.numberOfCredentialsSupportedPerUser = 1;
-    }
-
+    applyPinDefaults(this.state);
     await super.initialize();
     const homeAssistant = await this.agent.load(HomeAssistantEntityBehavior);
     this.update(homeAssistant.entity);
@@ -776,34 +848,7 @@ class LockServerWithPinBase extends PinCredentialBase {
     if (!entity.state || !entity.state.attributes) {
       return;
     }
-
-    const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);
-    const hasPinConfigured = pinIsRequired(this.env, homeAssistant);
-    const pinLengths = effectivePinCodeLengths(homeAssistant);
-
-    applyPatchState(this.state, {
-      lockState: this.state.config.getLockState(entity.state, this.agent),
-      lockType: DoorLock.LockType.DeadBolt,
-      operatingMode: DoorLock.OperatingMode.Normal,
-      actuatorEnabled: true,
-      // Matter DoorLock bitmap: true = mode NOT supported (inverted semantics)
-      supportedOperatingModes: {
-        noRemoteLockUnlock: true,
-        normal: false,
-        passage: true,
-        privacy: true,
-        vacation: true,
-        // AlwaysSet (bits 5-15) is mandatory per the Matter spec; matter.js
-        // requires supportedOperatingModes.alwaysSet to be 2047.
-        alwaysSet: 2047,
-      },
-      numberOfPinUsersSupported: 1,
-      numberOfTotalUsersSupported: 1,
-      numberOfCredentialsSupportedPerUser: 1,
-      maxPinCodeLength: pinLengths.max,
-      minPinCodeLength: pinLengths.min,
-      requirePinForRemoteOperation: hasPinConfigured,
-    });
+    applyPatchState(this.state, pinLockState(this, entity));
   }
 
   override lockDoor(request: DoorLock.LockDoorRequest) {
@@ -838,31 +883,9 @@ class LockServerWithPinBase extends PinCredentialBase {
       `unlockDoor called for ${homeAssistant.entityId}, PIN provided: ${hasPinProvided}, requirePin: ${this.state.requirePinForRemoteOperation}`,
     );
 
-    if (pinIsRequired(this.env, homeAssistant)) {
-      if (!request.pinCode) {
-        logger.info(
-          `unlockDoor REJECTED for ${homeAssistant.entityId} - no PIN provided`,
-        );
-        throw new StatusResponseError(
-          "PIN code required for remote unlock",
-          StatusCode.Failure,
-        );
-      }
-      const providedPin = new TextDecoder().decode(request.pinCode);
-      if (
-        !(await verifyStoredPinHelper(
-          this.env,
-          homeAssistant.entityId,
-          providedPin,
-        ))
-      ) {
-        logger.info(
-          `unlockDoor REJECTED for ${homeAssistant.entityId} - invalid PIN`,
-        );
-        throw new StatusResponseError("Invalid PIN code", StatusCode.Failure);
-      }
-      logger.debug(`unlockDoor PIN verified for ${homeAssistant.entityId}`);
-      action.data = { ...action.data, code: providedPin };
+    const pin = await assertRemotePin(this, request.pinCode, "unlockDoor");
+    if (pin !== undefined) {
+      action.data = { ...action.data, code: pin };
     }
 
     homeAssistant.callAction(action);
@@ -912,7 +935,7 @@ class LockServerWithPinBase extends PinCredentialBase {
       homeAssistant.entityId,
       request,
       this.context.fabric,
-      effectivePinCodeLengths(homeAssistant),
+      effectivePinCodeLengths(homeAssistant.state.mapping),
       usercodePassthroughFrom(homeAssistant),
     );
   }
@@ -984,31 +1007,11 @@ const PinCredentialUnboltBase = Base.with(
   credentialRulesSupport: { single: true, dual: false, tri: false },
 });
 
-// biome-ignore lint/correctness/noUnusedVariables: Used by the factory function below
 class LockServerWithPinAndUnboltBase extends PinCredentialUnboltBase {
   declare state: LockServerWithPinAndUnboltBase.State;
 
   override async initialize() {
-    clearStaleSendPinOverTheAir(this.state);
-    if (this.state.numberOfPinUsersSupported === undefined) {
-      this.state.numberOfPinUsersSupported = 1;
-    }
-    if (this.state.maxPinCodeLength === undefined) {
-      this.state.maxPinCodeLength = 8;
-    }
-    if (this.state.minPinCodeLength === undefined) {
-      this.state.minPinCodeLength = 4;
-    }
-    if (this.state.requirePinForRemoteOperation === undefined) {
-      this.state.requirePinForRemoteOperation = false;
-    }
-    if (this.state.numberOfTotalUsersSupported === undefined) {
-      this.state.numberOfTotalUsersSupported = 1;
-    }
-    if (this.state.numberOfCredentialsSupportedPerUser === undefined) {
-      this.state.numberOfCredentialsSupportedPerUser = 1;
-    }
-
+    applyPinDefaults(this.state);
     await super.initialize();
     const homeAssistant = await this.agent.load(HomeAssistantEntityBehavior);
     this.update(homeAssistant.entity);
@@ -1040,33 +1043,7 @@ class LockServerWithPinAndUnboltBase extends PinCredentialUnboltBase {
     if (!entity.state || !entity.state.attributes) {
       return;
     }
-    const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);
-    const hasPinConfigured = pinIsRequired(this.env, homeAssistant);
-    const pinLengths = effectivePinCodeLengths(homeAssistant);
-
-    applyPatchState(this.state, {
-      lockState: this.state.config.getLockState(entity.state, this.agent),
-      lockType: DoorLock.LockType.DeadBolt,
-      operatingMode: DoorLock.OperatingMode.Normal,
-      actuatorEnabled: true,
-      // Matter DoorLock bitmap: true = mode NOT supported (inverted semantics)
-      supportedOperatingModes: {
-        noRemoteLockUnlock: true,
-        normal: false,
-        passage: true,
-        privacy: true,
-        vacation: true,
-        // AlwaysSet (bits 5-15) is mandatory per the Matter spec; matter.js
-        // requires supportedOperatingModes.alwaysSet to be 2047.
-        alwaysSet: 2047,
-      },
-      numberOfPinUsersSupported: 1,
-      numberOfTotalUsersSupported: 1,
-      numberOfCredentialsSupportedPerUser: 1,
-      maxPinCodeLength: pinLengths.max,
-      minPinCodeLength: pinLengths.min,
-      requirePinForRemoteOperation: hasPinConfigured,
-    });
+    applyPatchState(this.state, pinLockState(this, entity));
   }
 
   override lockDoor(request: DoorLock.LockDoorRequest) {
@@ -1096,31 +1073,9 @@ class LockServerWithPinAndUnboltBase extends PinCredentialUnboltBase {
     logger.debug(
       `unlockDoor called for ${homeAssistant.entityId}, PIN provided: ${hasPinProvided}, requirePin: ${this.state.requirePinForRemoteOperation}, usingUnlatch: ${!!unlatchConfig}`,
     );
-    if (pinIsRequired(this.env, homeAssistant)) {
-      if (!request.pinCode) {
-        logger.info(
-          `unlockDoor REJECTED for ${homeAssistant.entityId} - no PIN provided`,
-        );
-        throw new StatusResponseError(
-          "PIN code required for remote unlock",
-          StatusCode.Failure,
-        );
-      }
-      const providedPin = new TextDecoder().decode(request.pinCode);
-      if (
-        !(await verifyStoredPinHelper(
-          this.env,
-          homeAssistant.entityId,
-          providedPin,
-        ))
-      ) {
-        logger.info(
-          `unlockDoor REJECTED for ${homeAssistant.entityId} - invalid PIN`,
-        );
-        throw new StatusResponseError("Invalid PIN code", StatusCode.Failure);
-      }
-      logger.debug(`unlockDoor PIN verified for ${homeAssistant.entityId}`);
-      action.data = { ...action.data, code: providedPin };
+    const pin = await assertRemotePin(this, request.pinCode, "unlockDoor");
+    if (pin !== undefined) {
+      action.data = { ...action.data, code: pin };
     }
     homeAssistant.callAction(action);
     scheduleRelock(this);
@@ -1139,31 +1094,9 @@ class LockServerWithPinAndUnboltBase extends PinCredentialUnboltBase {
     logger.debug(
       `unboltDoor called for ${homeAssistant.entityId}, PIN provided: ${hasPinProvided}, requirePin: ${this.state.requirePinForRemoteOperation}`,
     );
-    if (pinIsRequired(this.env, homeAssistant)) {
-      if (!request.pinCode) {
-        logger.info(
-          `unboltDoor REJECTED for ${homeAssistant.entityId} - no PIN provided`,
-        );
-        throw new StatusResponseError(
-          "PIN code required for remote unlatch",
-          StatusCode.Failure,
-        );
-      }
-      const providedPin = new TextDecoder().decode(request.pinCode);
-      if (
-        !(await verifyStoredPinHelper(
-          this.env,
-          homeAssistant.entityId,
-          providedPin,
-        ))
-      ) {
-        logger.info(
-          `unboltDoor REJECTED for ${homeAssistant.entityId} - invalid PIN`,
-        );
-        throw new StatusResponseError("Invalid PIN code", StatusCode.Failure);
-      }
-      logger.debug(`unboltDoor PIN verified for ${homeAssistant.entityId}`);
-      action.data = { ...action.data, code: providedPin };
+    const pin = await assertRemotePin(this, request.pinCode, "unboltDoor");
+    if (pin !== undefined) {
+      action.data = { ...action.data, code: pin };
     }
     homeAssistant.callAction(action);
     scheduleRelock(this);
@@ -1207,7 +1140,7 @@ class LockServerWithPinAndUnboltBase extends PinCredentialUnboltBase {
       homeAssistant.entityId,
       request,
       this.context.fabric,
-      effectivePinCodeLengths(homeAssistant),
+      effectivePinCodeLengths(homeAssistant.state.mapping),
       usercodePassthroughFrom(homeAssistant),
     );
   }

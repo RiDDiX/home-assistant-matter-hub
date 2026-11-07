@@ -461,7 +461,6 @@
     "namePlaceholder": "Cửa chính",
     "nameHelperText": "Tên dễ nhớ cho mã mở khóa này",
     "entityRequired": "ID thực thể là bắt buộc",
-    "pinLength": "Mã PIN phải có từ 4 đến 8 chữ số",
     "pinDigitsOnly": "Mã PIN chỉ được chứa các chữ số",
     "saveFailed": "Lưu thất bại",
     "loadFailed": "Không thể tải danh sách mã",
@@ -550,8 +549,7 @@
     "settings": "Cài đặt sao lưu",
     "autoBackupLabel": "Tự động sao lưu",
     "autoBackupDesc": "Tự động tạo bản sao lưu đầy đủ khi dừng hoặc khởi động lại ứng dụng.",
-    "retentionCount": "Số lượng bản sao lưu giữ lại",
-    "retentionCountDesc": "Số lượng bản sao lưu được lưu trữ (các bản cũ nhất sẽ tự động bị xóa)"
+    "retentionCount": "Số lượng bản sao lưu giữ lại"
   },
   "networkMap": {
     "title": "Sơ đồ mạng",

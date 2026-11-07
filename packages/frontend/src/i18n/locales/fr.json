@@ -461,7 +461,6 @@
     "namePlaceholder": "Porte d'entrée",
     "nameHelperText": "Nom convivial pour cet identifiant",
     "entityRequired": "L'ID de l'entité est obligatoire",
-    "pinLength": "Le code PIN doit comporter de 4 à 8 chiffres",
     "pinDigitsOnly": "Le code PIN ne doit contenir que des chiffres",
     "saveFailed": "Échec de l'enregistrement",
     "loadFailed": "Impossible de charger les identifiants",
@@ -550,8 +549,7 @@
     "settings": "Paramètres de sauvegarde",
     "autoBackupLabel": "Sauvegarde automatique",
     "autoBackupDesc": "Crée automatiquement une sauvegarde complète à l'arrêt ou au redémarrage de l'application.",
-    "retentionCount": "Sauvegardes conservées",
-    "retentionCountDesc": "Nombre de sauvegardes à conserver (les plus anciennes sont supprimées automatiquement)"
+    "retentionCount": "Sauvegardes conservées"
   },
   "networkMap": {
     "title": "Carte réseau",

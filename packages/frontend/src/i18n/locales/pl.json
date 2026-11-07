@@ -411,7 +411,6 @@
     "namePlaceholder": "Drzwi wejściowe",
     "nameHelperText": "Przyjazna nazwa dla tych danych dostępu",
     "entityRequired": "ID encji jest wymagane",
-    "pinLength": "PIN musi mieć 4-8 cyfr",
     "pinDigitsOnly": "PIN może zawierać tylko cyfry",
     "saveFailed": "Nie udało się zapisać",
     "loadFailed": "Nie udało się wczytać danych dostępu",
@@ -500,8 +499,7 @@
     "settings": "Ustawienia kopii",
     "autoBackupLabel": "Automatyczna kopia",
     "autoBackupDesc": "Automatycznie twórz pełną kopię podczas zamykania lub restartu aplikacji.",
-    "retentionCount": "Liczba przechowywanych kopii",
-    "retentionCountDesc": "Liczba kopii do zachowania (najstarsze są usuwane automatycznie)"
+    "retentionCount": "Liczba przechowywanych kopii"
   },
   "networkMap": {
     "title": "Mapa sieci",

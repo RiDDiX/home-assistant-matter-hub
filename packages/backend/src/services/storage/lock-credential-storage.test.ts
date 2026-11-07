@@ -104,4 +104,13 @@ describe("LockCredentialStorage.setCredential", () => {
     await storage.setCredential({ entityId: "lock.front", pinCode: "5678" });
     expect(storage.getCredential("lock.front")?.enabled).toBe(false);
   });
+
+  it("enables the first PIN on a slot SetUser created", async () => {
+    const { storage } = await load({ version: 2, credentials: [] });
+    await storage.setUser({ entityId: "lock.front", userName: "Guest" });
+    expect(storage.getCredential("lock.front")?.enabled).toBe(false);
+
+    await storage.setCredential({ entityId: "lock.front", pinCode: "5678" });
+    expect(storage.hasCredential("lock.front")).toBe(true);
+  });
 });

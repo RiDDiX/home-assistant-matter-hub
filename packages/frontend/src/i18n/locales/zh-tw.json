@@ -448,7 +448,6 @@
     "namePlaceholder": "例如：清潔人員",
     "nameHelperText": "用來識別此憑證的易記名稱。",
     "entityRequired": "必須選擇實體",
-    "pinLength": "PIN 碼長度必須在 4 到 8 位之間",
     "pinDigitsOnly": "PIN 碼只能包含數字",
     "saveFailed": "儲存憑證失敗",
     "loadFailed": "載入憑證失敗",
@@ -537,8 +536,7 @@
     "settings": "備份設定",
     "autoBackupLabel": "自動備份",
     "autoBackupDesc": "在應用程式關閉或重新啟動時自動建立完整備份。",
-    "retentionCount": "保留數量",
-    "retentionCountDesc": "要保留的備份數量（最舊的會自動刪除）"
+    "retentionCount": "保留數量"
   },
   "networkMap": {
     "title": "網路拓撲圖",

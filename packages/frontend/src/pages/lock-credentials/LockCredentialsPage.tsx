@@ -73,10 +73,11 @@ const CredentialDialog = ({
       setError(t("lockCredentials.entityRequired"));
       return;
     }
-    if (!pinCode || pinCode.length < 4 || pinCode.length > 8) {
-      setError(t("lockCredentials.pinLength"));
+    if (!pinCode) {
+      setError(t("lockCredentials.pinRequired"));
       return;
     }
+    // The length bounds follow the lock's mapping, the API checks them.
     if (!/^\d+$/.test(pinCode)) {
       setError(t("lockCredentials.pinDigitsOnly"));
       return;
@@ -130,7 +131,7 @@ const CredentialDialog = ({
             placeholder="1234"
             value={pinCode}
             onChange={(e) =>
-              setPinCode(e.target.value.replace(/\D/g, "").slice(0, 8))
+              setPinCode(e.target.value.replace(/\D/g, "").slice(0, 20))
             }
             fullWidth
             helperText={t("lockCredentials.pinHelperText")}
@@ -196,13 +197,14 @@ export const LockCredentialsPage = () => {
     pinCode: string,
     name: string,
   ) => {
+    const existing = credentials.find((c) => c.entityId === entityId);
     await updateLockCredential(entityId, {
       entityId,
       pinCode,
-      // an empty name clears it, a PIN change keeps the enabled switch
+      // an empty name clears it, a PIN change keeps the enabled switch, a
+      // slot without a PIN yet (Matter SetUser) starts enabled
       name,
-      enabled:
-        credentials.find((c) => c.entityId === entityId)?.enabled ?? true,
+      enabled: existing?.hasPinCode ? existing.enabled : true,
     });
     await loadCredentials();
   };
@@ -360,14 +362,16 @@ export const LockCredentialsPage = () => {
                             {credential.entityId}
                           </Typography>
                         )}
-                        <Typography
-                          component="span"
-                          variant="body2"
-                          color="text.secondary"
-                          sx={{ ml: credential.name ? 2 : 0 }}
-                        >
-                          {t("lockCredentials.pinMasked")}
-                        </Typography>
+                        {credential.hasPinCode && (
+                          <Typography
+                            component="span"
+                            variant="body2"
+                            color="text.secondary"
+                            sx={{ ml: credential.name ? 2 : 0 }}
+                          >
+                            {t("lockCredentials.pinMasked")}
+                          </Typography>
+                        )}
                       </>
                     }
                   />

@@ -411,7 +411,6 @@
     "namePlaceholder": "Örn. Misafir PIN",
     "nameHelperText": "Bu kimlik bilgisini daha kolay ayırt etmek için bir ad verin.",
     "entityRequired": "Varlık gerekli",
-    "pinLength": "PIN uzunluğu geçersiz",
     "pinDigitsOnly": "PIN yalnızca rakamlardan oluşmalıdır",
     "saveFailed": "Kaydetme başarısız",
     "loadFailed": "Yükleme başarısız",
@@ -500,8 +499,7 @@
     "settings": "Ayarlar",
     "autoBackupLabel": "Otomatik yedekleme",
     "autoBackupDesc": "Uygulama kapanırken veya yeniden başlatılırken otomatik olarak tam yedek oluştur.",
-    "retentionCount": "Saklama adedi",
-    "retentionCountDesc": "Saklanacak yedek sayısı (en eskileri otomatik olarak silinir)"
+    "retentionCount": "Saklama adedi"
   },
   "networkMap": {
     "title": "Ağ haritası",
