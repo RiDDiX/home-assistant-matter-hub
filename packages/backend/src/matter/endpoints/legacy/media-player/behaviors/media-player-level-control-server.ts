@@ -26,3 +26,11 @@ export const MediaPlayerLevelControlServer = SpeakerLevelControlServer({
     };
   },
 });
+
+// Without VOLUME_SET the level still follows volume_level, but commands
+// change nothing, otherwise matter.js would move the slider locally only.
+export class MediaPlayerReadOnlyLevelControlServer extends MediaPlayerLevelControlServer {
+  override moveToLevelLogic() {}
+  override moveLogic() {}
+  override stepLogic() {}
+}

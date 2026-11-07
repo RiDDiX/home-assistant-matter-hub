@@ -389,3 +389,43 @@ describe("Matter 1.4 water heater mode changes", () => {
     });
   });
 });
+
+describe("water heater thermostat Off", () => {
+  async function offAction(endpoint: Endpoint) {
+    let action: HomeAssistantAction | undefined;
+    await endpoint.act((agent) => {
+      // biome-ignore lint/suspicious/noExplicitAny: call the HA mapping directly
+      action = (agent as any).thermostat.state.config.setSystemMode(0, agent);
+    });
+    return action;
+  }
+
+  it("turns off through turn_off when operation_list has no off", async () => {
+    const endpoint = await bringUp(
+      waterHeater("eco", {
+        ...FULL_HEATER,
+        operation_list: ["eco", "electric"],
+      }),
+    );
+    expect(await offAction(endpoint)).toEqual({
+      action: "water_heater.turn_off",
+      data: {},
+    });
+  });
+
+  it("sends the entity's own Off spelling and reads it back as Off", async () => {
+    const endpoint = await bringUp(
+      waterHeater("Off", {
+        ...FULL_HEATER,
+        operation_list: ["Eco", "Off"],
+        operation_mode: "Off",
+      }),
+    );
+    expect(await offAction(endpoint)).toEqual({
+      action: "water_heater.set_operation_mode",
+      data: { operation_mode: "Off" },
+    });
+    // biome-ignore lint/suspicious/noExplicitAny: read cluster state
+    expect((endpoint.state as any).thermostat.systemMode).toBe(0);
+  });
+});

@@ -6,6 +6,7 @@ import {
   type WaterHeaterManagement,
   WaterHeaterMode,
 } from "@matter/main/clusters";
+import { trimToLength } from "../../../../utils/trim-to-length.js";
 
 /**
  * Matter mode values for the Home Assistant operation modes we know about.
@@ -105,7 +106,7 @@ export function normalizeOperationMode(operationMode: string): string {
   return operationMode.toLowerCase().replaceAll(" ", "_");
 }
 
-function isOffMode(operationMode: string): boolean {
+export function isOffMode(operationMode: string): boolean {
   return normalizeOperationMode(operationMode) === WaterHeaterOperationMode.off;
 }
 
@@ -130,8 +131,8 @@ function humanize(operationMode: string): string {
     .split("_")
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join(" ");
-  // ModeOptionStruct.Label is capped at 64 characters by the spec.
-  return label.slice(0, 64);
+  // ModeOptionStruct.Label is capped at 64 bytes by the spec.
+  return trimToLength(label, 64, "") ?? label;
 }
 
 /**
