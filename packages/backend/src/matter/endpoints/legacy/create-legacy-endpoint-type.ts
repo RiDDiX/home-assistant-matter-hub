@@ -3,10 +3,12 @@ import type {
   HomeAssistantDomain,
   HomeAssistantEntityInformation,
   MatterDeviceType,
+  VacuumDeviceAttributes,
 } from "@home-assistant-matter-hub/common";
 import { Logger } from "@matter/general";
 import type { EndpointType } from "@matter/main";
 import { FixedLabelServer } from "@matter/main/behaviors";
+import type { BridgeRegistry } from "../../../services/bridges/bridge-registry.js";
 import { trimToLength } from "../../../utils/trim-to-length.js";
 import type { HomeAssistantEntityBehavior } from "../../behaviors/home-assistant-entity-behavior.js";
 import {
@@ -85,6 +87,7 @@ import { SirenDevice } from "./siren/index.js";
 import { DimmablePlugInUnitType } from "./switch/dimmable-plugin-unit.js";
 import { SwitchDevice } from "./switch/index.js";
 import { MountedOnOffControlType } from "./switch/mounted-on-off-control.js";
+import { supportsCleaningModes } from "./vacuum/behaviors/vacuum-rvc-clean-mode-server.js";
 import { VacuumDevice } from "./vacuum/index.js";
 import { ValveDevice } from "./valve/index.js";
 import { WaterHeaterDevice } from "./water-heater/index.js";
@@ -138,12 +141,9 @@ export function createLegacyEndpointType(
   if (mapping?.matterDeviceType) {
     const overrideFactory = matterDeviceTypeFactories[mapping.matterDeviceType];
     if (overrideFactory) {
-      type = overrideFactory(ha);
-      // Explicit device types skip the domain path that swaps in battery
-      // variants, so attach a power source when a battery entity is mapped
-      // and the type does not already carry one (e.g. vacuum). A wired
-      // default (smoke_co_alarm, solar_power) only stands in for no battery
-      // at all, so a battery entity or attribute drops it.
+      type = overrideFactory(ha, options);
+      // A wired default (smoke_co_alarm, solar_power) only stands in for no
+      // battery at all, so a battery entity or attribute drops it.
       const attrs = entity.state.attributes as {
         battery?: number;
         battery_level?: number;
@@ -151,9 +151,6 @@ export function createLegacyEndpointType(
       const batteryAttr = attrs.battery != null || attrs.battery_level != null;
       if (type && (mapping.batteryEntity || batteryAttr)) {
         type = withoutWiredPowerSource(type);
-      }
-      if (type && mapping.batteryEntity && !hasPowerSource(type)) {
-        type = addPowerSource(type);
       }
     }
   }
@@ -178,7 +175,7 @@ export function createLegacyEndpointType(
           legacyLogger.info(
             `Using plugin domain mapping for "${domain}" → "${mappedType}"`,
           );
-          type = mappedFactory(ha);
+          type = mappedFactory(ha, options);
         }
       } else {
         return undefined;
@@ -188,6 +185,14 @@ export function createLegacyEndpointType(
 
   if (!type) {
     return undefined;
+  }
+
+  // A mapped battery is hidden as its own endpoint, and auto mapping puts it
+  // on every entity of the device. Explicit device types and domain types
+  // without a battery variant (moisture, event, illuminance) need a power
+  // source attached, or the level is lost.
+  if (mapping?.batteryEntity && !hasPowerSource(type)) {
+    type = addPowerSource(type);
   }
 
   validateEndpointType(type, entity.entity_id);
@@ -229,6 +234,36 @@ function addFixedLabel(type: EndpointType, areaName: string): EndpointType {
     ...type,
     behaviors: { ...type.behaviors, fixedLabel },
   } as EndpointType;
+}
+
+/**
+ * Cleaning mode options for a vacuum's RvcCleanMode, read from the mapped
+ * cleaning mode select. Without options (unavailable / not loaded) fall back to
+ * the defaults so mop modes are still generated, the runtime reads the entity
+ * live.
+ */
+export function resolveCleaningModeOptions(
+  registry: Pick<BridgeRegistry, "initialStateIncludingUnfiltered">,
+  entity: HomeAssistantEntityInformation,
+  mapping?: EntityMappingConfig,
+): string[] | undefined {
+  if (!entity.entity_id.startsWith("vacuum.")) return undefined;
+  let options: string[] | undefined;
+  if (mapping?.cleaningModeEntity) {
+    const cmState = registry.initialStateIncludingUnfiltered(
+      mapping.cleaningModeEntity,
+    );
+    options = (cmState?.attributes as { options?: string[] } | undefined)
+      ?.options;
+  }
+  if (
+    !options &&
+    (mapping?.cleaningModeEntity ||
+      supportsCleaningModes(entity.state.attributes as VacuumDeviceAttributes))
+  ) {
+    options = ["vacuum", "mop", "vacuum_and_mop", "vacuum_then_mop"];
+  }
+  return options;
 }
 
 function hasPowerSource(type: EndpointType): boolean {
@@ -305,6 +340,7 @@ const matterDeviceTypeFactories: Partial<
     MatterDeviceType,
     (
       homeAssistant: HomeAssistantEntityBehavior.State,
+      options?: LegacyEndpointOptions,
     ) => EndpointType | undefined
   >
 > = {
@@ -335,10 +371,12 @@ const matterDeviceTypeFactories: Partial<
     MountedOnOffControlType.set({ homeAssistantEntity: ha }),
   door_lock: LockDevice,
   window_covering: CoverDevice,
-  thermostat: ClimateDevice,
+  // the second ClimateDevice parameter is includeBasicInformation, not options
+  thermostat: (ha) => ClimateDevice(ha),
   fan: FanDevice,
   air_purifier: AirPurifierEndpoint,
-  robot_vacuum_cleaner: (ha) => VacuumDevice(ha),
+  robot_vacuum_cleaner: (ha, options) =>
+    VacuumDevice(ha, options?.vacuumOnOff, options?.cleaningModeOptions),
   robotic_lawn_mower: (ha) => LawnMowerDevice(ha),
   humidifier_dehumidifier: HumidifierDevice,
   speaker: SpeakerMediaPlayerDevice,

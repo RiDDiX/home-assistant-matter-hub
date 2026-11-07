@@ -347,6 +347,79 @@ describe("explicit matterDeviceType battery (#408)", () => {
 
 // The pm25, pm10 and co2 endpoints existed but were not selectable as an
 // override, unlike every sibling gas sensor.
+// With auto battery mapping the battery sensor is hidden, so a domain type
+// without a battery variant must still carry the level.
+describe("domain types with a mapped battery", () => {
+  it.each([
+    createEntity<BinarySensorDeviceAttributes>("binary_sensor.leak", "off", {
+      device_class: BinarySensorDeviceClass.Moisture,
+    }),
+    createEntity("event.button", "unknown", {
+      event_types: ["initial_press"],
+    }),
+  ])("$entity_id gets a power source", (entity) => {
+    const type = createLegacyEndpointType(entity, {
+      entityId: entity.entity_id,
+      batteryEntity: "sensor.battery",
+    });
+    expect(type!.behaviors).toHaveProperty("powerSource");
+  });
+});
+
+describe("robot_vacuum_cleaner override", () => {
+  const vacuum = createEntity<VacuumDeviceAttributes>("vacuum.v", "docked", {
+    supported_features: 15,
+  });
+  const options = {
+    vacuumOnOff: true,
+    cleaningModeOptions: ["vacuum", "mop", "vacuum_and_mop"],
+  };
+  const cleanModes = (type: EndpointType | undefined) =>
+    // biome-ignore lint/suspicious/noExplicitAny: inspecting matter.js internals
+    (type!.behaviors as any).rvcCleanMode.defaults.supportedModes.length;
+
+  it("keeps the vacuum options of the domain path", () => {
+    const domain = createLegacyEndpointType(
+      vacuum,
+      undefined,
+      undefined,
+      options,
+    );
+    const override = createLegacyEndpointType(
+      vacuum,
+      { entityId: "vacuum.v", matterDeviceType: "robot_vacuum_cleaner" },
+      undefined,
+      options,
+    );
+    expect(override!.behaviors).toHaveProperty("onOff");
+    expect(cleanModes(override)).toBe(cleanModes(domain));
+    expect(cleanModes(override)).toBeGreaterThan(
+      cleanModes(createLegacyEndpointType(vacuum)),
+    );
+  });
+});
+
+describe("air purifier fan features", () => {
+  it("adds Wind for presets mapped through fanWindPresets", () => {
+    const type = createLegacyEndpointType(
+      createEntity<FanDeviceAttributes>("fan.p", "on", {
+        supported_features: 8,
+        preset_modes: ["Natur", "Stark"],
+      }),
+      {
+        entityId: "fan.p",
+        matterDeviceType: "air_purifier",
+        fanWindPresets: { natural: ["Natur"] },
+      },
+    );
+    // biome-ignore lint/suspicious/noExplicitAny: inspecting matter.js internals
+    const featureMap = (type!.behaviors as any).fanControl.defaults.featureMap;
+    expect(featureMap.wind).toBe(true);
+    // preset-only speeds, the same as a plain fan
+    expect(featureMap.multiSpeed).toBe(true);
+  });
+});
+
 describe("particulate and co2 overrides", () => {
   const entity = createEntity("sensor.aq", "12", {});
 

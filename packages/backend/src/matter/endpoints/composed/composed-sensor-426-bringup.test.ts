@@ -268,6 +268,30 @@ describe("composed sensor endpoint with out-of-filter humidity and pressure subs
     expect(power.batPercentRemaining).toBe(160);
   });
 
+  it("pushes a battery-only change to the parent PowerSource", async () => {
+    const endpoint = await create();
+    await mount(endpoint);
+    const states: HomeAssistantStates = {
+      [TEMPERATURE]: state(TEMPERATURE, "21.5", "temperature", "°C"),
+      [HUMIDITY]: state(HUMIDITY, "55", "humidity", "%"),
+      [PRESSURE]: state(PRESSURE, "1013", "pressure", "hPa"),
+      [BATTERY]: state(BATTERY, "80", "battery", "%"),
+    };
+    await endpoint.updateStates(states);
+    await delay(200);
+
+    // the temperature stays put, only the battery moves
+    batteryPercent = 55;
+    await endpoint.updateStates({
+      ...states,
+      [BATTERY]: state(BATTERY, "55", "battery", "%"),
+    });
+    await delay(200);
+
+    // biome-ignore lint/suspicious/noExplicitAny: read cluster state off parent
+    expect((endpoint.state as any).powerSource.batPercentRemaining).toBe(110);
+  });
+
   it("keeps live updates flowing to an out-of-filter humidity sub-endpoint", async () => {
     const endpoint = await create();
     await mount(endpoint);

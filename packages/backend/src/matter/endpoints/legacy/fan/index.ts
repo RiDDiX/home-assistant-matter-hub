@@ -23,6 +23,56 @@ import {
   FanPlugOnOffServer,
 } from "./behaviors/fan-on-off-server.js";
 
+/** FanControl features of a fan entity, shared by fans and air purifiers. */
+export function fanControlFeatures(
+  attributes: FanDeviceAttributes,
+  mapping?: HomeAssistantEntityBehavior.State["mapping"],
+): FeatureSelection<typeof FanControl.Cluster> {
+  const supportedFeatures = attributes.supported_features ?? 0;
+  const presetModes = attributes.preset_modes ?? [];
+  const features: FeatureSelection<typeof FanControl.Cluster> = new Set();
+
+  // Enable MultiSpeed and Step for fans with percentage control OR preset modes
+  // For preset-only fans, speeds are mapped to preset modes (Low/Medium/High etc.)
+  if (
+    testBit(supportedFeatures, FanDeviceFeature.SET_SPEED) ||
+    presetModes.some((m) => m.toLowerCase() !== "auto")
+  ) {
+    features.add("MultiSpeed");
+    features.add("Step");
+  }
+
+  // Auto only if a preset really is "auto", else HA rejects the "Auto" we send (#387).
+  if (
+    testBit(supportedFeatures, FanDeviceFeature.PRESET_MODE) &&
+    autoPresetName(presetModes) !== undefined
+  ) {
+    features.add("Auto");
+  }
+  if (testBit(supportedFeatures, FanDeviceFeature.DIRECTION)) {
+    features.add("AirflowDirection");
+  }
+  // Enable Rocking (oscillation) if fan supports it
+  if (testBit(supportedFeatures, FanDeviceFeature.OSCILLATE)) {
+    features.add("Rocking");
+  }
+  // Enable Wind mode if fan has english natural/sleep presets, or localized
+  // ones the user mapped via fanWindPresets (#387).
+  const windPresets = mapping?.fanWindPresets;
+  const hasWindModes = presetModes.some(
+    (m) =>
+      m.toLowerCase() === "natural" ||
+      m.toLowerCase() === "nature" ||
+      m.toLowerCase() === "sleep" ||
+      !!windPresets?.natural?.includes(m) ||
+      !!windPresets?.sleep?.includes(m),
+  );
+  if (hasWindModes) {
+    features.add("Wind");
+  }
+  return features;
+}
+
 export function FanDevice(
   homeAssistantEntity: HomeAssistantEntityBehavior.State,
 ): EndpointType {
@@ -38,13 +88,10 @@ export function FanDevice(
   const hasBattery = hasBatteryAttr || hasBatteryEntity;
 
   const hasSetSpeed = testBit(supportedFeatures, FanDeviceFeature.SET_SPEED);
-  const hasPresetMode = testBit(
-    supportedFeatures,
-    FanDeviceFeature.PRESET_MODE,
-  );
-  const presetModes = attributes.preset_modes ?? [];
   // Filter out "Auto" from presets for speed calculation
-  const speedPresets = presetModes.filter((m) => m.toLowerCase() !== "auto");
+  const speedPresets = (attributes.preset_modes ?? []).filter(
+    (m) => m.toLowerCase() !== "auto",
+  );
 
   // On/off-only fan: no speed control and no speed-capable preset modes.
   // Use OnOffPlugInUnitDevice to avoid controllers showing percentage/speed
@@ -71,40 +118,7 @@ export function FanDevice(
     return onOffDevice.set({ homeAssistantEntity });
   }
 
-  const features: FeatureSelection<typeof FanControl.Cluster> = new Set();
-
-  // Enable MultiSpeed and Step for fans with percentage control OR preset modes
-  // For preset-only fans, speeds are mapped to preset modes (Low/Medium/High etc.)
-  if (hasSetSpeed || speedPresets.length > 0) {
-    features.add("MultiSpeed");
-    features.add("Step");
-  }
-
-  // Auto only if a preset really is "auto", else HA rejects the "Auto" we send (#387).
-  if (hasPresetMode && autoPresetName(presetModes) !== undefined) {
-    features.add("Auto");
-  }
-  if (testBit(supportedFeatures, FanDeviceFeature.DIRECTION)) {
-    features.add("AirflowDirection");
-  }
-  // Enable Rocking (oscillation) if fan supports it
-  if (testBit(supportedFeatures, FanDeviceFeature.OSCILLATE)) {
-    features.add("Rocking");
-  }
-  // Enable Wind mode if fan has english natural/sleep presets, or localized
-  // ones the user mapped via fanWindPresets (#387).
-  const windPresets = homeAssistantEntity.mapping?.fanWindPresets;
-  const hasWindModes = presetModes.some(
-    (m) =>
-      m.toLowerCase() === "natural" ||
-      m.toLowerCase() === "nature" ||
-      m.toLowerCase() === "sleep" ||
-      !!windPresets?.natural?.includes(m) ||
-      !!windPresets?.sleep?.includes(m),
-  );
-  if (hasWindModes) {
-    features.add("Wind");
-  }
+  const features = fanControlFeatures(attributes, homeAssistantEntity.mapping);
 
   const device = hasBattery
     ? Device.with(

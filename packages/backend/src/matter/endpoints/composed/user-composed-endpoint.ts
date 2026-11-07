@@ -20,7 +20,14 @@ import {
   withoutWiredPowerSource,
 } from "../../behaviors/power-source-server.js";
 import { duplicateNumberTags, setNumberTag } from "../duplicate-tags.js";
-import { createLegacyEndpointType } from "../legacy/create-legacy-endpoint-type.js";
+import {
+  createEndpointId,
+  mappedNonSubStateChanged,
+} from "../entity-endpoint.js";
+import {
+  createLegacyEndpointType,
+  resolveCleaningModeOptions,
+} from "../legacy/create-legacy-endpoint-type.js";
 import { updateEntityState } from "../update-entity-state.js";
 
 const logger = Logger.get("UserComposedEndpoint");
@@ -49,11 +56,6 @@ type MutableEndpointType = EndpointType & {
   with(...behaviors: unknown[]): EndpointType;
   set(state: Record<string, unknown>): EndpointType;
 };
-
-function createEndpointId(entityId: string, customName?: string): string {
-  const baseName = customName || entityId;
-  return baseName.replace(/\./g, "_").replace(/\s+/g, "_");
-}
 
 function buildEntityPayload(
   registry: BridgeRegistry,
@@ -157,11 +159,19 @@ export class UserComposedEndpoint extends Endpoint {
         state: { ...primaryPayload.state, attributes },
       };
     }
+    const vacuumOnOff = registry.isVacuumOnOffEnabled();
     const primaryType = createLegacyEndpointType(
       primarySubPayload,
       primaryMapping,
       config.areaName,
-      { vacuumOnOff: registry.isVacuumOnOffEnabled() },
+      {
+        vacuumOnOff,
+        cleaningModeOptions: resolveCleaningModeOptions(
+          registry,
+          primaryPayload,
+          primaryMapping,
+        ),
+      },
     );
     if (!primaryType) {
       logger.warn(
@@ -229,13 +239,13 @@ export class UserComposedEndpoint extends Endpoint {
       const sub = composedEntities[i];
       if (!sub.entityId) continue;
 
-      // Merged mode only, so a bridge that never turns the flag on keeps the
-      // exact tree it was paired with. The primary is the parent here, and a
-      // repeated entity would mount a second endpoint that no state update ever
-      // reaches, subEndpointMap is keyed by entity id so only the last wins.
+      // A repeated entity would mount a second endpoint that no state update
+      // ever reaches, subEndpointMap is keyed by entity id so only the last
+      // wins. Later subs keep their _sub_<i> ids, so valid configs keep the
+      // tree they were paired with.
       if (
-        primaryOnParent &&
-        (sub.entityId === primaryEntityId || subEndpointMap.has(sub.entityId))
+        sub.entityId === primaryEntityId ||
+        subEndpointMap.has(sub.entityId)
       ) {
         logger.warn(
           `Composed sub-entity ${sub.entityId} of ${primaryEntityId} is the ` +
@@ -262,6 +272,14 @@ export class UserComposedEndpoint extends Endpoint {
         subPayload,
         subMapping,
         config.areaName,
+        {
+          vacuumOnOff,
+          cleaningModeOptions: resolveCleaningModeOptions(
+            registry,
+            subPayload,
+            subMapping,
+          ),
+        },
       );
       if (!subType) {
         logger.warn(
@@ -349,7 +367,12 @@ export class UserComposedEndpoint extends Endpoint {
     // cluster would stay stale. Mirror the standalone path: force the parent
     // update so HomeAssistantEntityBehavior fires entity$Changed and PowerSource
     // re-reads the battery.
-    const mappedChanged = this.hasMappedNonSubEntityChanged(states);
+    const mappedChanged = mappedNonSubStateChanged(
+      this.mappedEntityIds,
+      this.subEndpoints,
+      states,
+      this.lastMappedStates,
+    );
 
     // Update parent (BasicInformationServer reachable state)
     this.scheduleUpdate(this, this.entityId, states, mappedChanged);
@@ -358,23 +381,6 @@ export class UserComposedEndpoint extends Endpoint {
     for (const [entityId, sub] of this.subEndpoints) {
       this.scheduleUpdate(sub, entityId, states);
     }
-  }
-
-  // A mapped entity without its own sub-endpoint (the battery) drives the parent
-  // PowerSource, so track its state and report when it moves. Subs flush
-  // themselves, so skip them here.
-  private hasMappedNonSubEntityChanged(states: HomeAssistantStates): boolean {
-    let changed = false;
-    for (const mappedId of this.mappedEntityIds) {
-      if (this.subEndpoints.has(mappedId)) continue;
-      const mappedState = states[mappedId];
-      if (!mappedState) continue;
-      if (mappedState.state !== this.lastMappedStates.get(mappedId)) {
-        this.lastMappedStates.set(mappedId, mappedState.state);
-        changed = true;
-      }
-    }
-    return changed;
   }
 
   private scheduleUpdate(

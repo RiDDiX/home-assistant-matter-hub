@@ -1,19 +1,13 @@
-import {
-  type FanDeviceAttributes,
-  FanDeviceFeature,
-} from "@home-assistant-matter-hub/common";
+import type { FanDeviceAttributes } from "@home-assistant-matter-hub/common";
 import type { EndpointType } from "@matter/main";
-import type { FanControl } from "@matter/main/clusters";
 import { AirPurifierDevice as Device } from "@matter/main/devices";
-import { autoPresetName } from "../../../../utils/converters/fan-mode.js";
-import type { FeatureSelection } from "../../../../utils/feature-selection.js";
-import { testBit } from "../../../../utils/test-bit.js";
 import { BasicInformationServer } from "../../../behaviors/basic-information-server.js";
 import { FanSpeedMemoryBehavior } from "../../../behaviors/fan-speed-memory.js";
 import { HomeAssistantEntityBehavior } from "../../../behaviors/home-assistant-entity-behavior.js";
 import { IdentifyServer } from "../../../behaviors/identify-server.js";
 import { FanFanControlServer } from "../fan/behaviors/fan-fan-control-server.js";
 import { FanOnOffServer } from "../fan/behaviors/fan-on-off-server.js";
+import { fanControlFeatures } from "../fan/index.js";
 import { AirPurifierHepaFilterMonitoringServer } from "./behaviors/air-purifier-hepa-filter-monitoring-server.js";
 
 // Extended attributes interface for filter life support
@@ -51,38 +45,8 @@ export function AirPurifierEndpoint(
 ): EndpointType {
   const attributes = homeAssistantEntity.entity.state
     .attributes as AirPurifierAttributes;
-  const supportedFeatures = attributes.supported_features ?? 0;
   const mapping = homeAssistantEntity.mapping;
-
-  const presetModes = attributes.preset_modes ?? [];
-  const features: FeatureSelection<typeof FanControl.Cluster> = new Set();
-  if (testBit(supportedFeatures, FanDeviceFeature.SET_SPEED)) {
-    features.add("MultiSpeed");
-    features.add("Step");
-  }
-  // Auto only if a preset really is "auto", else HA rejects the "auto" we send.
-  if (
-    testBit(supportedFeatures, FanDeviceFeature.PRESET_MODE) &&
-    autoPresetName(presetModes) !== undefined
-  ) {
-    features.add("Auto");
-  }
-  if (testBit(supportedFeatures, FanDeviceFeature.DIRECTION)) {
-    features.add("AirflowDirection");
-  }
-  if (testBit(supportedFeatures, FanDeviceFeature.OSCILLATE)) {
-    features.add("Rocking");
-  }
-  // Enable Wind mode if fan has natural/sleep preset modes
-  const hasWindModes = presetModes.some(
-    (m) =>
-      m.toLowerCase() === "natural" ||
-      m.toLowerCase() === "nature" ||
-      m.toLowerCase() === "sleep",
-  );
-  if (hasWindModes) {
-    features.add("Wind");
-  }
+  const features = fanControlFeatures(attributes, mapping);
 
   // Base device with fan control behaviors
   const baseDevice = Device.with(
