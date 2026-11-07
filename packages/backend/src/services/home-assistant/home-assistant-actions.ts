@@ -125,6 +125,12 @@ export class HomeAssistantActions extends Service {
   // calls per issuing entity, only the latest one may roll back (#446)
   private readonly callSeq = new Map<string, number>();
 
+  // a light.turn_on with data hit this light within RECENT_CHANGE_MS
+  lightChangedRecently(entityId: string): boolean {
+    const at = this.lastChangeAt.get(`${entityId}-light.turn_on`);
+    return at != null && Date.now() - at < RECENT_CHANGE_MS;
+  }
+
   private processAction(key: string, calls: HomeAssistantActionCall[]) {
     this.leadingOn.delete(key);
     // target === false means skip entity targeting (domain-level services like mqtt.publish)
@@ -195,9 +201,7 @@ export class HomeAssistantActions extends Service {
           this.debounceContext.get(commandKey, 100).unregister();
         }
       } else if (
-        Date.now() -
-          (this.lastChangeAt.get(base) ?? Number.NEGATIVE_INFINITY) >=
-          RECENT_CHANGE_MS &&
+        !this.lightChangedRecently(target) &&
         !this.debounceContext.isPending(commandKey)
       ) {
         // no recent level change, this On may start a pair

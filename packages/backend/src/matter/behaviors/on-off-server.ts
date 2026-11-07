@@ -141,14 +141,16 @@ class OnOffServerBase extends Base {
       // the async HA WebSocket state update arrives.
       applyPatchState(this.state, { onOff: true });
     }
+    // Notify LevelControlServer about turn-on for Alexa brightness workaround,
+    // also when no HA call goes out (#542)
+    notifyLightTurnedOn(homeAssistant.entityId);
     if (!action) {
       // Callback explicitly returned undefined = skip HA action
       // (e.g., climate already on, no need to send turn_on)
+      logger.debug(`[${homeAssistant.entityId}] Turning ON -> no HA call`);
       return;
     }
     logger.info(`[${homeAssistant.entityId}] Turning ON -> ${action.action}`);
-    // Notify LevelControlServer about turn-on for Alexa brightness workaround
-    notifyLightTurnedOn(homeAssistant.entityId);
     if (!skipMomentaryFlip) {
       const now = Date.now();
       sweepOptimisticOnOff(now);

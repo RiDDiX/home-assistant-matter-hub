@@ -1,3 +1,5 @@
+import { OnOffServer } from "@matter/main/behaviors";
+import { HomeAssistantActions } from "../../../../../services/home-assistant/home-assistant-actions.js";
 import { consumePendingColorStaging } from "../../../../behaviors/color-control-server.js";
 import { HomeAssistantEntityBehavior } from "../../../../behaviors/home-assistant-entity-behavior.js";
 import {
@@ -7,9 +9,23 @@ import {
 
 export const LightOnOffServer = LightingOnOffServer({
   turnOn: (_value, agent) => {
-    const entityId = agent.get(HomeAssistantEntityBehavior).entityId;
+    const homeAssistant = agent.get(HomeAssistantEntityBehavior);
+    const entityId = homeAssistant.entityId;
     const staged = consumePendingColorStaging(entityId);
     if (entityId.startsWith("light.")) {
+      // Google sends the color, then On. The light is on already, a bare
+      // turn_on would only cut the color transition short (#542).
+      const state = homeAssistant.entity.state;
+      if (
+        !staged &&
+        agent.get(OnOffServer).state.onOff &&
+        state.state === "on" &&
+        state.attributes.assumed_state !== true &&
+        // Optional call: test stubs do not define it.
+        agent.env.get(HomeAssistantActions).lightChangedRecently?.(entityId)
+      ) {
+        return undefined;
+      }
       return {
         action: "light.turn_on",
         data: staged,
