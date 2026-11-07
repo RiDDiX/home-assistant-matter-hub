@@ -3,16 +3,27 @@ import { Logger } from "@matter/general";
 import { ModeSelectServer as Base } from "@matter/main/behaviors";
 import type { HomeAssistantAction } from "../../services/home-assistant/home-assistant-actions.js";
 import { applyPatchState } from "../../utils/apply-patch-state.js";
+import { trimToLength } from "../../utils/trim-to-length.js";
 import { HomeAssistantEntityBehavior } from "./home-assistant-entity-behavior.js";
 
 const logger = Logger.get("ModeSelectServer");
 
+// SupportedModes holds at most 255 entries, later options are not exposed
+const MAX_MODES = 255;
+
 export function buildSupportedModes(options: string[]) {
-  return options.map((label, index) => ({
-    label: label.length > 64 ? label.substring(0, 64) : label,
+  return options.slice(0, MAX_MODES).map((label, index) => ({
+    label: trimToLength(label, 64, "") ?? label,
     mode: index,
     semanticTags: [],
   }));
+}
+
+export function findCurrentMode(options: string[], current?: string | null) {
+  const index = current
+    ? options.findIndex((o) => o.toLowerCase() === current.toLowerCase())
+    : -1;
+  return index >= 0 && index < MAX_MODES ? index : 0;
 }
 
 export interface SelectModeConfig {
@@ -46,13 +57,9 @@ class ModeSelectServerBase extends Base {
       return;
     }
 
-    const currentIndex = current
-      ? options.findIndex((o) => o.toLowerCase() === current.toLowerCase())
-      : -1;
-
     applyPatchState(this.state, {
       supportedModes: buildSupportedModes(options),
-      currentMode: currentIndex >= 0 ? currentIndex : 0,
+      currentMode: findCurrentMode(options, current),
     });
   }
 
@@ -62,7 +69,7 @@ class ModeSelectServerBase extends Base {
     const options = config.getOptions(homeAssistant.entity);
     const { newMode } = request;
 
-    if (newMode < 0 || newMode >= options.length) {
+    if (newMode < 0 || newMode >= Math.min(options.length, MAX_MODES)) {
       logger.warn(
         `[${homeAssistant.entityId}] Invalid mode ${newMode}, options: [${options.join(", ")}]`,
       );

@@ -23,6 +23,66 @@ function orderSelection(areas: number[], agent: Agent | undefined): number[] {
   }
 }
 
+// Both feature variants share these handlers; one class cannot extend the other.
+function selectAreas(
+  behavior: ServiceAreaServerBase | ServiceAreaServerWithMapsBase,
+  request: ServiceArea.SelectAreasRequest,
+): ServiceArea.SelectAreasResponse {
+  const { newAreas } = request;
+  const state = behavior.state;
+
+  logger.info(
+    `ServiceArea selectAreas called with: ${JSON.stringify(newAreas)}`,
+  );
+
+  // Remove duplicates, then apply the configured cleaning order
+  const uniqueAreas = orderSelection([...new Set(newAreas)], behavior.agent);
+
+  // Validate that all requested areas exist in supportedAreas
+  const supportedAreaIds = state.supportedAreas.map((a) => a.areaId);
+  const invalidAreas = uniqueAreas.filter(
+    (id) => !supportedAreaIds.includes(id),
+  );
+
+  if (invalidAreas.length > 0) {
+    logger.warn(`Invalid area IDs requested: ${invalidAreas.join(", ")}`);
+    return {
+      status: ServiceArea.SelectAreasStatus.UnsupportedArea,
+      statusText: `Invalid area IDs: ${invalidAreas.join(", ")}`,
+    };
+  }
+
+  // Store selected areas - actual cleaning starts when RvcRunMode.changeToMode(Cleaning) is called
+  state.selectedAreas = uniqueAreas;
+  // A new selection, even an empty one, replaces a parked one (#492)
+  getSession(behavior.endpoint).parkedAreas = [];
+
+  // Initialize progress for all selected areas as Pending
+  state.progress = uniqueAreas.map((areaId) => ({
+    areaId,
+    status: ServiceArea.OperationalStatus.Pending,
+  }));
+
+  // A fresh selection means the device is no longer operating in a
+  // previously cleaned area. A stale currentArea makes Apple Home treat
+  // the vacuum as busy and drop part of the new selection (#335, #367).
+  state.currentArea = null;
+
+  logger.info(
+    `ServiceArea: Stored ${uniqueAreas.length} areas for cleaning: ${uniqueAreas.join(", ")}`,
+  );
+  return {
+    status: ServiceArea.SelectAreasStatus.Success,
+    statusText: "Areas selected for cleaning",
+  };
+}
+
+// Skip area is not commonly supported by vacuum integrations
+const skipAreaResponse: ServiceArea.SkipAreaResponse = {
+  status: ServiceArea.SkipAreaStatus.InvalidInMode,
+  statusText: "Skip area not supported",
+};
+
 const ServiceAreaWithProgress = ServiceAreaBehavior.with(
   ServiceArea.Feature.ProgressReporting,
 );
@@ -40,62 +100,11 @@ export class ServiceAreaServerBase extends ServiceAreaWithProgress {
   override selectAreas(
     request: ServiceArea.SelectAreasRequest,
   ): ServiceArea.SelectAreasResponse {
-    const { newAreas } = request;
-
-    logger.info(
-      `ServiceArea selectAreas called with: ${JSON.stringify(newAreas)}`,
-    );
-
-    // Remove duplicates, then apply the configured cleaning order
-    const uniqueAreas = orderSelection([...new Set(newAreas)], this.agent);
-
-    // Validate that all requested areas exist in supportedAreas
-    const supportedAreaIds = this.state.supportedAreas.map((a) => a.areaId);
-    const invalidAreas = uniqueAreas.filter(
-      (id) => !supportedAreaIds.includes(id),
-    );
-
-    if (invalidAreas.length > 0) {
-      logger.warn(`Invalid area IDs requested: ${invalidAreas.join(", ")}`);
-      return {
-        status: ServiceArea.SelectAreasStatus.UnsupportedArea,
-        statusText: `Invalid area IDs: ${invalidAreas.join(", ")}`,
-      };
-    }
-
-    // Store selected areas - actual cleaning starts when RvcRunMode.changeToMode(Cleaning) is called
-    this.state.selectedAreas = uniqueAreas;
-    // A new selection, even an empty one, replaces a parked one (#492)
-    getSession(this.endpoint).parkedAreas = [];
-
-    // Initialize progress for all selected areas as Pending
-    this.state.progress = uniqueAreas.map((areaId) => ({
-      areaId,
-      status: ServiceArea.OperationalStatus.Pending,
-    }));
-
-    // A fresh selection means the device is no longer operating in a
-    // previously cleaned area. A stale currentArea makes Apple Home treat
-    // the vacuum as busy and drop part of the new selection (#335, #367).
-    this.state.currentArea = null;
-
-    logger.info(
-      `ServiceArea: Stored ${uniqueAreas.length} areas for cleaning: ${uniqueAreas.join(", ")}`,
-    );
-    return {
-      status: ServiceArea.SelectAreasStatus.Success,
-      statusText: "Areas selected for cleaning",
-    };
+    return selectAreas(this, request);
   }
 
-  override skipArea(
-    _request: ServiceArea.SkipAreaRequest,
-  ): ServiceArea.SkipAreaResponse {
-    // Skip area is not commonly supported by vacuum integrations
-    return {
-      status: ServiceArea.SkipAreaStatus.InvalidInMode,
-      statusText: "Skip area not supported",
-    };
+  override skipArea(): ServiceArea.SkipAreaResponse {
+    return skipAreaResponse;
   }
 }
 
@@ -142,64 +151,17 @@ const ServiceAreaWithMapsAndProgress = ServiceAreaBehavior.with(
  * Allows controllers to group and filter areas by map/floor,
  * and display per-area cleaning status.
  */
-// biome-ignore lint/correctness/noUnusedVariables: Used via .set() in factory function below
 class ServiceAreaServerWithMapsBase extends ServiceAreaWithMapsAndProgress {
   declare state: ServiceAreaServerWithMapsBase.State;
 
   override selectAreas(
     request: ServiceArea.SelectAreasRequest,
   ): ServiceArea.SelectAreasResponse {
-    const { newAreas } = request;
-
-    logger.info(
-      `ServiceArea selectAreas called with: ${JSON.stringify(newAreas)}`,
-    );
-
-    const uniqueAreas = orderSelection([...new Set(newAreas)], this.agent);
-
-    const supportedAreaIds = this.state.supportedAreas.map((a) => a.areaId);
-    const invalidAreas = uniqueAreas.filter(
-      (id) => !supportedAreaIds.includes(id),
-    );
-
-    if (invalidAreas.length > 0) {
-      logger.warn(`Invalid area IDs requested: ${invalidAreas.join(", ")}`);
-      return {
-        status: ServiceArea.SelectAreasStatus.UnsupportedArea,
-        statusText: `Invalid area IDs: ${invalidAreas.join(", ")}`,
-      };
-    }
-
-    this.state.selectedAreas = uniqueAreas;
-    getSession(this.endpoint).parkedAreas = [];
-
-    // Initialize progress for all selected areas as Pending
-    this.state.progress = uniqueAreas.map((areaId) => ({
-      areaId,
-      status: ServiceArea.OperationalStatus.Pending,
-    }));
-
-    // A fresh selection means the device is no longer operating in a
-    // previously cleaned area. A stale currentArea makes Apple Home treat
-    // the vacuum as busy and drop part of the new selection (#335, #367).
-    this.state.currentArea = null;
-
-    logger.info(
-      `ServiceArea: Stored ${uniqueAreas.length} areas for cleaning: ${uniqueAreas.join(", ")}`,
-    );
-    return {
-      status: ServiceArea.SelectAreasStatus.Success,
-      statusText: "Areas selected for cleaning",
-    };
+    return selectAreas(this, request);
   }
 
-  override skipArea(
-    _request: ServiceArea.SkipAreaRequest,
-  ): ServiceArea.SkipAreaResponse {
-    return {
-      status: ServiceArea.SkipAreaStatus.InvalidInMode,
-      statusText: "Skip area not supported",
-    };
+  override skipArea(): ServiceArea.SkipAreaResponse {
+    return skipAreaResponse;
   }
 }
 

@@ -1,5 +1,6 @@
 import type { HomeAssistantEntityInformation } from "@home-assistant-matter-hub/common";
 import { Logger } from "@matter/general";
+import type { Agent } from "@matter/main";
 import {
   RvcRunModeServer as Base,
   RvcOperationalStateBehavior,
@@ -36,6 +37,8 @@ export interface RvcRunModeServerConfig {
   cleanRoom?: ValueSetter<number>;
   /** Optional: Current service area names, to follow renames */
   getAreaNames?: ValueGetter<{ areaId: number; name: string }[]>;
+  /** Optional: ServiceArea id for a room mode, when labels differ from area names */
+  getAreaIdForMode?: (mode: number, agent: Agent) => number | undefined;
 }
 
 export interface RvcRunModeServerInitialState {
@@ -754,11 +757,13 @@ class RvcRunModeServerBase extends Base {
   }
 
   /**
-   * Find the ServiceArea area ID that corresponds to a run mode value
-   * by matching the mode label to the area location name.
+   * Find the ServiceArea area ID that corresponds to a run mode value,
+   * by default by matching the mode label to the area location name.
    */
   private findAreaIdForMode(mode: number): number | null {
     try {
+      const resolved = this.state.config.getAreaIdForMode?.(mode, this.agent);
+      if (resolved !== undefined) return resolved;
       const serviceArea = this.agent.get(ServiceAreaBehavior);
       const modeEntry = this.state.supportedModes.find((m) => m.mode === mode);
       if (!modeEntry) return null;

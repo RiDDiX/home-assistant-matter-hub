@@ -2,17 +2,20 @@ import type { HomeAssistantEntityInformation } from "@home-assistant-matter-hub/
 import type { Agent, EndpointType } from "@matter/main";
 import { GroupsServer, ScenesManagementServer } from "@matter/main/behaviors";
 import { ModeSelectDevice, OnOffPlugInUnitDevice } from "@matter/main/devices";
+import { trimToLength } from "../../../../utils/trim-to-length.js";
 import { BasicInformationServer } from "../../../behaviors/basic-information-server.js";
 import { HomeAssistantEntityBehavior } from "../../../behaviors/home-assistant-entity-behavior.js";
 import { IdentifyServer } from "../../../behaviors/identify-server.js";
 import {
   buildSupportedModes,
+  findCurrentMode,
   ModeSelectServer,
 } from "../../../behaviors/mode-select-server.js";
 import { PlugOnOffServer } from "../../../behaviors/on-off-server.js";
 
 interface SelectAttributes {
   options?: string[];
+  friendly_name?: string;
 }
 
 function getSelectOptions(entity: HomeAssistantEntityInformation): string[] {
@@ -102,74 +105,49 @@ const InputSelectEndpointType = ModeSelectDevice.with(
   InputSelectModeServer,
 );
 
-export function SelectDevice(
+function modeSelectState(
   homeAssistantEntity: HomeAssistantEntityBehavior.State,
-): EndpointType | undefined {
-  const asSwitch = selectAsSwitch(homeAssistantEntity, SelectSwitchType);
-  if (asSwitch) {
-    return asSwitch;
-  }
+  fallbackName: string,
+) {
   const attrs = homeAssistantEntity.entity.state.attributes as SelectAttributes;
   const options = attrs.options ?? [];
-
   if (options.length === 0) {
     return undefined;
   }
-
-  const currentOption = homeAssistantEntity.entity.state.state;
-  const currentIndex = currentOption
-    ? options.findIndex((o) => o.toLowerCase() === currentOption.toLowerCase())
-    : 0;
-
-  return SelectEndpointType.set({
+  return {
     homeAssistantEntity,
     modeSelect: {
       description:
-        homeAssistantEntity.customName ??
-        (
-          homeAssistantEntity.entity.state.attributes as {
-            friendly_name?: string;
-          }
-        ).friendly_name ??
-        "Select",
+        trimToLength(
+          homeAssistantEntity.customName ?? attrs.friendly_name,
+          64,
+          "...",
+        ) ?? fallbackName,
       supportedModes: buildSupportedModes(options),
-      currentMode: currentIndex >= 0 ? currentIndex : 0,
+      currentMode: findCurrentMode(
+        options,
+        homeAssistantEntity.entity.state.state,
+      ),
     },
-  });
+  };
+}
+
+export function SelectDevice(
+  homeAssistantEntity: HomeAssistantEntityBehavior.State,
+): EndpointType | undefined {
+  const state = modeSelectState(homeAssistantEntity, "Select");
+  return (
+    selectAsSwitch(homeAssistantEntity, SelectSwitchType) ??
+    (state && SelectEndpointType.set(state))
+  );
 }
 
 export function InputSelectDevice(
   homeAssistantEntity: HomeAssistantEntityBehavior.State,
 ): EndpointType | undefined {
-  const asSwitch = selectAsSwitch(homeAssistantEntity, InputSelectSwitchType);
-  if (asSwitch) {
-    return asSwitch;
-  }
-  const attrs = homeAssistantEntity.entity.state.attributes as SelectAttributes;
-  const options = attrs.options ?? [];
-
-  if (options.length === 0) {
-    return undefined;
-  }
-
-  const currentOption = homeAssistantEntity.entity.state.state;
-  const currentIndex = currentOption
-    ? options.findIndex((o) => o.toLowerCase() === currentOption.toLowerCase())
-    : 0;
-
-  return InputSelectEndpointType.set({
-    homeAssistantEntity,
-    modeSelect: {
-      description:
-        homeAssistantEntity.customName ??
-        (
-          homeAssistantEntity.entity.state.attributes as {
-            friendly_name?: string;
-          }
-        ).friendly_name ??
-        "Input Select",
-      supportedModes: buildSupportedModes(options),
-      currentMode: currentIndex >= 0 ? currentIndex : 0,
-    },
-  });
+  const state = modeSelectState(homeAssistantEntity, "Input Select");
+  return (
+    selectAsSwitch(homeAssistantEntity, InputSelectSwitchType) ??
+    (state && InputSelectEndpointType.set(state))
+  );
 }

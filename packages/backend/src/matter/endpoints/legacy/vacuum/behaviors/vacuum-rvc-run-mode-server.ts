@@ -12,6 +12,7 @@ import { ServiceAreaBehavior } from "@matter/main/behaviors";
 import { RvcRunMode } from "@matter/main/clusters";
 import type { HomeAssistantAction } from "../../../../../services/home-assistant/home-assistant-actions.js";
 import { testBit } from "../../../../../utils/test-bit.js";
+import { trimToLength } from "../../../../../utils/trim-to-length.js";
 import { HomeAssistantEntityBehavior } from "../../../../behaviors/home-assistant-entity-behavior.js";
 import {
   type CleaningSession,
@@ -75,33 +76,35 @@ function buildValetudoSegmentAction(
   };
 }
 
-// Mode labels must be unique and at most 64 chars, or the endpoint fails.
+type RoomModeSource = { name: string; mapName?: string };
+
+// Mode labels must be unique and at most 64 bytes, or the endpoint fails.
 // Repeated names get their map appended (#506). Unique short names stay.
-export function customAreaModeLabels(sorted: CustomServiceArea[]): string[] {
+export function customAreaModeLabels(sorted: RoomModeSource[]): string[] {
   const names = new Set(sorted.map((a) => a.name));
   const used = new Set(["Idle", "Cleaning"]);
   return sorted.map((area, i) => {
     // a made up label must not take another area's real name
     const free = (label: string) =>
-      label.length <= 64 &&
+      Buffer.byteLength(label) <= 64 &&
       !used.has(label) &&
       (label === area.name || !names.has(label));
     const mapName = typeof area.mapName === "string" ? area.mapName.trim() : "";
     let label = area.name;
     if (!free(label) && mapName) label = `${area.name} (${mapName})`;
     for (let n = i + 1; !free(label); n++) {
-      label = `${area.name.slice(0, 58)} ${n}`;
+      label = `${trimToLength(area.name, 58, "") ?? area.name} ${n}`;
     }
     used.add(label);
     return label;
   });
 }
 
-// Custom areas as room modes, in label order. The mode list and cleanRoom
+// Areas or rooms as room modes, in label order. The mode list and cleanRoom
 // both index into this, and Apple Home picks modes by alphabetical position.
-export function customAreaModes(
-  customAreas: CustomServiceArea[],
-): { area: CustomServiceArea; label: string }[] {
+export function customAreaModes<T extends RoomModeSource>(
+  customAreas: T[],
+): { area: T; label: string }[] {
   const byName = [...customAreas].sort((a, b) => a.name.localeCompare(b.name));
   const labels = customAreaModeLabels(byName);
   return byName
@@ -167,13 +170,12 @@ export function buildSupportedModes(
   } else {
     // Regular room modes from vacuum attributes (Dreame, Roborock, etc.)
     const rooms = parseVacuumRooms(attributes, includeUnnamedRooms);
-    rooms.sort((a, b) => a.name.localeCompare(b.name));
-    for (const room of rooms) {
+    for (const { area: room, label } of customAreaModes(rooms)) {
       const modeValue = getRoomModeValue(room);
       // Mode values must fit in uint8 (Matter spec: ModeBase mode is uint8)
       if (modeValue > 255) continue;
       modes.push({
-        label: room.name,
+        label,
         mode: modeValue,
         modeTags: [{ value: RvcRunMode.ModeTag.Cleaning }],
       });
@@ -578,6 +580,28 @@ const vacuumRvcRunModeConfig = {
     );
   },
 
+  // Labels can carry a suffix the area name lacks, so resolve by position
+  // like cleanRoom does
+  getAreaIdForMode: (mode: number, agent: Agent) => {
+    const mapping = agent.get(HomeAssistantEntityBehavior).state.mapping;
+    const index = mode - ROOM_MODE_BASE - 1;
+    if (mapping?.cleanAreaRooms?.length) {
+      return customAreaModes(mapping.cleanAreaRooms)[index]?.area.areaId;
+    }
+    const customAreas = mapping?.customServiceAreas;
+    if (customAreas?.length) {
+      const entry = customAreaModes(customAreas)[index];
+      return entry ? customAreas.indexOf(entry.area) + 1 : undefined;
+    }
+    if (mapping?.roomEntities?.length) return undefined;
+    const attributes = agent.get(HomeAssistantEntityBehavior).entity.state
+      .attributes as VacuumDeviceAttributes;
+    const room = parseVacuumRooms(attributes).find(
+      (r) => getRoomModeValue(r) === mode,
+    );
+    return room ? toAreaId(room.id) : undefined;
+  },
+
   getAreaNames: (entity: { attributes: unknown }, agent: Agent) =>
     getVacuumServiceAreas(
       entity.attributes as VacuumDeviceAttributes,
@@ -663,12 +687,10 @@ const vacuumRvcRunModeConfig = {
     // HA 2026.3 CLEAN_AREA: resolve room mode to HA area ID
     const cleanAreaRooms = homeAssistant.state.mapping?.cleanAreaRooms;
     if (cleanAreaRooms && cleanAreaRooms.length > 0) {
-      const sorted = [...cleanAreaRooms].sort((a, b) =>
-        a.name.localeCompare(b.name),
-      );
+      const sorted = customAreaModes(cleanAreaRooms);
       const areaIndex = roomMode - ROOM_MODE_BASE - 1;
       if (areaIndex >= 0 && areaIndex < sorted.length) {
-        const area = sorted[areaIndex];
+        const area = sorted[areaIndex].area;
         logger.info(
           `cleanRoom: CLEAN_AREA "${area.name}" → vacuum.clean_area(${area.haAreaId})`,
         );
@@ -867,14 +889,12 @@ function buildCleanAreaModes(
   ];
   if (disableRoomModes) return modes;
 
-  const sorted = [...cleanAreaRooms].sort((a, b) =>
-    a.name.localeCompare(b.name),
-  );
+  const sorted = customAreaModes(cleanAreaRooms);
   for (let i = 0; i < sorted.length; i++) {
     const modeValue = ROOM_MODE_BASE + i + 1;
     if (modeValue > 255) continue;
     modes.push({
-      label: sorted[i].name,
+      label: sorted[i].label,
       mode: modeValue,
       modeTags: [{ value: RvcRunMode.ModeTag.Cleaning }],
     });
