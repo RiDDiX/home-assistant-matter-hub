@@ -22,6 +22,7 @@ import type { EntityMappingStorage } from "../storage/entity-mapping-storage.js"
 import { BridgeDataProvider } from "./bridge-data-provider.js";
 import { BridgeEndpointManager } from "./bridge-endpoint-manager.js";
 import { BridgeRegistry } from "./bridge-registry.js";
+import { EntityIsolationService } from "./entity-isolation-service.js";
 import { EntityStateProvider } from "./entity-state-provider.js";
 
 // #445: plugin devices mount as bare Endpoints in root.parts. The entity flows
@@ -597,6 +598,24 @@ describe("identity survives isolation and plugin stops (#438)", () => {
 
     await manager.refreshDevices();
     expect(vacuumEndpoint(manager).number).toBe(before);
+  });
+
+  it("a recreated entity no longer lists as failed", async () => {
+    const ha = makeHa();
+    const { manager } = await buildManager(ha);
+    await manager.refreshDevices();
+    // The record isolateFromError leaves; it needs a 32-hex bridge id to parse.
+    // biome-ignore lint/suspicious/noExplicitAny: seed the private record map
+    (EntityIsolationService as any).isolatedEntities.set(
+      `bridge-445:${vacuumEndpoint(manager).id}`,
+      { entityId: vacuumEndpoint(manager).id, reason: "test", failedAt: "" },
+    );
+    await manager.isolateEntity(VACUUM);
+    expect(manager.failedEntities).toHaveLength(1);
+
+    await manager.refreshDevices();
+    expect(vacuumEndpoint(manager)).toBeDefined();
+    expect(manager.failedEntities).toHaveLength(0);
   });
 
   it("plugin endpoints keep their number across stopPlugins", async () => {

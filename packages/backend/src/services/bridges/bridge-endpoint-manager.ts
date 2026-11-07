@@ -107,7 +107,7 @@ export class BridgeEndpointManager extends Service {
   // timer on a bridge that has since stopped (#438).
   private lifecycle = 0;
   private readonly pluginEndpoints = new Map<string, Endpoint>();
-  private readonly pluginStateUpdating = new Set<string>();
+  private readonly pluginStateUpdating = new Map<string, number>();
   private readonly pluginListeners = new Map<string, PluginListenerRef[]>();
   private topologyChangeHandler = async (change: () => Promise<unknown>) => {
     await change();
@@ -259,7 +259,7 @@ export class BridgeEndpointManager extends Service {
             `Plugin "${pluginName}": invalid endpointType for device "${device.id}":`,
             e,
           );
-          return;
+          return false;
         }
         const supplied = device.endpointType as Partial<MutableEndpoint>;
         const initialState: Record<string, object> = {};
@@ -293,7 +293,7 @@ export class BridgeEndpointManager extends Service {
           this.log.warn(
             `Plugin "${pluginName}": endpointType for device "${device.id}" cannot take its cluster config, skipping it`,
           );
-          return;
+          return false;
         }
         if (!hasOwnIdentity && (!mutable || ownsPluginDevice)) {
           this.log.warn(
@@ -316,7 +316,7 @@ export class BridgeEndpointManager extends Service {
           this.log.warn(
             `Plugin "${pluginName}": unsupported device type "${device.deviceType}" for device "${device.id}"`,
           );
-          return;
+          return false;
         }
         // Set PluginDeviceBehavior state and apply initial cluster config
         const initialState: Record<string, object> = {
@@ -341,7 +341,9 @@ export class BridgeEndpointManager extends Service {
           `Plugin "${pluginName}": failed to add device "${device.id}":`,
           e,
         );
+        return false;
       }
+      return true;
     };
 
     this.pluginManager.onDeviceUnregistered = async (
@@ -397,7 +399,11 @@ export class BridgeEndpointManager extends Service {
         );
         return;
       }
-      this.pluginStateUpdating.add(deviceId);
+      // Counted: the first of two overlapping pushes must not unguard the other.
+      this.pluginStateUpdating.set(
+        deviceId,
+        (this.pluginStateUpdating.get(deviceId) ?? 0) + 1,
+      );
       endpoint
         .setStateOf(behaviorType, attributes)
         .catch((e) => {
@@ -407,7 +413,9 @@ export class BridgeEndpointManager extends Service {
           );
         })
         .finally(() => {
-          this.pluginStateUpdating.delete(deviceId);
+          const left = (this.pluginStateUpdating.get(deviceId) ?? 1) - 1;
+          if (left > 0) this.pluginStateUpdating.set(deviceId, left);
+          else this.pluginStateUpdating.delete(deviceId);
         });
     };
   }
@@ -1205,6 +1213,13 @@ export class BridgeEndpointManager extends Service {
         if (endpoint) {
           try {
             await this.root.add(endpoint);
+            // Isolation closed the old endpoint, this one starts clean. The
+            // record keys on the part id or the entity id the error named.
+            EntityIsolationService.clearIsolatedEntity(
+              this.bridgeId,
+              endpoint.id,
+            );
+            EntityIsolationService.clearIsolatedEntity(this.bridgeId, entityId);
             this.mappingFingerprints.set(
               entityId,
               this.mappingSync.fingerprintAsBuilt(
@@ -1374,6 +1389,7 @@ export class BridgeEndpointManager extends Service {
             parentEffective: effective,
           });
           await this.root.add(endpoint);
+          EntityIsolationService.clearIsolatedEntity(this.bridgeId, switchId);
         } catch (e) {
           this.log.warn(
             `Failed to add area switch ${switchId} for ${entityId}:`,

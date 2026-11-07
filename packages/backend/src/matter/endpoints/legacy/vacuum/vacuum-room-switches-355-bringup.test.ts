@@ -515,7 +515,7 @@ describe("vacuum room switches (#355)", () => {
     expect(warned).toBe(true);
   });
 
-  it("isolating the vacuum removes its switches and keeps them off while isolated", async () => {
+  it("isolating the vacuum removes its switches, the recreate brings them back", async () => {
     // isolateFromError parses a 32-hex bridge id from the endpoint path.
     const BID = "ab".repeat(16);
     const mapping = new FakeMappingStorage();
@@ -535,9 +535,11 @@ describe("vacuum room switches (#355)", () => {
     ).toHaveLength(0);
     expect(switchEndpoints(manager)).toHaveLength(0);
 
-    // The reconcile must not bring the switches back for an isolated parent.
+    // The refresh recreates the vacuum under its kept number, which clears
+    // the isolation record, so the reconcile mounts the switches again.
     await manager.refreshDevices();
-    expect(switchEndpoints(manager)).toHaveLength(0);
+    expect(switchEndpoints(manager)).toHaveLength(2);
+    expect(manager.failedEntities).toHaveLength(0);
   });
 
   it("switches advertise their own serial, never the vacuum's", async () => {

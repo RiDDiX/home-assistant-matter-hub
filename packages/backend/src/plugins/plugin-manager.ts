@@ -140,11 +140,11 @@ export class PluginManager {
   private readonly runner = new SafePluginRunner();
   private registry?: PluginRegistry;
 
-  /** Callback invoked when a plugin registers a new device */
+  /** Callback invoked when a plugin registers a new device, false when it did not mount */
   onDeviceRegistered?: (
     pluginName: string,
     device: PluginDevice,
-  ) => Promise<void>;
+  ) => Promise<boolean | undefined>;
 
   /**
    * Callback invoked when a plugin removes a device. keepIdentity marks a
@@ -329,13 +329,20 @@ export class PluginManager {
           pluginLogger.warn(`Rejected device registration: ${validationError}`);
           return;
         }
-        if (devices.has(device.id)) {
+        const known = devices.has(device.id);
+        if (known) {
           pluginLogger.warn(
             `Device "${device.id}" already registered, updating`,
           );
         }
         devices.set(device.id, device);
-        await this.onDeviceRegistered?.(plugin.name, device);
+        const mounted = await this.onDeviceRegistered?.(plugin.name, device);
+        // A failed first mount must not list a device without an endpoint. A
+        // failed update keeps the entry, its old endpoint is still mounted.
+        if (mounted === false) {
+          if (!known) devices.delete(device.id);
+          return;
+        }
         pluginLogger.debug(`Registered device: ${device.name} (${device.id})`);
       };
 
@@ -471,9 +478,17 @@ export class PluginManager {
     } else if (this.runner.getState(name).failures === 0) {
       instance.started = true;
     }
-    // onStart may merge persisted config, keep the listing in sync
-    if (instance.plugin.getCurrentConfig) {
+    this.syncCurrentConfig(name, instance);
+  }
+
+  // onStart may merge persisted config, keep the listing in sync. Runs outside
+  // the runner, so a throw must not fail the bridge start or the enable.
+  private syncCurrentConfig(name: string, instance: PluginInstance): void {
+    if (!instance.plugin.getCurrentConfig) return;
+    try {
       instance.metadata.config = instance.plugin.getCurrentConfig();
+    } catch (e) {
+      logger.warn(`Plugin "${name}" getCurrentConfig failed:`, e);
     }
   }
 
@@ -581,13 +596,7 @@ export class PluginManager {
         }
         instance.started = false;
         instance.startCalled = false;
-        // Sweep whatever the shutdown left mounted.
-        for (const deviceId of [...instance.devices.keys()]) {
-          instance.devices.delete(deviceId);
-          await this.onDeviceUnregistered?.(pluginName, deviceId, {
-            keepIdentity: true,
-          });
-        }
+        await this.sweepDevices(pluginName, instance);
       } finally {
         instance.suspending = false;
       }
@@ -599,6 +608,19 @@ export class PluginManager {
       }
       return instance.metadata;
     });
+  }
+
+  // Unmount whatever a shutdown left registered, keeping the numbers.
+  private async sweepDevices(
+    pluginName: string,
+    instance: PluginInstance,
+  ): Promise<void> {
+    for (const deviceId of [...instance.devices.keys()]) {
+      instance.devices.delete(deviceId);
+      await this.onDeviceUnregistered?.(pluginName, deviceId, {
+        keepIdentity: true,
+      });
+    }
   }
 
   /**
@@ -614,6 +636,22 @@ export class PluginManager {
       instance.metadata.enabled = true;
       this.persistEnabled(pluginName, true);
       if (instance.started) return instance.metadata;
+      // A start that failed or timed out may still hold what it set up.
+      if (instance.startCalled) {
+        instance.epoch++;
+        instance.suspending = true;
+        try {
+          if (instance.plugin.onShutdown) {
+            await this.runner.runCleanup(pluginName, "onShutdown", () =>
+              instance.plugin.onShutdown!("Plugin restarting"),
+            );
+          }
+          await this.sweepDevices(pluginName, instance);
+        } finally {
+          instance.suspending = false;
+        }
+      }
+      instance.startCalled = false;
       // A save parked during the disable becomes the config this start
       // reads, or the old config would mount first and the parked one
       // remount everything right behind it. Cleared only once persisted, so
@@ -645,9 +683,7 @@ export class PluginManager {
       if (this.runner.getState(pluginName).failures === 0) {
         instance.started = true;
       }
-      if (instance.plugin.getCurrentConfig) {
-        instance.metadata.config = instance.plugin.getCurrentConfig();
-      }
+      this.syncCurrentConfig(pluginName, instance);
       if (instance.started && instance.plugin.onConfigure) {
         await this.runner.run(pluginName, "onConfigure", () =>
           instance.plugin.onConfigure!(),
@@ -687,7 +723,12 @@ export class PluginManager {
   getConfigSchema(pluginName: string): PluginConfigSchema | undefined {
     const instance = this.instances.get(pluginName);
     if (!instance) return undefined;
-    return instance.plugin.getConfigSchema?.();
+    try {
+      return instance.plugin.getConfigSchema?.();
+    } catch (e) {
+      logger.warn(`Plugin "${pluginName}" getConfigSchema failed:`, e);
+      return undefined;
+    }
   }
 
   getDomainMappings(): Map<string, PluginDomainMapping> {
@@ -705,7 +746,7 @@ export class PluginManager {
       // The listing redacts secret fields to the placeholder; a save carrying
       // it back means "keep what is stored", never store the placeholder
       // itself.
-      const schema = instance.plugin.getConfigSchema?.();
+      const schema = this.getConfigSchema(pluginName);
       if (schema) {
         for (const [key, prop] of Object.entries(schema.properties)) {
           if (prop.secret && config[key] === SECRET_UNCHANGED) {
@@ -725,6 +766,19 @@ export class PluginManager {
       if (instance.plugin.onConfigChanged) {
         if (!instance.metadata.enabled) {
           instance.pendingConfig = config;
+          // Built-ins keep their config only in plugin storage, a restart
+          // before the enable would bring back the old one.
+          if (instance.metadata.source === "builtin") {
+            try {
+              await instance.context.storage.set(PLUGIN_CONFIG_KEY, config);
+              await instance.context.storage.flush?.();
+            } catch (e) {
+              logger.warn(
+                `Failed to persist the parked config for "${pluginName}":`,
+                e,
+              );
+            }
+          }
           logger.info(
             `Plugin "${pluginName}" is disabled, the config applies on enable`,
           );

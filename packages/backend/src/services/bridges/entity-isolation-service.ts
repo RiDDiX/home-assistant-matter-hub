@@ -153,6 +153,13 @@ class EntityIsolationServiceImpl {
   }
 
   /**
+   * Clear one record once its entity is mounted again.
+   */
+  clearIsolatedEntity(bridgeId: string, entityName: string) {
+    this.isolatedEntities.delete(`${bridgeId}:${entityName}`);
+  }
+
+  /**
    * Clear isolated entities for a bridge (e.g., on restart).
    */
   clearIsolatedEntities(bridgeId: string) {

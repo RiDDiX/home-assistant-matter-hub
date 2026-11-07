@@ -415,8 +415,8 @@ describe("security plugin bring-up (#419)", () => {
     // erase the entry held below.
     await new Promise((r) => setTimeout(r, 50));
     // biome-ignore lint/suspicious/noExplicitAny: reach the private echo guard
-    const guard = (bem as any).pluginStateUpdating as Set<string>;
-    guard.add("mode_home");
+    const guard = (bem as any).pluginStateUpdating as Map<string, number>;
+    guard.set("mode_home", 1);
     await endpoints.get("mode_away")!.set({ onOff: { onOff: true } } as never);
 
     // The Away write must reach the machine even while the Home update is in

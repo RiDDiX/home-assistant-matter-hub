@@ -18,6 +18,8 @@ export interface InstalledPlugin {
 /**
  * Persists the list of installed plugins to a JSON file in the storage
  * directory so the loader knows which npm packages to pick up on startup.
+ * The API and every bridge hold their own instance, so each read and write
+ * starts from the file, never from a copy loaded earlier.
  */
 export class PluginRegistry {
   private plugins: InstalledPlugin[] = [];
@@ -46,21 +48,22 @@ export class PluginRegistry {
       if (!fs.existsSync(dir)) {
         fs.mkdirSync(dir, { recursive: true });
       }
-      fs.writeFileSync(
-        this.filePath,
-        JSON.stringify(this.plugins, null, 2),
-        "utf-8",
-      );
+      // A crash mid-write leaves the old file, a torn one would load as [].
+      const tmpPath = `${this.filePath}.tmp`;
+      fs.writeFileSync(tmpPath, JSON.stringify(this.plugins, null, 2), "utf-8");
+      fs.renameSync(tmpPath, this.filePath);
     } catch (e) {
       logger.error("Failed to save plugin registry:", e);
     }
   }
 
   getAll(): InstalledPlugin[] {
+    this.load();
     return [...this.plugins];
   }
 
   get(packageName: string): InstalledPlugin | undefined {
+    this.load();
     return this.plugins.find((p) => p.packageName === packageName);
   }
 
@@ -86,6 +89,7 @@ export class PluginRegistry {
   }
 
   remove(packageName: string): boolean {
+    this.load();
     const idx = this.plugins.findIndex((p) => p.packageName === packageName);
     if (idx === -1) return false;
     this.plugins.splice(idx, 1);
