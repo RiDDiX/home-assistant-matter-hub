@@ -421,6 +421,15 @@ Home, ...) are not placed in the same network segment. Please make sure to revie
 <details>
 <summary><strong>🧪 Alpha (v2.1.0-alpha.x)</strong></summary>
 
+**v2.1.0-alpha.966:**
+- **Device fixes from a second code audit**: pumps switch again, Hue buttons send one press per tap, TVs and speakers without full power or volume support now control Home Assistant, the remote Mute key works, water heaters turn off with their own off mode, humidifiers show 0 while off and respect their humidity range, fan speed steps and wind modes work on preset-only fans and air conditioners, Fahrenheit setpoints are sent without rounding noise, and robot vacuums with two rooms of the same name stay on the bridge.
+- **Units and composed devices**: mapped power, energy, voltage and current sensors in kW, mW, Wh, MWh, mV or mA are converted instead of being read as W or kWh. Composed sensors, air purifiers and climate fans refresh mapped power, battery and filter values.
+- **Locks**: the PIN length in the web UI follows the lock's PIN length setting, wrong PINs are counted with the advertised lockout, and a PIN added to a slot a controller created stays enabled.
+- **Plugins**: installs and uninstalls are no longer lost when a bridge saves plugin settings, uploads run one at a time, settings saved while a built-in plugin is disabled are kept, and a plugin that fails while reporting its settings no longer stops its bridge.
+- **Reliability**: a Home Assistant service that rejects calls no longer blocks every device for 30 s, auto recovery records failed retries as failed, restarts no longer wait while the web UI is open, and a change of the Home Assistant unit system is picked up without a restart.
+- **Backups**: the retention limit counts automatic backups only, manual backups are kept. A restore that includes app settings restarts the app.
+- **Web API and Docker**: bridge import checks bridge ids and ports, websocket messages are size limited, the IP whitelist also applies to the websocket, the standalone image health check follows `HAMH_HTTP_PORT`, and npm installs report their version.
+
 **v2.1.0-alpha.965:**
 - **Unique ID Suffix help text**: the setting takes effect after a restart of the whole app (add-on), a bridge restart is not enough; a new bridge uses it right away.
 
