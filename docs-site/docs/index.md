@@ -421,6 +421,9 @@ Home, ...) are not placed in the same network segment. Please make sure to revie
 <details>
 <summary><strong>🧪 Alpha (v2.1.0-alpha.x)</strong></summary>
 
+**v2.1.0-alpha.967:**
+- **Google voice colors**: a voice color or brightness command on a light that is already on no longer sends a second empty turn on to Home Assistant. That second call cut the color fade short on lights such as the Shelly RGBW, so the light kept its old color ([#542](https://github.com/RiDDiX/home-assistant-matter-hub/issues/542)).
+
 **v2.1.0-alpha.966:**
 - **Device fixes from a second code audit**: pumps switch again, Hue buttons send one press per tap, TVs and speakers without full power or volume support now control Home Assistant, the remote Mute key works, water heaters turn off with their own off mode, humidifiers show 0 while off and respect their humidity range, fan speed steps and wind modes work on preset-only fans and air conditioners, Fahrenheit setpoints are sent without rounding noise, and robot vacuums with two rooms of the same name stay on the bridge.
 - **Units and composed devices**: mapped power, energy, voltage and current sensors in kW, mW, Wh, MWh, mV or mA are converted instead of being read as W or kWh. Composed sensors, air purifiers and climate fans refresh mapped power, battery and filter values.
