@@ -39,7 +39,7 @@ of port forwarding etc.
 | Channel | Branch | Current Version | Description |
 |---------|--------|-----------------|-------------|
 | **Stable** | `main` | v2.0.59 | Production-ready, recommended for most users |
-| **Alpha** | `alpha` | v2.1.0-alpha.966 | Ahead of Stable, carries the additions listed under Alpha Features |
+| **Alpha** | `alpha` | v2.1.0-alpha.967 | Ahead of Stable, carries the additions listed under Alpha Features |
 | **Testing** | `testing` | v4.1.0-testing.x | ⚠️ **Highly unstable!** Experimental features, may break |
 
 ### Which version should I use?
@@ -421,6 +421,9 @@ Re-assign the affected devices to their rooms after they reconnect. See the [doc
 
 <details>
 <summary><strong>🧪 Alpha Features (v2.1.0-alpha.x)</strong> - Click to expand</summary>
+
+**v2.1.0-alpha.967:**
+- **Google voice colors**: a voice color or brightness command on a light that is already on no longer sends a second empty turn on to Home Assistant. That second call cut the color fade short on lights such as the Shelly RGBW, so the light kept its old color ([#542](https://github.com/RiDDiX/home-assistant-matter-hub/issues/542)).
 
 **v2.1.0-alpha.966:**
 - **Device fixes from a second code audit**: pumps switch again, Hue buttons send one press per tap, TVs and speakers without full power or volume support now control Home Assistant, the remote Mute key works, water heaters turn off with their own off mode, humidifiers show 0 while off and respect their humidity range, fan speed steps and wind modes work on preset-only fans and air conditioners, Fahrenheit setpoints are sent without rounding noise, and robot vacuums with two rooms of the same name stay on the bridge.
