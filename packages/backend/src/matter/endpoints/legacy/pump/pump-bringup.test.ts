@@ -99,7 +99,7 @@ describe("switch mapped as pump", () => {
     await server.close().catch(() => {});
 
     expect(calls).toContainEqual({
-      action: { action: "turn_on" },
+      action: { action: "homeassistant.turn_on" },
       entityId: "switch.pump",
     });
   });

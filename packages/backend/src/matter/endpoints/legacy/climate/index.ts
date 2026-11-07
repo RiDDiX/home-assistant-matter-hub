@@ -132,23 +132,22 @@ export function ClimateDevice(
     attributes.battery_level != null || attributes.battery != null;
   const hasBatteryEntity = !!homeAssistantEntity.mapping?.batteryEntity;
   const hasBattery = hasBatteryAttr || hasBatteryEntity;
+  const hvacModes = attributes.hvac_modes ?? [];
 
   // heat_cool-only zones (e.g. HVAC zones that follow the main system) get
   // both Heating and Cooling features (without AutoMode). The thermostat
   // server dynamically sets controlSequenceOfOperation to HeatingOnly or
   // CoolingOnly based on hvac_action to reflect the main system's mode (#207).
-  const supportsCooling = coolingModes.some((mode) =>
-    attributes.hvac_modes.includes(mode),
-  );
+  const supportsCooling = coolingModes.some((mode) => hvacModes.includes(mode));
   const hasExplicitHeating = heatingModes.some((mode) =>
-    attributes.hvac_modes.includes(mode),
+    hvacModes.includes(mode),
   );
   // Treat auto-only thermostats (no heat/cool/heat_cool) as heating devices
   // so simple "auto"-only thermostats still map onto a Matter mode.
   const isAutoOnly =
     !hasExplicitHeating &&
     !supportsCooling &&
-    autoOnlyMode.some((mode) => attributes.hvac_modes.includes(mode));
+    autoOnlyMode.some((mode) => hvacModes.includes(mode));
   // Treat ventilation-only devices (fan_only/dry, no heat/cool/auto) as
   // heating devices so CMVs like Ambientika (#130) still surface as Matter
   // thermostats. The actual mode control runs through SystemMode.FanOnly/Dry.
@@ -156,14 +155,14 @@ export function ClimateDevice(
     !hasExplicitHeating &&
     !supportsCooling &&
     !isAutoOnly &&
-    ventilationOnlyModes.some((mode) => attributes.hvac_modes.includes(mode));
+    ventilationOnlyModes.some((mode) => hvacModes.includes(mode));
   const supportsHeating = hasExplicitHeating || isAutoOnly || isVentilationOnly;
 
   // Validate that at least one usable mode is supported
   if (!supportsCooling && !supportsHeating) {
     throw new InvalidDeviceError(
       `Climates have to support at least one of: heat, cool, heat_cool, auto, fan_only, or dry. ` +
-        `Found: [${attributes.hvac_modes.join(", ")}]`,
+        `Found: [${hvacModes.join(", ")}]`,
     );
   }
 
@@ -268,9 +267,9 @@ export function ClimateDevice(
   const autoMode =
     supportsHeating &&
     supportsCooling &&
-    attributes.hvac_modes.includes(ClimateHvacMode.heat_cool) &&
-    (attributes.hvac_modes.includes(ClimateHvacMode.heat) ||
-      attributes.hvac_modes.includes(ClimateHvacMode.cool));
+    hvacModes.includes(ClimateHvacMode.heat_cool) &&
+    (hvacModes.includes(ClimateHvacMode.heat) ||
+      hvacModes.includes(ClimateHvacMode.cool));
 
   // Pass thermostat state at the endpoint type level using the behavior ID,
   // so matter.js's internal validation sees the values before initialize.

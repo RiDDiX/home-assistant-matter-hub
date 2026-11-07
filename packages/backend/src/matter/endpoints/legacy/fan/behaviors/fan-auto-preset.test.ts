@@ -38,3 +38,17 @@ describe("fan setAutoMode preset casing (#436)", () => {
     });
   });
 });
+
+describe("fan setWindMode preset casing", () => {
+  it("sends the entity's own natural and sleep preset names", () => {
+    const agent = agentFor({ preset_modes: ["Nature", "Normal", "SLEEP"] });
+    expect(fanControlConfig.setWindMode("natural", agent)).toEqual({
+      action: "fan.set_preset_mode",
+      data: { preset_mode: "Nature" },
+    });
+    expect(fanControlConfig.setWindMode("sleep", agent)).toEqual({
+      action: "fan.set_preset_mode",
+      data: { preset_mode: "SLEEP" },
+    });
+  });
+});

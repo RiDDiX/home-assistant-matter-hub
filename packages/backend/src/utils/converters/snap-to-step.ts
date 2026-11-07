@@ -8,14 +8,17 @@
  * entity only supports integer steps but the controller sends 0.5°C
  * deltas.
  *
- * Pass-through when step is missing/invalid.
+ * Without a valid step the target is rounded to 0.1, which drops the float
+ * noise of the centi-degree conversion (2111 -> 69.998 F) that HA stores as is.
  */
 export function snapToStep(
   target: number,
   current: number | undefined,
   step: number | undefined,
 ): number {
-  if (step == null || !Number.isFinite(step) || step <= 0) return target;
+  if (step == null || !Number.isFinite(step) || step <= 0) {
+    return Math.round(target * 10) / 10;
+  }
   const ratio = target / step;
   const lower = Math.floor(ratio) * step;
   const upper = Math.ceil(ratio) * step;

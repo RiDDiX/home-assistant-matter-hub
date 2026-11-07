@@ -135,20 +135,22 @@ export const fanControlConfig: FanControlServerConfig = {
   }),
   setWindMode: (mode, agent) => {
     const presets = windPresets(agent);
+    const entityState = agent.get(HomeAssistantEntityBehavior).state.entity
+      .state;
+    const modes = attributes(entityState).preset_modes ?? [];
+    // HA preset names are case-sensitive, send the entity's own spelling.
     let presetMode: string;
     if (mode === "natural") {
-      presetMode = presets.natural?.[0] ?? "Natural";
+      presetMode =
+        presets.natural?.[0] ?? modes.find(isEnglishNatural) ?? "Natural";
     } else if (mode === "sleep") {
-      presetMode = presets.sleep?.[0] ?? "Sleep";
+      presetMode = presets.sleep?.[0] ?? modes.find(isEnglishSleep) ?? "Sleep";
     } else {
       // "off" picks the first non-wind preset (the normal one, e.g. 直吹风)
       const wind = new Set([
         ...(presets.natural ?? []),
         ...(presets.sleep ?? []),
       ]);
-      const entityState = agent.get(HomeAssistantEntityBehavior).state.entity
-        .state;
-      const modes = attributes(entityState).preset_modes ?? [];
       presetMode =
         modes.find(
           (m) => !wind.has(m) && !isEnglishNatural(m) && !isEnglishSleep(m),
