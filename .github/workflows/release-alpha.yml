@@ -13,6 +13,11 @@ on:
 permissions:
   contents: read
 
+# Runs compute the next alpha number from the tags seen at checkout.
+concurrency:
+  group: release-alpha
+  cancel-in-progress: false
+
 jobs:
   release:
     if: github.repository == 'RiDDiX/home-assistant-matter-hub'

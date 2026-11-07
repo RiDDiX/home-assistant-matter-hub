@@ -125,7 +125,14 @@ export class WebApi extends Service {
         entityMappingApi(this.mappingStorage, this.identityStorage),
       )
       .use("/mapping-profiles", mappingProfileApi(this.mappingStorage))
-      .use("/lock-credentials", lockCredentialApi(this.lockCredentialStorage))
+      .use(
+        "/lock-credentials",
+        lockCredentialApi(this.lockCredentialStorage, (entityId) =>
+          this.bridgeStorage.bridges.flatMap(
+            (b) => this.mappingStorage.getMapping(b.id, entityId) ?? [],
+          ),
+        ),
+      )
       .use(
         "/settings",
         settingsApi(this.settingsStorage, this.bridgeService, this.props.auth),
@@ -139,11 +146,12 @@ export class WebApi extends Service {
           this.backupService,
           this.settingsStorage,
           this.bridgeService,
+          this.identityStorage,
         ),
       )
       .use("/home-assistant", homeAssistantApi(this.haRegistry, this.haClient))
       .use("/logs", logsApi(this.logger))
-      .use("/system", systemApi(this.props.version))
+      .use("/system", systemApi(this.props.version, this.props.storageLocation))
       .use(
         "/diagnostic",
         diagnosticApi(
@@ -221,14 +229,20 @@ export class WebApi extends Service {
 
   override async dispose() {
     this.wsApi.close();
+    const server = this.server;
+    if (!server) {
+      return;
+    }
     await new Promise<void>((resolve, reject) => {
-      this.server?.close((error) => {
+      server.close((error) => {
         if (error) {
           reject(error);
         } else {
           resolve();
         }
       });
+      // Log streams never end on their own.
+      server.closeAllConnections();
     });
   }
 
@@ -242,8 +256,18 @@ export class WebApi extends Service {
         })
       : undefined;
     const storageMiddleware = basicAuth({
-      authorizer: (username: string, password: string) =>
-        this.settingsStorage.verifyAuth(username, password),
+      authorizer: (
+        username: string,
+        password: string,
+        callback: basicAuth.AsyncAuthorizerCallback,
+      ) => {
+        // express-basic-auth throws on a callback error, so deny instead.
+        this.settingsStorage.verifyAuth(username, password).then(
+          (ok) => callback(null, ok),
+          () => callback(null, false),
+        );
+      },
+      authorizeAsync: true,
       challenge: true,
       realm: "Home Assistant Matter Hub",
     });
@@ -280,6 +304,6 @@ export class WebApi extends Service {
         );
       });
     });
-    this.wsApi.attach(this.server, this.props.basePath);
+    this.wsApi.attach(this.server, this.props.basePath, this.props.whitelist);
   }
 }

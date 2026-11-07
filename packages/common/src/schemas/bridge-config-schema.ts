@@ -459,8 +459,9 @@ export const bridgeConfigSchema: JSONSchema7 = {
     },
     port: {
       title: "Port",
-      type: "number",
+      type: "integer",
       minimum: 1,
+      maximum: 65535,
     },
     icon: {
       title: "Icon",

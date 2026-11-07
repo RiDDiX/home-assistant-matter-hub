@@ -1,5 +1,6 @@
 import type * as http from "node:http";
 import type { WebSocketMessage } from "@home-assistant-matter-hub/common";
+import AccessControl from "express-ip-access-control";
 import { type WebSocket, WebSocketServer } from "ws";
 import type { BetterLogger } from "../core/app/logger.js";
 import type { BridgeService } from "../services/bridges/bridge-service.js";
@@ -23,9 +24,18 @@ export class WebSocketApi {
     this.diagnosticService = service;
   }
 
-  attach(server: http.Server, basePath = "/") {
+  attach(server: http.Server, basePath = "/", whitelist?: string[]) {
     const wsPath = `${basePath === "/" ? "" : basePath}/api/ws`;
-    this.wss = new WebSocketServer({ server, path: wsPath });
+    this.wss = new WebSocketServer({
+      server,
+      path: wsPath,
+      // Clients only send small control messages.
+      maxPayload: 64 * 1024,
+      // Upgrades skip the Express middlewares, so apply the whitelist here.
+      verifyClient: ({ req }: { req: http.IncomingMessage }) =>
+        !whitelist?.length ||
+        AccessControl.ipMatch(req.socket.remoteAddress ?? "", whitelist),
+    });
     // A proxy that keeps its x-forwarded-prefix in the URL sends /<prefix>/api/ws.
     this.wss.shouldHandle = (req) =>
       (req.url ?? "").split("?")[0].endsWith(wsPath);
@@ -148,6 +158,10 @@ export class WebSocketApi {
     this.unsubscribeDiagnostics?.();
     if (this.pingInterval) {
       clearInterval(this.pingInterval);
+    }
+    // ws 8 leaves open clients running, which keeps the http server open.
+    for (const client of this.wss?.clients ?? []) {
+      client.terminate();
     }
     this.wss?.close();
     this.clients.clear();

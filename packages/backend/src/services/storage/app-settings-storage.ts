@@ -1,4 +1,5 @@
-import { randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
+import { randomBytes, scrypt, scryptSync, timingSafeEqual } from "node:crypto";
+import { promisify } from "node:util";
 import type { StorageContext, SupportedStorageTypes } from "@matter/main";
 import { Service } from "../../core/ioc/service.js";
 import type { AppStorage } from "./app-storage.js";
@@ -13,6 +14,13 @@ const SCRYPT_COST_N = 16384;
 const SCRYPT_BLOCK_R = 8;
 const SCRYPT_PARALLEL_P = 1;
 const SALT_BYTES = 16;
+
+const scryptAsync = promisify(scrypt) as (
+  password: string,
+  salt: Buffer,
+  keylen: number,
+  options: { N: number; r: number; p: number },
+) => Promise<Buffer>;
 
 export interface AuthInfo {
   username: string;
@@ -78,11 +86,12 @@ function hashPassword(plain: string): {
   };
 }
 
-function verifyPasswordHash(
+// Async so a wrong password does not block the event loop for every bridge.
+async function verifyPasswordHash(
   plain: string,
   passwordHash: string,
   passwordSalt: string,
-): boolean {
+): Promise<boolean> {
   let expected: Buffer;
   let salt: Buffer;
   try {
@@ -94,7 +103,7 @@ function verifyPasswordHash(
   if (expected.length !== SCRYPT_KEYLEN || salt.length === 0) {
     return false;
   }
-  const derived = scryptSync(plain, salt, SCRYPT_KEYLEN, {
+  const derived = await scryptAsync(plain, salt, SCRYPT_KEYLEN, {
     N: SCRYPT_COST_N,
     r: SCRYPT_BLOCK_R,
     p: SCRYPT_PARALLEL_P,
@@ -162,7 +171,7 @@ export class AppSettingsStorage extends Service {
     await this.persist();
   }
 
-  verifyAuth(username: string, password: string): boolean {
+  async verifyAuth(username: string, password: string): Promise<boolean> {
     const stored = this.settings.auth;
     if (!stored) {
       return false;
@@ -193,7 +202,13 @@ export class AppSettingsStorage extends Service {
 
     if (stored.passwordHash && stored.passwordSalt) {
       if (
-        verifyPasswordHash(password, stored.passwordHash, stored.passwordSalt)
+        (await verifyPasswordHash(
+          password,
+          stored.passwordHash,
+          stored.passwordSalt,
+        )) &&
+        // The credentials may have been replaced while scrypt ran.
+        this.settings.auth === stored
       ) {
         this.verifiedPassword = { username: stored.username, password };
         return true;

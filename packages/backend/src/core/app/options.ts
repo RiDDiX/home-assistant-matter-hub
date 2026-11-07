@@ -12,18 +12,21 @@ import type { MdnsOptions } from "./mdns.js";
 import type { StorageOptions } from "./storage.js";
 
 function resolveAppVersion(): string {
-  try {
-    const require = createRequire(import.meta.url);
-    // When installed globally via npm, this resolves to the published package.json
-    // and provides the real semantic version.
-    const pkg = require("home-assistant-matter-hub/package.json") as {
-      version?: string;
-    };
-    if (pkg.version && pkg.version !== "0.0.0") {
-      return pkg.version;
+  const require = createRequire(import.meta.url);
+  // The relative path is the package root next to dist/backend/cli.js, which
+  // also works for the npm package published as @riddix/hamh.
+  for (const id of [
+    "../../package.json",
+    "home-assistant-matter-hub/package.json",
+  ]) {
+    try {
+      const pkg = require(id) as { version?: string };
+      if (pkg.version && pkg.version !== "0.0.0") {
+        return pkg.version;
+      }
+    } catch {
+      // ignore, try the next one
     }
-  } catch {
-    // ignore, fall through to env var
   }
   if (process.env.APP_VERSION) {
     return process.env.APP_VERSION;
