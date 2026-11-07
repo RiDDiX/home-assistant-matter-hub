@@ -3,6 +3,7 @@ import { ElectricalPowerMeasurementServer as Base } from "@matter/main/behaviors
 import { ElectricalPowerMeasurement } from "@matter/main/clusters";
 import { EntityStateProvider } from "../../services/bridges/entity-state-provider.js";
 import { applyPatchState } from "../../utils/apply-patch-state.js";
+import { mappedMilli } from "../../utils/converters/electrical-unit.js";
 import { HomeAssistantEntityBehavior } from "./home-assistant-entity-behavior.js";
 
 const logger = Logger.get("ElectricalPowerMeasurementServer");
@@ -50,20 +51,18 @@ class ElectricalPowerMeasurementServerBase extends FeaturedBase {
       activeCurrent?: number;
     } = {};
 
+    // Matter uses milliwatts (int64), millivolts and milliamps
     if (powerEntity) {
-      const powerWatts = stateProvider.getNumericState(powerEntity);
-      // Matter uses milliwatts (int64)
-      if (powerWatts != null) patch.activePower = Math.round(powerWatts * 1000);
+      const mw = mappedMilli(stateProvider, powerEntity, "power");
+      if (mw != null) patch.activePower = mw;
     }
     if (voltageEntity) {
-      const volts = stateProvider.getNumericState(voltageEntity);
-      // Matter uses millivolts
-      if (volts != null) patch.voltage = Math.round(volts * 1000);
+      const mv = mappedMilli(stateProvider, voltageEntity, "voltage");
+      if (mv != null) patch.voltage = mv;
     }
     if (currentEntity) {
-      const amps = stateProvider.getNumericState(currentEntity);
-      // Matter uses milliamps
-      if (amps != null) patch.activeCurrent = Math.round(amps * 1000);
+      const ma = mappedMilli(stateProvider, currentEntity, "current");
+      if (ma != null) patch.activeCurrent = ma;
     }
 
     if (Object.keys(patch).length > 0) applyPatchState(this.state, patch);

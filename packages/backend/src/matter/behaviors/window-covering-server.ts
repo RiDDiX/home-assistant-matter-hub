@@ -951,11 +951,18 @@ export class WindowCoveringServerBase extends FeaturedBase {
     const currentPositionMatter = this.state.currentPositionLiftPercent100ths;
     // Skip only a target the axis is already at. Strict on purpose: the
     // completion check tolerates one percent, this must not, or a one percent
-    // slider step is dropped instead of dispatched (#429).
+    // slider step is dropped instead of dispatched (#429). A slider moved back
+    // to where the cover is still must cancel the earlier pending target.
     if (
       currentPositionMatter != null &&
       isExactPosition(targetPercent100ths, currentPositionMatter)
     ) {
+      // An already dispatched target is moving the cover, keep its optimistic status.
+      const st = getCoverDebounce(this.endpoint);
+      if (st.pendingLift) {
+        clearPendingLift(st);
+        this.settleAtRest("lift");
+      }
       return;
     }
     // Update target immediately for UI feedback
@@ -1079,6 +1086,14 @@ export class WindowCoveringServerBase extends FeaturedBase {
       currentPositionMatter != null &&
       isExactPosition(targetPercent100ths, currentPositionMatter)
     ) {
+      const st = getCoverDebounce(this.endpoint);
+      // tilt-only covers park tilt actions in the lift slot, #350
+      const parkedTilt = st.pendingLift?.action.action.includes("tilt");
+      if (st.pendingTilt || parkedTilt) {
+        clearPendingTilt(st);
+        if (parkedTilt) clearPendingLift(st);
+        this.settleAtRest("tilt");
+      }
       return;
     }
     // Update target immediately for UI feedback

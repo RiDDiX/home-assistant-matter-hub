@@ -11,6 +11,10 @@ import { ElectricalPowerMeasurement } from "@matter/main/clusters";
 import { SolarPowerDevice } from "@matter/main/devices";
 import { EntityStateProvider } from "../../../../../services/bridges/entity-state-provider.js";
 import { applyPatchState } from "../../../../../utils/apply-patch-state.js";
+import {
+  mappedMilli,
+  toMatterMilli,
+} from "../../../../../utils/converters/electrical-unit.js";
 import { BasicInformationServer } from "../../../../behaviors/basic-information-server.js";
 import { HomeAssistantEntityBehavior } from "../../../../behaviors/home-assistant-entity-behavior.js";
 import { IdentifyServer } from "../../../../behaviors/identify-server.js";
@@ -52,17 +56,18 @@ class StandalonePowerServer extends PowerFeaturedBase {
       | undefined;
     const dc = attrs?.device_class;
     const primary = entity.state?.state;
+    const unit = attrs?.unit_of_measurement;
     if (primary != null && !Number.isNaN(+primary)) {
       if (dc === SensorDeviceClass.power) {
-        patch.activePower = Math.round(+primary * 1000);
+        patch.activePower = toMatterMilli(+primary, "power", unit);
       } else if (dc === SensorDeviceClass.voltage) {
-        patch.voltage = Math.round(+primary * 1000);
+        patch.voltage = toMatterMilli(+primary, "voltage", unit);
       } else if (dc === SensorDeviceClass.current) {
-        patch.activeCurrent = Math.round(+primary * 1000);
+        patch.activeCurrent = toMatterMilli(+primary, "current", unit);
       }
     }
 
-    // Mapped companions (W*1000 mW, V*1000 mV, A*1000 mA).
+    // Mapped companions, in mW, mV and mA.
     const mapping = this.agent.get(HomeAssistantEntityBehavior).state.mapping;
     if (
       mapping?.powerEntity ||
@@ -71,16 +76,16 @@ class StandalonePowerServer extends PowerFeaturedBase {
     ) {
       const stateProvider = this.agent.env.get(EntityStateProvider);
       if (mapping.powerEntity) {
-        const w = stateProvider.getNumericState(mapping.powerEntity);
-        if (w != null) patch.activePower = Math.round(w * 1000);
+        const mw = mappedMilli(stateProvider, mapping.powerEntity, "power");
+        if (mw != null) patch.activePower = mw;
       }
       if (mapping.voltageEntity) {
-        const v = stateProvider.getNumericState(mapping.voltageEntity);
-        if (v != null) patch.voltage = Math.round(v * 1000);
+        const mv = mappedMilli(stateProvider, mapping.voltageEntity, "voltage");
+        if (mv != null) patch.voltage = mv;
       }
       if (mapping.currentEntity) {
-        const a = stateProvider.getNumericState(mapping.currentEntity);
-        if (a != null) patch.activeCurrent = Math.round(a * 1000);
+        const ma = mappedMilli(stateProvider, mapping.currentEntity, "current");
+        if (ma != null) patch.activeCurrent = ma;
       }
     }
 
@@ -166,26 +171,28 @@ class StandaloneEnergyServer extends EnergyFeaturedBase {
   }
 
   private update(entity: HomeAssistantEntityInformation) {
-    let energyKwh: number | null = null;
+    let energyMwh: number | null = null;
 
     const attrs = entity.state?.attributes as
       | SensorDeviceAttributes
       | undefined;
     if (attrs?.device_class === SensorDeviceClass.energy) {
       const state = entity.state?.state;
-      if (state != null && !Number.isNaN(+state)) energyKwh = +state;
+      if (state != null && !Number.isNaN(+state)) {
+        energyMwh = toMatterMilli(+state, "energy", attrs.unit_of_measurement);
+      }
     }
 
     const mapping = this.agent.get(HomeAssistantEntityBehavior).state.mapping;
     if (mapping?.energyEntity) {
       const stateProvider = this.agent.env.get(EntityStateProvider);
-      const mapped = stateProvider.getNumericState(mapping.energyEntity);
-      if (mapped != null) energyKwh = mapped;
+      const mapped = mappedMilli(stateProvider, mapping.energyEntity, "energy");
+      if (mapped != null) energyMwh = mapped;
     }
 
-    if (energyKwh == null) return;
+    if (energyMwh == null) return;
 
-    const energyImported = { energy: Math.round(energyKwh * 1_000_000) };
+    const energyImported = { energy: energyMwh };
     const changed = applyPatchState(this.state, {
       cumulativeEnergyImported: energyImported,
     });

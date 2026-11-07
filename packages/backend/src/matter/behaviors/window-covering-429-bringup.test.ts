@@ -948,3 +948,52 @@ describe("#512 open/close as position", () => {
     expect(state(endpoint).targetPositionLiftPercent100ths).toBe(10000);
   });
 });
+
+// A slider dragged away and back to where the cover still sits ends on a
+// target the skip guard drops. That command has to cancel the earlier pending
+// target, or the cover still drives to the abandoned position.
+describe("slider moved back to the current position", () => {
+  it("x: lift back to current cancels the pending set_cover_position", async () => {
+    const endpoint = await mount("open", 50); // default inversion: stored 5000
+    const cap = subscribe(endpoint);
+    calls.length = 0;
+
+    await goToLift(endpoint, 6000);
+    await goToLift(endpoint, 5000);
+    await delay(500); // past the slider debounce
+
+    expect(calls).toEqual([]);
+    expect(cap.ops).toEqual([Closing, Stopped]);
+    expect(state(endpoint).targetPositionLiftPercent100ths).toBe(5000);
+  });
+
+  it("y: tilt back to current cancels the pending set_cover_tilt_position", async () => {
+    const endpoint = await mount("open", 50, undefined, {
+      supportedFeatures: LIFT_AND_TILT_WITH_POSITION,
+      haTiltPosition: 50,
+    });
+    const cap = subscribe(endpoint, "tilt");
+    calls.length = 0;
+
+    await goToTilt(endpoint, 6000);
+    await goToTilt(endpoint, 5000);
+    await delay(500);
+
+    expect(calls).toEqual([]);
+    expect(cap.ops).toEqual([Closing, Stopped]);
+    expect(state(endpoint).targetPositionTiltPercent100ths).toBe(5000);
+  });
+
+  it("x2: lift back to current after dispatch keeps the optimistic movement", async () => {
+    const endpoint = await mount("open", 50);
+    const cap = subscribe(endpoint);
+    calls.length = 0;
+
+    await goToLift(endpoint, 6000);
+    await delay(500); // dispatched, the cover is moving
+    expect(calls.length).toBe(1);
+    await goToLift(endpoint, 5000);
+
+    expect(cap.ops).toEqual([Closing]);
+  });
+});

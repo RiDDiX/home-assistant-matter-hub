@@ -214,13 +214,15 @@ export interface EntityMappingConfig {
   /** Optional: Override the advertised maximum PIN length (uint8, 1..20). Default 8. */
   readonly lockPinMaxLength?: number;
   /**
-   * Optional: Entity ID of a power sensor (device_class: power, unit: W).
+   * Optional: Entity ID of a power sensor (device_class: power). unit_of_measurement
+   * mW/W/kW/MW is converted, a missing unit is taken as W.
    * Adds ElectricalPowerMeasurement cluster to show real-time power consumption.
    * Example: "sensor.smart_plug_power"
    */
   readonly powerEntity?: string;
   /**
-   * Optional: Entity ID of an energy sensor (device_class: energy, unit: kWh).
+   * Optional: Entity ID of an energy sensor (device_class: energy). unit_of_measurement
+   * Wh/kWh/MWh is converted, a missing unit is taken as kWh.
    * Adds ElectricalEnergyMeasurement cluster to show cumulative energy consumption.
    * Example: "sensor.smart_plug_energy"
    */

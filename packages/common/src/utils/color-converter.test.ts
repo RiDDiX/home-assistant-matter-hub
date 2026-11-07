@@ -31,6 +31,15 @@ describe("ColorConverter", () => {
       expect(resultH).toBeCloseTo(h, 0);
       expect(resultS).toBeCloseTo(s, 0);
     });
+
+    // Matter allows colorY 0, which used to give NaN channels.
+    it("gives a finite color for y = 0", () => {
+      for (const x of [0, 0.3]) {
+        const color = ColorConverter.fromXY(x, 0);
+        const hs = ColorConverter.toHomeAssistantHS(color);
+        expect(hs.every(Number.isFinite)).toBe(true);
+      }
+    });
   });
 
   describe("fromRGB", () => {

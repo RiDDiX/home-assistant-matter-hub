@@ -4,6 +4,7 @@ import { ElectricalEnergyMeasurementServer as Base } from "@matter/main/behavior
 import { ElectricalPowerMeasurement } from "@matter/main/clusters";
 import { EntityStateProvider } from "../../services/bridges/entity-state-provider.js";
 import { applyPatchState } from "../../utils/apply-patch-state.js";
+import { mappedMilli } from "../../utils/converters/electrical-unit.js";
 import { HomeAssistantEntityBehavior } from "./home-assistant-entity-behavior.js";
 
 const logger = Logger.get("ElectricalEnergyMeasurementServer");
@@ -46,12 +47,10 @@ class ElectricalEnergyMeasurementServerBase extends FeaturedBase {
     if (!energyEntity) return;
 
     const stateProvider = this.agent.env.get(EntityStateProvider);
-    const energyKwh = stateProvider.getNumericState(energyEntity);
-
-    if (energyKwh == null) return;
-
     // Matter uses milliwatt-hours (mWh)
-    const energyMwh = Math.round(energyKwh * 1_000_000);
+    const energyMwh = mappedMilli(stateProvider, energyEntity, "energy");
+
+    if (energyMwh == null) return;
 
     const energyImported = { energy: energyMwh };
 
