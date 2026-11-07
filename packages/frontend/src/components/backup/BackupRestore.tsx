@@ -68,6 +68,8 @@ interface RestoreResult {
   identitiesRestored: number;
   errors: Array<{ bridgeId: string; error: string }>;
   restartRequired?: boolean;
+  // the server restarts on its own after restoring app files
+  restarting?: boolean;
 }
 
 function formatSize(bytes: number): string {
@@ -149,6 +151,11 @@ export function BackupRestore() {
     }
   };
 
+  const afterRestore = (result: RestoreResult) => {
+    if (result.restarting) setSuccess(t("backup.restarting"));
+    else if (result.restartRequired) setRestartDialogOpen(true);
+  };
+
   const handleRestoreSnapshot = async (filename: string) => {
     setLoading(true);
     setError(null);
@@ -171,9 +178,7 @@ export function BackupRestore() {
         );
       }
       setSnapshotRestoreTarget(null);
-      if (result.restartRequired) {
-        setRestartDialogOpen(true);
-      }
+      afterRestore(result);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to restore backup");
     } finally {
@@ -363,10 +368,7 @@ export function BackupRestore() {
       setDialogOpen(false);
       setPreview(null);
       setUploadedFile(null);
-
-      if (result.restartRequired) {
-        setRestartDialogOpen(true);
-      }
+      afterRestore(result);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Unknown error");
     } finally {

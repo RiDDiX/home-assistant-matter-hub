@@ -299,7 +299,8 @@ export class BackupService {
     // backup, so anything but a positive integer means "keep all".
     if (!Number.isInteger(maxCount) || maxCount <= 0) return;
 
-    const backups = this.listBackups();
+    // manual backups are deliberate recovery points, only the user deletes them
+    const backups = this.listBackups().filter((b) => b.auto);
     if (backups.length <= maxCount) return;
 
     const toDelete = backups.slice(maxCount);
@@ -309,7 +310,7 @@ export class BackupService {
 
     if (toDelete.length > 0) {
       this.log.info(
-        `Retention: deleted ${toDelete.length} old backup(s), keeping ${maxCount}`,
+        `Retention: deleted ${toDelete.length} old automatic backup(s), keeping ${maxCount}`,
       );
     }
   }

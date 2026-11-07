@@ -34,10 +34,8 @@ export interface DiagnosticBridgeInfo {
   readonly bridgeId: string;
   readonly bridgeName: string;
   readonly status: string;
-  readonly uptime: number;
   readonly entityCount: number;
   readonly sessionCount: number;
-  readonly subscriptionCount: number;
   readonly featureFlags: Record<string, boolean>;
   readonly entities: DiagnosticEntityInfo[];
 }

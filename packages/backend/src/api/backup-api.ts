@@ -27,13 +27,15 @@ import {
   type BridgeStorage,
   bridgeMigrations,
 } from "../services/storage/bridge-storage.js";
+import type { EntityIdentityStorage } from "../services/storage/entity-identity-storage.js";
 import type { EntityMappingStorage } from "../services/storage/entity-mapping-storage.js";
 
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 100 * 1024 * 1024 },
 });
-const MAX_BACKUP_JSON_BYTES = 50 * 1024 * 1024;
+// Per zip entry. The upload cap only bounds the compressed size.
+const MAX_ENTRY_BYTES = 50 * 1024 * 1024;
 // Bridge ids become directory names below the storage location on restore.
 // Imported legacy bridges keep dashed UUIDs or their old id.
 const BRIDGE_ID = /^[\w-]+$/;
@@ -69,8 +71,14 @@ export function backupApi(
   backupService: BackupService,
   settingsStorage: AppSettingsStorage,
   bridgeService: BridgeService,
+  identityStorage: EntityIdentityStorage,
 ): express.Router {
   const router = express.Router();
+
+  // The graceful shutdown path disposes bridges, HA client and storage in
+  // reverse order before the process exits.
+  const scheduleRestart = () =>
+    setTimeout(() => process.kill(process.pid, "SIGTERM"), 500);
 
   async function restore(
     buffer: Buffer,
@@ -172,6 +180,7 @@ export function backupApi(
           zipDirectory,
           storageLocation,
           bridgeService,
+          identityStorage,
         );
       } catch (e) {
         errors.push({
@@ -190,7 +199,11 @@ export function backupApi(
       errors,
       restartRequired:
         bridgesRestored > 0 || identitiesRestored > 0 || appRestored,
+      // The running storages would write their stale memory over the restored
+      // app files, so the restart is not left to the user.
+      restarting: appRestored,
     });
+    if (appRestored) scheduleRestart();
   }
 
   router.get("/download", async (req, res) => {
@@ -353,12 +366,7 @@ export function backupApi(
 
   router.post("/restart", async (_, res) => {
     res.json({ message: "Restarting application..." });
-    // Signal the graceful shutdown path instead of exiting directly.
-    // The SIGTERM handler disposes bridges, HA client, and storage in
-    // reverse order before the process exits.
-    setTimeout(() => {
-      process.kill(process.pid, "SIGTERM");
-    }, 500);
+    scheduleRestart();
   });
 
   // --- Snapshot management endpoints ---
@@ -526,12 +534,27 @@ async function extractBackupData(buffer: Buffer): Promise<ExtractedBackup> {
   if (!backupFile) {
     throw new Error("Invalid backup: backup.json not found");
   }
-  if (backupFile.uncompressedSize > MAX_BACKUP_JSON_BYTES) {
-    throw new Error("Invalid backup: backup.json is larger than 50 MB");
-  }
-  const content = await backupFile.buffer();
+  const content = await readEntry(backupFile);
   const data = JSON.parse(content.toString()) as BackupData;
   return { backupData: data, zipDirectory: directory };
+}
+
+// The declared size comes from the archive, so the inflated bytes are counted
+// too.
+async function readEntry(file: unzipper.File): Promise<Buffer> {
+  const tooLarge = () =>
+    new Error(
+      `Invalid backup: ${file.path} is larger than ${MAX_ENTRY_BYTES / 1024 / 1024} MB`,
+    );
+  if (file.uncompressedSize > MAX_ENTRY_BYTES) throw tooLarge();
+  const chunks: Buffer[] = [];
+  let size = 0;
+  for await (const chunk of file.stream()) {
+    size += chunk.length;
+    if (size > MAX_ENTRY_BYTES) throw tooLarge();
+    chunks.push(chunk);
+  }
+  return Buffer.concat(chunks);
 }
 
 // The store migrations run on a whole store, so the record goes through a
@@ -596,8 +619,7 @@ async function restoreIdentityFiles(
 
     fs.mkdirSync(targetDirPath, { recursive: true });
 
-    const content = await file.buffer();
-    fs.writeFileSync(targetPath, content);
+    fs.writeFileSync(targetPath, await readEntry(file));
   }
 
   return true;
@@ -627,17 +649,18 @@ async function restorePluginConfigs(
         `Refusing to restore plugin file with unsafe path: ${file.path}`,
       );
     }
-    fs.writeFileSync(targetPath, await file.buffer());
+    fs.writeFileSync(targetPath, await readEntry(file));
   }
 }
 
 // Lock PINs, login and entity identities live in the app namespace that the
-// running storages rewrite from memory, so every bridge stops first and the
-// restart follows.
+// running storages rewrite from memory, so every bridge stops first, the
+// pending identity write lands before the files and the restart follows.
 async function restoreAppFiles(
   zipDirectory: unzipper.CentralDirectory,
   storageLocation: string,
   bridgeService: BridgeService,
+  identityStorage: EntityIdentityStorage,
 ): Promise<boolean> {
   const entries = zipDirectory.files.filter(
     (f: { path: string; type: string }) =>
@@ -646,6 +669,9 @@ async function restoreAppFiles(
   if (entries.length === 0) {
     return false;
   }
+  // read up front so a bad entry leaves the bridges running
+  const contents: Buffer[] = [];
+  for (const entry of entries) contents.push(await readEntry(entry));
   const active = () =>
     bridgeService.bridges.filter(
       (b) =>
@@ -658,14 +684,15 @@ async function restoreAppFiles(
       "Lock PINs, login and entity identities were not restored because a bridge did not stop. Stop all bridges and restore again.",
     );
   }
+  await identityStorage.flush();
   const appDir = path.join(storageLocation, "app");
   fs.mkdirSync(appDir, { recursive: true });
-  for (const entry of entries) {
+  entries.forEach((entry, i) => {
     fs.writeFileSync(
       path.join(appDir, entry.path.slice("app/".length)),
-      await entry.buffer(),
+      contents[i],
     );
-  }
+  });
   return true;
 }
 
@@ -684,8 +711,10 @@ async function restorePluginState(
   if (!entry) {
     return false;
   }
-  const content = await entry.buffer();
-  fs.writeFileSync(pluginStateFilePath(storageLocation, bridgeId), content);
+  fs.writeFileSync(
+    pluginStateFilePath(storageLocation, bridgeId),
+    await readEntry(entry),
+  );
   return true;
 }
 
@@ -718,8 +747,7 @@ async function restoreBridgeIcon(
       );
     }
 
-    const content = await file.buffer();
-    fs.writeFileSync(targetPath, content);
+    fs.writeFileSync(targetPath, await readEntry(file));
   }
 
   return true;

@@ -77,10 +77,25 @@ describe("BackupService", () => {
   it("still enforces retention after a backup", async () => {
     seed(5);
     const service = createService(storageLocation);
-    const metadata = await service.createBackup(false);
+    const metadata = await service.createBackup(true);
     const files = fs.readdirSync(backupDir);
     expect(files).toHaveLength(5);
     expect(files).toContain(metadata.filename);
+  });
+
+  it("never prunes manual backups", async () => {
+    const manual = path.join(
+      backupDir,
+      "hamh-manual-2.0.56-2026-08-01_00-00-00.zip",
+    );
+    fs.writeFileSync(manual, "x");
+    fs.utimesSync(manual, new Date(2026, 7, 1), new Date(2026, 7, 1));
+    seed(7);
+    const service = createService(storageLocation);
+    await service.createBackup(false);
+    const files = fs.readdirSync(backupDir);
+    expect(files.filter((f) => f.startsWith("hamh-auto-"))).toHaveLength(5);
+    expect(files.filter((f) => f.startsWith("hamh-manual-"))).toHaveLength(2);
   });
 
   it("keeps every backup when the stored count is not a positive integer", () => {

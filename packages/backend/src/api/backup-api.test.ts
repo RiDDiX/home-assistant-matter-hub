@@ -10,6 +10,7 @@ import {
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Readable } from "node:stream";
 import type { BridgeData } from "@home-assistant-matter-hub/common";
 import archiver from "archiver";
 import express from "express";
@@ -19,6 +20,7 @@ import type { BackupService } from "../services/backup/backup-service.js";
 import type { BridgeService } from "../services/bridges/bridge-service.js";
 import type { AppSettingsStorage } from "../services/storage/app-settings-storage.js";
 import type { BridgeStorage } from "../services/storage/bridge-storage.js";
+import type { EntityIdentityStorage } from "../services/storage/entity-identity-storage.js";
 import type { EntityMappingStorage } from "../services/storage/entity-mapping-storage.js";
 import { backupApi } from "./backup-api.js";
 
@@ -43,12 +45,17 @@ const mappingStorage = {
   setMapping: async () => {},
 } as unknown as EntityMappingStorage;
 
+const noIdentities = {
+  flush: async () => {},
+} as unknown as EntityIdentityStorage;
+
 async function withRouter(
   fn: (base: string) => Promise<void>,
   settingsStorage = {} as unknown as AppSettingsStorage,
   bridgeService = noBridges,
   storage = bridgeStorage,
   storageLocation = dir,
+  identityStorage = noIdentities,
 ): Promise<void> {
   const app = express();
   app.use(express.json());
@@ -61,6 +68,7 @@ async function withRouter(
       {} as unknown as BackupService,
       settingsStorage,
       bridgeService,
+      identityStorage,
     ),
   );
   const server = app.listen(0);
@@ -191,6 +199,7 @@ describe("mapping restore keeps every field", () => {
         { getBackupPath: () => zipPath } as unknown as BackupService,
         {} as unknown as AppSettingsStorage,
         noBridges,
+        noIdentities,
       ),
     );
     const server = app.listen(0);
@@ -341,12 +350,41 @@ describe("restore input checks", () => {
       expect((await res.json()).error).toMatch(/50 MB/);
     });
   });
+
+  it("rejects an entry that inflates past its declared size", async () => {
+    const stream = vi.fn(() =>
+      Readable.from([
+        Buffer.alloc(30 * 1024 * 1024),
+        Buffer.alloc(30 * 1024 * 1024),
+      ]),
+    );
+    vi.spyOn(unzipper.Open, "buffer").mockResolvedValueOnce({
+      files: [
+        { path: "backup.json", type: "File", uncompressedSize: 2, stream },
+      ],
+    } as unknown as unzipper.CentralDirectory);
+    await withRouter(async (base) => {
+      const res = await fetch(
+        `${base}/backup/restore/preview`,
+        restoreForm(new Blob(["zip"])),
+      );
+      expect(res.status).toBe(400);
+      expect((await res.json()).error).toMatch(/50 MB/);
+    });
+    expect(stream).toHaveBeenCalledOnce();
+  });
 });
 
 describe("restore while the bridge runs", () => {
-  it("stops every running bridge and restores the app files", async () => {
+  it("stops every running bridge, restores the app files and restarts", async () => {
+    const kill = vi.spyOn(process, "kill").mockImplementation(() => true);
     const storageLocation = join(dir, "running-all");
     mkdirSync(storageLocation, { recursive: true });
+    const settingsFile = join(storageLocation, "app", "settings.data");
+    // the pending identity write has to land before the restored files
+    const flush = vi.fn(async () => {
+      expect(existsSync(settingsFile)).toBe(false);
+    });
     const data = { status: "running" };
     const other = {
       data,
@@ -373,16 +411,21 @@ describe("restore while the bridge runs", () => {
         const body = await res.json();
         expect(body.errors).toEqual([]);
         expect(body.restartRequired).toBe(true);
+        expect(body.restarting).toBe(true);
       },
       undefined,
       bridgeService,
       undefined,
       storageLocation,
+      { flush } as unknown as EntityIdentityStorage,
     );
     expect(other.stop).toHaveBeenCalledOnce();
-    expect(
-      readFileSync(join(storageLocation, "app", "settings.data"), "utf-8"),
-    ).toBe("{}");
+    expect(flush).toHaveBeenCalledOnce();
+    expect(readFileSync(settingsFile, "utf-8")).toBe("{}");
+    await vi.waitFor(() =>
+      expect(kill).toHaveBeenCalledWith(process.pid, "SIGTERM"),
+    );
+    kill.mockRestore();
   });
 
   it("keeps the app files when a bridge does not stop", async () => {
