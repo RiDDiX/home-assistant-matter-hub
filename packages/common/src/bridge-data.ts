@@ -83,14 +83,11 @@ interface AllBridgeFeatureFlags {
    * Amazon Alexa REQUIRES PowerController (mapped from OnOff) for robotic vacuums.
    * Without it, the vacuum commissions but never appears in the Alexa app.
    *
-   * In Server Mode: OnOff is included automatically when this flag is unset.
-   * Set to false explicitly to disable (e.g. Apple Home shows "Updating").
-   *
-   * In Bridge Mode: OnOff is excluded by default. Set to true to enable for Alexa.
+   * OnOff is off by default in both modes and only included when this flag is
+   * true (it is not part of RVC device type 0x74, and Alexa rejects it, #185/#183).
    *
    * NOTE: This field intentionally has no schema default so that RJSF does not
-   * write false into new bridge configs, which would override the server-mode
-   * default-to-true logic in isServerModeVacuumOnOffEnabled().
+   * write false into new bridge configs.
    */
   readonly vacuumOnOff: boolean;
   /**

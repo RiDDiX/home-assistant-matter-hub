@@ -482,6 +482,28 @@ export class ServerModeEndpointManager extends Service {
         }
 
         const existing = this.endpoints.get(entityId);
+
+        // already exposed through another endpoint's mapped entities
+        // (e.g. the vacuum auto-claims its battery and mode selects)
+        const claimedBy = [...this.endpoints.entries()].find(
+          ([id, entry]) =>
+            id !== entityId &&
+            entry.endpoint.mappedEntityIds.includes(entityId),
+        );
+        if (claimedBy) {
+          // mounted standalone before the claim, e.g. a battery that was
+          // unavailable when the vacuum was built (#498)
+          if (existing) {
+            await this.removeEndpoints([entityId]);
+            structureChanged = true;
+          }
+          this._failedEntities.push({
+            entityId,
+            reason: `Already exposed through ${claimedBy[0]} on this node.`,
+          });
+          continue;
+        }
+
         if (
           existing &&
           existing.fingerprint ===
@@ -505,19 +527,6 @@ export class ServerModeEndpointManager extends Service {
             await this.removeEndpoints([entityId]);
           }
           structureChanged = true;
-        }
-
-        // already exposed through another endpoint's mapped entities
-        // (e.g. the vacuum auto-claims its battery and mode selects)
-        const claimedBy = [...this.endpoints.entries()].find(([, entry]) =>
-          entry.endpoint.mappedEntityIds.includes(entityId),
-        );
-        if (claimedBy) {
-          this._failedEntities.push({
-            entityId,
-            reason: `Already exposed through ${claimedBy[0]} on this node.`,
-          });
-          continue;
         }
 
         // matter.js rejects duplicate endpoint ids at startup

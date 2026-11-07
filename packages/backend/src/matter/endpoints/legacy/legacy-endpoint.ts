@@ -26,8 +26,10 @@ import { ComposedSensorEndpoint } from "../composed/composed-sensor-endpoint.js"
 import { UserComposedEndpoint } from "../composed/user-composed-endpoint.js";
 import { asStandaloneEndpointType } from "../standalone-endpoint-type.js";
 import { updateEntityState } from "../update-entity-state.js";
-import { createLegacyEndpointType } from "./create-legacy-endpoint-type.js";
-import { supportsCleaningModes } from "./vacuum/behaviors/vacuum-rvc-clean-mode-server.js";
+import {
+  createLegacyEndpointType,
+  resolveCleaningModeOptions,
+} from "./create-legacy-endpoint-type.js";
 import {
   type VacuumEffectiveConfig,
   withResolvedRooms,
@@ -271,7 +273,6 @@ export class LegacyEndpoint extends EntityEndpoint {
               entityId: effectiveMapping?.entityId ?? entityId,
               powerEntity: powerEntityId,
             };
-            registry.markPowerEntityUsed(powerEntityId);
             logger.debug(`Auto-assigned power ${powerEntityId} to ${entityId}`);
           }
         }
@@ -292,7 +293,6 @@ export class LegacyEndpoint extends EntityEndpoint {
               entityId: effectiveMapping?.entityId ?? entityId,
               energyEntity: energyEntityId,
             };
-            registry.markEnergyEntityUsed(energyEntityId);
             logger.debug(
               `Auto-assigned energy ${energyEntityId} to ${entityId}`,
             );
@@ -600,33 +600,11 @@ export class LegacyEndpoint extends EntityEndpoint {
       );
     }
 
-    // Resolve cleaning mode options for vacuum entities
-    let cleaningModeOptions: string[] | undefined;
-    if (entityId.startsWith("vacuum.")) {
-      if (effectiveMapping?.cleaningModeEntity) {
-        const cmState = registry.initialStateIncludingUnfiltered(
-          effectiveMapping.cleaningModeEntity,
-        );
-        cleaningModeOptions = (
-          cmState?.attributes as { options?: string[] } | undefined
-        )?.options;
-      }
-      // Fallback: if no options from entity (unavailable / not loaded),
-      // use hardcoded defaults so mop modes are still generated.
-      // The runtime getCurrentMode/setCleanMode reads the entity live.
-      if (
-        !cleaningModeOptions &&
-        (effectiveMapping?.cleaningModeEntity ||
-          supportsCleaningModes(state.attributes as VacuumDeviceAttributes))
-      ) {
-        cleaningModeOptions = [
-          "vacuum",
-          "mop",
-          "vacuum_and_mop",
-          "vacuum_then_mop",
-        ];
-      }
-    }
+    const cleaningModeOptions = resolveCleaningModeOptions(
+      registry,
+      payload,
+      effectiveMapping,
+    );
 
     const areaName = registry.getAreaName(entityId);
     let type = createLegacyEndpointType(
@@ -694,8 +672,15 @@ export class LegacyEndpoint extends EntityEndpoint {
     clear(): void;
   };
 
+  // delete() ends in close(), and a rebuild or bridge stop only closes, so
+  // the queued flush must not outlive either (#461)
+  override async close() {
+    this.flushUpdate.clear();
+    await super.close();
+  }
+
+  // delete() erases storage before it reaches close(), so clear first here too.
   override async delete() {
-    // Clear any pending debounce timers to prevent callbacks firing after deletion
     this.flushUpdate.clear();
     await super.delete();
   }

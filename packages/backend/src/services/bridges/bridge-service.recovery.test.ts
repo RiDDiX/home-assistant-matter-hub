@@ -4,12 +4,16 @@ import type { Bridge } from "./bridge.js";
 import type { BridgeFactory } from "./bridge-factory.js";
 import { BridgeService, type BridgeServiceProps } from "./bridge-service.js";
 
-function makeBridge(id: string, status: string) {
-  return {
+// start() resolves even when the bridge fails again, only the status tells
+function makeBridge(id: string, status: string, statusAfterStart = "running") {
+  const bridge = {
     id,
     data: { status, name: id },
-    start: vi.fn().mockResolvedValue(undefined),
+    start: vi.fn(async () => {
+      bridge.data.status = statusAfterStart;
+    }),
   };
+  return bridge;
 }
 
 // autoRecovery off keeps initialize() from starting a timer the tests would leak.
@@ -53,6 +57,22 @@ describe("BridgeService recovery", () => {
       bridgeId: "a",
       outcome: "success",
     });
+  });
+
+  it("records a failed outcome when the bridge fails again", async () => {
+    const svc = await makeService();
+    svc.autoRecoveryEnabled = true;
+    const failed = makeBridge("a", "failed", "failed");
+    svc.bridges.push(failed as unknown as Bridge);
+
+    svc.recoverFailedBridgesNow();
+
+    await vi.waitFor(() => expect(svc.recoveryHistory).toHaveLength(1));
+    expect(svc.recoveryHistory[0]).toMatchObject({
+      bridgeId: "a",
+      outcome: "failed",
+    });
+    expect(svc.recoveryCount).toBe(0);
   });
 
   it("debounces back-to-back reactive triggers", async () => {

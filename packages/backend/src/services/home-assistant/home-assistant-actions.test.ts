@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import type { LoggerService } from "../../core/app/logger.js";
-import { HomeAssistantActions } from "./home-assistant-actions.js";
+import {
+  HomeAssistantActions,
+  type HomeAssistantActionsConfig,
+} from "./home-assistant-actions.js";
 import type { HomeAssistantClient } from "./home-assistant-client.js";
 
 // #446: a command must not report success when the call cannot reach HA, and
@@ -22,6 +25,7 @@ function makeActions(
     type: string;
     [key: string]: unknown;
   }) => Promise<unknown>,
+  config: HomeAssistantActionsConfig = {},
 ) {
   const client = {
     haRunning: true,
@@ -32,6 +36,7 @@ function makeActions(
     retryAttempts: 1,
     retryBaseDelayMs: 1,
     circuitBreakerResetMs: 10_000,
+    ...config,
   });
   return { actions, client };
 }
@@ -370,5 +375,28 @@ describe("HomeAssistantActions on-then-level (#491)", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe("HomeAssistantActions HA refusals", () => {
+  it("sends a refused call once and keeps the breaker closed", async () => {
+    const refusal = { code: "service_validation_error", message: "bad" };
+    const send = vi.fn(async (): Promise<unknown> => {
+      throw refusal;
+    });
+    const { actions } = makeActions(send, {
+      retryAttempts: 3,
+      circuitBreakerThreshold: 1,
+    });
+
+    await expect(
+      actions.callAction("light", "turn_on", {}, { entity_id: "light.a" }),
+    ).rejects.toBe(refusal);
+    expect(send).toHaveBeenCalledTimes(1);
+
+    send.mockResolvedValueOnce({});
+    await expect(
+      actions.callAction("light", "turn_on", {}, { entity_id: "light.b" }),
+    ).resolves.toEqual({});
   });
 });

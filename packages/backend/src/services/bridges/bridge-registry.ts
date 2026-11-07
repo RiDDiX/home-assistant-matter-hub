@@ -66,10 +66,6 @@ export class BridgeRegistry {
   private _usedHumidityEntities: Set<string> = new Set();
   // Track pressure entities that have been auto-assigned to temperature sensors
   private _usedPressureEntities: Set<string> = new Set();
-  // Track power entities that have been auto-assigned to switch/plug entities
-  private _usedPowerEntities: Set<string> = new Set();
-  // Track energy entities that have been auto-assigned to switch/plug entities
-  private _usedEnergyEntities: Set<string> = new Set();
   // Track entities consumed by composed devices (e.g., sensors/climate grouped under air purifier)
   private _usedComposedSubEntities: Set<string> = new Set();
   // The find*ForDevice lookups scanned the whole HA registry per call. Index
@@ -408,20 +404,6 @@ export class BridgeRegistry {
   }
 
   /**
-   * Find a climate entity that belongs to the same HA device.
-   * Returns the entity_id of the climate entity, or undefined if none found.
-   */
-  findClimateEntityForDevice(deviceId: string): string | undefined {
-    for (const entity of this.entitiesOfDevice(deviceId)) {
-      if (!entity.entity_id.startsWith("climate.")) continue;
-
-      const state = this.registry.states[entity.entity_id];
-      if (state) return entity.entity_id;
-    }
-    return undefined;
-  }
-
-  /**
    * Mark an entity as consumed by a composed device.
    */
   markComposedSubEntityUsed(entityId: string): void {
@@ -476,18 +458,6 @@ export class BridgeRegistry {
   // consumption of the stored endpoint id/anchor is gated on this flag.
   isStableIdentityEnabled(): boolean {
     return this.dataProvider.featureFlags?.stableIdentity === true;
-  }
-
-  /**
-   * Check if the vacuum OnOff cluster should be included for server-mode vacuums.
-   * Defaults to OFF. OnOff is NOT part of the RoboticVacuumCleaner (0x74) device
-   * type spec. Adding it makes the device non-conformant and causes Amazon Alexa
-   * to reject it entirely (#185, #183). Apple Home may also render the vacuum
-   * incorrectly (shows "Updating" or switch UI). Only enable via feature flag
-   * if a specific controller requires it.
-   */
-  isServerModeVacuumOnOffEnabled(): boolean {
-    return this.dataProvider.featureFlags?.vacuumOnOff === true;
   }
 
   /**
@@ -932,22 +902,6 @@ export class BridgeRegistry {
     );
   }
 
-  markPowerEntityUsed(entityId: string): void {
-    this._usedPowerEntities.add(entityId);
-  }
-
-  isPowerEntityUsed(entityId: string): boolean {
-    return this._usedPowerEntities.has(entityId);
-  }
-
-  markEnergyEntityUsed(entityId: string): void {
-    this._usedEnergyEntities.add(entityId);
-  }
-
-  isEnergyEntityUsed(entityId: string): boolean {
-    return this._usedEnergyEntities.has(entityId);
-  }
-
   constructor(
     private readonly registry: HomeAssistantRegistry,
     private readonly dataProvider: BridgeDataProvider,
@@ -999,8 +953,6 @@ export class BridgeRegistry {
     this._usedBatteryEntities.clear();
     this._usedHumidityEntities.clear();
     this._usedPressureEntities.clear();
-    this._usedPowerEntities.clear();
-    this._usedEnergyEntities.clear();
     this._usedComposedSubEntities.clear();
     // Clear lookup caches
     this._batteryEntityCache.clear();
@@ -1077,34 +1029,7 @@ export class BridgeRegistry {
       }
     }
 
-    // Second pass: Find power and energy entities for switch/light entities
-    for (const entity of entities) {
-      if (!entity.device_id) continue;
-      const domain = entity.entity_id.split(".")[0];
-      if (domain !== "switch" && domain !== "light") continue;
-
-      const powerEntityId = this.findPowerEntityForDevice(
-        entity.device_id,
-        entity.entity_id,
-      );
-      if (powerEntityId && powerEntityId !== entity.entity_id) {
-        if (!this._usedPowerEntities.has(powerEntityId)) {
-          this._usedPowerEntities.add(powerEntityId);
-        }
-      }
-
-      const energyEntityId = this.findEnergyEntityForDevice(
-        entity.device_id,
-        entity.entity_id,
-      );
-      if (energyEntityId && energyEntityId !== entity.entity_id) {
-        if (!this._usedEnergyEntities.has(energyEntityId)) {
-          this._usedEnergyEntities.add(energyEntityId);
-        }
-      }
-    }
-
-    // Third pass: Find all "main" entities and mark their battery entities
+    // Second pass: Find all "main" entities and mark their battery entities
     // A "main" entity is any entity that is NOT already marked as used
     if (this.isAutoBatteryMappingEnabled()) {
       for (const entity of entities) {

@@ -119,6 +119,20 @@ describe("BridgeService.updatePriorities", () => {
   });
 });
 
+describe("BridgeService.update", () => {
+  it("does not store a bridge a delete removed while it updated", async () => {
+    const { svc, add } = await makeService([bridgeData("a", 5540)]);
+    const bridge = svc.get("a");
+    vi.mocked(bridge!.update).mockImplementation(async () => {
+      svc.bridges.splice(0, 1);
+    });
+
+    await svc.update({ ...bridgeData("a", 5540), name: "late" });
+
+    expect(add).not.toHaveBeenCalled();
+  });
+});
+
 describe("BridgeService.create", () => {
   const request = {
     name: "x",

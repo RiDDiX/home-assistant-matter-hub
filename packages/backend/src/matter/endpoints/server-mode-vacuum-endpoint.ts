@@ -9,7 +9,7 @@ import debounce from "debounce";
 import type { BridgeRegistry } from "../../services/bridges/bridge-registry.js";
 import type { HomeAssistantStates } from "../../services/home-assistant/home-assistant-registry.js";
 import { EntityEndpoint, getMappedEntityIds } from "./entity-endpoint.js";
-import { supportsCleaningModes } from "./legacy/vacuum/behaviors/vacuum-rvc-clean-mode-server.js";
+import { resolveCleaningModeOptions } from "./legacy/create-legacy-endpoint-type.js";
 import {
   type VacuumEffectiveConfig,
   withResolvedRooms,
@@ -254,33 +254,11 @@ export class ServerModeVacuumEndpoint extends EntityEndpoint {
       effectiveMapping,
     );
 
-    // Resolve cleaning mode options for accurate RvcCleanMode generation.
-    // Reads actual entity options so only supported types get modes.
-    const vacAttrsForClean = state.attributes as VacuumDeviceAttributes;
-    let cleaningModeOptions: string[] | undefined;
-    if (effectiveMapping?.cleaningModeEntity) {
-      const cmState = registry.initialStateIncludingUnfiltered(
-        effectiveMapping.cleaningModeEntity,
-      );
-      cleaningModeOptions = (
-        cmState?.attributes as { options?: string[] } | undefined
-      )?.options;
-    }
-    // Fallback: if no options from entity (unavailable / not loaded),
-    // use hardcoded defaults so mop modes are still generated.
-    // The runtime getCurrentMode/setCleanMode reads the entity live.
-    if (
-      !cleaningModeOptions &&
-      (effectiveMapping?.cleaningModeEntity ||
-        supportsCleaningModes(vacAttrsForClean))
-    ) {
-      cleaningModeOptions = [
-        "vacuum",
-        "mop",
-        "vacuum_and_mop",
-        "vacuum_then_mop",
-      ];
-    }
+    const cleaningModeOptions = resolveCleaningModeOptions(
+      registry,
+      payload,
+      effectiveMapping,
+    );
 
     const customName = effectiveMapping?.customName;
     const endpointType = ServerModeVacuumDevice(
@@ -289,7 +267,7 @@ export class ServerModeVacuumEndpoint extends EntityEndpoint {
         customName,
         mapping: effectiveMapping,
       },
-      registry.isServerModeVacuumOnOffEnabled(),
+      registry.isVacuumOnOffEnabled(),
       cleaningModeOptions,
     );
 

@@ -642,6 +642,29 @@ describe("ServerModeEndpointManager (#301)", () => {
     expect(advertised).toBe(0x74);
   });
 
+  it("drops a standalone endpoint once the vacuum claims its entity (#498)", async () => {
+    const h = makeHarness(["vacuum.robo", "sensor.vac_battery"], "vacuum.robo");
+    await h.manager.refreshDevices();
+    const added = h.serverNode.addDevice.mock.calls.map(
+      (c) => c[0] as EntityEndpoint,
+    );
+    const vacuum = added.find((e) => e.entityId === "vacuum.robo");
+    const battery = added.find((e) => e.entityId === "sensor.vac_battery");
+    expect(battery).toBeDefined();
+
+    // the vacuum picked the battery up once it became available
+    (vacuum as unknown as { mappedEntityIds: string[] }).mappedEntityIds = [
+      "sensor.vac_battery",
+    ];
+    await h.manager.refreshDevices();
+
+    expect(battery?.delete).toHaveBeenCalled();
+    expect(h.manager.failedEntities).toContainEqual({
+      entityId: "sensor.vac_battery",
+      reason: "Already exposed through vacuum.robo on this node.",
+    });
+  });
+
   it("removes an endpoint immediately when its entity leaves the filter but stays in HA (#468)", async () => {
     const h = makeHarness(["light.a", "light.b"], "light.a");
     await h.manager.refreshDevices();

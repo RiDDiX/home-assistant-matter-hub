@@ -172,6 +172,12 @@ export class BridgeService extends Service {
       for (const bridge of failedBridges) {
         try {
           await bridge.start();
+          // start() catches its own errors and leaves the bridge failed
+          if (bridge.data.status !== "running") {
+            this.log.warn(`Recovery attempt failed for bridge ${bridge.id}`);
+            this.recordRecovery(bridge, "failed");
+            continue;
+          }
           this.recoveryCount++;
           this.recordRecovery(bridge, "success");
         } catch (e) {
@@ -286,7 +292,8 @@ export class BridgeService extends Service {
   }
 
   async refreshAll() {
-    for (const bridge of this.bridges) {
+    // a delete finishing mid-pass must not shift the next bridge out of the loop
+    for (const bridge of [...this.bridges]) {
       try {
         await bridge.refreshDevices();
         this.onBridgeChanged?.(bridge.id);
@@ -360,6 +367,8 @@ export class BridgeService extends Service {
       return;
     }
     await bridge.update(request);
+    // a delete that ran meanwhile already removed it from storage
+    if (!this.bridges.includes(bridge)) return;
     await this.bridgeStorage.add(bridge.data);
     this.onBridgeChanged?.(bridge.id);
     return bridge;
