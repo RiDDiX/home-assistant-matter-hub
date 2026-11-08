@@ -74,6 +74,7 @@ export interface OnOffConfig {
 // biome-ignore lint/correctness/noUnusedVariables: Biome thinks this is unused, but it's used by the function below
 class OnOffServerBase extends Base {
   declare state: OnOffServerBase.State;
+  declare internal: OnOffServerBase.Internal;
 
   override async initialize() {
     await super.initialize();
@@ -121,7 +122,7 @@ class OnOffServerBase extends Base {
   override on() {
     const { turnOn, turnOff } = this.state.config;
     if (turnOn === null) {
-      setTimeout(this.callback(this.autoReset), 1000);
+      this.scheduleAutoReset();
       return;
     }
     const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);
@@ -163,14 +164,14 @@ class OnOffServerBase extends Base {
     // Auto-reset for momentary actions (scenes, automations) so controllers
     // don't show a permanently "on" state after activation.
     if (turnOff === null && !skipMomentaryFlip) {
-      setTimeout(this.callback(this.autoReset), 1000);
+      this.scheduleAutoReset();
     }
   }
 
   override off() {
     const { turnOff } = this.state.config;
     if (turnOff === null) {
-      setTimeout(this.callback(this.autoReset), 1000);
+      this.scheduleAutoReset();
       return;
     }
     const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);
@@ -200,6 +201,12 @@ class OnOffServerBase extends Base {
     homeAssistant.callAction(action);
   }
 
+  // callback() installs a reactor until the behavior closes, so build it once
+  private scheduleAutoReset() {
+    this.internal.autoReset ??= this.callback(this.autoReset);
+    setTimeout(this.internal.autoReset, 1000);
+  }
+
   private autoReset() {
     const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);
     optimisticOnOffState.delete(homeAssistant.entityId);
@@ -208,6 +215,9 @@ class OnOffServerBase extends Base {
 }
 
 namespace OnOffServerBase {
+  export class Internal extends Base.Internal {
+    autoReset?: () => void;
+  }
   export class State extends Base.State {
     config!: OnOffConfig;
   }

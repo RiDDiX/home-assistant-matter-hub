@@ -86,6 +86,14 @@ function closeGracefully(
     .catch(() => s.initiateForceClose({ cause: new Error(forceReason) }));
 }
 
+// Ids as matter.js logs them, so "Subscription N ..." notices map to a
+// session (#543).
+function subscriptionIds(s: {
+  subscriptions: Iterable<{ subscriptionId: number }>;
+}): string {
+  return Array.from(s.subscriptions, (x) => x.subscriptionId).join(",");
+}
+
 // Everything a bridge does to its controller sessions once the node runs:
 // diagnostics, stale and dead session cleanup, rotation, the wedge watchdog
 // and the mDNS address watch. Bridge and ServerModeBridge carried this twice,
@@ -468,7 +476,7 @@ export class SessionSupervisor {
           if (!supersededIds.has(s.id) || s.subscriptions.size === 0) continue;
           const quietSec = Math.round((now - s.timestamp) / 1000);
           this.log.info(
-            `Closing superseded session ${s.id} (peer ${s.peerNodeId}, ${s.subscriptions.size} subs, quiet ${quietSec}s), replaced by session ${newSession.id}`,
+            `Closing superseded session ${s.id} (peer ${s.peerNodeId}, ${s.subscriptions.size} subs [${subscriptionIds(s)}], quiet ${quietSec}s), replaced by session ${newSession.id}`,
           );
           closes.push(closeGracefully(s, "superseded session, forcing"));
         }
@@ -646,6 +654,8 @@ export class SessionSupervisor {
           this.log.info(
             `Keeping session ${s.id} (peer ${s.peerNodeId}, 0 subs, last traffic ${idleSec}s ago)`,
           );
+          const armed = this.staleSessionTimers.get(sessionId);
+          if (armed) clearTimeout(armed);
           this.staleSessionTimers.set(
             sessionId,
             setTimeout(() => {
@@ -669,8 +679,9 @@ export class SessionSupervisor {
           .catch(() => {});
         break;
       }
-    } catch {
+    } catch (e) {
       // SessionManager may be disposed
+      this.log.debug(`Stale session ${sessionId} close skipped: ${e}`);
     }
   }
 
@@ -933,7 +944,7 @@ export class SessionSupervisor {
           (lastImRequestMsAgo ?? sessionAgeMs) / 60_000,
         );
         this.log.info(
-          `Wedge watchdog: rotating session ${s.id}, no inbound interaction for ${silenceMin}min`,
+          `Wedge watchdog: rotating session ${s.id} (subs [${subscriptionIds(s)}]), no inbound interaction for ${silenceMin}min`,
         );
         this.wedgeLastRotatedAt.set(s, now);
         closes.push(closeGracefully(s, "wedge watchdog, forcing"));
@@ -1073,7 +1084,7 @@ export class SessionSupervisor {
         }
         const ageMin = Math.round(ageMs / 60_000);
         this.log.info(
-          `Rotating session ${s.id} (peer ${s.peerNodeId}, age ${ageMin}min, subs ${s.subscriptions.size})`,
+          `Rotating session ${s.id} (peer ${s.peerNodeId}, age ${ageMin}min, subs ${s.subscriptions.size} [${subscriptionIds(s)}])`,
         );
         closes.push(closeGracefully(s, "session rotation, forcing"));
       }

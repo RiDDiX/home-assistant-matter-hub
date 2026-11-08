@@ -6,9 +6,9 @@ import type {
   HomeAssistantEntityInformation,
 } from "@home-assistant-matter-hub/common";
 import { Environment, VariableService } from "@matter/general";
-import { Endpoint, VendorId } from "@matter/main";
+import { Behavior, Endpoint, VendorId } from "@matter/main";
 import { ServerNode } from "@matter/main/node";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { BridgeDataProvider } from "../../../../services/bridges/bridge-data-provider.js";
 import {
   type HomeAssistantAction,
@@ -152,4 +152,28 @@ describe("disableMomentaryFlip (#423)", () => {
     expect(onOffLater).toBe(false);
     expect(calls.filter((c) => c.action === "script.turn_on")).toHaveLength(1);
   });
+});
+
+// callback() keeps its reactor until the behavior closes, one per press leaked
+it("reuses one auto-reset callback across presses", async () => {
+  const { server, endpoint } = await mount("script.reused_reset");
+  // biome-ignore lint/suspicious/noExplicitAny: callback is protected
+  const spy = vi.spyOn(Behavior.prototype as any, "callback");
+  const press = async () => {
+    // biome-ignore lint/suspicious/noExplicitAny: drive the cluster
+    await endpoint.act((agent) => (agent as any).onOff.on());
+    await delay(1200);
+    let onOff: boolean | undefined;
+    // biome-ignore lint/suspicious/noExplicitAny: read state
+    await endpoint.act((agent) => (onOff = (agent as any).onOff.state.onOff));
+    return onOff;
+  };
+  expect(await press()).toBe(false);
+  expect(await press()).toBe(false);
+  const created = spy.mock.calls.length;
+  spy.mockRestore();
+  await server.close().catch(() => {});
+
+  expect(created).toBe(1);
+  expect(calls.filter((c) => c.action === "script.turn_on")).toHaveLength(2);
 });

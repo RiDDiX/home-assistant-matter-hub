@@ -183,3 +183,21 @@ describe("subscription aborted during initial data reports (#487)", () => {
     expect(session.initiateClose).toHaveBeenCalled();
   });
 });
+
+describe("superseded sweep on a new session (#400)", () => {
+  it("closes a quiet same-peer session with subs, spares a talking one", async () => {
+    const quiet = fakeSession(1);
+    quiet.subscriptions.size = 1;
+    quiet.timestamp = Date.now() - STALE_SESSION_QUIET_WINDOW_MS - 60_000;
+    const talking = fakeSession(2);
+    talking.subscriptions.size = 1;
+    const fresh = fakeSession(3);
+    const { handlers } = makeBridge([quiet, talking, fresh]);
+
+    handlers.added?.(fresh as never);
+
+    expect(quiet.initiateClose).toHaveBeenCalled();
+    expect(talking.initiateClose).not.toHaveBeenCalled();
+    expect(fresh.initiateClose).not.toHaveBeenCalled();
+  });
+});

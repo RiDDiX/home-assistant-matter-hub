@@ -69,10 +69,6 @@ export class EntityIdentityStorage extends Service {
     }
 
     const data = stored as unknown as StoredIdentities;
-    if (data.version < CURRENT_VERSION) {
-      await this.migrate(data);
-      return;
-    }
     if (data.version > CURRENT_VERSION) {
       // A file written by a newer build. Starting empty would let the next
       // write persist an empty set over it.
@@ -87,19 +83,6 @@ export class EntityIdentityStorage extends Service {
         bridgeMap.set(key, record);
       }
       this.identities.set(bridgeId, bridgeMap);
-    }
-  }
-
-  private async migrate(data: StoredIdentities): Promise<void> {
-    if (data.version < CURRENT_VERSION) {
-      for (const [bridgeId, records] of Object.entries(data.identities)) {
-        const bridgeMap = new Map<string, IdentityRecord>();
-        for (const [key, record] of Object.entries(records)) {
-          bridgeMap.set(key, record);
-        }
-        this.identities.set(bridgeId, bridgeMap);
-      }
-      await this.persist();
     }
   }
 
