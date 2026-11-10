@@ -36,6 +36,10 @@ const upload = multer({
 });
 // Per zip entry. The upload cap only bounds the compressed size.
 const MAX_ENTRY_BYTES = 50 * 1024 * 1024;
+// All entries of one archive together.
+const MAX_TOTAL_BYTES = 200 * 1024 * 1024;
+// Every entry of an archive points at the same running total.
+const archiveTotals = new WeakMap<unzipper.File, { bytes: number }>();
 // Bridge ids become directory names below the storage location on restore.
 // Imported legacy bridges keep dashed UUIDs or their old id.
 const BRIDGE_ID = /^[\w-]+$/;
@@ -528,6 +532,8 @@ interface ExtractedBackup {
 
 async function extractBackupData(buffer: Buffer): Promise<ExtractedBackup> {
   const directory = await unzipper.Open.buffer(buffer);
+  const total = { bytes: 0 };
+  for (const file of directory.files) archiveTotals.set(file, total);
   const backupFile = directory.files.find(
     (f: { path: string }) => f.path === "backup.json",
   );
@@ -540,20 +546,30 @@ async function extractBackupData(buffer: Buffer): Promise<ExtractedBackup> {
 }
 
 // The declared size comes from the archive, so the inflated bytes are counted
-// too.
+// too. The archive total takes the larger of both.
 async function readEntry(file: unzipper.File): Promise<Buffer> {
+  const total = archiveTotals.get(file) ?? { bytes: 0 };
   const tooLarge = () =>
     new Error(
       `Invalid backup: ${file.path} is larger than ${MAX_ENTRY_BYTES / 1024 / 1024} MB`,
     );
+  const totalTooLarge = () =>
+    new Error(
+      `Invalid backup: the archive contents are larger than ${MAX_TOTAL_BYTES / 1024 / 1024} MB`,
+    );
   if (file.uncompressedSize > MAX_ENTRY_BYTES) throw tooLarge();
+  if (total.bytes + file.uncompressedSize > MAX_TOTAL_BYTES) {
+    throw totalTooLarge();
+  }
   const chunks: Buffer[] = [];
   let size = 0;
   for await (const chunk of file.stream()) {
     size += chunk.length;
     if (size > MAX_ENTRY_BYTES) throw tooLarge();
+    if (total.bytes + size > MAX_TOTAL_BYTES) throw totalTooLarge();
     chunks.push(chunk);
   }
+  total.bytes += Math.max(size, file.uncompressedSize);
   return Buffer.concat(chunks);
 }
 

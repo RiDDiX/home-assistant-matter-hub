@@ -58,6 +58,11 @@ export function startOptionsBuilder(yargs: Argv): Argv<StartOptions> {
       description:
         "Only allow the specified IPv4, IPv6 or CIDR. You can specify this option multiple times. When configured via ENV variables, you can only specify ONE value. Defaults to allow every IP address.",
     })
+    .option("http-allowed-hosts", {
+      type: "array",
+      description:
+        "Extra host names the web UI may be reached by, '*.example.com' matches subdomains. IP addresses, localhost, single-label names and .local, .localhost, .home.arpa, .lan, .internal and .fritz.box names are always allowed. You can specify this option multiple times. When configured via ENV variables, you can only specify ONE value.",
+    })
     .option("mdns-disable-ipv4", {
       type: "boolean",
       default: false,

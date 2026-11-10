@@ -24,6 +24,7 @@ import { diagnosticApi } from "./diagnostic-api.js";
 import { entityMappingApi } from "./entity-mapping-api.js";
 import { healthApi } from "./health-api.js";
 import { homeAssistantApi } from "./home-assistant-api.js";
+import { hostGuard } from "./host-guard.js";
 import { lockCredentialApi } from "./lock-credential-api.js";
 import { logsApi } from "./logs-api.js";
 import { mappingProfileApi } from "./mapping-profile-api.js";
@@ -40,6 +41,7 @@ import { WebSocketApi } from "./websocket-api.js";
 export interface WebApiProps {
   readonly port: number;
   readonly whitelist: string[] | undefined;
+  readonly allowedHosts: string[];
   readonly webUiDist?: string;
   readonly version: string;
   readonly storageLocation: string;
@@ -188,16 +190,12 @@ export class WebApi extends Service {
 
     const middlewares: express.Handler[] = [
       this.accessLogger,
+      hostGuard(this.props.allowedHosts),
       supportIngress,
       supportProxyLocation,
     ];
 
-    middlewares.push(this.createDynamicAuthMiddleware());
-    if (this.props.auth) {
-      this.log.info("Basic authentication enabled (environment variables)");
-    } else if (this.settingsStorage.auth) {
-      this.log.info("Basic authentication enabled (stored settings)");
-    }
+    // Whitelist first, so denied clients never get an auth challenge.
     if (this.props.whitelist && this.props.whitelist.length > 0) {
       middlewares.push(
         AccessControl({
@@ -210,6 +208,12 @@ export class WebApi extends Service {
           allows: this.props.whitelist,
         }),
       );
+    }
+    middlewares.push(this.createDynamicAuthMiddleware());
+    if (this.props.auth) {
+      this.log.info("Basic authentication enabled (environment variables)");
+    } else if (this.settingsStorage.auth) {
+      this.log.info("Basic authentication enabled (stored settings)");
     }
 
     const appRouter = express.Router();
@@ -285,6 +289,36 @@ export class WebApi extends Service {
     };
   }
 
+  // Same credentials as the http middleware, for upgrades that skip Express.
+  private verifyAuthorization(
+    header: string | undefined,
+  ): Promise<boolean> | boolean {
+    const envAuth = this.props.auth;
+    if (!envAuth && !this.settingsStorage.auth) {
+      return true;
+    }
+    const match = /^Basic (.+)$/i.exec(header ?? "");
+    if (!match) {
+      return false;
+    }
+    const decoded = Buffer.from(match[1], "base64").toString();
+    const split = decoded.indexOf(":");
+    if (split < 0) {
+      return false;
+    }
+    const username = decoded.slice(0, split);
+    const password = decoded.slice(split + 1);
+    if (envAuth) {
+      // Both compares always run, like express-basic-auth.
+      const userOk = basicAuth.safeCompare(username, envAuth.username);
+      const passwordOk = basicAuth.safeCompare(password, envAuth.password);
+      return userOk && passwordOk;
+    }
+    return this.settingsStorage
+      .verifyAuth(username, password)
+      .catch(() => false);
+  }
+
   async start() {
     if (this.server) {
       return;
@@ -304,6 +338,12 @@ export class WebApi extends Service {
         );
       });
     });
-    this.wsApi.attach(this.server, this.props.basePath, this.props.whitelist);
+    this.wsApi.attach(
+      this.server,
+      this.props.basePath,
+      this.props.whitelist,
+      this.props.allowedHosts,
+      (header) => this.verifyAuthorization(header),
+    );
   }
 }

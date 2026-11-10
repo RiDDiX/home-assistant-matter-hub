@@ -6,6 +6,7 @@ import type { BetterLogger } from "../core/app/logger.js";
 import type { BridgeService } from "../services/bridges/bridge-service.js";
 import { diagnosticEventBus } from "../services/diagnostics/diagnostic-event-bus.js";
 import type { DiagnosticService } from "../services/diagnostics/diagnostic-service.js";
+import { crossSiteReason } from "./host-guard.js";
 
 export class WebSocketApi {
   private wss?: WebSocketServer;
@@ -24,17 +25,46 @@ export class WebSocketApi {
     this.diagnosticService = service;
   }
 
-  attach(server: http.Server, basePath = "/", whitelist?: string[]) {
+  attach(
+    server: http.Server,
+    basePath = "/",
+    whitelist?: string[],
+    allowedHosts: string[] = [],
+    verifyAuthorization: (
+      header: string | undefined,
+    ) => Promise<boolean> | boolean = () => true,
+  ) {
     const wsPath = `${basePath === "/" ? "" : basePath}/api/ws`;
     this.wss = new WebSocketServer({
       server,
       path: wsPath,
       // Clients only send small control messages.
       maxPayload: 64 * 1024,
-      // Upgrades skip the Express middlewares, so apply the whitelist here.
-      verifyClient: ({ req }: { req: http.IncomingMessage }) =>
-        !whitelist?.length ||
-        AccessControl.ipMatch(req.socket.remoteAddress ?? "", whitelist),
+      // Upgrades skip the Express middlewares, so apply the same checks here.
+      verifyClient: ({ req }, cb) => {
+        if (
+          (whitelist?.length &&
+            !AccessControl.ipMatch(
+              req.socket.remoteAddress ?? "",
+              whitelist,
+            )) ||
+          crossSiteReason(req.headers, allowedHosts, req.socket.remoteAddress)
+        ) {
+          return cb(false, 403);
+        }
+        Promise.resolve()
+          .then(() => verifyAuthorization(req.headers.authorization))
+          .then(
+            (ok) =>
+              ok
+                ? cb(true)
+                : cb(false, 401, "Unauthorized", {
+                    "WWW-Authenticate":
+                      'Basic realm="Home Assistant Matter Hub"',
+                  }),
+            () => cb(false, 401),
+          );
+      },
     });
     // A proxy that keeps its x-forwarded-prefix in the URL sends /<prefix>/api/ws.
     this.wss.shouldHandle = (req) =>

@@ -7,8 +7,9 @@ const logger = Logger.get("PluginInstaller");
 
 // Validate package name to prevent command injection. The version part
 // takes no "/" or ":", or npm would install from a URL, git or file path.
+// No leading "-", or npm would read the name as a flag.
 export const VALID_PACKAGE_RE =
-  /^(@[a-z0-9-~][a-z0-9-._~]*\/)?[a-z0-9-~][a-z0-9-._~]*(@[^@\s/:]+)?$/;
+  /^(@[a-z0-9~][a-z0-9-._~]*\/)?[a-z0-9~][a-z0-9-._~]*(@[^@\s/:]+)?$/;
 
 // npm and plugin install scripts get no HAMH secrets (HA token, supervisor token).
 const NPM_ENV = {

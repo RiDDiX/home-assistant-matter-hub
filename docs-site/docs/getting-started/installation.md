@@ -147,6 +147,9 @@ Options:
   --http-auth-password           Password for HTTP basic authentication                                                             [string]
   --http-ip-whitelist            Only allow the specified IPv4, IPv6 or CIDR. You can specify this option multiple times. When configured vi
                                  a ENV variables, you can only specify ONE value. Defaults to allow every IP address.                [array]
+  --http-allowed-hosts           Extra host names the web UI may be reached by, '*.example.com' matches subdomains. IP addresses, localhost,
+                                 single-label names and .local, .localhost, .home.arpa, .lan, .internal and .fritz.box names are always
+                                 allowed.                                                                                           [array]
   --mdns-network-interface       Limit mDNS to this network interface                                                               [string]
   --home-assistant-url           The HTTP-URL of your Home Assistant URL                                                 [string] [required]
   --home-assistant-access-token  A long-lived access token for your Home Assistant Instance                              [string] [required]

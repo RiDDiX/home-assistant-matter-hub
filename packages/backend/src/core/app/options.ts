@@ -86,6 +86,9 @@ export class Options {
       whitelist: this.startOptions.httpIpWhitelist?.map((item) =>
         item.toString(),
       ),
+      allowedHosts: (this.startOptions.httpAllowedHosts ?? []).map((item) =>
+        item.toString(),
+      ),
       webUiDist: this.startOptions.webUiDist,
       version: resolveAppVersion(),
       storageLocation: this.resolveStorageLocation(),

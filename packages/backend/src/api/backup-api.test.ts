@@ -373,6 +373,43 @@ describe("restore input checks", () => {
     });
     expect(stream).toHaveBeenCalledOnce();
   });
+
+  it("rejects entries that together pass the archive cap", async () => {
+    const backupJson = JSON.stringify({
+      version: 2,
+      bridges: [{ id: ID, name: "Bridge One", port: 5540 }],
+      entityMappings: {},
+      includesIdentity: true,
+    });
+    const entry = (path: string, content: string) => ({
+      path,
+      type: "File",
+      uncompressedSize: 45 * 1024 * 1024,
+      stream: () => Readable.from([Buffer.from(content)]),
+    });
+    vi.spyOn(unzipper.Open, "buffer").mockResolvedValueOnce({
+      files: [
+        entry("backup.json", backupJson),
+        ...["a", "b", "c", "d"].map((n) => entry(`identity/${ID}/${n}`, "k")),
+      ],
+    } as unknown as unzipper.CentralDirectory);
+    const storageLocation = join(dir, "total-cap");
+    mkdirSync(storageLocation, { recursive: true });
+    await withRouter(
+      async (base) => {
+        const res = await fetch(
+          `${base}/backup/restore`,
+          restoreForm(new Blob(["zip"])),
+        );
+        const body = await res.json();
+        expect(body.errors[0].error).toMatch(/200 MB/);
+      },
+      undefined,
+      undefined,
+      undefined,
+      storageLocation,
+    );
+  });
 });
 
 describe("restore while the bridge runs", () => {

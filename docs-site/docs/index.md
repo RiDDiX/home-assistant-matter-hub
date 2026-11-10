@@ -29,6 +29,13 @@ of port forwarding etc.
 
 ## Known issues and limitations
 
+### Read this before updating to alpha.969
+
+The web UI now checks the `Host` and `Origin` headers to block DNS rebinding and cross-site WebSocket access. Requests are only answered when the host is an IP address, `localhost`, a single-label name, or a name ending in `.local`, `.localhost`, `.home.arpa`, `.lan`, `.internal` or `.fritz.box`. Home Assistant ingress and direct access by IP keep working without any change.
+
+If you reach HAMH through a reverse proxy on a public name such as `matter.example.org`, add that name before you update, or the UI answers with 403 until you do: `--http-allowed-hosts=matter.example.org` for a container, or `HAMH_HTTP_ALLOWED_HOSTS=matter.example.org` as environment variable. This is needed whether or not the proxy rewrites the `Host` header. The WebSocket also requires the basic auth credentials now when auth is enabled, browsers send them on their own. See the [reverse proxy guide](./guides/reverse-proxy.md) for detail.
+
+
 ### Device Type Support
 
 This project does not yet support all available device types in the matter specification.
@@ -420,6 +427,12 @@ Home, ...) are not placed in the same network segment. Please make sure to revie
 
 <details>
 <summary><strong>🧪 Alpha (v2.1.0-alpha.x)</strong></summary>
+
+**v2.1.0-alpha.969:**
+- **Host and Origin checks**: the web UI and the WebSocket reject requests whose `Host` is not a local name or IP and browser requests whose `Origin` does not match, which blocks DNS rebinding and cross-site WebSocket access. Public proxy names go into the new `--http-allowed-hosts` option, see the warning above. The WebSocket upgrade now enforces basic auth, before it answered without credentials and sent the pairing codes of every bridge to any client. The IP whitelist runs before basic auth, so denied addresses get no login prompt. Plugin names starting with a dash are rejected, a backup restore is capped at 200 MB in total, and the ingress path is escaped in the page header.
+
+**v2.1.0-alpha.968:**
+- **Session logs and switch callbacks**: a session close now logs the matter.js subscription ids, the stale session timer is cleared before it is re-armed, a close error is logged instead of swallowed, and a switch press reuses one callback instead of leaking a handler per press ([#543](https://github.com/RiDDiX/home-assistant-matter-hub/issues/543)).
 
 **v2.1.0-alpha.967:**
 - **Google voice colors**: a voice color or brightness command on a light that is already on no longer sends a second empty turn on to Home Assistant. That second call cut the color fade short on lights such as the Shelly RGBW, so the light kept its old color ([#542](https://github.com/RiDDiX/home-assistant-matter-hub/issues/542)).

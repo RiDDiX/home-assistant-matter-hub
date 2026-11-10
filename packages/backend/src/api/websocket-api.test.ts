@@ -22,6 +22,8 @@ afterEach(async () => {
 async function serve(
   bridges: Array<{ id: string; data: object }>,
   whitelist?: string[],
+  allowedHosts?: string[],
+  verifyAuthorization?: (header: string | undefined) => boolean,
 ) {
   const bridgeService = {
     bridges,
@@ -29,7 +31,7 @@ async function serve(
   } as unknown as BridgeService;
   const api = new WebSocketApi(log, bridgeService);
   const server = http.createServer();
-  api.attach(server, "/", whitelist);
+  api.attach(server, "/", whitelist, allowedHosts, verifyAuthorization);
   await new Promise<void>((resolve) => server.listen(0, resolve));
   cleanup.push(async () => {
     api.close();
@@ -41,8 +43,8 @@ async function serve(
 
 // Resolves with the client and its first message, or rejects on a refused
 // upgrade.
-function connect(url: string) {
-  const ws = new WebSocket(url);
+function connect(url: string, headers?: Record<string, string>) {
+  const ws = new WebSocket(url, { headers });
   cleanup.push(async () => ws.close());
   const messages: WebSocketMessage[] = [];
   ws.on("message", (data) => messages.push(JSON.parse(data.toString())));
@@ -87,10 +89,40 @@ describe("WebSocketApi", () => {
 
   it("applies the ip whitelist to upgrades", async () => {
     const denied = await serve([], ["10.0.0.1"]);
-    await expect(connect(`${denied.base}/api/ws`)).rejects.toThrow("401");
+    await expect(connect(`${denied.base}/api/ws`)).rejects.toThrow("403");
 
     const allowed = await serve([], ["127.0.0.1"]);
     const { messages } = await connect(`${allowed.base}/api/ws`);
+    expect(messages[0].type).toBe("bridges_update");
+  });
+
+  it("rejects a cross-site origin unless proxied", async () => {
+    const { base } = await serve([]);
+    const host = base.slice("ws://".length);
+
+    await expect(
+      connect(`${base}/api/ws`, { origin: "http://evil.example" }),
+    ).rejects.toThrow("403");
+    const same = await connect(`${base}/api/ws`, { origin: `http://${host}` });
+    expect(same.messages[0].type).toBe("bridges_update");
+    const proxied = await connect(`${base}/api/ws`, {
+      origin: "http://evil.example",
+      "x-ingress-path": "/api/hassio_ingress/abc",
+    });
+    expect(proxied.messages[0].type).toBe("bridges_update");
+  });
+
+  it("requires basic auth when configured", async () => {
+    const authorization = `Basic ${Buffer.from("user:pass").toString("base64")}`;
+    const { base } = await serve(
+      [],
+      undefined,
+      [],
+      (header) => header === authorization,
+    );
+
+    await expect(connect(`${base}/api/ws`)).rejects.toThrow("401");
+    const { messages } = await connect(`${base}/api/ws`, { authorization });
     expect(messages[0].type).toBe("bridges_update");
   });
 

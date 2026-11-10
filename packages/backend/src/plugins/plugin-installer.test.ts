@@ -49,6 +49,15 @@ describe("VALID_PACKAGE_RE", () => {
 
   it("accepts a scoped package with a version", () => {
     expect(VALID_PACKAGE_RE.test("@scope/name@1.2.3")).toBe(true);
+    expect(VALID_PACKAGE_RE.test("foo")).toBe(true);
+    expect(VALID_PACKAGE_RE.test("foo-bar")).toBe(true);
+  });
+
+  it("refuses names that npm would read as flags", () => {
+    expect(VALID_PACKAGE_RE.test("-g")).toBe(false);
+    expect(VALID_PACKAGE_RE.test("--global")).toBe(false);
+    expect(VALID_PACKAGE_RE.test("--prefix")).toBe(false);
+    expect(VALID_PACKAGE_RE.test("@-scope/name")).toBe(false);
   });
 });
 
