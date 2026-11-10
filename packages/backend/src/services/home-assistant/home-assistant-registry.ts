@@ -270,7 +270,7 @@ export class HomeAssistantRegistry extends Service {
     }
     for (const d of deviceRegistry) {
       hash.update(
-        `${d.id}\0${(d.labels ?? []).join(",")}\0${d.area_id ?? ""}\0${d.name_by_user ?? ""}\0${d.name ?? ""}\0${d.model ?? ""}\0${d.model_id ?? ""}\0${d.manufacturer ?? ""}\0${d.hw_version ?? ""}\0${d.sw_version ?? ""}\0${d.serial_number ?? ""}\n`,
+        `${d.id}\0${(d.labels ?? []).join(",")}\0${d.area_id ?? ""}\0${d.name_by_user ?? ""}\0${d.name ?? ""}\0${d.model ?? ""}\0${d.model_id ?? ""}\0${d.manufacturer ?? ""}\0${d.hw_version ?? ""}\0${d.sw_version ?? ""}\0${d.serial_number ?? ""}\0${d.default_name ?? ""}\0${d.default_model ?? ""}\0${d.default_manufacturer ?? ""}\n`,
       );
     }
     // name too: matchers resolve label names to ids, a rename must refresh

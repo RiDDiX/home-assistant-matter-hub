@@ -75,7 +75,11 @@ function makeBridge(sessions: FakeSession[], featureFlags: object = {}) {
     server as never,
   );
   const supervisor = (bridge as unknown as { sessions: unknown })
-    .sessions as unknown as { wireSessionDiagnostics(): void };
+    .sessions as unknown as {
+    wireSessionDiagnostics(): void;
+    stop(): void;
+    staleSessionTimers: Map<number, unknown>;
+  };
   const before = interactionServer.onNewExchange;
   supervisor.wireSessionDiagnostics();
   const wrapped = interactionServer.onNewExchange;
@@ -90,7 +94,7 @@ function makeBridge(sessions: FakeSession[], featureFlags: object = {}) {
       } as never,
     );
 
-  return { handlers, subscribeRequest };
+  return { handlers, subscribeRequest, supervisor };
 }
 
 // past the 5 min quiet window plus a 60s re-arm
@@ -169,6 +173,17 @@ describe("subscription aborted during initial data reports (#487)", () => {
     }
 
     expect(session.initiateClose).not.toHaveBeenCalled();
+  });
+
+  it("arms no watchdog for a SubscribeRequest that lands after stop()", () => {
+    const session = fakeSession(50000);
+    const { subscribeRequest, supervisor } = makeBridge([session]);
+
+    supervisor.stop();
+    subscribeRequest(session);
+
+    expect(supervisor.staleSessionTimers.size).toBe(0);
+    expect(vi.getTimerCount()).toBe(0);
   });
 
   it("still reaps a wedged session under fastSessionRecovery", async () => {

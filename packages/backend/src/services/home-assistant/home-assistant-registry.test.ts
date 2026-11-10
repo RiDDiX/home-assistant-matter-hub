@@ -290,6 +290,32 @@ describe("HomeAssistantRegistry", () => {
     expect(registry.labels).toEqual([{ label_id: "voice_2", name: "Alexa" }]);
   });
 
+  // matchers fall back to default_* fields, so they must refresh too
+  it("picks up a default_model change on its own", async () => {
+    const fake = makeConnection();
+    let defaultModel = "Old";
+    fake.connection.sendMessagePromise = vi.fn((message: { type: string }) =>
+      Promise.resolve(
+        message.type === "config/device_registry/list"
+          ? [{ id: "d1", name: "Oven", default_model: defaultModel }]
+          : [],
+      ),
+    ) as unknown as Connection["sendMessagePromise"];
+    const client = {
+      connection: fake.connection,
+      haRunning: true,
+    } as unknown as HomeAssistantClient & { haRunning: boolean };
+    const registry = new HomeAssistantRegistry(client, defaultOptions);
+    const initPromise = registry.construction;
+    await vi.runAllTimersAsync();
+    await initPromise;
+
+    await expect(registry.reload()).resolves.toBe(false);
+    defaultModel = "New";
+    await expect(registry.reload()).resolves.toBe(true);
+    expect(registry.devices.d1?.default_model).toBe("New");
+  });
+
   it("keeps the last areas when the area query fails", async () => {
     const fake = makeConnection();
     let areasFail = false;

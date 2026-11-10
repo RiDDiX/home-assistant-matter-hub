@@ -70,18 +70,23 @@ export interface MdnsAddressWatchDeps {
   stripGlobalIpv6?: boolean;
   ipv4Enabled?: boolean;
   currentSnapshot: string[];
+  // consecutive ticks that kept the old snapshot because every fabric failed
+  failedRetries?: number;
   fabrics: () => Iterable<unknown>;
   refresh: (fabric: unknown) => Promise<void>;
   onChange?: (prev: string[], curr: string[]) => void;
   onRefreshError?: (fabric: unknown, error: unknown) => void;
 }
 
+export const MDNS_REFRESH_MAX_RETRIES = 3;
+
 // One watcher tick: recompute the snapshot and, when it changed, refresh the
 // operational advertisement for every fabric so matter.js re-runs its address
-// lookup. Returns the snapshot to store (unchanged when nothing moved).
+// lookup. Returns the snapshot to store (unchanged when nothing moved) and the
+// retry count to pass into the next tick.
 export async function runMdnsAddressWatchTick(
   deps: MdnsAddressWatchDeps,
-): Promise<string[]> {
+): Promise<{ snapshot: string[]; failedRetries: number }> {
   const next = collectAdvertisedAddresses(
     deps.readInterfaces(),
     deps.netInterface,
@@ -89,17 +94,31 @@ export async function runMdnsAddressWatchTick(
     deps.ipv4Enabled,
   );
   if (!advertisedAddressesChanged(deps.currentSnapshot, next)) {
-    return deps.currentSnapshot;
+    return { snapshot: deps.currentSnapshot, failedRetries: 0 };
   }
-  deps.onChange?.(deps.currentSnapshot, next);
-  // one failing fabric must not skip the rest or keep the old snapshot,
-  // that would re-announce on every tick
+  const retries = deps.failedRetries ?? 0;
+  // a retry tick keeps the old snapshot, so it would report the same change
+  if (retries === 0) {
+    deps.onChange?.(deps.currentSnapshot, next);
+  }
+  let attempted = 0;
+  let failed = 0;
+  // one failing fabric must not skip the rest; only an all-fail tick retries
   for (const fabric of deps.fabrics()) {
+    attempted++;
     try {
       await deps.refresh(fabric);
     } catch (e) {
+      failed++;
       deps.onRefreshError?.(fabric, e);
     }
   }
-  return next;
+  if (
+    attempted > 0 &&
+    failed === attempted &&
+    retries < MDNS_REFRESH_MAX_RETRIES
+  ) {
+    return { snapshot: deps.currentSnapshot, failedRetries: retries + 1 };
+  }
+  return { snapshot: next, failedRetries: 0 };
 }

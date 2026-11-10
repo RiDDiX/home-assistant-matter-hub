@@ -12,17 +12,20 @@ import {
 } from "./climate-thermostat-server.js";
 
 const entityId = "climate.test";
+let event = 0;
 
+// Every state() is a new HA event unless the caller pins last_updated.
 function state(
   hvacState: ClimateHvacMode,
   action: ClimateHvacAction,
+  lastUpdated = `t${event++}`,
 ): HomeAssistantEntityState {
   return {
     entity_id: entityId,
     state: hvacState,
     context: { id: "ctx" },
     last_changed: "x",
-    last_updated: "x",
+    last_updated: lastUpdated,
     attributes: {
       hvac_action: action,
       hvac_modes: [ClimateHvacMode.cool, ClimateHvacMode.off],
@@ -156,5 +159,36 @@ describe("applyClimateFreezeForKeepModeOnIdle (#340)", () => {
         true,
       ),
     ).toBe(Thermostat.SystemMode.Off);
+  });
+
+  it("counts one off event once however often update() sees it", () => {
+    applyClimateFreezeForKeepModeOnIdle(
+      Thermostat.SystemMode.Cool,
+      state(ClimateHvacMode.cool, ClimateHvacAction.cooling),
+      entityId,
+      true,
+    );
+    const off = state(ClimateHvacMode.off, ClimateHvacAction.off);
+    for (let i = 0; i < 3; i++) {
+      expect(
+        applyClimateFreezeForKeepModeOnIdle(
+          Thermostat.SystemMode.Off,
+          off,
+          entityId,
+          true,
+        ),
+      ).toBe(Thermostat.SystemMode.Cool);
+    }
+    const secondOff = state(ClimateHvacMode.off, ClimateHvacAction.off);
+    for (let i = 0; i < 2; i++) {
+      expect(
+        applyClimateFreezeForKeepModeOnIdle(
+          Thermostat.SystemMode.Off,
+          secondOff,
+          entityId,
+          true,
+        ),
+      ).toBe(Thermostat.SystemMode.Off);
+    }
   });
 });

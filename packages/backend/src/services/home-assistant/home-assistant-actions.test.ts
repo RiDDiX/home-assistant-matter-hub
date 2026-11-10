@@ -400,3 +400,45 @@ describe("HomeAssistantActions HA refusals", () => {
     ).resolves.toEqual({});
   });
 });
+
+// #547: the thermostat resume sends the mode and the setpoint as two calls.
+describe("HomeAssistantActions call order", () => {
+  it("sends set_hvac_mode before set_temperature without waiting for it", async () => {
+    vi.useFakeTimers();
+    try {
+      const sent: string[] = [];
+      const pending: Array<(value: unknown) => void> = [];
+      const { actions } = makeActions(
+        (message) =>
+          new Promise((resolve) => {
+            if (message.type === "call_service") {
+              sent.push(`${message.domain}.${message.service}`);
+            }
+            pending.push(resolve);
+          }),
+      );
+
+      actions.call(
+        { action: "climate.set_hvac_mode", data: { hvac_mode: "heat" } },
+        "climate.trv",
+      );
+      actions.call(
+        { action: "climate.set_temperature", data: { temperature: 21 } },
+        "climate.trv",
+      );
+      await vi.advanceTimersByTimeAsync(99);
+      expect(sent).toEqual([]);
+      await vi.advanceTimersByTimeAsync(1);
+
+      // Same order, but the temperature goes out while the mode call is
+      // still unanswered: HA may run both at once.
+      expect(sent).toEqual([
+        "climate.set_hvac_mode",
+        "climate.set_temperature",
+      ]);
+      for (const resolve of pending) resolve({});
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});

@@ -132,6 +132,7 @@ export class SessionSupervisor {
   // refreshOperationalAdvertisement can't overlap and re-announce off a stale
   // snapshot.
   private mdnsCheckInFlight = false;
+  private mdnsFailedRetries = 0;
 
   // Session lifecycle diagnostic handlers (non-destructive, logging only).
   // biome-ignore lint/suspicious/noExplicitAny: matter.js internal types
@@ -144,6 +145,9 @@ export class SessionSupervisor {
   // Warns when Alexa pairs on a non-5540 port, the fabric rolls back later (#401).
   // biome-ignore lint/suspicious/noExplicitAny: matter.js internal types
   private fabricAddedHandler?: (fabric: any) => void;
+
+  // the onNewExchange wrapper outlives stop(), so it must not arm timers then
+  private stopped = false;
 
   constructor(
     private readonly log: Logger,
@@ -158,6 +162,7 @@ export class SessionSupervisor {
 
   // after server.start(); rewiring is idempotent
   start(): void {
+    this.stopped = false;
     this.wireSessionDiagnostics();
     this.wireFabricWarnings();
     this.startSessionRotation();
@@ -167,6 +172,7 @@ export class SessionSupervisor {
 
   // before server.cancel(); unwireSessionDiagnostics also stops the timers
   stop(): void {
+    this.stopped = true;
     this.unwireSessionDiagnostics();
     this.unwireFabricWarnings();
   }
@@ -620,6 +626,7 @@ export class SessionSupervisor {
   // A subscription that dies before its first report never joins the session,
   // so no event fires to reap the session (#487).
   private armSubscribeWatchdog(session: { id?: unknown }) {
+    if (this.stopped) return;
     const sessionId = session.id;
     if (typeof sessionId !== "number") return;
     if (this.staleSessionTimers.has(sessionId)) return;
@@ -970,6 +977,7 @@ export class SessionSupervisor {
       stripGlobalIpv6,
       ipv4Enabled,
     );
+    this.mdnsFailedRetries = 0;
     this.mdnsAddressTimer = setInterval(() => {
       if (this.mdnsCheckInFlight) return;
       this.mdnsCheckInFlight = true;
@@ -1017,12 +1025,13 @@ export class SessionSupervisor {
       this.readMdnsWatchSettings();
     const advertiser = this.server.env.get(DeviceAdvertiser);
     const fabrics = this.server.env.get(FabricManager);
-    this.advertisedAddressSnapshot = await runMdnsAddressWatchTick({
+    const { snapshot, failedRetries } = await runMdnsAddressWatchTick({
       readInterfaces: () => os.networkInterfaces(),
       netInterface,
       stripGlobalIpv6,
       ipv4Enabled,
       currentSnapshot: this.advertisedAddressSnapshot,
+      failedRetries: this.mdnsFailedRetries,
       fabrics: () => fabrics.fabrics,
       refresh: (fabric) =>
         advertiser.refreshOperationalAdvertisement(fabric as Fabric),
@@ -1039,6 +1048,8 @@ export class SessionSupervisor {
         );
       },
     });
+    this.advertisedAddressSnapshot = snapshot;
+    this.mdnsFailedRetries = failedRetries;
   }
 
   // Env var unset or garbage falls back to defaultMaxAgeHours, 0 (rotation

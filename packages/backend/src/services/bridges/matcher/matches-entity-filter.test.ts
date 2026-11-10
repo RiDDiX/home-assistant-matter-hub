@@ -878,4 +878,50 @@ describe("matchEntityFilter.testMatcher", () => {
       ),
     ).toBeFalsy();
   });
+
+  it.each([
+    [["test_label"], undefined, true],
+    [[], ["test_label"], false],
+    [["test_label"], ["test_label"], true],
+    [[], [], false],
+  ])("label behaves as entity_label (entity %j, device %j)", (entityLabels, deviceLabels, expected) => {
+    const entity = { ...registry, labels: entityLabels };
+    const device = { ...deviceRegistry, labels: deviceLabels };
+    for (const type of [
+      HomeAssistantMatcherType.Label,
+      HomeAssistantMatcherType.EntityLabel,
+    ]) {
+      expect(testMatcher({ type, value: "test_label" }, device, entity)).toBe(
+        expected,
+      );
+    }
+  });
+
+  it("keeps regex results stable across cached calls", () => {
+    const matcher = {
+      type: HomeAssistantMatcherType.Regex,
+      value: "^light\\.my_entity$",
+    };
+    const other = { ...registry, entity_id: "light.other" };
+    expect(testMatcher(matcher, undefined, registry)).toBe(true);
+    expect(testMatcher(matcher, undefined, other)).toBe(false);
+    expect(testMatcher(matcher, undefined, registry)).toBe(true);
+
+    const invalid = {
+      type: HomeAssistantMatcherType.Regex,
+      value: "[cached(invalid",
+    };
+    expect(testMatcher(invalid, undefined, registry)).toBe(false);
+    expect(testMatcher(invalid, undefined, registry)).toBe(false);
+
+    // past the cache bound, matching still works
+    for (let i = 0; i < 600; i++) {
+      testMatcher(
+        { type: HomeAssistantMatcherType.Pattern, value: `light.n${i}*` },
+        undefined,
+        registry,
+      );
+    }
+    expect(testMatcher(matcher, undefined, registry)).toBe(true);
+  });
 });

@@ -428,4 +428,25 @@ describe("water heater thermostat Off", () => {
     // biome-ignore lint/suspicious/noExplicitAny: read cluster state
     expect((endpoint.state as any).thermostat.systemMode).toBe(0);
   });
+
+  it("setpointRaiseLower while Off resumes and steps from the clamped base", async () => {
+    const endpoint = await bringUp(
+      waterHeater("off", {
+        ...FULL_HEATER,
+        operation_mode: "off",
+        temperature: 20,
+      }),
+    );
+    calls.length = 0;
+    await endpoint.act((agent) => {
+      // biome-ignore lint/suspicious/noExplicitAny: invoke the cluster command
+      (agent as any).thermostat.setpointRaiseLower({ mode: 0, amount: 10 });
+    });
+    expect(calls).toEqual([
+      { action: "water_heater.turn_on", data: {} },
+      { action: "water_heater.set_temperature", data: { temperature: 31 } },
+    ]);
+    // biome-ignore lint/suspicious/noExplicitAny: read cluster state
+    expect((endpoint.state as any).thermostat.systemMode).toBe(4);
+  });
 });

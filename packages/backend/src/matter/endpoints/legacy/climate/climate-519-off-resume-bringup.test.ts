@@ -9,8 +9,8 @@ import { Environment, VariableService } from "@matter/general";
 import { ControllerBehavior, VendorId } from "@matter/main";
 import { Thermostat } from "@matter/main/clusters";
 import { ServerNode } from "@matter/main/node";
-import { Write } from "@matter/main/protocol";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { Invoke, Write } from "@matter/main/protocol";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { BridgeDataProvider } from "../../../../services/bridges/bridge-data-provider.js";
 import { BridgeRegistry } from "../../../../services/bridges/bridge-registry.js";
 import { EntityStateProvider } from "../../../../services/bridges/entity-state-provider.js";
@@ -37,6 +37,7 @@ let counter = 0;
 let server: ServerNode | undefined;
 let controller: ServerNode | undefined;
 let calls: HomeAssistantAction[] = [];
+let failTemperature = false;
 
 function registryEntity(entityId: string): HomeAssistantEntityRegistry {
   return {
@@ -61,6 +62,7 @@ function registryEntity(entityId: string): HomeAssistantEntityRegistry {
 function climateState(
   value: string,
   hvacModes: string[],
+  extra: Record<string, unknown> = {},
 ): HomeAssistantEntityState {
   const attributes: Record<string, unknown> = {
     friendly_name: "TH",
@@ -71,6 +73,7 @@ function climateState(
     current_temperature: 22,
     // TARGET_TEMPERATURE | TURN_OFF | TURN_ON
     supported_features: 385,
+    ...extra,
   };
   return {
     entity_id: CLIMATE,
@@ -101,9 +104,13 @@ function dataProvider(): BridgeDataProvider {
   } as any);
 }
 
-function registry(value: string, hvacModes: string[]): BridgeRegistry {
+function registry(
+  value: string,
+  hvacModes: string[],
+  extra?: Record<string, unknown>,
+): BridgeRegistry {
   const states: Record<string, HomeAssistantEntityState> = {
-    [CLIMATE]: climateState(value, hvacModes),
+    [CLIMATE]: climateState(value, hvacModes, extra),
   };
   const haRegistry = {
     areas: new Map(),
@@ -125,8 +132,13 @@ beforeEach(() => {
     // biome-ignore lint/suspicious/noExplicitAny: test stub
   } as any);
   calls = [];
+  failTemperature = false;
   env.set(HomeAssistantActions, {
     call(action: HomeAssistantAction) {
+      if (failTemperature && action.action === "climate.set_temperature") {
+        failTemperature = false;
+        throw new Error("set_temperature failed");
+      }
       calls.push(action);
     },
     fireEvent() {},
@@ -141,6 +153,7 @@ beforeEach(() => {
 });
 
 afterEach(async () => {
+  vi.useRealTimers();
   await controller?.close().catch(() => {});
   controller = undefined;
   await server?.close().catch(() => {});
@@ -148,10 +161,14 @@ afterEach(async () => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-async function mount(value: string, hvacModes: string[]) {
+async function mount(
+  value: string,
+  hvacModes: string[],
+  extra?: Record<string, unknown>,
+) {
   CLIMATE = `climate.th${counter}`;
   const endpoint = await LegacyEndpoint.create(
-    registry(value, hvacModes),
+    registry(value, hvacModes, extra),
     CLIMATE,
   );
   expect(endpoint).toBeDefined();
@@ -216,6 +233,31 @@ async function remoteWrite(
       ),
     ),
   );
+}
+
+async function raiseLower(
+  // biome-ignore lint/suspicious/noExplicitAny: matter.js client API is loosely typed
+  client: any,
+  endpointNo: number,
+  mode: Thermostat.SetpointRaiseLowerMode,
+  amount: number,
+) {
+  const response = client.interaction.invoke(
+    Invoke({
+      commands: [
+        {
+          endpoint: endpointNo,
+          cluster: Thermostat,
+          command: "setpointRaiseLower",
+          fields: { mode, amount },
+          // biome-ignore lint/suspicious/noExplicitAny: matter.js client API is loosely typed
+        } as any,
+      ],
+    }),
+  );
+  for await (const _chunk of response) {
+    // drain
+  }
 }
 
 const modeCalls = () =>
@@ -325,5 +367,140 @@ describe("thermostat off auto-resume (#519)", () => {
     expect((endpoint.state as any).thermostat.systemMode).toBe(
       Thermostat.SystemMode.Heat,
     );
+  });
+
+  it("never swallows a controller write once a stale resume entry expired", async () => {
+    const { endpoint, client } = await mount("off", ["off", "heat"]);
+    vi.useFakeTimers({ toFake: ["Date"] });
+    // The write aborts after the resume, so no systemMode$Changed consumes
+    // the auto-resume entry.
+    failTemperature = true;
+    await remoteWrite(client, endpoint.number, {
+      occupiedHeatingSetpoint: 2100,
+    }).catch(() => {});
+    expect(failTemperature).toBe(false);
+    // biome-ignore lint/suspicious/noExplicitAny: read cluster state
+    expect((endpoint.state as any).thermostat.systemMode).toBe(
+      Thermostat.SystemMode.Off,
+    );
+    vi.setSystemTime(Date.now() + 3000);
+    calls = [];
+    await remoteWrite(client, endpoint.number, {
+      systemMode: Thermostat.SystemMode.Heat,
+    });
+    expect(modeCalls().map((c) => c.data)).toEqual([{ hvac_mode: "heat" }]);
+  });
+});
+
+// #547 reporter shape: TRVZB on ZHA, min_temp 10, HA temperature 4.
+describe("thermostat off setpoint, #547 fixture", () => {
+  const trv = { min_temp: 10, temperature: 4 };
+
+  it("sends set_hvac_mode then set_temperature carrying the resumed mode from Off", async () => {
+    const { endpoint, client } = await mount("off", ["off", "heat"], trv);
+    calls = [];
+    await remoteWrite(client, endpoint.number, {
+      occupiedHeatingSetpoint: 2100,
+    });
+    expect(calls).toEqual([
+      { action: "climate.set_hvac_mode", data: { hvac_mode: "heat" } },
+      {
+        action: "climate.set_temperature",
+        data: { temperature: 21, hvac_mode: "heat" },
+      },
+    ]);
+  });
+
+  it("a cooling write from Off carries cool", async () => {
+    const { endpoint, client } = await mount(
+      "off",
+      ["off", "heat", "cool"],
+      trv,
+    );
+    calls = [];
+    await remoteWrite(client, endpoint.number, {
+      occupiedCoolingSetpoint: 2400,
+    });
+    expect(calls).toEqual([
+      { action: "climate.set_hvac_mode", data: { hvac_mode: "cool" } },
+      {
+        action: "climate.set_temperature",
+        data: { temperature: 24, hvac_mode: "cool" },
+      },
+    ]);
+  });
+
+  it("a heating write from Off on a heat_cool-only zone carries heat_cool", async () => {
+    const { endpoint, client } = await mount("off", ["off", "heat_cool"], trv);
+    calls = [];
+    await remoteWrite(client, endpoint.number, {
+      occupiedHeatingSetpoint: 2100,
+    });
+    expect(calls).toEqual([
+      { action: "climate.set_hvac_mode", data: { hvac_mode: "heat_cool" } },
+      {
+        action: "climate.set_temperature",
+        data: { temperature: 21, hvac_mode: "heat_cool" },
+      },
+    ]);
+  });
+
+  it("leaves hvac_mode out when the resumed mode is not in hvac_modes", async () => {
+    // Auto-only: the heating resume maps to "heat", which HA would reject.
+    const { endpoint, client } = await mount("off", ["off", "auto"], trv);
+    calls = [];
+    await remoteWrite(client, endpoint.number, {
+      occupiedHeatingSetpoint: 2100,
+    });
+    expect(tempCalls()).toEqual([
+      { action: "climate.set_temperature", data: { temperature: 21 } },
+    ]);
+  });
+
+  it("sends only set_temperature while heating", async () => {
+    const { endpoint, client } = await mount("heat", ["off", "heat"], trv);
+    calls = [];
+    await remoteWrite(client, endpoint.number, {
+      occupiedHeatingSetpoint: 2100,
+    });
+    expect(calls).toEqual([
+      { action: "climate.set_temperature", data: { temperature: 21 } },
+    ]);
+  });
+
+  it("setpointRaiseLower resumes from Off and steps from the declared min", async () => {
+    const { endpoint, client } = await mount("off", ["off", "heat"], trv);
+    calls = [];
+    await raiseLower(
+      client,
+      endpoint.number,
+      Thermostat.SetpointRaiseLowerMode.Heat,
+      10,
+    );
+    expect(calls).toEqual([
+      { action: "climate.set_hvac_mode", data: { hvac_mode: "heat" } },
+      {
+        action: "climate.set_temperature",
+        data: { temperature: 11, hvac_mode: "heat" },
+      },
+    ]);
+    // biome-ignore lint/suspicious/noExplicitAny: read cluster state
+    expect((endpoint.state as any).thermostat.systemMode).toBe(
+      Thermostat.SystemMode.Heat,
+    );
+  });
+
+  it("setpointRaiseLower while heating steps from the declared min only", async () => {
+    const { endpoint, client } = await mount("heat", ["off", "heat"], trv);
+    calls = [];
+    await raiseLower(
+      client,
+      endpoint.number,
+      Thermostat.SetpointRaiseLowerMode.Heat,
+      10,
+    );
+    expect(calls).toEqual([
+      { action: "climate.set_temperature", data: { temperature: 11 } },
+    ]);
   });
 });
