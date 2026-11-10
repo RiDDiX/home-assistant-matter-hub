@@ -266,6 +266,30 @@ describe("HomeAssistantRegistry", () => {
     expect(registry.labels).toEqual([{ label_id: "voice_2", name: "Voice" }]);
   });
 
+  it("picks up a label rename with an unchanged id", async () => {
+    const fake = makeConnection();
+    let labelName = "Voice";
+    fake.connection.sendMessagePromise = vi.fn((message: { type: string }) =>
+      Promise.resolve(
+        message.type === "config/label_registry/list"
+          ? [{ label_id: "voice_2", name: labelName }]
+          : [],
+      ),
+    ) as unknown as Connection["sendMessagePromise"];
+    const client = {
+      connection: fake.connection,
+      haRunning: true,
+    } as unknown as HomeAssistantClient & { haRunning: boolean };
+    const registry = new HomeAssistantRegistry(client, defaultOptions);
+    const initPromise = registry.construction;
+    await vi.runAllTimersAsync();
+    await initPromise;
+
+    labelName = "Alexa";
+    await expect(registry.reload()).resolves.toBe(true);
+    expect(registry.labels).toEqual([{ label_id: "voice_2", name: "Alexa" }]);
+  });
+
   it("keeps the last areas when the area query fails", async () => {
     const fake = makeConnection();
     let areasFail = false;

@@ -14,6 +14,7 @@ import {
 import { FilteredNetwork } from "../../core/app/filtered-network.js";
 import {
   collectAdvertisedAddresses,
+  diffAdvertisedAddresses,
   runMdnsAddressWatchTick,
 } from "../../matter/mdns-address-watch.js";
 import { diagnosticEventBus } from "../diagnostics/diagnostic-event-bus.js";
@@ -1026,8 +1027,15 @@ export class SessionSupervisor {
       refresh: (fabric) =>
         advertiser.refreshOperationalAdvertisement(fabric as Fabric),
       onChange: (prev, curr) => {
+        const { added, removed } = diffAdvertisedAddresses(prev, curr);
         this.log.warn(
-          `Advertised address set changed (${prev.length} -> ${curr.length} addresses), re-announcing operational mDNS (#415)`,
+          `Advertised address set changed (${prev.length} -> ${curr.length} addresses), re-announcing operational mDNS (#415), added: [${added.join(", ")}] removed: [${removed.join(", ")}]`,
+        );
+      },
+      onRefreshError: (fabric, e) => {
+        this.log.warn(
+          `mDNS re-announce failed for fabric ${(fabric as Fabric).fabricIndex}:`,
+          e,
         );
       },
     });

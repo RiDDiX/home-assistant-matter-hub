@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   advertisedAddressesChanged,
   collectAdvertisedAddresses,
+  diffAdvertisedAddresses,
   runMdnsAddressWatchTick,
 } from "./mdns-address-watch.js";
 
@@ -119,6 +120,17 @@ describe("advertisedAddressesChanged", () => {
     expect(advertisedAddressesChanged(["a", "b"], ["a"])).toBe(true);
     expect(advertisedAddressesChanged(["a"], ["b"])).toBe(true);
   });
+
+  it("names the flipped address when the count stays the same", () => {
+    const before = collectAdvertisedAddresses(oldPrefix);
+    const after = collectAdvertisedAddresses(newPrefix);
+    expect(after).toHaveLength(before.length);
+    expect(advertisedAddressesChanged(before, after)).toBe(true);
+    expect(diffAdvertisedAddresses(before, after)).toEqual({
+      added: ["2601:ccc:d00:9::42"],
+      removed: ["2601:aaa:b00:1::42"],
+    });
+  });
 });
 
 describe("runMdnsAddressWatchTick", () => {
@@ -148,5 +160,28 @@ describe("runMdnsAddressWatchTick", () => {
     });
     expect(refresh).not.toHaveBeenCalled();
     expect(next).toBe(snapshot);
+  });
+
+  it("keeps refreshing and stores the snapshot when one fabric fails", async () => {
+    const refresh = vi.fn(async (fabric: unknown) => {
+      if ((fabric as { id: number }).id === 1) throw new Error("boom");
+    });
+    const onRefreshError = vi.fn();
+    const deps = {
+      readInterfaces: () => newPrefix,
+      currentSnapshot: collectAdvertisedAddresses(oldPrefix),
+      fabrics: () => [{ id: 1 }, { id: 2 }],
+      refresh,
+      onRefreshError,
+    };
+    const next = await runMdnsAddressWatchTick(deps);
+    expect(refresh).toHaveBeenCalledTimes(2);
+    expect(refresh).toHaveBeenLastCalledWith({ id: 2 });
+    expect(onRefreshError).toHaveBeenCalledOnce();
+    expect(next).toEqual(collectAdvertisedAddresses(newPrefix));
+
+    refresh.mockClear();
+    await runMdnsAddressWatchTick({ ...deps, currentSnapshot: next });
+    expect(refresh).not.toHaveBeenCalled();
   });
 });

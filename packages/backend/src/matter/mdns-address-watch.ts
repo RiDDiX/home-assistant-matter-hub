@@ -42,17 +42,26 @@ export function collectAdvertisedAddresses(
   return [...out].sort();
 }
 
+// Addresses only in curr (added) and only in prev (removed).
+export function diffAdvertisedAddresses(
+  prev: string[],
+  curr: string[],
+): { added: string[]; removed: string[] } {
+  const before = new Set(prev);
+  const after = new Set(curr);
+  return {
+    added: curr.filter((a) => !before.has(a)),
+    removed: prev.filter((a) => !after.has(a)),
+  };
+}
+
 // Simple set inequality between two collected snapshots.
 export function advertisedAddressesChanged(
   prev: string[],
   curr: string[],
 ): boolean {
-  if (prev.length !== curr.length) return true;
-  const seen = new Set(prev);
-  for (const a of curr) {
-    if (!seen.has(a)) return true;
-  }
-  return false;
+  const { added, removed } = diffAdvertisedAddresses(prev, curr);
+  return added.length > 0 || removed.length > 0;
 }
 
 export interface MdnsAddressWatchDeps {
@@ -64,6 +73,7 @@ export interface MdnsAddressWatchDeps {
   fabrics: () => Iterable<unknown>;
   refresh: (fabric: unknown) => Promise<void>;
   onChange?: (prev: string[], curr: string[]) => void;
+  onRefreshError?: (fabric: unknown, error: unknown) => void;
 }
 
 // One watcher tick: recompute the snapshot and, when it changed, refresh the
@@ -82,8 +92,14 @@ export async function runMdnsAddressWatchTick(
     return deps.currentSnapshot;
   }
   deps.onChange?.(deps.currentSnapshot, next);
+  // one failing fabric must not skip the rest or keep the old snapshot,
+  // that would re-announce on every tick
   for (const fabric of deps.fabrics()) {
-    await deps.refresh(fabric);
+    try {
+      await deps.refresh(fabric);
+    } catch (e) {
+      deps.onRefreshError?.(fabric, e);
+    }
   }
   return next;
 }

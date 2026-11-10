@@ -242,11 +242,18 @@ export class HomeAssistantRegistry extends Service {
         getDeviceRegistry(connection, timeoutMs),
         // failed query: keep last labels, empty would unmount filtered
         // endpoints (#500)
-        getLabelRegistry(connection, timeoutMs).catch(() => this._labels),
+        getLabelRegistry(connection, timeoutMs).catch((e) => {
+          logger.warn("Label registry fetch failed, keeping last labels:", e);
+          return this._labels;
+        }),
         // same for areas: empty flips the fingerprint and drops room names
-        getAreaRegistry(connection, timeoutMs).catch(() =>
-          Array.from(this._areas, ([area_id, name]) => ({ area_id, name })),
-        ),
+        getAreaRegistry(connection, timeoutMs).catch((e) => {
+          logger.warn("Area registry fetch failed, keeping last areas:", e);
+          return Array.from(this._areas, ([area_id, name]) => ({
+            area_id,
+            name,
+          }));
+        }),
       ]);
 
     // Fingerprint structural registry data to detect changes.
@@ -266,7 +273,8 @@ export class HomeAssistantRegistry extends Service {
         `${d.id}\0${(d.labels ?? []).join(",")}\0${d.area_id ?? ""}\0${d.name_by_user ?? ""}\0${d.name ?? ""}\0${d.model ?? ""}\0${d.model_id ?? ""}\0${d.manufacturer ?? ""}\0${d.hw_version ?? ""}\0${d.sw_version ?? ""}\0${d.serial_number ?? ""}\n`,
       );
     }
-    for (const l of labels) hash.update(`${l.label_id}\n`);
+    // name too: matchers resolve label names to ids, a rename must refresh
+    for (const l of labels) hash.update(`${l.label_id}\0${l.name}\n`);
     for (const a of areas) hash.update(`${a.area_id}\0${a.name}\n`);
     const fingerprint = hash.digest("hex");
 

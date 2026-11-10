@@ -213,24 +213,20 @@ export class FanControlServerBase extends FeaturedBase {
     await super.initialize();
 
     // Seed last non-zero values from persisted state so turn-on after
-    // a bridge restart can restore the previous speed.
-    const ps = this.state.percentSetting;
-    if (ps != null && ps > 0) {
-      this.lastNonZeroPercent = ps;
-    }
-    if (this.features.multiSpeed) {
-      const ss = this.state.speedSetting;
-      if (ss != null && ss > 0) {
-        this.lastNonZeroSpeed = ss;
-      }
-    }
-    // Migrate the percentSetting seed into the persisted memory once, so
-    // fans that were on at shutdown keep their speed known (#387).
+    // a bridge restart can restore the previous speed. Fans read the memory
+    // behavior only: a stored percentSetting may be the #546 stand-in.
     if (this.agent.has(FanSpeedMemoryBehavior)) {
-      const memory = await this.agent.load(FanSpeedMemoryBehavior);
-      if (memory.state.lastPercent === 0 && this.lastNonZeroPercent > 0) {
-        memory.state.lastPercent = this.lastNonZeroPercent;
-        memory.state.lastSpeed = this.lastNonZeroSpeed;
+      await this.agent.load(FanSpeedMemoryBehavior);
+    } else {
+      const ps = this.state.percentSetting;
+      if (ps != null && ps > 0) {
+        this.lastNonZeroPercent = ps;
+      }
+      if (this.features.multiSpeed) {
+        const ss = this.state.speedSetting;
+        if (ss != null && ss > 0) {
+          this.lastNonZeroSpeed = ss;
+        }
       }
     }
 
@@ -303,6 +299,7 @@ export class FanControlServerBase extends FeaturedBase {
     let percentage: number;
     let speedMax: number;
     let speed: number;
+    let fallback = false;
 
     if (supportsPercentage) {
       // Fan supports percentage control - use percentage-based logic
@@ -322,6 +319,20 @@ export class FanControlServerBase extends FeaturedBase {
         minSpeedMax,
         Math.min(maxSpeedMax, calculatedSpeedMax),
       );
+      // An on entity without a percentage (Dyson in preset Auto) must not
+      // read as off while OnOff says on (#546). The stand-in is not remembered.
+      // Fans only: a humidifier percentSetting is its target humidity.
+      if (
+        percentage === 0 &&
+        this.agent.has(FanSpeedMemoryBehavior) &&
+        this.agent.get(HomeAssistantEntityBehavior).isAvailable &&
+        entity.state.state !== "off"
+      ) {
+        fallback = true;
+        percentage =
+          this.remembered().percent ||
+          Math.floor((Math.ceil(speedMax / 2) / speedMax) * 100);
+      }
       speed =
         percentage === 0
           ? 0
@@ -373,7 +384,7 @@ export class FanControlServerBase extends FeaturedBase {
 
     // Save last non-zero values; restored on controller-initiated turn-on
     // to prevent Apple Home defaulting to 100% (#225).
-    if (percentage > 0) {
+    if (percentage > 0 && !fallback) {
       this.lastNonZeroPercent = percentage;
       this.lastNonZeroSpeed = speed;
       this.lastIsAutoMode = config.isInAutoMode(entity.state, this.agent);
