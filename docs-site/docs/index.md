@@ -428,6 +428,9 @@ Home, ...) are not placed in the same network segment. Please make sure to revie
 <details>
 <summary><strong>🧪 Alpha (v2.1.0-alpha.x)</strong></summary>
 
+**v2.1.0-alpha.974:**
+- **Add-on access token**: the add-on can log in to Home Assistant with a long-lived access token of your own user through the new `access_token` and `home_assistant_url` options, so bridge actions show up as that user instead of Supervisor. Leave `access_token` empty to keep the Supervisor connection. See the FAQ for which user to pick.
+
 **v2.1.0-alpha.972:**
 - **Vacuum jobs**: Dock from a controller ends a queued multi-room job instead of starting the next room, a vacuum that is unavailable for a moment during a clean no longer counts as finished, a room selection that spans two maps is rejected, and Ecovacs rooms with several ids per room are no longer treated as Dreame.
 - **Lock PINs**: PINs no longer show in the diagnostics view, the `hamh_action` event or the debug log.

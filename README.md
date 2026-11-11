@@ -39,7 +39,7 @@ of port forwarding etc.
 | Channel | Branch | Current Version | Description |
 |---------|--------|-----------------|-------------|
 | **Stable** | `main` | v2.0.59 | Production-ready, recommended for most users |
-| **Alpha** | `alpha` | v2.1.0-alpha.972 | Ahead of Stable, carries the additions listed under Alpha Features |
+| **Alpha** | `alpha` | v2.1.0-alpha.974 | Ahead of Stable, carries the additions listed under Alpha Features |
 | **Testing** | `testing` | v4.1.0-testing.x | ⚠️ **Highly unstable!** Experimental features, may break |
 
 ### Which version should I use?
@@ -427,6 +427,9 @@ Re-assign the affected devices to their rooms after they reconnect. See the [doc
 
 <details>
 <summary><strong>🧪 Alpha Features (v2.1.0-alpha.x)</strong> - Click to expand</summary>
+
+**v2.1.0-alpha.974:**
+- **Add-on access token**: the add-on can log in to Home Assistant with a long-lived access token of your own user through the new `access_token` and `home_assistant_url` options, so bridge actions show up as that user instead of Supervisor. Leave `access_token` empty to keep the Supervisor connection. See the FAQ for which user to pick.
 
 **v2.1.0-alpha.972:**
 - **Vacuum jobs**: Dock from a controller ends a queued multi-room job instead of starting the next room, a vacuum that is unavailable for a moment during a clean no longer counts as finished, a room selection that spans two maps is rejected, and Ecovacs rooms with several ids per room are no longer treated as Dreame.
