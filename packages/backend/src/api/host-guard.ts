@@ -26,6 +26,15 @@ export function crossSiteReason(
   allowedHosts: string[],
   remoteAddress?: string,
 ): "host" | "origin" | undefined {
+  // HA ingress forwards whatever name HA is reached by. Only the add-on's
+  // Supervisor can reach us from 172.30.32.2, and it authenticates the user.
+  if (
+    (process.env.SUPERVISOR_TOKEN || process.env.HASSIO_TOKEN) &&
+    "x-ingress-path" in headers &&
+    AccessControl.ipMatch(remoteAddress ?? "", ["172.30.32.2"])
+  ) {
+    return undefined;
+  }
   const host = normalizeHost(headers.host);
   if (!host || !hostAllowed(hostName(host), allowedHosts)) {
     return "host";

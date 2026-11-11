@@ -24,6 +24,7 @@ location / {
 
 To stop other websites from talking to HAMH through your browser, HAMH only answers requests whose `Host` is an IP address, `localhost`, a single-label name or a name ending in `.local`, `.localhost`, `.home.arpa`, `.lan`, `.internal` or `.fritz.box`. Any other public name your proxy passes as `Host` must be listed with `--http-allowed-hosts` (or `HAMH_HTTP_ALLOWED_HOSTS`).
 Browser requests whose `Origin` differs from the `Host` are rejected, unless the `Origin` host is listed in `--http-allowed-hosts` or the request comes through Home Assistant ingress.
+The Home Assistant add-on panel (ingress) needs no setting, whatever name Home Assistant is reached by.
 So a proxy on `matter.example.org` needs `--http-allowed-hosts=matter.example.org`, whether or not it rewrites the `Host` header.
 
 ## Running in a sub-path

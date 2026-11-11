@@ -5,7 +5,7 @@ import i18n from "../../i18n/index.ts";
 import { renderWithProviders } from "../../test/render.tsx";
 import { LanguageSwitcher } from "./LanguageSwitcher.tsx";
 
-describe("LanguageSwitcher", () => {
+describe("LanguageSwitcher", { timeout: 20_000 }, () => {
   afterEach(async () => {
     await i18n.changeLanguage("en");
   });

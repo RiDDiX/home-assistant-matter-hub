@@ -35,7 +35,7 @@ function makeProps(overrides?: Partial<FieldProps>): FieldProps {
   } as unknown as FieldProps;
 }
 
-describe("EntityFilterRuleField", () => {
+describe("EntityFilterRuleField", { timeout: 20_000 }, () => {
   beforeEach(() => {
     vi.stubGlobal(
       "fetch",

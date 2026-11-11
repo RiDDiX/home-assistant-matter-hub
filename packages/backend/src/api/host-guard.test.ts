@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { crossSiteReason } from "./host-guard.js";
 
 describe("crossSiteReason", () => {
@@ -44,6 +44,59 @@ describe("crossSiteReason", () => {
         "192.168.1.20",
       ),
     ).toBe("host");
+  });
+
+  it("skips both checks for add-on ingress from the supervisor", () => {
+    const ingress = {
+      host: "ha.example.com",
+      "x-ingress-path": "/api/hassio_ingress/abc",
+    };
+    try {
+      vi.stubEnv("HASSIO_TOKEN", "");
+      vi.stubEnv("SUPERVISOR_TOKEN", "token");
+      expect(crossSiteReason(ingress, [], "172.30.32.2")).toBeUndefined();
+      expect(
+        crossSiteReason(
+          { ...ingress, origin: "https://ha.example.com" },
+          [],
+          "172.30.32.2",
+        ),
+      ).toBeUndefined();
+      expect(
+        crossSiteReason(
+          { ...ingress, origin: "https://evil.example" },
+          [],
+          "172.30.32.2",
+        ),
+      ).toBeUndefined();
+      expect(
+        crossSiteReason(ingress, [], "::ffff:172.30.32.2"),
+      ).toBeUndefined();
+      for (const address of [
+        "127.0.0.1",
+        "172.30.33.5",
+        "192.168.1.10",
+        undefined,
+      ]) {
+        expect(crossSiteReason(ingress, [], address)).toBe("host");
+      }
+      expect(
+        crossSiteReason({ host: "ha.example.com" }, [], "172.30.32.2"),
+      ).toBe("host");
+      expect(
+        crossSiteReason(
+          { host: "ha.example.com", "x-forwarded-for": "1.2.3.4" },
+          [],
+          "172.30.32.2",
+        ),
+      ).toBe("host");
+      vi.stubEnv("SUPERVISOR_TOKEN", "");
+      expect(crossSiteReason(ingress, [], "172.30.32.2")).toBe("host");
+      vi.stubEnv("SUPERVISOR_TOKEN", undefined);
+      expect(crossSiteReason(ingress, [], "172.30.32.2")).toBe("host");
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 
   it("checks the origin against the host", () => {

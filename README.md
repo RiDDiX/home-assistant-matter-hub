@@ -39,7 +39,7 @@ of port forwarding etc.
 | Channel | Branch | Current Version | Description |
 |---------|--------|-----------------|-------------|
 | **Stable** | `main` | v2.0.59 | Production-ready, recommended for most users |
-| **Alpha** | `alpha` | v2.1.0-alpha.974 | Ahead of Stable, carries the additions listed under Alpha Features |
+| **Alpha** | `alpha` | v2.1.0-alpha.975 | Ahead of Stable, carries the additions listed under Alpha Features |
 | **Testing** | `testing` | v4.1.0-testing.x | ⚠️ **Highly unstable!** Experimental features, may break |
 
 ### Which version should I use?
@@ -52,7 +52,7 @@ of port forwarding etc.
 
 The web UI now checks the `Host` and `Origin` headers to block DNS rebinding and cross-site WebSocket access. Requests are only answered when the host is an IP address, `localhost`, a single-label name, or a name ending in `.local`, `.localhost`, `.home.arpa`, `.lan`, `.internal` or `.fritz.box`. Home Assistant ingress and direct access by IP keep working without any change.
 
-If you reach HAMH through a reverse proxy on a public name such as `matter.example.org`, add that name before you update, or the UI answers with 403 until you do: `--http-allowed-hosts=matter.example.org` for a container, or `HAMH_HTTP_ALLOWED_HOSTS=matter.example.org` as environment variable. This is needed whether or not the proxy rewrites the `Host` header. The WebSocket also requires the basic auth credentials now when auth is enabled, browsers send them on their own. See the [reverse proxy guide](https://riddix.github.io/home-assistant-matter-hub/guides/reverse-proxy) for detail.
+If you reach HAMH through a reverse proxy on a public name such as `matter.example.org`, add that name before you update, or the UI answers with 403 until you do: `--http-allowed-hosts=matter.example.org` for a container, or `HAMH_HTTP_ALLOWED_HOSTS=matter.example.org` as environment variable. This is needed whether or not the proxy rewrites the `Host` header. The WebSocket also requires the basic auth credentials now when auth is enabled, browsers send them on their own. The Home Assistant add-on panel is not affected. See the [reverse proxy guide](https://riddix.github.io/home-assistant-matter-hub/guides/reverse-proxy) for detail.
 
 ### Upgrading from 2.0.46
 
@@ -427,6 +427,9 @@ Re-assign the affected devices to their rooms after they reconnect. See the [doc
 
 <details>
 <summary><strong>🧪 Alpha Features (v2.1.0-alpha.x)</strong> - Click to expand</summary>
+
+**v2.1.0-alpha.975:**
+- **Add-on panel on a public address**: the add-on panel opens again when Home Assistant is reached by a public name such as a Nabu Casa or DuckDNS address. Since alpha.969 it answered 403 Host not allowed.
 
 **v2.1.0-alpha.974:**
 - **Add-on access token**: the add-on can log in to Home Assistant with a long-lived access token of your own user through the new `access_token` and `home_assistant_url` options, so bridge actions show up as that user instead of Supervisor. Leave `access_token` empty to keep the Supervisor connection. See the FAQ for which user to pick.

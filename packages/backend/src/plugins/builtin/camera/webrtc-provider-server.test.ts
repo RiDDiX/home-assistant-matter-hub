@@ -488,7 +488,10 @@ describe("provideOffer negotiates after responding", () => {
     await vi.waitFor(() =>
       expect(allocatedAudioStreams(endpoint)[0].referenceCount).toBe(0),
     );
-    await audioCall(endpoint, "audioStreamDeallocate", { audioStreamId });
+    // the drop can still hold the state lock right after the count reads 0
+    await vi.waitFor(() =>
+      audioCall(endpoint, "audioStreamDeallocate", { audioStreamId }),
+    );
     expect(allocatedAudioStreams(endpoint)).toEqual([]);
   });
 });
