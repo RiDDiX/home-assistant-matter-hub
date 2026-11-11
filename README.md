@@ -39,7 +39,7 @@ of port forwarding etc.
 | Channel | Branch | Current Version | Description |
 |---------|--------|-----------------|-------------|
 | **Stable** | `main` | v2.0.59 | Production-ready, recommended for most users |
-| **Alpha** | `alpha` | v2.1.0-alpha.969 | Ahead of Stable, carries the additions listed under Alpha Features |
+| **Alpha** | `alpha` | v2.1.0-alpha.971 | Ahead of Stable, carries the additions listed under Alpha Features |
 | **Testing** | `testing` | v4.1.0-testing.x | ⚠️ **Highly unstable!** Experimental features, may break |
 
 ### Which version should I use?
@@ -427,6 +427,15 @@ Re-assign the affected devices to their rooms after they reconnect. See the [doc
 
 <details>
 <summary><strong>🧪 Alpha Features (v2.1.0-alpha.x)</strong> - Click to expand</summary>
+
+**v2.1.0-alpha.971:**
+- **Thermostat setpoint from Off**: a setpoint set while the thermostat is Off now resumes it and sends the mode together with the temperature. ZHA climate entities such as the Sonoff TRVZB ignored the temperature while still reading off ([#547](https://github.com/RiDDiX/home-assistant-matter-hub/issues/547)).
+- **Raise and lower from Off**: a raise or lower command also resumes an Off thermostat and starts from a value inside its limits, water heaters included.
+- **Wizard labels and mDNS retry**: the bridge wizard label filter now matches labels set on the device as well as on the entity, and the mDNS address check retries at most 3 times when every fabric fails ([#545](https://github.com/RiDDiX/home-assistant-matter-hub/issues/545)).
+
+**v2.1.0-alpha.970:**
+- **Fans on Auto**: a fan or air purifier that Home Assistant reports as on without a speed, such as a Dyson in Auto, now shows as on instead of off, so the Apple Home tile no longer hangs on "Turning...". The stand-in speed is not saved, a restart does not push it back to the fan ([#546](https://github.com/RiDDiX/home-assistant-matter-hub/issues/546)).
+- **Label renames and mDNS log**: a renamed Home Assistant label is picked up on the next refresh, a failed label or area fetch is logged as a warning, and the mDNS address warning lists which addresses were added or removed ([#545](https://github.com/RiDDiX/home-assistant-matter-hub/issues/545)).
 
 **v2.1.0-alpha.969:**
 - **Host and Origin checks**: the web UI and the WebSocket reject requests whose `Host` is not a local name or IP and browser requests whose `Origin` does not match, which blocks DNS rebinding and cross-site WebSocket access. Public proxy names go into the new `--http-allowed-hosts` option, see the warning above. The WebSocket upgrade now enforces basic auth, before it answered without credentials and sent the pairing codes of every bridge to any client. The IP whitelist runs before basic auth, so denied addresses get no login prompt. Plugin names starting with a dash are rejected, a backup restore is capped at 200 MB in total, and the ingress path is escaped in the page header.
