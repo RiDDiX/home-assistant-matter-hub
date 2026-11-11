@@ -31,6 +31,11 @@ import { backupApi } from "./backup-api.js";
 const dir = mkdtempSync(join(tmpdir(), "hamh-backup-api-"));
 afterAll(() => rmSync(dir, { recursive: true, force: true }));
 
+// A restore that brings back app files sends a real SIGTERM 500 ms later,
+// which kills the test worker when the file runs slow.
+const kill = vi.spyOn(process, "kill").mockImplementation(() => true);
+afterAll(() => kill.mockRestore());
+
 const ID = "0123456789abcdef0123456789abcdef";
 const bridgeStorage = {
   bridges: [{ id: ID, name: "Bridge One", port: 5540 }],
@@ -414,7 +419,7 @@ describe("restore input checks", () => {
 
 describe("restore while the bridge runs", () => {
   it("stops every running bridge, restores the app files and restarts", async () => {
-    const kill = vi.spyOn(process, "kill").mockImplementation(() => true);
+    kill.mockClear();
     const storageLocation = join(dir, "running-all");
     mkdirSync(storageLocation, { recursive: true });
     const settingsFile = join(storageLocation, "app", "settings.data");
@@ -462,7 +467,6 @@ describe("restore while the bridge runs", () => {
     await vi.waitFor(() =>
       expect(kill).toHaveBeenCalledWith(process.pid, "SIGTERM"),
     );
-    kill.mockRestore();
   });
 
   it("keeps the app files when a bridge does not stop", async () => {
