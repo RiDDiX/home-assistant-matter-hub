@@ -47,10 +47,43 @@ describe("VALID_PACKAGE_RE", () => {
     expect(VALID_PACKAGE_RE.test("foo@file:../../x")).toBe(false);
   });
 
+  it("refuses specs npm resolves as a local file or directory", () => {
+    for (const spec of [
+      "foo@.",
+      "foo@..",
+      "foo@.x",
+      "foo.tgz",
+      "foo@1.tgz",
+      "foo@1.TGZ",
+      "foo.tar.gz",
+      "foo@1.Tar.Gz",
+      "foo.tar",
+      "@scope/name@1.tar",
+    ]) {
+      expect(VALID_PACKAGE_RE.test(spec), spec).toBe(false);
+    }
+  });
+
   it("accepts a scoped package with a version", () => {
     expect(VALID_PACKAGE_RE.test("@scope/name@1.2.3")).toBe(true);
     expect(VALID_PACKAGE_RE.test("foo")).toBe(true);
     expect(VALID_PACKAGE_RE.test("foo-bar")).toBe(true);
+  });
+
+  it("accepts registry names, tags and ranges", () => {
+    for (const spec of [
+      "name",
+      "@scope/name",
+      "name@1.2.3",
+      "name@latest",
+      "name@~1.2",
+      "name@^1",
+      "name@1.x",
+      "name@*",
+      "name@1.0.0-rc.1",
+    ]) {
+      expect(VALID_PACKAGE_RE.test(spec), spec).toBe(true);
+    }
   });
 
   it("refuses names that npm would read as flags", () => {

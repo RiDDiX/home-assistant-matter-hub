@@ -5,6 +5,7 @@ import multer from "multer";
 
 const ALLOWED_EXTENSIONS = [".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"];
 const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
+const INVALID_TYPE = `Invalid file type. Allowed: ${ALLOWED_EXTENSIONS.join(", ")}`;
 
 export function bridgeIconApi(storageLocation: string): express.Router {
   const iconsDir = path.join(storageLocation, "bridge-icons");
@@ -34,11 +35,7 @@ export function bridgeIconApi(storageLocation: string): express.Router {
     if (ALLOWED_EXTENSIONS.includes(ext)) {
       cb(null, true);
     } else {
-      cb(
-        new Error(
-          `Invalid file type. Allowed: ${ALLOWED_EXTENSIONS.join(", ")}`,
-        ),
-      );
+      cb(new Error(INVALID_TYPE));
     }
   };
 
@@ -52,12 +49,30 @@ export function bridgeIconApi(storageLocation: string): express.Router {
   const iconFiles = (bridgeId: string) =>
     fs.readdirSync(iconsDir).filter((f) => path.parse(f).name === bridgeId);
 
+  // multer and fileFilter report through next(err), Express would answer 500
+  const uploadError = (
+    err: unknown,
+    _req: express.Request,
+    res: express.Response,
+    _next: express.NextFunction,
+  ) => {
+    if (err instanceof multer.MulterError) {
+      const tooLarge = err.code === "LIMIT_FILE_SIZE";
+      res.status(tooLarge ? 413 : 400).json({ error: err.message });
+    } else if (err instanceof Error && err.message === INVALID_TYPE) {
+      res.status(400).json({ error: err.message });
+    } else {
+      // disk errors are ours and their message carries absolute paths
+      res.status(500).json({ error: "Upload failed" });
+    }
+  };
+
   const router = express.Router();
 
   // Express decodes %2F in params and multer joins the name onto iconsDir.
   // Imported legacy bridges can carry dashed UUIDs, so not only 32 hex.
   router.param("bridgeId", (_req, res, next, bridgeId: string) => {
-    if (/^[\w-]+$/.test(bridgeId)) next();
+    if (/^[\w-]{1,128}$/.test(bridgeId)) next();
     else res.status(400).json({ error: "Invalid bridge id" });
   });
 
@@ -79,6 +94,7 @@ export function bridgeIconApi(storageLocation: string): express.Router {
       const iconUrl = `api/bridge-icons/${req.params.bridgeId}`;
       res.json({ success: true, iconUrl });
     },
+    uploadError,
   );
 
   // Tells the UI whether a custom icon exists, without a 404 probe
@@ -101,7 +117,10 @@ export function bridgeIconApi(storageLocation: string): express.Router {
 
     const filePath = path.join(iconsDir, iconFile);
     res.sendFile(filePath, {
-      headers: { "Content-Security-Policy": "sandbox" },
+      headers: {
+        "Content-Security-Policy": "sandbox",
+        "X-Content-Type-Options": "nosniff",
+      },
     });
   });
 

@@ -242,6 +242,25 @@ export class WebApi extends Service {
       this.app.get("/", (_req, res) => res.redirect(basePath));
     }
     this.app.use(basePath, appRouter);
+    // Express' default handler answers with the stack trace outside production.
+    this.app.use(((err, req, res, next) => {
+      if (res.headersSent) {
+        return next(err);
+      }
+      const code = Number(err?.status ?? err?.statusCode);
+      const status = code >= 400 && code < 500 ? code : 500;
+      if (status === 500) {
+        this.log.error(`${req.method} ${req.originalUrl} failed:`, err);
+      }
+      const exposed = status < 500 && err?.expose === true;
+      res.status(status).json({
+        error: exposed
+          ? String(err.message)
+          : status < 500
+            ? "Bad request"
+            : "Internal server error",
+      });
+    }) as express.ErrorRequestHandler);
   }
 
   override async dispose() {

@@ -22,6 +22,9 @@ vi.mock("../plugins/plugin-installer.js", () => ({
       installCalls.push(packageName);
       return { success: true, packageName, version: "1.0.0" };
     }
+    async uninstall(packageName: string) {
+      return { success: true, packageName };
+    }
     // The tgz and local paths read the name out of the package itself, so the
     // stub echoes a name the caller plants via the payload or path.
     async installFromTgz(buf: Buffer) {
@@ -219,6 +222,27 @@ describe("secret config values in the listing", () => {
       const entry = body.find((p) => p.packageName === "hamh-plugin-secretive");
       expect(entry).toBeDefined();
       expect(entry).not.toHaveProperty("config");
+    });
+  });
+
+  it("drops the registry entry when uninstalled with a version spec", async () => {
+    await withRouter(async (base) => {
+      const post = (route: string) =>
+        fetch(`${base}/plugins/${route}`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ packageName: "hamh-plugin-gone@1.2.3" }),
+        });
+      const names = async () =>
+        (
+          (await (await fetch(`${base}/plugins/installed`)).json()) as Array<{
+            packageName: string;
+          }>
+        ).map((p) => p.packageName);
+      await post("install");
+      expect(await names()).toContain("hamh-plugin-gone");
+      expect((await post("uninstall")).status).toBe(200);
+      expect(await names()).not.toContain("hamh-plugin-gone");
     });
   });
 });

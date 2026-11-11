@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import type * as http from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -17,8 +17,10 @@ afterEach(async () => {
   while (cleanup.length) await cleanup.pop()?.();
 });
 
-async function serve(whitelist?: string[]) {
-  const dir = mkdtempSync(join(tmpdir(), "hamh-web-api-"));
+async function serve(
+  whitelist?: string[],
+  dir = mkdtempSync(join(tmpdir(), "hamh-web-api-")),
+) {
   cleanup.push(async () => rmSync(dir, { recursive: true, force: true }));
   const stub = {} as never;
   const api = new WebApi(
@@ -101,6 +103,39 @@ describe("WebApi auth", () => {
   it("keeps the liveness probe reachable outside the whitelist", async () => {
     const host = await serve(["10.0.0.0/8"]);
     expect(await get(host, "/api/health/live")).toBe(200);
+  });
+
+  it("names the rejected origin in plain text", async () => {
+    const host = await serve();
+    const res = await fetch(`http://${host}/api/settings/auth`, {
+      headers: { origin: "https://evil.example" },
+    });
+    expect(res.status).toBe(403);
+    expect(res.headers.get("content-type")).toMatch(/^text\/plain/);
+    expect(await res.text()).toBe(
+      "Origin evil.example is not allowed, add it with --http-allowed-hosts",
+    );
+  });
+
+  it("answers errors as json without paths", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "hamh-web-api-"));
+    const host = await serve(undefined, dir);
+    rmSync(join(dir, "bridge-icons"), { recursive: true });
+    writeFileSync(join(dir, "bridge-icons"), "");
+    const authorization = basic("admin", "secret");
+    const broken = await fetch(`http://${host}/api/bridge-icons/b1`, {
+      headers: { authorization },
+    });
+    expect(broken.status).toBe(500);
+    expect(await broken.json()).toEqual({ error: "Internal server error" });
+    const malformed = await fetch(`http://${host}/api/settings/auth`, {
+      method: "PUT",
+      headers: { authorization, "content-type": "application/json" },
+      body: "{",
+    });
+    expect(malformed.status).toBe(400);
+    expect(malformed.headers.get("content-type")).toMatch(/json/);
+    expect(await malformed.json()).toHaveProperty("error");
   });
 
   it("lets only loopback probes skip the whitelist", () => {

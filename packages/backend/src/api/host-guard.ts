@@ -3,15 +3,6 @@ import net from "node:net";
 import type express from "express";
 import AccessControl from "express-ip-access-control";
 
-// After a DNS rebind a page can set these itself, so the headers alone prove
-// nothing. Only a proxy on loopback or the HA supervisor network is trusted.
-const trustedProxies = ["127.0.0.0/8", "::1", "172.30.32.0/23"];
-const proxyHeaders = [
-  "x-ingress-path",
-  "x-forwarded-prefix",
-  "x-forwarded-host",
-  "x-forwarded-for",
-];
 const localSuffixes = [
   ".local",
   ".localhost",
@@ -36,15 +27,13 @@ export function crossSiteReason(
     return undefined;
   }
   const host = normalizeHost(headers.host);
-  if (!host || !hostAllowed(hostName(host), allowedHosts)) {
+  const name = host && hostName(host);
+  if (!name || !hostAllowed(name, allowedHosts)) {
     return "host";
   }
   const origin = headers.origin;
-  if (
-    origin === undefined ||
-    (proxyHeaders.some((name) => name in headers) &&
-      AccessControl.ipMatch(remoteAddress ?? "", trustedProxies))
-  ) {
+  // A same-host reverse proxy adds X-Forwarded-For to cross-site requests too.
+  if (origin === undefined) {
     return undefined;
   }
   try {
@@ -70,15 +59,24 @@ export function hostGuard(allowedHosts: string[]): express.RequestHandler {
     if (!reason) {
       return next();
     }
-    res
-      .status(403)
-      .type("text")
-      .send(
-        reason === "host"
-          ? `Host ${req.headers.host ?? ""} is not allowed, add it with --http-allowed-hosts`
-          : "Cross-site request blocked",
-      );
+    res.status(403).type("text").send(crossSiteMessage(reason, req.headers));
   };
+}
+
+export function crossSiteMessage(
+  reason: "host" | "origin",
+  headers: IncomingHttpHeaders,
+): string {
+  if (reason === "host") {
+    return `Host ${headers.host ?? ""} is not allowed, add it with --http-allowed-hosts`;
+  }
+  try {
+    const originHost = new URL(headers.origin ?? "").host;
+    if (originHost) {
+      return `Origin ${originHost} is not allowed, add it with --http-allowed-hosts`;
+    }
+  } catch {}
+  return "Cross-site request blocked";
 }
 
 function normalizeHost(host: string | undefined): string | undefined {
@@ -92,7 +90,8 @@ function normalizeHost(host: string | undefined): string | undefined {
 
 function hostName(host: string): string {
   if (host.startsWith("[")) {
-    return host.slice(1, host.indexOf("]"));
+    const end = host.indexOf("]");
+    return end === -1 ? "" : host.slice(1, end);
   }
   return host.replace(/:\d+$/, "");
 }

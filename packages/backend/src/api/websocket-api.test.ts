@@ -96,8 +96,8 @@ describe("WebSocketApi", () => {
     expect(messages[0].type).toBe("bridges_update");
   });
 
-  it("rejects a cross-site origin unless proxied", async () => {
-    const { base } = await serve([]);
+  it("rejects a cross-site origin even with proxy headers", async () => {
+    const { base } = await serve([], undefined, ["matter.example.org"]);
     const host = base.slice("ws://".length);
 
     await expect(
@@ -105,11 +105,43 @@ describe("WebSocketApi", () => {
     ).rejects.toThrow("403");
     const same = await connect(`${base}/api/ws`, { origin: `http://${host}` });
     expect(same.messages[0].type).toBe("bridges_update");
-    const proxied = await connect(`${base}/api/ws`, {
-      origin: "http://evil.example",
-      "x-ingress-path": "/api/hassio_ingress/abc",
+    await expect(
+      connect(`${base}/api/ws`, {
+        origin: "http://evil.example",
+        "x-ingress-path": "/api/hassio_ingress/abc",
+        "x-forwarded-for": "192.168.1.20",
+      }),
+    ).rejects.toThrow("403");
+    const listed = await connect(`${base}/api/ws`, {
+      origin: "https://matter.example.org",
+      "x-forwarded-for": "192.168.1.20",
     });
-    expect(proxied.messages[0].type).toBe("bridges_update");
+    expect(listed.messages[0].type).toBe("bridges_update");
+  });
+
+  it("names the rejected origin in plain text", async () => {
+    const { base } = await serve([]);
+    const res = await new Promise<http.IncomingMessage>((resolve, reject) =>
+      http
+        .get(`${base.replace("ws:", "http:")}/api/ws`, {
+          headers: {
+            connection: "Upgrade",
+            upgrade: "websocket",
+            "sec-websocket-version": "13",
+            "sec-websocket-key": "dGhlIHNhbXBsZSBub25jZQ==",
+            origin: "https://evil.example",
+          },
+        })
+        .once("response", resolve)
+        .once("error", reject),
+    );
+    let body = "";
+    for await (const chunk of res) body += chunk;
+    expect(res.statusCode).toBe(403);
+    expect(res.headers["content-type"]).toMatch(/^text\/plain/);
+    expect(body).toBe(
+      "Origin evil.example is not allowed, add it with --http-allowed-hosts",
+    );
   });
 
   it("requires basic auth when configured", async () => {

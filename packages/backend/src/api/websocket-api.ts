@@ -6,7 +6,7 @@ import type { BetterLogger } from "../core/app/logger.js";
 import type { BridgeService } from "../services/bridges/bridge-service.js";
 import { diagnosticEventBus } from "../services/diagnostics/diagnostic-event-bus.js";
 import type { DiagnosticService } from "../services/diagnostics/diagnostic-service.js";
-import { crossSiteReason } from "./host-guard.js";
+import { crossSiteMessage, crossSiteReason } from "./host-guard.js";
 
 export class WebSocketApi {
   private wss?: WebSocketServer;
@@ -43,14 +43,21 @@ export class WebSocketApi {
       // Upgrades skip the Express middlewares, so apply the same checks here.
       verifyClient: ({ req }, cb) => {
         if (
-          (whitelist?.length &&
-            !AccessControl.ipMatch(
-              req.socket.remoteAddress ?? "",
-              whitelist,
-            )) ||
-          crossSiteReason(req.headers, allowedHosts, req.socket.remoteAddress)
+          whitelist?.length &&
+          !AccessControl.ipMatch(req.socket.remoteAddress ?? "", whitelist)
         ) {
           return cb(false, 403);
+        }
+        const reason = crossSiteReason(
+          req.headers,
+          allowedHosts,
+          req.socket.remoteAddress,
+        );
+        if (reason) {
+          // ws defaults the body to text/html.
+          return cb(false, 403, crossSiteMessage(reason, req.headers), {
+            "Content-Type": "text/plain; charset=utf-8",
+          });
         }
         Promise.resolve()
           .then(() => verifyAuthorization(req.headers.authorization))

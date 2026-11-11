@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { crossSiteReason } from "./host-guard.js";
+import { crossSiteMessage, crossSiteReason } from "./host-guard.js";
 
 describe("crossSiteReason", () => {
   it("allows IP, localhost and local names", () => {
@@ -29,13 +29,13 @@ describe("crossSiteReason", () => {
     );
   });
 
-  it("trusts proxy headers only from a trusted source", () => {
+  it("checks the origin even with proxy headers", () => {
     const ingress = {
       host: "172.30.33.5:8099",
       origin: "https://ha.example.com",
       "x-ingress-path": "/api/hassio_ingress/abc",
     };
-    expect(crossSiteReason(ingress, [], "172.30.32.2")).toBeUndefined();
+    expect(crossSiteReason(ingress, [], "172.30.32.2")).toBe("origin");
     expect(crossSiteReason(ingress, [], "192.168.1.20")).toBe("origin");
     expect(
       crossSiteReason(
@@ -44,6 +44,52 @@ describe("crossSiteReason", () => {
         "192.168.1.20",
       ),
     ).toBe("host");
+    const sameHostProxy = {
+      host: "127.0.0.1:8482",
+      "x-forwarded-for": "192.168.1.20",
+    };
+    for (const address of ["127.0.0.1", "::1", "::ffff:127.0.0.1"]) {
+      expect(
+        crossSiteReason(
+          { ...sameHostProxy, origin: "https://evil.example" },
+          [],
+          address,
+        ),
+      ).toBe("origin");
+      expect(
+        crossSiteReason(
+          { ...sameHostProxy, origin: "https://matter.example.org" },
+          ["matter.example.org"],
+          address,
+        ),
+      ).toBeUndefined();
+      expect(crossSiteReason(sameHostProxy, [], address)).toBeUndefined();
+    }
+    expect(
+      crossSiteReason(
+        { ...sameHostProxy, origin: "https://a.example.org" },
+        ["*.example.org"],
+        "127.0.0.1",
+      ),
+    ).toBeUndefined();
+    expect(
+      crossSiteReason(
+        { ...sameHostProxy, origin: "https://example.org" },
+        ["*.example.org"],
+        "127.0.0.1",
+      ),
+    ).toBe("origin");
+  });
+
+  it("parses bracketed hosts strictly", () => {
+    expect(crossSiteReason({ host: "" }, [])).toBe("host");
+    expect(crossSiteReason({}, [])).toBe("host");
+    expect(crossSiteReason({ host: "[::1]" }, [])).toBeUndefined();
+    expect(
+      crossSiteReason({ host: "[::ffff:127.0.0.1]:8482" }, []),
+    ).toBeUndefined();
+    expect(crossSiteReason({ host: "[::1" }, [])).toBe("host");
+    expect(crossSiteReason({ host: "[::1:8482" }, [])).toBe("host");
   });
 
   it("skips both checks for add-on ingress from the supervisor", () => {
@@ -121,5 +167,23 @@ describe("crossSiteReason", () => {
     expect(crossSiteReason(proxied, ["matter.example.org"])).toBeUndefined();
     expect(crossSiteReason(proxied, [])).toBe("origin");
     expect(crossSiteReason({ host, origin: "not a url" }, [])).toBe("origin");
+  });
+
+  it("names the rejected host or origin", () => {
+    expect(crossSiteMessage("host", { host: "hamh.example.com" })).toBe(
+      "Host hamh.example.com is not allowed, add it with --http-allowed-hosts",
+    );
+    expect(
+      crossSiteMessage("origin", {
+        origin: "https://matter.example.org:8443/<b>",
+      }),
+    ).toBe(
+      "Origin matter.example.org:8443 is not allowed, add it with --http-allowed-hosts",
+    );
+    for (const origin of ["null", "not a url", "file:///etc", undefined]) {
+      expect(crossSiteMessage("origin", { origin })).toBe(
+        "Cross-site request blocked",
+      );
+    }
   });
 });

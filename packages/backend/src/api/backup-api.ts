@@ -119,6 +119,15 @@ export function backupApi(
           continue;
         }
 
+        // checked before anything is added
+        const mappings =
+          options.includeMappings !== false
+            ? ownMappings(backupData, bridge.id)
+            : undefined;
+        if (mappings && !Array.isArray(mappings)) {
+          throw new Error(`Invalid entity mappings for bridge ${bridge.id}`);
+        }
+
         // A running bridge keeps writing its old fabrics and sessions over
         // the restored files until the restart.
         const live = bridgeService.get(bridge.id);
@@ -129,19 +138,16 @@ export function backupApi(
         await bridgeStorage.add(await migrateBridge(bridge, bridgeVersion));
         bridgesRestored++;
 
-        if (options.includeMappings !== false) {
-          const mappings = backupData.entityMappings[bridge.id];
-          if (mappings) {
-            for (const mapping of mappings) {
-              const config = mapping as EntityMappingConfig;
-              if (typeof config?.entityId !== "string") continue;
-              // setMapping sanitizes field by field, no list here to drift
-              await mappingStorage.setMapping({
-                ...config,
-                bridgeId: bridge.id,
-              });
-              mappingsRestored++;
-            }
+        if (Array.isArray(mappings)) {
+          for (const mapping of mappings) {
+            const config = mapping as EntityMappingConfig;
+            if (typeof config?.entityId !== "string") continue;
+            // setMapping sanitizes field by field, no list here to drift
+            await mappingStorage.setMapping({
+              ...config,
+              bridgeId: bridge.id,
+            });
+            mappingsRestored++;
           }
         }
 
@@ -327,14 +333,17 @@ export function backupApi(
           version: backupData.version,
           createdAt: backupData.createdAt,
           includesIdentity: backupData.includesIdentity ?? false,
-          bridges: backupData.bridges.map((bridge: BridgeData) => ({
-            id: bridge.id,
-            name: bridge.name,
-            port: bridge.port,
-            exists: existingIds.has(bridge.id),
-            hasMappings: !!backupData.entityMappings[bridge.id],
-            mappingCount: backupData.entityMappings[bridge.id]?.length || 0,
-          })),
+          bridges: backupData.bridges.map((bridge: BridgeData) => {
+            const mappings = ownMappings(backupData, bridge.id);
+            return {
+              id: bridge.id,
+              name: bridge.name,
+              port: bridge.port,
+              exists: existingIds.has(bridge.id),
+              hasMappings: Array.isArray(mappings),
+              mappingCount: Array.isArray(mappings) ? mappings.length : 0,
+            };
+          }),
         };
 
         res.json(preview);
@@ -530,8 +539,33 @@ interface ExtractedBackup {
   zipDirectory: unzipper.CentralDirectory;
 }
 
+// Own keys only: "__proto__" or "constructor" would hand back an
+// Object.prototype member.
+function ownMappings(data: BackupData, bridgeId: string): unknown {
+  return Object.hasOwn(data.entityMappings ?? {}, bridgeId)
+    ? data.entityMappings[bridgeId]
+    : undefined;
+}
+
+const totalTooLarge = () =>
+  new Error(
+    `Invalid backup: the archive contents are larger than ${MAX_TOTAL_BYTES / 1024 / 1024} MB`,
+  );
+
 async function extractBackupData(buffer: Buffer): Promise<ExtractedBackup> {
   const directory = await unzipper.Open.buffer(buffer);
+  // An honest oversized archive is refused before anything is written. A size
+  // of 0xffffffff without zip64 data comes back undefined and would turn every
+  // total check below into a NaN compare.
+  let declared = 0;
+  for (const file of directory.files) {
+    const size: unknown = file.uncompressedSize;
+    if (typeof size !== "number" || !Number.isFinite(size) || size < 0) {
+      throw new Error(`Invalid backup: ${file.path} has no valid size`);
+    }
+    declared += size;
+  }
+  if (declared > MAX_TOTAL_BYTES) throw totalTooLarge();
   const total = { bytes: 0 };
   for (const file of directory.files) archiveTotals.set(file, total);
   const backupFile = directory.files.find(
@@ -552,10 +586,6 @@ async function readEntry(file: unzipper.File): Promise<Buffer> {
   const tooLarge = () =>
     new Error(
       `Invalid backup: ${file.path} is larger than ${MAX_ENTRY_BYTES / 1024 / 1024} MB`,
-    );
-  const totalTooLarge = () =>
-    new Error(
-      `Invalid backup: the archive contents are larger than ${MAX_TOTAL_BYTES / 1024 / 1024} MB`,
     );
   if (file.uncompressedSize > MAX_ENTRY_BYTES) throw tooLarge();
   if (total.bytes + file.uncompressedSize > MAX_TOTAL_BYTES) {

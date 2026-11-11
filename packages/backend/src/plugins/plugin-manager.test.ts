@@ -2,7 +2,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { OnOffLightDevice } from "@matter/main/devices";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import {
   PLUGIN_API_VERSION,
   PluginManager,
@@ -25,7 +25,10 @@ function createMockPlugin(
 }
 
 describe("PluginManager", () => {
-  const storageDir = `/tmp/hamh-test-plugins-${Date.now()}`;
+  const storageDir = fs.mkdtempSync(
+    path.join(os.tmpdir(), "hamh-test-plugins-"),
+  );
+  afterAll(() => fs.rmSync(storageDir, { recursive: true, force: true }));
 
   describe("registerBuiltIn", () => {
     it("should register a built-in plugin", async () => {

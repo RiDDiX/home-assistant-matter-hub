@@ -2,6 +2,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
   unlinkSync,
@@ -379,23 +380,27 @@ describe("restore input checks", () => {
     expect(stream).toHaveBeenCalledOnce();
   });
 
-  it("rejects entries that together pass the archive cap", async () => {
+  it("rejects entries that inflate together past the archive cap", async () => {
     const backupJson = JSON.stringify({
       version: 2,
       bridges: [{ id: ID, name: "Bridge One", port: 5540 }],
       entityMappings: {},
       includesIdentity: true,
     });
-    const entry = (path: string, content: string) => ({
+    const entry = (path: string, content: Buffer, declared: number) => ({
       path,
       type: "File",
-      uncompressedSize: 45 * 1024 * 1024,
-      stream: () => Readable.from([Buffer.from(content)]),
+      uncompressedSize: declared,
+      stream: () => Readable.from([content]),
     });
+    // the declared sizes stay under the cap, the last entry lies
     vi.spyOn(unzipper.Open, "buffer").mockResolvedValueOnce({
       files: [
-        entry("backup.json", backupJson),
-        ...["a", "b", "c", "d"].map((n) => entry(`identity/${ID}/${n}`, "k")),
+        entry("backup.json", Buffer.from(backupJson), 2),
+        ...["a", "b", "c", "d"].map((n) =>
+          entry(`identity/${ID}/${n}`, Buffer.from("k"), 45 * 1024 * 1024),
+        ),
+        entry(`identity/${ID}/e`, Buffer.alloc(25 * 1024 * 1024), 1),
       ],
     } as unknown as unzipper.CentralDirectory);
     const storageLocation = join(dir, "total-cap");
@@ -414,6 +419,204 @@ describe("restore input checks", () => {
       undefined,
       storageLocation,
     );
+  });
+
+  it("rejects declared sizes over the archive cap before writing anything", async () => {
+    const added: BridgeData[] = [];
+    const storage = {
+      bridges: [],
+      add: async (bridge: BridgeData) => {
+        added.push(bridge);
+      },
+    } as unknown as BridgeStorage;
+    const backupJson = JSON.stringify({
+      version: 2,
+      bridges: [{ id: ID, name: "Bridge One", port: 5540 }],
+      entityMappings: {},
+      includesIdentity: true,
+    });
+    const entry = (path: string, content: string) => ({
+      path,
+      type: "File",
+      uncompressedSize: 45 * 1024 * 1024,
+      stream: () => Readable.from([Buffer.from(content)]),
+    });
+    vi.spyOn(unzipper.Open, "buffer").mockResolvedValueOnce({
+      files: [
+        entry("backup.json", backupJson),
+        ...["a", "b", "c", "d"].map((n) => entry(`identity/${ID}/${n}`, "k")),
+      ],
+    } as unknown as unzipper.CentralDirectory);
+    const storageLocation = join(dir, "declared-cap");
+    mkdirSync(storageLocation, { recursive: true });
+    await withRouter(
+      async (base) => {
+        const res = await fetch(
+          `${base}/backup/restore`,
+          restoreForm(new Blob(["zip"])),
+        );
+        expect(res.status).toBe(400);
+        expect((await res.json()).error).toMatch(/200 MB/);
+      },
+      undefined,
+      undefined,
+      storage,
+      storageLocation,
+    );
+    expect(added).toEqual([]);
+    expect(readdirSync(storageLocation)).toEqual([]);
+  });
+
+  it("ignores Object.prototype members for a bridge id like __proto__", async () => {
+    const added: BridgeData[] = [];
+    const storage = {
+      bridges: [],
+      add: async (bridge: BridgeData) => {
+        added.push(bridge);
+      },
+    } as unknown as BridgeStorage;
+    // raw JSON, an object literal would set the prototype instead of a key
+    const zip = await zipOf({
+      "backup.json": `{"version":2,"bridges":[{"id":"__proto__","name":"P","port":5540},{"id":"constructor","name":"C","port":5541}],"entityMappings":{"__proto__":{"entityId":"light.x"}}}`,
+    });
+    await withRouter(
+      async (base) => {
+        const res = await fetch(`${base}/backup/restore`, restoreForm(zip));
+        expect(res.status).toBe(200);
+        const body = await res.json();
+        expect(body.bridgesRestored).toBe(1);
+        expect(
+          body.errors.map((e: { bridgeId: string }) => e.bridgeId),
+        ).toEqual(["__proto__"]);
+      },
+      undefined,
+      undefined,
+      storage,
+    );
+    expect(added.map((b) => b.id)).toEqual(["constructor"]);
+  });
+
+  it("refuses an entry whose size field reads 0xffffffff without zip64 data", async () => {
+    const added: BridgeData[] = [];
+    const storage = {
+      bridges: [],
+      add: async (bridge: BridgeData) => {
+        added.push(bridge);
+      },
+    } as unknown as BridgeStorage;
+    const zip = Buffer.from(
+      await (
+        await zipOf({
+          "backup.json": JSON.stringify({
+            version: 2,
+            bridges: [{ id: ID, name: "Bridge One", port: 5540 }],
+            entityMappings: {},
+            includesIdentity: true,
+          }),
+          [`identity/${ID}/keys`]: "k",
+        })
+      ).arrayBuffer(),
+    );
+    // uncompressed size of the last central directory header
+    const header = zip.lastIndexOf(Buffer.from([0x50, 0x4b, 0x01, 0x02]));
+    zip.writeUInt32LE(0xffffffff, header + 24);
+    const storageLocation = join(dir, "size-ffffffff");
+    mkdirSync(storageLocation, { recursive: true });
+    await withRouter(
+      async (base) => {
+        for (const route of ["restore", "restore/preview"]) {
+          const res = await fetch(
+            `${base}/backup/${route}`,
+            restoreForm(new Blob([zip])),
+          );
+          expect(res.status).toBe(400);
+          expect((await res.json()).error).toMatch(/Invalid backup/);
+        }
+      },
+      undefined,
+      undefined,
+      storage,
+      storageLocation,
+    );
+    expect(added).toEqual([]);
+    expect(readdirSync(storageLocation)).toEqual([]);
+  });
+
+  it.each([
+    undefined,
+    Number.NaN,
+    -5,
+    "300000000",
+  ])("refuses a declared size of %s", async (size) => {
+    const added: BridgeData[] = [];
+    const storage = {
+      bridges: [],
+      add: async (bridge: BridgeData) => {
+        added.push(bridge);
+      },
+    } as unknown as BridgeStorage;
+    const backupJson = JSON.stringify({
+      version: 2,
+      bridges: [{ id: ID, name: "Bridge One", port: 5540 }],
+      entityMappings: {},
+      includesIdentity: true,
+    });
+    vi.spyOn(unzipper.Open, "buffer").mockResolvedValueOnce({
+      files: [
+        {
+          path: "backup.json",
+          type: "File",
+          uncompressedSize: backupJson.length,
+          stream: () => Readable.from([Buffer.from(backupJson)]),
+        },
+        {
+          path: `identity/${ID}/keys`,
+          type: "File",
+          uncompressedSize: size,
+          stream: () => Readable.from([Buffer.from("k")]),
+        },
+      ],
+    } as unknown as unzipper.CentralDirectory);
+    const storageLocation = join(dir, `bad-size-${String(size)}`);
+    mkdirSync(storageLocation, { recursive: true });
+    await withRouter(
+      async (base) => {
+        const res = await fetch(
+          `${base}/backup/restore`,
+          restoreForm(new Blob(["zip"])),
+        );
+        expect(res.status).toBe(400);
+        expect((await res.json()).error).toMatch(/Invalid backup/);
+      },
+      undefined,
+      undefined,
+      storage,
+      storageLocation,
+    );
+    expect(added).toEqual([]);
+    expect(readdirSync(storageLocation)).toEqual([]);
+  });
+
+  it("previews a bridge id like constructor with no mappings", async () => {
+    const zip = await zipOf({
+      "backup.json": JSON.stringify({
+        version: 2,
+        bridges: [{ id: "constructor", name: "C", port: 5540 }],
+        entityMappings: {},
+      }),
+    });
+    await withRouter(async (base) => {
+      const res = await fetch(
+        `${base}/backup/restore/preview`,
+        restoreForm(zip),
+      );
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.bridges[0]).toMatchObject({
+        hasMappings: false,
+        mappingCount: 0,
+      });
+    });
   });
 });
 

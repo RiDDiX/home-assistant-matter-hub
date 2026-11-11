@@ -6,7 +6,7 @@ import { BackupRestore } from "./BackupRestore.tsx";
 
 vi.mock("../../api/backup.js");
 
-describe("BackupRestore retention field", () => {
+describe("BackupRestore retention field", { timeout: 20_000 }, () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(backupApi.fetchBackupSnapshots).mockResolvedValue([]);

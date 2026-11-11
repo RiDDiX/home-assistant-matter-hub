@@ -349,7 +349,8 @@ export function pluginApi(
         return;
       }
 
-      registry.remove(packageName);
+      // install stored the bare name
+      registry.remove(packageBaseName(packageName));
 
       res.json({
         success: true,
