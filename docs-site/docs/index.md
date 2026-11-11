@@ -428,6 +428,15 @@ Home, ...) are not placed in the same network segment. Please make sure to revie
 <details>
 <summary><strong>🧪 Alpha (v2.1.0-alpha.x)</strong></summary>
 
+**v2.1.0-alpha.972:**
+- **Vacuum jobs**: Dock from a controller ends a queued multi-room job instead of starting the next room, a vacuum that is unavailable for a moment during a clean no longer counts as finished, a room selection that spans two maps is rejected, and Ecovacs rooms with several ids per room are no longer treated as Dreame.
+- **Lock PINs**: PINs no longer show in the diagnostics view, the `hamh_action` event or the debug log.
+- **Home Assistant connection and bridges**: a dead connection is detected by a ping every 30 s and reconnected, and a refused reconnect is logged as an error. One broken stored bridge no longer stops the other bridges from starting, and a stored country code that is not two letters is dropped with a warning.
+- **Plugins**: re-uploading a plugin keeps its saved config, reset starts the plugin again, an upgraded plugin needs an app restart and the message says so, and deleting a bridge removes its plugin files.
+- **Sensors**: power, voltage and current show no value while the sensor is unavailable instead of the last one, EVSE states like ready to charge no longer show as charging, and moisture and cold sensors keep their battery level.
+- **Climate, fans and covers**: setpoint changes in Dry and Fan only mode reach Home Assistant, the fan slider debounce no longer turns a fan back on after off, a water heater Boost survives a short unavailable, a lawn mower that is unavailable shows Stopped instead of an error, and tilt-only covers report their position.
+- **Web UI and access**: the bridge wizard no longer keeps flags of a deselected controller profile, the mapping dialog blocks Save on invalid input, and IP whitelist denials answer 403 instead of 401.
+
 **v2.1.0-alpha.971:**
 - **Thermostat setpoint from Off**: a setpoint set while the thermostat is Off now resumes it and sends the mode together with the temperature. ZHA climate entities such as the Sonoff TRVZB ignored the temperature while still reading off ([#547](https://github.com/RiDDiX/home-assistant-matter-hub/issues/547)).
 - **Raise and lower from Off**: a raise or lower command also resumes an Off thermostat and starts from a value inside its limits, water heaters included.
