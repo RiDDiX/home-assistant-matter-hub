@@ -75,6 +75,21 @@ esac
 export NODE_OPTIONS="--max-old-space-size=${heap_size}${NODE_OPTIONS:+ ${NODE_OPTIONS}}"
 export APP_VERSION="${APP_VERSION:-$(bashio::addon.version)}"
 
+# A user token talks to Core directly: the Supervisor proxy runs every call as
+# its own "Supervisor" user and does not pass an add-on's token on.
+ha_url='http://supervisor/core'
+ha_token="$SUPERVISOR_TOKEN"
+access_token=$(bashio::config 'access_token' '')
+access_token="${access_token//[[:space:]]/}"
+if [ -n "$access_token" ] && [ "$access_token" != "null" ]; then
+  ha_token="$access_token"
+  ha_url=$(bashio::config 'home_assistant_url' '')
+  if [ -z "$ha_url" ] || [ "$ha_url" = "null" ]; then
+    ha_url='http://127.0.0.1:8123'
+  fi
+  bashio::log.info "Home Assistant: using the configured access token at ${ha_url}"
+fi
+
 exec home-assistant-matter-hub start \
   --log-level=$(bashio::config 'app_log_level') \
   --protocol-log-level=$(bashio::config 'protocol_log_level' 'info') \
@@ -84,6 +99,6 @@ exec home-assistant-matter-hub start \
   --mdns-strip-global-ipv6=$(bashio::config 'mdns_strip_global_ipv6' 'false') \
   --storage-location=/config/data \
   --web-port=$(bashio::addon.ingress_port) \
-  --home-assistant-url='http://supervisor/core' \
-  --home-assistant-access-token="$SUPERVISOR_TOKEN" \
+  --home-assistant-url="$ha_url" \
+  --home-assistant-access-token="$ha_token" \
   --http-ip-whitelist="172.30.32.2"

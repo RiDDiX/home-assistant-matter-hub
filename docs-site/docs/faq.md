@@ -114,6 +114,23 @@ See the [Low-Resource Devices Guide](./guides/low-resource-devices.md) for detai
 
 A crash that ends with `# Fatal error in , line 0`, `# unreachable code` and `Trace/breakpoint trap` is not an OOM kill. The abort happens inside the V8 engine and HAMH cannot catch it; what triggers it is not known yet, and the Alpine-based add-on prints no native stack frames after it. Turn on the add-on's **Watchdog** switch so the Supervisor restarts it automatically, and report it with the log lines from just before the crash, see [#479](https://github.com/RiDDiX/home-assistant-matter-hub/issues/479).
 
+## How do I make the add-on act as its own Home Assistant user?
+
+By default the add-on talks to Home Assistant through the Supervisor, so its actions show up as the user `Supervisor` in the logbook and in `context.user_id`.
+
+Set `access_token` in the add-on configuration to a long-lived access token of the user HAMH should act as. `home_assistant_url` is the address HAMH then uses, default `http://127.0.0.1:8123`. Change it when Home Assistant listens on another port or serves HTTPS itself, then with the host name the certificate is issued for. Leave `access_token` empty to keep the Supervisor connection.
+
+```yaml
+access_token: "your-long-lived-access-token"
+home_assistant_url: "http://127.0.0.1:8123"
+```
+
+An administrator keeps everything working. A normal user (default Users group) works for entities and commands, but Home Assistant then rejects the `hamh_action` event and the vacuum room segment lookup, which need an administrator. A user in a restricted or read-only group does not work.
+
+Home Assistant counts a wrong or deleted token as a failed login from `127.0.0.1`. If you have set `login_attempts_threshold` in the `http` integration, repeated starts with a bad token can ban `127.0.0.1`, and you then have to remove it from `ip_bans.yaml` by hand.
+
+This is available in the Alpha add-on for now.
+
 ## Alexa loses connection after a few hours
 
 This is typically caused by stale sessions, Alexa goes offline but the bridge keeps the old session alive, blocking new subscriptions. The bridge includes an automatic force-sync mechanism that periodically pushes state updates to all connected controllers. If you still experience this:
