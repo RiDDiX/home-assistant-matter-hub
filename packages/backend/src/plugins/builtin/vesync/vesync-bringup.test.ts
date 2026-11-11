@@ -165,7 +165,7 @@ async function bringUp() {
   );
   await server.add(bem.root);
   bem.setTopologyChangeHandler(async (change) => {
-    await server!.act("plugin topology change", (agent) =>
+    await server!.act("topology change", (agent) =>
       agent.get(BasicInformationServer).increaseConfigurationVersion(change),
     );
   });

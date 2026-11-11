@@ -6,8 +6,13 @@ import {
 } from "@home-assistant-matter-hub/common";
 import type { Endpoint } from "@matter/main";
 import { BasicInformationServer } from "@matter/main/behaviors";
+import { AdministratorCommissioning } from "@matter/main/clusters";
 import { CommissioningServer, type ServerNode } from "@matter/main/node";
-import { SessionManager } from "@matter/main/protocol";
+import {
+  DeviceCommissioner,
+  FabricManager,
+  SessionManager,
+} from "@matter/main/protocol";
 import type { BetterLogger } from "../../core/app/logger.js";
 import { updateEntityState } from "../../matter/endpoints/update-entity-state.js";
 import {
@@ -33,6 +38,10 @@ const AUTO_FORCE_SYNC_INTERVAL_MS = 90_000;
 // a start whose server.start never settles must not block stop, and with it
 // dispose and shutdown
 const START_WAIT_MS = 60_000;
+
+// matter.js closes the window of an unpaired node after 48 h without telling
+// anyone, so a running bridge checks for that and reopens it
+export const COMMISSIONING_CHECK_MS = 10 * 60_000;
 
 interface LifecycleEndpointManager {
   readonly failedEntities: FailedEntity[];
@@ -62,6 +71,7 @@ export abstract class BridgeBase<
   public onStatusChange?: () => void;
 
   private autoForceSyncTimer: ReturnType<typeof setInterval> | null = null;
+  private commissioningCheckTimer: ReturnType<typeof setInterval> | null = null;
 
   // Serialize concurrent lifecycle calls so auto-recovery and a manual
   // restartBridge can't race past each other's Starting/Stopping states.
@@ -232,6 +242,10 @@ export abstract class BridgeBase<
       }
 
       this.sessions.start();
+      this.commissioningCheckTimer = setInterval(
+        () => this.reopenExpiredCommissioning(),
+        COMMISSIONING_CHECK_MS,
+      );
       logMemoryUsage(this.log, `${this.label.toLowerCase()} running`);
       this.log.info(`${this.label} started`);
       diagnosticEventBus.emit("bridge_started", `${this.label} started`, {
@@ -286,6 +300,10 @@ export abstract class BridgeBase<
   protected async runStop(code: BridgeStatus, reason: string): Promise<void> {
     this.sessions.stop();
     this.stopAutoForceSync();
+    if (this.commissioningCheckTimer) {
+      clearInterval(this.commissioningCheckTimer);
+      this.commissioningCheckTimer = null;
+    }
     await this.sessions.closeActiveSessions();
     await this.onServerStopping();
     this.endpointManager.stopObserving();
@@ -395,6 +413,27 @@ export abstract class BridgeBase<
     await this.stop(BridgeStatus.Stopped, "Factory reset");
     await this.server.factoryReset();
     await this.start();
+  }
+
+  private async reopenExpiredCommissioning() {
+    try {
+      // a fabric exists from AddNOC on, so this also skips a pairing that is
+      // finishing and not yet marked commissioned
+      if (
+        this.status.code !== BridgeStatus.Running ||
+        this.server.env.get(FabricManager).length > 0 ||
+        this.server.env.get(DeviceCommissioner).windowStatus !==
+          AdministratorCommissioning.CommissioningWindowStatus.WindowNotOpen
+      ) {
+        return;
+      }
+      await this.server.act((agent) =>
+        agent.get(CommissioningServer).enterCommissionableMode(),
+      );
+      this.log.info("Commissioning window expired before pairing, reopened it");
+    } catch (e) {
+      this.log.warn("Reopening commissioning failed:", e);
+    }
   }
 
   /**

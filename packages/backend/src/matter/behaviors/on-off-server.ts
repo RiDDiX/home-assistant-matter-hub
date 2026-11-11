@@ -155,12 +155,7 @@ class OnOffServerBase extends Base {
     }
     logger.info(`[${homeAssistant.entityId}] Turning ON -> ${action.action}`);
     if (!skipMomentaryFlip) {
-      const now = Date.now();
-      sweepOptimisticOnOff(now);
-      optimisticOnOffState.set(homeAssistant.entityId, {
-        expectedOnOff: true,
-        timestamp: now,
-      });
+      setOptimisticOnOff(homeAssistant.entityId, true);
     }
     homeAssistant.callAction(action);
     // Auto-reset for momentary actions (scenes, automations) so controllers
@@ -194,12 +189,7 @@ class OnOffServerBase extends Base {
       return;
     }
     logger.info(`[${homeAssistant.entityId}] Turning OFF -> ${action.action}`);
-    const now = Date.now();
-    sweepOptimisticOnOff(now);
-    optimisticOnOffState.set(homeAssistant.entityId, {
-      expectedOnOff: false,
-      timestamp: now,
-    });
+    setOptimisticOnOff(homeAssistant.entityId, false);
     homeAssistant.callAction(action);
   }
 

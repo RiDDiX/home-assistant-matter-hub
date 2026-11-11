@@ -192,6 +192,7 @@ export class WebApi extends Service {
         networkDiagnosticApi(
           this.props.mdnsInterface,
           this.props.mdnsIpv4 ?? true,
+          this.bridgeService,
         ),
       );
 

@@ -40,7 +40,7 @@ type RawInterfaces = Record<
 
 // docker0/hassio/veth*/cni* are container-internal. br-* is intentionally NOT
 // here: br-lan and friends are common real LAN bridge names.
-const DOCKER_NAME = /^(docker\d*|hassio|veth|cni)/;
+export const DOCKER_NAME = /^(docker\d*|hassio|veth|cni)/;
 
 // wpan0/otbr* are OpenThread border-router interfaces. Their mesh-local fd::
 // ULA is not routable off the host, so mDNS must not advertise it (#388).

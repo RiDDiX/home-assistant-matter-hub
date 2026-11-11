@@ -1,5 +1,6 @@
 import type * as os from "node:os";
 import { filterAdvertisedIpv6 } from "../core/app/filtered-network.js";
+import { DOCKER_NAME } from "../core/app/select-mdns-interface.js";
 
 // matter.js bakes the interface addresses into the operational mDNS records at
 // first announcement and caches them. After an ISP IPv6 prefix change the old
@@ -23,7 +24,14 @@ export function collectAdvertisedAddresses(
   stripGlobalIpv6?: boolean,
   ipv4Enabled = true,
 ): string[] {
-  const names = netInterface ? [netInterface] : Object.keys(interfaces);
+  // veth links come and go with other containers and would republish every
+  // bridge for nothing; hassio is a stable, real network and stays
+  const all = Object.keys(interfaces).filter((n) =>
+    interfaces[n]?.some((a) => !a.internal),
+  );
+  const lan = all.filter((n) => n === "hassio" || !DOCKER_NAME.test(n));
+  // a host whose only LAN link has a container-like name keeps being watched
+  const names = netInterface ? [netInterface] : lan.length > 0 ? lan : all;
   const out = new Set<string>();
   for (const name of names) {
     const addrs = interfaces[name];

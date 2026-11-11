@@ -1,10 +1,11 @@
+import { createHash } from "node:crypto";
 import type {
   EntityMappingConfig,
   FailedEntity,
   VacuumDeviceAttributes,
 } from "@home-assistant-matter-hub/common";
 import type { Logger } from "@matter/general";
-import { Endpoint, type MutableEndpoint } from "@matter/main";
+import { Endpoint, type MutableEndpoint, ServerNodeStore } from "@matter/main";
 import { Service } from "../../core/ioc/service.js";
 import { AggregatorEndpoint } from "../../matter/endpoints/aggregator-endpoint.js";
 import {
@@ -63,6 +64,11 @@ export const ENDPOINT_REMOVAL_GRACE_MS = 300_000;
 // pending state writes, and giving up early just defers them to the next poll.
 const REGISTRY_PUSH_TIMEOUT_MS = 10_000;
 
+// Wait for the endpoint set to settle before comparing it. Covers the first
+// registry tick after a start (60 s by default) and its reload, which mounts
+// the entities whose state arrived late.
+const TOPOLOGY_SETTLE_MS = 90_000;
+
 // First absence stamp: removal also needs a fresh successful HA reload after
 // this, so the 65s recheck can never delete from the same stale snapshot.
 export interface PendingRemoval {
@@ -112,74 +118,76 @@ export class BridgeEndpointManager extends Service {
   private topologyChangeHandler = async (change: () => Promise<unknown>) => {
     await change();
   };
-  // Bridge start and stop mount or unmount every plugin device at once. That
-  // is one topology change, not one per device, and a restart that ends with
-  // the same devices is none at all, so controllers are not told to
-  // re-discover the bridge on every restart.
-  // Depth, not a flag: a stop and a start can overlap, and the inner one
-  // finishing must not un-quiet the outer.
-  private topologyBatchDepth = 0;
   // The handler writes the Matter configuration version, which takes a
   // synchronous lock on the root node. Two overlapping registrations would
   // make the second one throw and leave its endpoint mounted but untracked,
-  // so every change goes through here one at a time, batch or not.
+  // so every change goes through here one at a time.
   private topologyQueue: Promise<unknown> = Promise.resolve();
-  // What controllers were last told the plugin composition is. Survives a
-  // bridge restart within the process, so a restart that brings back the same
-  // devices announces nothing while a changed set announces once.
-  private announcedPluginTopology = "";
+  // The endpoint set is only complete once both halves are in: the plugin
+  // devices after startPlugins, the HA entities after a trusted reconcile.
+  // Comparing earlier would announce a half set on every start.
+  private pluginsStarted = false;
+  private entitiesReconciled = false;
+  // Last set a reconcile saw, so only a reconcile that moved it re-arms.
+  private reconciledTopology = "";
+  private topologyTimer: ReturnType<typeof setTimeout> | undefined;
 
-  private pluginTopology(): string {
-    return [...this.root.parts]
-      .map((part) => part.id)
-      .filter((id) => id.startsWith("plugin_"))
-      .sort()
-      .join(" ");
-  }
-
-  private async enqueueTopology(
-    change: () => Promise<unknown>,
-    batched: boolean,
-  ): Promise<void> {
-    const next = this.topologyQueue.then(async () => {
-      // Inside a start or stop batch the mutation still has to be serialized,
-      // only the announcement is held back until the batch is done.
-      if (batched) {
-        await change();
-        return;
-      }
-      await this.topologyChangeHandler(change);
-      this.announcedPluginTopology = this.pluginTopology();
-    });
+  private async enqueueTopology(run: () => Promise<unknown>): Promise<void> {
+    const next = this.topologyQueue.then(run);
     this.topologyQueue = next.catch(() => undefined);
     await next;
   }
 
-  private async topologyChange(change: () => Promise<unknown>): Promise<void> {
-    // Read the batch at enqueue time: work handed over during a batch belongs
-    // to it even if the queue only gets to it after the batch has ended.
-    await this.enqueueTopology(change, this.topologyBatchDepth > 0);
+  private topologyKnown(): boolean {
+    return this.pluginsStarted && this.entitiesReconciled;
   }
 
-  // Start and stop mount or unmount every plugin device at once. That is one
-  // topology change, not one per device, and a stop is none at all because the
-  // devices come back with the same numbers on the next start (#438).
-  private async duringPluginBatch(
-    run: () => Promise<void>,
-    announce: boolean,
-  ): Promise<void> {
-    this.topologyBatchDepth++;
+  private async topologyChange(change: () => Promise<unknown>): Promise<void> {
+    await this.enqueueTopology(change);
+    this.settleTopology();
+  }
+
+  // Every change re-arms the timer, so a start that passes through partial
+  // sets (late states, #450 retry, #498 cleanup, area switches) compares once.
+  private settleTopology(): void {
+    if (!this.topologyKnown()) return;
+    clearTimeout(this.topologyTimer);
+    this.topologyTimer = setTimeout(() => {
+      this.topologyTimer = undefined;
+      void this.enqueueTopology(() => this.compareTopology());
+    }, TOPOLOGY_SETTLE_MS);
+    this.topologyTimer.unref?.();
+  }
+
+  private topologySignature(): string {
+    const ids = [...this.root.parts].map((part) => part.id).sort();
+    return createHash("sha256")
+      .update(ids.join("\n"))
+      .digest("hex")
+      .slice(0, 16);
+  }
+
+  // ConfigurationVersion has to move when the set of bridged endpoints does.
+  // The last announced set lives in the node storage, so a restart with the
+  // same endpoints announces nothing and a changed one announces once (#505).
+  private async compareTopology(): Promise<void> {
+    // a stop that began after the timer fired leaves a half unmounted set
+    if (!this.topologyKnown()) return;
     try {
-      await run();
-    } finally {
-      this.topologyBatchDepth--;
+      const signature = this.topologySignature();
+      const storage = this.root.env
+        .get(ServerNodeStore)
+        .storage.createContext("hamh");
+      const announced = await storage.get<string>("topology", "");
+      if (announced === signature) return;
+      // a first run only records the set, the version starts fresh anyway
+      if (announced !== "") {
+        await this.topologyChangeHandler(async () => undefined);
+      }
+      await storage.set("topology", signature);
+    } catch (e) {
+      this.log.warn("Failed to announce the bridge topology change:", e);
     }
-    if (!announce) return;
-    const topology = this.pluginTopology();
-    if (topology === this.announcedPluginTopology) return;
-    // Always a real announcement, even when another batch is still open:
-    // this one has already decided the composition changed.
-    await this.enqueueTopology(async () => undefined, false);
   }
 
   get failedEntities(): FailedEntity[] {
@@ -469,13 +477,12 @@ export class BridgeEndpointManager extends Service {
   }
 
   async startPlugins(): Promise<void> {
-    if (!this.pluginManager) return;
-    await this.duringPluginBatch(async () => {
-      await this.registerBuiltInPlugins();
-      await this.loadRegisteredPlugins();
-      await this.pluginManager?.startAll();
-      await this.pluginManager?.configureAll();
-    }, true);
+    await this.registerBuiltInPlugins();
+    await this.loadRegisteredPlugins();
+    await this.pluginManager?.startAll();
+    await this.pluginManager?.configureAll();
+    this.pluginsStarted = true;
+    this.settleTopology();
   }
 
   // Built-in plugins ship inside the backend bundle, so they share the same
@@ -517,20 +524,22 @@ export class BridgeEndpointManager extends Service {
   }
 
   async stopPlugins(): Promise<void> {
+    // a stop is no topology change, the devices come back on the next start.
+    // A pending compare is dropped, the next start compares against storage.
+    this.pluginsStarted = false;
+    clearTimeout(this.topologyTimer);
     if (!this.pluginManager) return;
-    await this.duringPluginBatch(async () => {
-      await this.pluginManager?.shutdownAll("Bridge stopping");
-      // close() keeps the numbers, so plugin devices survive every bridge stop
-      // and restart (#438). Permanent removal goes through onDeviceUnregistered.
-      for (const [id, endpoint] of this.pluginEndpoints) {
-        try {
-          await this.topologyChange(() => endpoint.close());
-        } catch (e) {
-          this.log.warn(`Failed to close plugin endpoint ${id}:`, e);
-        }
+    await this.pluginManager.shutdownAll("Bridge stopping");
+    // close() keeps the numbers, so plugin devices survive every bridge stop
+    // and restart (#438). Permanent removal goes through onDeviceUnregistered.
+    for (const [id, endpoint] of this.pluginEndpoints) {
+      try {
+        await this.topologyChange(() => endpoint.close());
+      } catch (e) {
+        this.log.warn(`Failed to close plugin endpoint ${id}:`, e);
       }
-      this.pluginEndpoints.clear();
-    }, false);
+    }
+    this.pluginEndpoints.clear();
   }
 
   getPluginInfo(): {
@@ -758,6 +767,9 @@ export class BridgeEndpointManager extends Service {
 
   stopObserving() {
     this.observingRequested = false;
+    this.entitiesReconciled = false;
+    this.reconciledTopology = "";
+    clearTimeout(this.topologyTimer);
     this.lifecycle++;
     this.clearSubscription();
     // Bridges stop through this, never through dispose(), so the recheck
@@ -1265,6 +1277,15 @@ export class BridgeEndpointManager extends Service {
       this.log.info(
         `Device list changed: ${removed.length} removed, ${added.length} added${names}, ${mountedNow.size} mounted`,
       );
+    }
+    // Not added/removed: an isolation closes endpoints between reconciles.
+    if (lifecycle === this.lifecycle) {
+      this.entitiesReconciled = true;
+      const topology = this.topologySignature();
+      if (topology !== this.reconciledTopology) {
+        this.reconciledTopology = topology;
+        this.settleTopology();
+      }
     }
 
     if (this.observingRequested) {

@@ -201,12 +201,10 @@ function buildEntityHaystack(
       : "";
   const entityLabelSlugs = entity.labels ?? [];
   const deviceLabelSlugs = device?.labels ?? [];
-  const entityLabelNames = entityLabelSlugs
-    .map((slug) => labelName(slug, labels) ?? "")
-    .filter((name) => name.length > 0);
-  const deviceLabelNames = deviceLabelSlugs
-    .map((slug) => labelName(slug, labels) ?? "")
-    .filter((name) => name.length > 0);
+  const namesOf = (slugs: string[]) =>
+    slugs.map((slug) => labelName(slug, labels) ?? "").filter(Boolean);
+  const entityLabelNames = namesOf(entityLabelSlugs);
+  const deviceLabelNames = namesOf(deviceLabelSlugs);
   const deviceName =
     device?.name_by_user ?? device?.name ?? device?.default_name ?? "";
   const productName = device?.model ?? device?.default_model ?? "";

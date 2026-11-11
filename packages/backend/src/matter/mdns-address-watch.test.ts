@@ -65,6 +65,57 @@ describe("collectAdvertisedAddresses", () => {
     expect(advertisedAddressesChanged(a, b)).toBe(false);
   });
 
+  it("ignores container links when no interface is set", () => {
+    const lan = { address: "192.168.1.10", family: "IPv4", internal: false };
+    const before = ifaces({
+      eth0: [lan],
+      veth1a2b: [{ address: "fe80::a", family: "IPv6", internal: false }],
+      docker0: [{ address: "172.17.0.1", family: "IPv4", internal: false }],
+    });
+    const after = ifaces({
+      eth0: [lan],
+      veth9c8d: [{ address: "fe80::b", family: "IPv6", internal: false }],
+      docker0: [{ address: "172.17.0.1", family: "IPv4", internal: false }],
+    });
+    const a = collectAdvertisedAddresses(before);
+    expect(a).toEqual(["192.168.1.10"]);
+    expect(
+      advertisedAddressesChanged(a, collectAdvertisedAddresses(after)),
+    ).toBe(false);
+    const moved = ifaces({
+      eth0: [{ ...lan, address: "192.168.1.11" }],
+      veth9c8d: [{ address: "fe80::b", family: "IPv6", internal: false }],
+    });
+    expect(
+      advertisedAddressesChanged(a, collectAdvertisedAddresses(moved)),
+    ).toBe(true);
+  });
+
+  it("watches container-named links when nothing else is there", () => {
+    const lo = [{ address: "127.0.0.1", family: "IPv4", internal: true }];
+    const before = ifaces({
+      lo,
+      cni0: [{ address: "10.0.0.5", family: "IPv4", internal: false }],
+    });
+    const after = ifaces({
+      lo,
+      cni0: [{ address: "10.0.0.6", family: "IPv4", internal: false }],
+    });
+    expect(
+      advertisedAddressesChanged(
+        collectAdvertisedAddresses(before),
+        collectAdvertisedAddresses(after),
+      ),
+    ).toBe(true);
+  });
+
+  it("keeps a configured interface even when it looks like a container link", () => {
+    const set = ifaces({
+      docker0: [{ address: "172.17.0.1", family: "IPv4", internal: false }],
+    });
+    expect(collectAdvertisedAddresses(set, "docker0")).toEqual(["172.17.0.1"]);
+  });
+
   it("drops internal addresses", () => {
     expect(collectAdvertisedAddresses(oldPrefix)).not.toContain("::1");
   });

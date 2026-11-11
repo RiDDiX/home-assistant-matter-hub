@@ -4,6 +4,7 @@
 // the ServerModeBridge.
 
 import type { BridgeFeatureFlags } from "@home-assistant-matter-hub/common";
+import { Time } from "@matter/general";
 
 // 0 = off, age rotation is opt-in on every bridge (#287).
 export const DEFAULT_SESSION_MAX_AGE_HOURS = 0;
@@ -78,7 +79,8 @@ export function sessionIsQuiet(
     timestamp?: number;
   },
   quietWindowMs = STALE_SESSION_QUIET_WINDOW_MS,
-  now = Date.now(),
+  // session.timestamp runs on matter.js's monotonic clock, not Date.now()
+  now: number = Time.nowUs,
 ): boolean {
   if (session.isClosing) return false;
   if (session.isPeerActive) return false;
@@ -101,7 +103,7 @@ export function staleSessionShouldClose(
     timestamp?: number;
   },
   quietWindowMs = STALE_SESSION_QUIET_WINDOW_MS,
-  now = Date.now(),
+  now: number = Time.nowUs,
 ): boolean {
   return (
     session.subscriptions.size === 0 &&
@@ -130,7 +132,7 @@ export function selectSupersededSessions(
     fabric?: { fabricIndex?: unknown };
   },
   quietWindowMs = STALE_SESSION_QUIET_WINDOW_MS,
-  now = Date.now(),
+  now: number = Time.nowUs,
 ): number[] {
   const ids: number[] = [];
   for (const s of sessions) {

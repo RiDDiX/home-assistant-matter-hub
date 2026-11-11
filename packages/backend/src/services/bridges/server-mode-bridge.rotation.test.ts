@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { Time } from "@matter/general";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { makeWarmStartState } from "./server-mode-bridge.js";
 import {
   DEFAULT_SESSION_MAX_AGE_HOURS,
@@ -83,6 +84,24 @@ describe("staleSessionShouldClose", () => {
     expect(
       staleSessionShouldClose(session({ timestamp: NOW - 1_000 }), 0, NOW),
     ).toBe(true);
+  });
+
+  describe("wall-clock step", () => {
+    beforeEach(() => vi.useFakeTimers());
+    afterEach(() => vi.useRealTimers());
+
+    it("keeps a fresh session when the wall clock jumps forward", () => {
+      const fresh = session({ timestamp: Time.nowUs });
+      vi.setSystemTime(Date.now() + 3_600_000);
+      expect(staleSessionShouldClose(fresh)).toBe(false);
+    });
+
+    it("closes a quiet session when the wall clock jumps back", () => {
+      const quiet = session({ timestamp: Time.nowUs });
+      vi.advanceTimersByTime(STALE_SESSION_QUIET_WINDOW_MS);
+      vi.setSystemTime(Date.now() - 3_600_000);
+      expect(staleSessionShouldClose(quiet)).toBe(true);
+    });
   });
 });
 

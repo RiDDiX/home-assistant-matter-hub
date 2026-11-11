@@ -1,6 +1,6 @@
 import * as os from "node:os";
 import { alexaPairingPortProblem } from "@home-assistant-matter-hub/common";
-import type { Environment, Logger } from "@matter/general";
+import { type Environment, type Logger, Time } from "@matter/general";
 import { Network } from "@matter/main";
 import { InteractionServer } from "@matter/main/node";
 import {
@@ -241,10 +241,10 @@ export class SessionSupervisor {
         const nowMs = Date.now();
         const lastActiveMsAgo =
           typeof s.activeTimestamp === "number" && s.activeTimestamp > 0
-            ? nowMs - s.activeTimestamp
+            ? Time.nowUs - s.activeTimestamp
             : null;
         const lastAnyActivityMsAgo =
-          typeof s.timestamp === "number" ? nowMs - s.timestamp : null;
+          typeof s.timestamp === "number" ? Time.nowUs - s.timestamp : null;
         const lastImAt = this.lastImRequestAt.get(s);
         const lastImRequestMsAgo = lastImAt != null ? nowMs - lastImAt : null;
         const startedAt = this.sessionStartedAt.get(s.id);
@@ -469,7 +469,7 @@ export class SessionSupervisor {
         const quietWindowMs = staleSessionQuietWindowMs(
           this.dataProvider.featureFlags,
         );
-        const now = Date.now();
+        const now = Time.nowUs;
         const supersededIds = new Set(
           selectSupersededSessions(
             [...sessionManager.sessions],
@@ -646,7 +646,7 @@ export class SessionSupervisor {
         if (s.id !== sessionId || s.isClosing || s.subscriptions.size > 0) {
           continue;
         }
-        const idleSec = Math.round((Date.now() - s.timestamp) / 1000);
+        const idleSec = Math.round((Time.nowUs - s.timestamp) / 1000);
         if (
           !staleSessionShouldClose(
             s,
@@ -708,7 +708,7 @@ export class SessionSupervisor {
         if (this.staleSessionTimers.has(s.id)) {
           continue;
         }
-        const idleSec = Math.round((Date.now() - s.timestamp) / 1000);
+        const idleSec = Math.round((Time.nowUs - s.timestamp) / 1000);
         if (
           !staleSessionShouldClose(
             s,

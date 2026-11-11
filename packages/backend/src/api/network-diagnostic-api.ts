@@ -1,10 +1,16 @@
 import * as net from "node:net";
 import * as os from "node:os";
+import {
+  type BridgeDataWithMetadata,
+  BridgeStatus,
+} from "@home-assistant-matter-hub/common";
 import express from "express";
 import {
+  DOCKER_NAME,
   describeInterface,
   selectMdnsInterface,
 } from "../core/app/select-mdns-interface.js";
+import type { BridgeService } from "../services/bridges/bridge-service.js";
 
 export interface NetworkInterfaceInfo {
   name: string;
@@ -34,11 +40,16 @@ export interface NetworkDiagnosticResult {
 export function networkDiagnosticApi(
   mdnsInterface: string | undefined,
   mdnsIpv4: boolean,
+  bridgeService?: BridgeService,
 ): express.Router {
   const router = express.Router();
 
   router.get("/", async (_, res) => {
-    const result = await runDiagnostics(mdnsInterface, mdnsIpv4);
+    const result = await runDiagnostics(
+      mdnsInterface,
+      mdnsIpv4,
+      bridgeService?.bridges.map((b) => b.data),
+    );
     res.json(result);
   });
 
@@ -89,6 +100,7 @@ async function isPort80Taken(host: string): Promise<boolean> {
 export async function runDiagnostics(
   mdnsInterface: string | undefined,
   mdnsIpv4: boolean,
+  bridges: readonly BridgeDataWithMetadata[] = [],
 ): Promise<NetworkDiagnosticResult> {
   const interfaces = getNetworkInterfaces();
   const checks: NetworkDiagnosticCheck[] = [];
@@ -112,13 +124,17 @@ export async function runDiagnostics(
     });
   }
 
-  // Check 2: IPv6 availability on external interfaces
-  const ipv6Interfaces = external.filter((i) => i.ipv6.length > 0);
+  // Check 2: IPv6 on the interfaces mDNS really advertises; container links
+  // with only fe80 do not help a controller on the LAN
+  const advertised = mdnsInterface
+    ? interfaces.filter((i) => i.name === mdnsInterface)
+    : external.filter((i) => !DOCKER_NAME.test(i.name));
+  const ipv6Interfaces = advertised.filter((i) => i.ipv6.length > 0);
   if (ipv6Interfaces.length === 0) {
     checks.push({
       name: "ipv6_available",
       status: "warn",
-      message: "No IPv6 addresses found on external interfaces",
+      message: "No IPv6 address is advertised",
       detail:
         "Matter primarily uses IPv6 for communication. Some controllers may require it. Ensure IPv6 is enabled on your network.",
     });
@@ -252,6 +268,23 @@ export async function runDiagnostics(
       detail:
         `Answering on ${busy.join(", ")}. That is fine on its own. Two users could only pair Alexa after freeing port 80 (#449, #478), nobody knows why yet. ` +
         "If Alexa won't pair, stop whatever holds it while pairing, then turn it back on.",
+    });
+  }
+
+  // Check 8: matter.js answers a plain _matterc browse with only the first
+  // unpaired bridge, and Alexa browses exactly that way
+  const unpaired = bridges.filter(
+    (b) =>
+      b.status === BridgeStatus.Running &&
+      b.commissioning?.isCommissioned === false,
+  );
+  if (unpaired.length > 1) {
+    checks.push({
+      name: "multiple_unpaired_bridges",
+      status: "warn",
+      message: `${unpaired.length} bridges are waiting to be paired`,
+      detail:
+        "Alexa can only find one unpaired bridge at a time. Stop the other unpaired bridges while pairing.",
     });
   }
 

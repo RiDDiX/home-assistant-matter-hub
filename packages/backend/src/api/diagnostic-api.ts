@@ -204,7 +204,11 @@ export function diagnosticApi(
     const memUsage = process.memoryUsage();
     const bridges = bridgeService.bridges;
     const haConnected = haClient.connection?.connected ?? false;
-    const network = await runDiagnostics(mdnsInterface, mdnsIpv4);
+    const network = await runDiagnostics(
+      mdnsInterface,
+      mdnsIpv4,
+      bridges.map((b) => b.data),
+    );
 
     const bridgeDetails = bridges.map((b) => {
       const data = b.data;

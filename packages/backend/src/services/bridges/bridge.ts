@@ -127,7 +127,7 @@ export class Bridge extends BridgeBase<
       0,
     );
     this.endpointManager.setTopologyChangeHandler(async (change) => {
-      await this.server.act("plugin topology change", (agent) =>
+      await this.server.act("topology change", (agent) =>
         agent.get(BasicInformationServer).increaseConfigurationVersion(change),
       );
       this.log.debugCtx("Matter topology configuration version increased", {
