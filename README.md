@@ -39,7 +39,7 @@ of port forwarding etc.
 | Channel | Branch | Current Version | Description |
 |---------|--------|-----------------|-------------|
 | **Stable** | `main` | v2.0.59 | Production-ready, recommended for most users |
-| **Alpha** | `alpha` | v2.1.0-alpha.975 | Ahead of Stable, carries the additions listed under Alpha Features |
+| **Alpha** | `alpha` | v2.1.0-alpha.976 | Ahead of Stable, carries the additions listed under Alpha Features |
 | **Testing** | `testing` | v4.1.0-testing.x | ⚠️ **Highly unstable!** Experimental features, may break |
 
 ### Which version should I use?
@@ -427,6 +427,13 @@ Re-assign the affected devices to their rooms after they reconnect. See the [doc
 
 <details>
 <summary><strong>🧪 Alpha Features (v2.1.0-alpha.x)</strong> - Click to expand</summary>
+
+**v2.1.0-alpha.976:**
+- **Cross-site requests behind a reverse proxy**: requests that arrive through a proxy on the same host no longer skip the `Origin` check. A proxy that rewrites the `Host` header needs its public name in `--http-allowed-hosts`, as described under "Read this before updating to alpha.969". Without it the page loads, but changes and live updates answer 403 and name the host to add. The Home Assistant add-on panel needs no setting.
+- **Backup restore**: an archive with an invalid size field is refused, it could get past the 200 MB limit. An archive that is too large is refused before anything is written.
+- **Error responses**: API errors answer as short JSON without stack traces or file paths.
+- **Icons and device images**: a wrong file type answers 400 instead of 500, invalid ids are refused, and the browser can no longer read a served image as another content type.
+- **Plugins**: package names that npm would read as a local file or folder are refused, and uninstalling with a version in the name removes the plugin from the list.
 
 **v2.1.0-alpha.975:**
 - **Add-on panel on a public address**: the add-on panel opens again when Home Assistant is reached by a public name such as a Nabu Casa or DuckDNS address. Since alpha.969 it answered 403 Host not allowed.
