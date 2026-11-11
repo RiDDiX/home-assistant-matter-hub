@@ -13,7 +13,7 @@ import { HomeAssistantEntityBehavior } from "../behaviors/home-assistant-entity-
 // One state write per endpoint at a time. Two overlapping setStateOf
 // transactions on the same endpoint cannot take the lock synchronously, and
 // matter.js then drops the attribute writes with a warning only (#464).
-// ponytail: plain chain, an endpoint whose construction never settles queues
+// Plain chain, an endpoint whose construction never settles queues
 // its later updates. Add a timeout around the write if that ever shows up.
 const chains = new WeakMap<Endpoint, Promise<void>>();
 

@@ -34,6 +34,10 @@ export const MATTER_TRAFFIC_FACILITIES = new Set([
   "CaseServer",
   "PaseServer",
   "FailsafeContext",
+  // Camera plugin, so the export shows WebRTC offers and stream setup (#539).
+  "CameraPlugin",
+  "CameraWebRtc",
+  "CameraWebRtcRequestor",
 ]);
 
 export function categoryFor(facility: string): string | undefined {

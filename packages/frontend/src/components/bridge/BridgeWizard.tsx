@@ -68,7 +68,6 @@ interface WizardBridge {
   port: number;
   serverMode: boolean;
   icon?: BridgeIconType;
-  featureFlags?: BridgeFeatureFlags;
   filter: {
     include: HomeAssistantMatcher[];
     exclude: HomeAssistantMatcher[];
@@ -153,6 +152,13 @@ export function BridgeWizard({ open, onClose, onComplete }: BridgeWizardProps) {
   const [selectedController, setSelectedController] = useState<
     ControllerProfile | undefined
   >();
+  const [userFlags, setUserFlags] = useState<BridgeFeatureFlags>({});
+  // derived so a deselected or switched profile leaves none of its flags behind
+  const featureFlags: BridgeFeatureFlags = {
+    ...selectedTemplate?.featureFlags,
+    ...selectedController?.featureFlags,
+    ...userFlags,
+  };
   const [filterType, setFilterType] = useState<WizardFilterType>("pattern");
   const [labelValues, setLabelValues] = useState<string[]>([]);
   const [labels, setLabels] = useState<HomeAssistantLabel[]>([]);
@@ -215,6 +221,7 @@ export function BridgeWizard({ open, onClose, onComplete }: BridgeWizardProps) {
       setExcludePattern("");
       setError(null);
       setSelectedController(undefined);
+      setUserFlags({});
       setFilterType("pattern");
       setLabelValues([]);
       setLabels([]);
@@ -225,13 +232,13 @@ export function BridgeWizard({ open, onClose, onComplete }: BridgeWizardProps) {
 
   const applyTemplate = useCallback((template: BridgeTemplate | null) => {
     setSelectedTemplate(template ?? undefined);
+    setUserFlags({});
     if (template) {
       setCurrentBridge((prev) => ({
         ...prev,
         name: template.name,
         serverMode: template.featureFlags?.serverMode ?? false,
         icon: template.icon,
-        featureFlags: template.featureFlags,
         filter: { ...template.filter },
       }));
       // Pre-fill entity pattern from template filter
@@ -257,26 +264,18 @@ export function BridgeWizard({ open, onClose, onComplete }: BridgeWizardProps) {
         name: "",
         serverMode: false,
         icon: undefined,
-        featureFlags: undefined,
         filter: { include: [], exclude: [] },
       }));
       setUseWildcard(true);
       setEntityPattern("*");
       setExcludePattern("");
+      setFilterType("pattern");
+      setLabelValues([]);
     }
   }, []);
 
   const applyController = useCallback((profile: ControllerProfile | null) => {
     setSelectedController(profile ?? undefined);
-    if (profile) {
-      setCurrentBridge((prev) => ({
-        ...prev,
-        featureFlags: {
-          ...prev.featureFlags,
-          ...profile.featureFlags,
-        },
-      }));
-    }
   }, []);
 
   const handleNext = () => {
@@ -355,6 +354,7 @@ export function BridgeWizard({ open, onClose, onComplete }: BridgeWizardProps) {
     setBridges((prev) => [...prev, currentBridge]);
     setSelectedTemplate(undefined);
     setSelectedController(undefined);
+    setUserFlags({});
     setCurrentBridge((prev) => ({
       name: "",
       port: prev.port,
@@ -374,16 +374,16 @@ export function BridgeWizard({ open, onClose, onComplete }: BridgeWizardProps) {
     setLoading(true);
     setError(null);
     try {
-      const featureFlags: BridgeFeatureFlags = {
-        ...currentBridge.featureFlags,
+      const flags: BridgeFeatureFlags = {
+        ...featureFlags,
         ...(currentBridge.serverMode ? { serverMode: true } : {}),
       };
-      const hasFlags = Object.keys(featureFlags).length > 0;
+      const hasFlags = Object.keys(flags).length > 0;
       const request: CreateBridgeRequest = {
         name: currentBridge.name,
         port: currentBridge.port,
         filter: currentBridge.filter,
-        featureFlags: hasFlags ? featureFlags : undefined,
+        featureFlags: hasFlags ? flags : undefined,
         icon: currentBridge.icon,
       };
       await apiCreateBridge(request);
@@ -708,14 +708,11 @@ export function BridgeWizard({ open, onClose, onComplete }: BridgeWizardProps) {
           <FormControlLabel
             control={
               <Switch
-                checked={currentBridge.featureFlags?.[flag.key] === true}
+                checked={featureFlags[flag.key] === true}
                 onChange={(e) =>
-                  setCurrentBridge((prev) => ({
+                  setUserFlags((prev) => ({
                     ...prev,
-                    featureFlags: {
-                      ...prev.featureFlags,
-                      [flag.key]: e.target.checked,
-                    },
+                    [flag.key]: e.target.checked,
                   }))
                 }
               />
@@ -736,7 +733,7 @@ export function BridgeWizard({ open, onClose, onComplete }: BridgeWizardProps) {
   );
 
   const renderStep2 = () => {
-    const flagEntries = Object.entries(currentBridge.featureFlags ?? {}).filter(
+    const flagEntries = Object.entries(featureFlags).filter(
       ([, v]) => v === true,
     );
     return (

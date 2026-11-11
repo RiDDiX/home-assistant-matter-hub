@@ -1,5 +1,4 @@
 import {
-  BridgeStatus,
   type CreateBridgeRequest,
   createBridgeRequestSchema,
   type HomeAssistantFilter,
@@ -8,6 +7,7 @@ import {
 } from "@home-assistant-matter-hub/common";
 import { Ajv } from "ajv";
 import express from "express";
+import { removePluginFiles } from "../plugins/plugin-storage.js";
 import type { BridgeService } from "../services/bridges/bridge-service.js";
 import { testMatchers } from "../services/bridges/matcher/matches-entity-filter.js";
 import type { HomeAssistantRegistry } from "../services/home-assistant/home-assistant-registry.js";
@@ -28,6 +28,7 @@ export function matterApi(
   haRegistry?: HomeAssistantRegistry,
   identityStorage?: EntityIdentityStorage,
   mappingStorage?: EntityMappingStorage,
+  storageLocation?: string,
 ): express.Router {
   const router = express.Router();
   router.get("/", (_, res) => {
@@ -126,6 +127,13 @@ export function matterApi(
       // bridge never inherits stale anchors and backups carry no orphans (#404).
       await identityStorage?.deleteBridgeIdentities(bridgeId);
       await mappingStorage?.deleteBridgeMappings(bridgeId);
+      if (storageLocation) {
+        removePluginFiles(
+          storageLocation,
+          bridgeId,
+          bridgeService.bridges.map((b) => b.id),
+        );
+      }
       res.status(204).send();
     } catch (e) {
       res.status(500).json({
@@ -141,21 +149,21 @@ export function matterApi(
       res.status(404).send("Not Found");
       return;
     }
-    // Bridge.factoryReset does nothing unless the bridge runs, so refuse
-    // before the identities are dropped.
-    if (bridge.data.status !== BridgeStatus.Running) {
-      res
-        .status(409)
-        .json({ error: "Bridge must be running to factory reset" });
-      return;
-    }
     try {
       // A factory reset erases the persisted endpoint numbers, so the frozen
-      // identities no longer map to anything. Drop them BEFORE factoryReset:
-      // it restarts the bridge and refreshes devices internally, and that
+      // identities no longer map to anything. Drop them BEFORE the erase: the
+      // reset restarts the bridge and refreshes devices internally, and that
       // rebuild would otherwise re-seed against the wiped matter.js store (#404).
-      await identityStorage?.deleteBridgeIdentities(bridgeId);
-      await bridge.factoryReset();
+      // factoryReset drops them only when it really runs.
+      const ran = await bridge.factoryReset(async () => {
+        await identityStorage?.deleteBridgeIdentities(bridgeId);
+      });
+      if (!ran) {
+        res
+          .status(409)
+          .json({ error: "Bridge must be running to factory reset" });
+        return;
+      }
       await bridge.start();
       res.status(200).json(bridge.data);
     } catch (e) {

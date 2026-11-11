@@ -24,7 +24,7 @@ import TextField from "@mui/material/TextField";
 import Tooltip from "@mui/material/Tooltip";
 import Typography from "@mui/material/Typography";
 import useMediaQuery from "@mui/material/useMediaQuery";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ConfirmDialog } from "../misc/ConfirmDialog.tsx";
 import { useNotifications } from "../notifications/use-notifications.ts";
@@ -80,26 +80,32 @@ export const LogViewer = ({ open, onClose }: LogViewerProps) => {
   const [search, setSearch] = useState<string>("");
   const [autoRefresh, setAutoRefresh] = useState<boolean>(true);
   const [confirmClear, setConfirmClear] = useState(false);
+  const query = new URLSearchParams({
+    level: level.join(","),
+    limit: "500",
+    ...(search && { search }),
+  }).toString();
+  // only a filter change drops older answers, a slow poll still lands
+  const queryRef = useRef(query);
+  useEffect(() => {
+    queryRef.current = query;
+  }, [query]);
 
   const fetchLogs = useCallback(async () => {
     try {
-      const params = new URLSearchParams({
-        level: level.join(","),
-        limit: "500",
-        ...(search && { search }),
-      });
-      const res = await fetch(`api/logs?${params}`);
+      const res = await fetch(`api/logs?${query}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = (await res.json()) as { entries: LogEntry[] };
+      if (query !== queryRef.current) return;
       setLogs(data.entries);
       setFetchError(false);
     } catch {
       // polled every 5 s, so an inline alert instead of a toast per try
-      setFetchError(true);
+      if (query === queryRef.current) setFetchError(true);
     } finally {
-      setLoading(false);
+      if (query === queryRef.current) setLoading(false);
     }
-  }, [level, search]);
+  }, [query]);
 
   useEffect(() => {
     if (open) {

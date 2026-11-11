@@ -68,8 +68,16 @@ export function mapEvseStatus(
     };
   }
 
+  // Plugged in but idle: ready, awaiting start, finished, paused, sleeping.
+  // These win over "charg", as in "ready_to_charge" or "charge complete".
+  // "charged" must not match the V2X "discharged".
+  const idle =
+    /ready|awaiting|complete|(?<!dis)charged|done|finish|sleep|paused/.test(
+      raw,
+    );
+
   // Actively charging, but exclude discharging (V2X / vehicle-to-home).
-  if (raw.includes("charg") && !raw.includes("discharg")) {
+  if (!idle && raw.includes("charg") && !raw.includes("discharg")) {
     return {
       state: EnergyEvse.State.PluggedInCharging,
       supplyState: EnergyEvse.SupplyState.ChargingEnabled,
@@ -77,15 +85,7 @@ export function mapEvseStatus(
     };
   }
 
-  // Plugged in but idle: ready, awaiting start, finished, paused, sleeping.
-  if (
-    raw.includes("connected") ||
-    raw.includes("ready") ||
-    raw.includes("awaiting") ||
-    raw.includes("completed") ||
-    raw.includes("sleep") ||
-    raw.includes("paused")
-  ) {
+  if (idle || raw.includes("connected")) {
     return {
       state: EnergyEvse.State.PluggedInNoDemand,
       supplyState: switchSupply,

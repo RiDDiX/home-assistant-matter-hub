@@ -625,6 +625,60 @@ describe("SecurityPlugin", () => {
     await plugin.onShutdown();
   });
 
+  it("stays triggered across a restart when the trigger time is beyond a timer", async () => {
+    const storage = makeStorage({
+      state: { mode: "away", phase: "triggered" },
+    });
+    const conn = fakeConnection();
+    const { ctx } = createMockContext({
+      storage: storage as unknown as PluginStorage,
+      homeAssistant: ha,
+    });
+    const plugin = new SecurityPlugin(
+      {
+        triggerTimeSeconds: 3e6,
+        awayTriggers: "binary_sensor.door",
+        awayAlerts: "siren.horn",
+      },
+      { connect: async () => conn as unknown as Connection },
+    );
+    await plugin.onStart(ctx);
+    await vi.waitFor(() => expect(conn.subscribeEvents).toHaveBeenCalled());
+    await new Promise((r) => setTimeout(r, 10));
+
+    expect(
+      conn.sendMessagePromise.mock.calls
+        .map(([m]) => m)
+        .filter((m) => m.service === "turn_off"),
+    ).toEqual([]);
+    expect(storage.data.get("state")).toMatchObject({ phase: "triggered" });
+    await plugin.onShutdown();
+  });
+
+  it("holds an exit delay beyond a timer instead of arming after 1 ms", async () => {
+    vi.useFakeTimers();
+    const conn = fakeConnection();
+    const { ctx, devices } = createMockContext({ homeAssistant: ha });
+    const plugin = new SecurityPlugin(
+      {
+        exitDelaySeconds: 3e6,
+        homeTriggers: "binary_sensor.motion",
+        homeSetters: "scene.arm_home",
+      },
+      { connect: async () => conn as unknown as Connection },
+    );
+    await plugin.onStart(ctx);
+    await armVia(devices, "mode_home");
+    await vi.advanceTimersByTimeAsync(1000);
+
+    expect(
+      conn.sendMessagePromise.mock.calls
+        .map(([m]) => m)
+        .filter((m) => m.service === "turn_on"),
+    ).toEqual([]);
+    await plugin.onShutdown();
+  });
+
   it("keeps a chasing disarm behind the trip batch so no turn_on lands after its turn_off", async () => {
     const conn = fakeConnection();
     let release!: () => void;

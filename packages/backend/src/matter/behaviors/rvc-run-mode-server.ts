@@ -98,6 +98,9 @@ export interface CleaningSession {
   /** HA reported cleaning last, or a controller start is on its way. A
    *  late cleaning update after a controller stop is not a new clean. */
   haCleaning: boolean;
+  /** Run mode before HA reported unavailable or unknown, so the update
+   *  after the blip compares against it instead of the offline Idle. */
+  modeBeforeOffline?: number;
 }
 
 const cleaningSessions = new WeakMap<object, CleaningSession>();
@@ -153,7 +156,7 @@ class RvcRunModeServerBase extends Base {
       return;
     }
     const s = getSession(this.endpoint);
-    const previousMode = this.state.currentMode;
+    const previousMode = s.modeBeforeOffline ?? this.state.currentMode;
     const newMode = this.state.config.getCurrentMode(entity.state, this.agent);
 
     applyPatchState(
@@ -167,10 +170,14 @@ class RvcRunModeServerBase extends Base {
       },
       { force: true },
     );
-    // unavailable drops the rooms, keep the last names
-    if (!["unavailable", "unknown"].includes(entity.state.state)) {
-      this.renameAreas(entity.state);
+    // An offline vacuum has not finished a room or the job, and unavailable
+    // drops the rooms, keep the last names
+    if (["unavailable", "unknown"].includes(entity.state.state)) {
+      s.modeBeforeOffline = previousMode;
+      return;
     }
+    s.modeBeforeOffline = undefined;
+    this.renameAreas(entity.state);
 
     // changeToMode already set currentMode=Cleaning, so the cleaning event
     // often arrives without a transition. Latch the flag here instead.
@@ -777,6 +784,21 @@ class RvcRunModeServerBase extends Base {
     }
   }
 
+  /** Explicit controller stop or dock: the job is over, queued rooms too. */
+  endSession() {
+    const s = getSession(this.endpoint);
+    this.finalizeProgressOnStop();
+    this.restoreParkedAreas();
+    s.completedAreas.clear();
+    s.lastCurrentArea = null;
+    s.activeAreas = [];
+    s.loggedShortCircuits.clear();
+    s.pendingDispatches = [];
+    s.observedCleaning = false;
+    s.cleanedAreaBaseline = null;
+    s.modeBeforeOffline = undefined;
+  }
+
   override changeToMode(
     request: ModeBase.ChangeToModeRequest,
   ): ModeBase.ChangeToModeResponse {
@@ -894,16 +916,7 @@ class RvcRunModeServerBase extends Base {
         break;
       }
       case RvcSupportedRunMode.Idle:
-        // Explicit user command to stop, clear session state
-        this.finalizeProgressOnStop();
-        this.restoreParkedAreas();
-        s.completedAreas.clear();
-        s.lastCurrentArea = null;
-        s.activeAreas = [];
-        s.loggedShortCircuits.clear();
-        s.pendingDispatches = [];
-        s.observedCleaning = false;
-        s.cleanedAreaBaseline = null;
+        this.endSession();
         homeAssistant.callAction(
           this.state.config.returnToBase(void 0, this.agent),
         );
@@ -923,6 +936,13 @@ class RvcRunModeServerBase extends Base {
 namespace RvcRunModeServerBase {
   export class State extends Base.State {
     config!: RvcRunModeServerConfig;
+  }
+}
+
+/** Matter GoHome ends the job like a stop to Idle does. */
+export function endCleaningSession(agent: Agent) {
+  if (agent.has(RvcRunModeServerBase)) {
+    agent.get(RvcRunModeServerBase).endSession();
   }
 }
 

@@ -35,6 +35,43 @@ export function pluginStateFilePath(
   return path.join(storageDir, `plugin-state-${safe(bridgeId)}.json`);
 }
 
+// A deleted bridge's plugin files hold HA tokens and passwords. Ids can share
+// a prefix (ab, ab-x), a file of a longer other id is not this bridge's.
+export function removePluginFiles(
+  storageDir: string,
+  bridgeId: string,
+  otherBridgeIds: string[],
+): void {
+  const prefix = `plugin-${safe(bridgeId)}-`;
+  const longer = otherBridgeIds
+    .map((id) => `plugin-${safe(id)}-`)
+    .filter((p) => p.length > prefix.length && p.startsWith(prefix));
+  const othersState = new Set(
+    otherBridgeIds.map((id) => path.basename(pluginStateFilePath("", id))),
+  );
+  const ownState = path.basename(pluginStateFilePath("", bridgeId));
+  let names: string[];
+  try {
+    names = fs.readdirSync(storageDir);
+  } catch {
+    return;
+  }
+  for (const name of names) {
+    const own =
+      name === ownState ||
+      (name.startsWith(prefix) &&
+        /\.json(\.tmp)?$/.test(name) &&
+        !othersState.has(name) &&
+        !longer.some((p) => name.startsWith(p)));
+    if (!own) continue;
+    try {
+      fs.rmSync(path.join(storageDir, name), { force: true });
+    } catch (e) {
+      logger.warn(`Failed to remove plugin file ${name}:`, e);
+    }
+  }
+}
+
 export class FilePluginStorage implements PluginStorage {
   private data: Record<string, unknown> = {};
   private dirty = false;

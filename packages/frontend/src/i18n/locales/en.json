@@ -728,6 +728,7 @@
     "creating": "Creating...",
     "created": "Created",
     "unknownError": "Unknown error",
+    "alreadyExists": "Already has a bridge, skipped",
     "createBridges_one": "Create {{count}} Bridge",
     "createBridges_other": "Create {{count}} Bridges",
     "createdSuccess_one": "Created {{count}} bridge successfully",

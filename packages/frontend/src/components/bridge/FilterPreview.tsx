@@ -84,8 +84,11 @@ export function FilterPreview({
   const [expanded, setExpanded] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const filterJsonRef = useRef<string>("");
+  const requestRef = useRef(0);
 
   const fetchPreview = useCallback(async () => {
+    // a slow answer for an older filter must not replace the newer one
+    const request = ++requestRef.current;
     setLoading(true);
     setError(null);
     try {
@@ -96,6 +99,7 @@ export function FilterPreview({
       });
 
       const text = await response.text();
+      if (request !== requestRef.current) return;
       const parsed = tryParseJson(text);
 
       if (!response.ok) {
@@ -110,9 +114,11 @@ export function FilterPreview({
       setResult(data);
       setExpanded(true);
     } catch (e) {
-      setError(e instanceof Error ? e.message : t("common.unknown"));
+      if (request === requestRef.current) {
+        setError(e instanceof Error ? e.message : t("common.unknown"));
+      }
     } finally {
-      setLoading(false);
+      if (request === requestRef.current) setLoading(false);
     }
   }, [filter, includeHiddenEntities, t]);
 
@@ -123,6 +129,8 @@ export function FilterPreview({
       filter.include.some((f) => f.type && f.value);
 
     if (!hasFilters) {
+      requestRef.current++;
+      setLoading(false);
       setResult(null);
       setExpanded(false);
       filterJsonRef.current = "";

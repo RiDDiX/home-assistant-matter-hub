@@ -406,6 +406,13 @@ describe("isDreameVacuum", () => {
     expect(isDreameVacuum(attributes)).toBe(false);
   });
 
+  it("should not detect Ecovacs numeric id arrays as Dreame", () => {
+    const attributes: VacuumDeviceAttributes = {
+      rooms: { kitchen: 1, bedroom: [3, 5], living_room: 2 },
+    };
+    expect(isDreameVacuum(attributes)).toBe(false);
+  });
+
   it("should return false when no rooms attribute", () => {
     const attributes: VacuumDeviceAttributes = {};
     expect(isDreameVacuum(attributes)).toBe(false);
@@ -496,6 +503,13 @@ describe("isEcovacsVacuum", () => {
         kuche: 1,
         badezimmer: 7,
       },
+    };
+    expect(isEcovacsVacuum(attributes)).toBe(true);
+  });
+
+  it("should detect Ecovacs rooms with numeric id arrays", () => {
+    const attributes: VacuumDeviceAttributes = {
+      rooms: { kitchen: 1, bedroom: [3, 5], living_room: 2 },
     };
     expect(isEcovacsVacuum(attributes)).toBe(true);
   });

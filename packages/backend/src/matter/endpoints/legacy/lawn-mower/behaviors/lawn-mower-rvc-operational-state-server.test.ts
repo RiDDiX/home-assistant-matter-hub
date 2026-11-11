@@ -13,8 +13,11 @@ describe("mapLawnMowerOperationalState (#301 lawn mower)", () => {
     expect(mapLawnMowerOperationalState({ state: "docked" })).toBe(OS.Docked);
     expect(mapLawnMowerOperationalState({ state: "paused" })).toBe(OS.Paused);
     expect(mapLawnMowerOperationalState({ state: "error" })).toBe(OS.Error);
+  });
+
+  it("reports an unavailable mower as Stopped, not Error", () => {
     expect(mapLawnMowerOperationalState({ state: "unavailable" })).toBe(
-      OS.Error,
+      OS.Stopped,
     );
   });
 

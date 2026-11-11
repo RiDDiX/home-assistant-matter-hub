@@ -46,6 +46,18 @@ function isHaRefusal(error: unknown): boolean {
   );
 }
 
+// Lock PINs from Matter controllers, the HA call gets them, nothing else does.
+const SECRET_KEYS = new Set(["code", "usercode", "user_code", "pin"]);
+
+function redactData(data: object | undefined): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(data ?? {}).map(([key, value]) => [
+      key,
+      SECRET_KEYS.has(key) ? "[redacted]" : value,
+    ]),
+  );
+}
+
 const defaultConfig: Required<HomeAssistantActionsConfig> = {
   retryAttempts: 3,
   retryBaseDelayMs: 100,
@@ -167,18 +179,19 @@ export class HomeAssistantActions extends Service {
           this.log.debug(`Rollback for '${origin}' failed: ${e}`);
         }
       });
+    const shownData = redactData(data);
     diagnosticEventBus.emit(
       "command_received",
       `Action ${action} for ${entity_id ?? "(no target)"}`,
       {
         entityId: entity_id ?? calls[0].entityId,
-        details: { action, data },
+        details: { action, data: shownData },
       },
     );
     this.fireEvent("hamh_action", {
       entity_id: entity_id ?? calls[0].entityId,
       action,
-      data,
+      data: shownData,
       source: "matter_controller",
     });
   }
@@ -224,7 +237,7 @@ export class HomeAssistantActions extends Service {
     const targetStr = JSON.stringify(target);
 
     this.log.debug(
-      `Calling action '${actionKey}' for target ${targetStr} with data ${JSON.stringify(data ?? {})}`,
+      `Calling action '${actionKey}' for target ${targetStr} with data ${JSON.stringify(redactData(data))}`,
     );
 
     try {

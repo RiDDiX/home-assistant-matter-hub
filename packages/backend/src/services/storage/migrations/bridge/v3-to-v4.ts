@@ -14,10 +14,15 @@ export async function migrateBridgeV3ToV4(
     const bridge = bridgeValue as Record<string, unknown>;
     const featureFlags = bridge.featureFlags as Record<string, unknown>;
     if (featureFlags) {
+      // a rerun after a crash finds the old key gone and keeps the moved value
       featureFlags.coverDoNotInvertPercentage =
-        featureFlags.mimicHaCoverPercentage ?? false;
+        featureFlags.mimicHaCoverPercentage ??
+        featureFlags.coverDoNotInvertPercentage ??
+        false;
       featureFlags.coverSwapOpenClose =
-        featureFlags.mimicHaCoverPercentage ?? false;
+        featureFlags.mimicHaCoverPercentage ??
+        featureFlags.coverSwapOpenClose ??
+        false;
       featureFlags.mimicHaCoverPercentage = undefined;
       await storage.set(bridgeId, bridgeValue);
     }

@@ -7,11 +7,19 @@ import type { EntityIdentityStorage } from "../services/storage/entity-identity-
 import type { EntityMappingStorage } from "../services/storage/entity-mapping-storage.js";
 import { matterApi } from "./matter-api.js";
 
-async function factoryReset(status: BridgeStatus) {
+// runs: what Bridge.factoryReset sees, the bridge can stop after data was read
+async function factoryReset(
+  status: BridgeStatus,
+  runs = status === BridgeStatus.Running,
+) {
   const bridge = {
     id: "b1",
     data: { id: "b1", status },
-    factoryReset: vi.fn().mockResolvedValue(undefined),
+    factoryReset: vi.fn(async (beforeReset?: () => Promise<void>) => {
+      if (!runs) return false;
+      await beforeReset?.();
+      return true;
+    }),
     start: vi.fn().mockResolvedValue(undefined),
   };
   const deleteBridgeIdentities = vi.fn().mockResolvedValue(undefined);
@@ -45,7 +53,17 @@ describe("POST /bridges/:id/actions/factory-reset", () => {
 
     expect(status).toBe(409);
     expect(deleteBridgeIdentities).not.toHaveBeenCalled();
-    expect(bridge.factoryReset).not.toHaveBeenCalled();
+    expect(bridge.start).not.toHaveBeenCalled();
+  });
+
+  it("keeps the identities of a bridge that stopped before the reset ran", async () => {
+    const { status, bridge, deleteBridgeIdentities } = await factoryReset(
+      BridgeStatus.Running,
+      false,
+    );
+
+    expect(status).toBe(409);
+    expect(deleteBridgeIdentities).not.toHaveBeenCalled();
     expect(bridge.start).not.toHaveBeenCalled();
   });
 

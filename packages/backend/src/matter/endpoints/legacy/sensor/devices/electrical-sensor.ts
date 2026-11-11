@@ -26,6 +26,18 @@ import { HaPowerTopologyServer } from "../../../../behaviors/power-topology-serv
 
 const PowerFeaturedBase = PowerBase.with("AlternatingCurrent");
 
+// undefined while the mapped entity is not loaded yet, null when it is
+// unavailable or unknown.
+function mappedReading(
+  stateProvider: EntityStateProvider,
+  entityId: string,
+  quantity: "power" | "voltage" | "current",
+): number | null | undefined {
+  const value = mappedMilli(stateProvider, entityId, quantity);
+  if (value != null) return value;
+  return stateProvider.getState(entityId) == null ? undefined : null;
+}
+
 // Power server for standalone electrical sensors. The primary entity drives the
 // attribute matching its own device_class; mapped power/voltage/current sensors
 // fold their measurements onto the same endpoint so one device carries them all.
@@ -45,9 +57,9 @@ class StandalonePowerServer extends PowerFeaturedBase {
 
   private update(entity: HomeAssistantEntityInformation) {
     const patch: {
-      activePower?: number;
-      voltage?: number;
-      activeCurrent?: number;
+      activePower?: number | null;
+      voltage?: number | null;
+      activeCurrent?: number | null;
     } = {};
 
     // Primary sensor: value goes to the attribute for its own device_class.
@@ -57,13 +69,16 @@ class StandalonePowerServer extends PowerFeaturedBase {
     const dc = attrs?.device_class;
     const primary = entity.state?.state;
     const unit = attrs?.unit_of_measurement;
-    if (primary != null && !Number.isNaN(+primary)) {
+    if (primary != null) {
+      // unavailable or unknown clears the reading instead of freezing the last one
+      const reading = (quantity: "power" | "voltage" | "current") =>
+        Number.isNaN(+primary) ? null : toMatterMilli(+primary, quantity, unit);
       if (dc === SensorDeviceClass.power) {
-        patch.activePower = toMatterMilli(+primary, "power", unit);
+        patch.activePower = reading("power");
       } else if (dc === SensorDeviceClass.voltage) {
-        patch.voltage = toMatterMilli(+primary, "voltage", unit);
+        patch.voltage = reading("voltage");
       } else if (dc === SensorDeviceClass.current) {
-        patch.activeCurrent = toMatterMilli(+primary, "current", unit);
+        patch.activeCurrent = reading("current");
       }
     }
 
@@ -76,16 +91,27 @@ class StandalonePowerServer extends PowerFeaturedBase {
     ) {
       const stateProvider = this.agent.env.get(EntityStateProvider);
       if (mapping.powerEntity) {
-        const mw = mappedMilli(stateProvider, mapping.powerEntity, "power");
-        if (mw != null) patch.activePower = mw;
+        const mw = mappedReading(stateProvider, mapping.powerEntity, "power");
+        if (mw !== undefined)
+          patch.activePower = mw ?? patch.activePower ?? null;
       }
       if (mapping.voltageEntity) {
-        const mv = mappedMilli(stateProvider, mapping.voltageEntity, "voltage");
-        if (mv != null) patch.voltage = mv;
+        const mv = mappedReading(
+          stateProvider,
+          mapping.voltageEntity,
+          "voltage",
+        );
+        if (mv !== undefined) patch.voltage = mv ?? patch.voltage ?? null;
       }
       if (mapping.currentEntity) {
-        const ma = mappedMilli(stateProvider, mapping.currentEntity, "current");
-        if (ma != null) patch.activeCurrent = ma;
+        const ma = mappedReading(
+          stateProvider,
+          mapping.currentEntity,
+          "current",
+        );
+        if (ma !== undefined) {
+          patch.activeCurrent = ma ?? patch.activeCurrent ?? null;
+        }
       }
     }
 

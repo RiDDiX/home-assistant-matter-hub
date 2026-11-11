@@ -45,6 +45,7 @@ import { EndpointCard } from "../../components/endpoints/EndpointCard";
 import { getEndpointName } from "../../components/endpoints/EndpointName";
 import { EntityMappingDialog } from "../../components/entity-mapping/EntityMappingDialog";
 import { useBridges } from "../../hooks/data/bridges";
+import { safeStorage } from "../../safe-storage";
 import { loadBridges } from "../../state/bridges/bridge-actions";
 import { loadDevices } from "../../state/devices/device-actions";
 import { useAppDispatch, useAppSelector } from "../../state/hooks";
@@ -80,7 +81,7 @@ export const DevicesPage = () => {
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
   const [page, setPage] = useState(1);
   const [itemsPerPage, setItemsPerPageRaw] = useState<number>(() => {
-    const stored = localStorage.getItem(PAGE_SIZE_KEY);
+    const stored = safeStorage.get(PAGE_SIZE_KEY);
     if (!stored) return 12;
     if (stored === "all") return 0;
     const num = parseInt(stored, 10);
@@ -90,7 +91,7 @@ export const DevicesPage = () => {
 
   const setItemsPerPage = useCallback((size: number) => {
     setItemsPerPageRaw(size);
-    localStorage.setItem(PAGE_SIZE_KEY, size === 0 ? "all" : String(size));
+    safeStorage.set(PAGE_SIZE_KEY, size === 0 ? "all" : String(size));
     setPage(1);
   }, []);
 

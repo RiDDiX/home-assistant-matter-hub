@@ -39,15 +39,20 @@ export function flattenObject(
   return result;
 }
 
+const unsafeKeyParts = new Set(["__proto__", "constructor", "prototype"]);
+
 export function unflattenObject(
   flat: Record<string, string>,
 ): Record<string, unknown> {
   const result: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(flat)) {
     const parts = key.split(".");
+    // keys come from imported files and storage, keep them off the prototype
+    if (parts.some((p) => unsafeKeyParts.has(p))) continue;
     let current = result;
     for (let i = 0; i < parts.length - 1; i++) {
-      if (!(parts[i] in current)) {
+      // inherited members are functions, never walk into them
+      if (typeof current[parts[i]] !== "object") {
         current[parts[i]] = {};
       }
       current = current[parts[i]] as Record<string, unknown>;

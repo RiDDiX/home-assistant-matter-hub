@@ -41,6 +41,18 @@ describe("bridge request schema", () => {
     }
   });
 
+  // Matter Location is exactly two characters, a 3-letter code broke start.
+  it.each([
+    ["USA", false],
+    ["", false],
+    ["D1", false],
+    ["DE", true],
+  ])("countryCode %j valid=%s", (countryCode, valid) => {
+    expect(
+      new Ajv().validate(updateBridgeRequestSchema, { ...bridge, countryCode }),
+    ).toBe(valid);
+  });
+
   it.each([0, 65536, 5540.5])("rejects port %d", (port) => {
     expect(
       new Ajv().validate(updateBridgeRequestSchema, { ...bridge, port }),

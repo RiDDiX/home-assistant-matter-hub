@@ -26,6 +26,13 @@ export const PLUGIN_API_VERSION = 1;
 
 const MAX_PLUGIN_DEVICE_ID_LENGTH = 100;
 
+// Node caches a package's ES modules for the life of the process, so a newer
+// copy of one imported here only runs after a full restart of the app.
+const importedPackages = new Set<string>();
+export function isPluginImported(packageName: string): boolean {
+  return importedPackages.has(packageName);
+}
+
 // Older builds kept the enable choice inside the plugin's own storage file,
 // where a plugin-owned key of the same name collides. Migrated on first read.
 const LEGACY_ENABLED_KEY = "__enabled";
@@ -245,6 +252,7 @@ export class PluginManager {
           `Plugin at ${packagePath} failed to load (timeout or error)`,
         );
       }
+      importedPackages.add(manifest.name);
       const PluginClass: MatterHubPluginConstructor =
         module.default ?? module.MatterHubPlugin;
 
@@ -566,12 +574,10 @@ export class PluginManager {
     return this.runner.getAllStates();
   }
 
-  resetPlugin(pluginName: string): void {
-    this.runner.resetCircuitBreaker(pluginName);
-    const instance = this.instances.get(pluginName);
-    if (instance) {
-      instance.metadata.enabled = true;
-    }
+  // Only enablePlugin starts a plugin, a bare breaker reset left it enabled
+  // but never mounted.
+  resetPlugin(pluginName: string): Promise<PluginMetadata | undefined> {
+    return this.enablePlugin(pluginName);
   }
 
   /**

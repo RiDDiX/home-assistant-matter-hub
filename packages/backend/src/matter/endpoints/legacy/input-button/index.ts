@@ -11,6 +11,7 @@ const InputButtonOnOffServer = PlugOnOffServer({
     action: "input_button.press",
   }),
   turnOff: null,
+  momentary: true,
 });
 
 const InputButtonEndpointType = OnOffPlugInUnitDevice.with(

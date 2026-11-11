@@ -36,6 +36,7 @@ import { FabricNode } from "../../components/network-map/nodes/FabricNode.tsx";
 import { FailedNode } from "../../components/network-map/nodes/FailedNode.tsx";
 import { HubNode } from "../../components/network-map/nodes/HubNode.tsx";
 import { useBridges } from "../../hooks/data/bridges.ts";
+import { safeStorage } from "../../safe-storage.ts";
 import { loadBridges } from "../../state/bridges/bridge-actions.ts";
 import { loadDevices } from "../../state/devices/device-actions.ts";
 import { useAppDispatch, useAppSelector } from "../../state/hooks.ts";
@@ -411,7 +412,7 @@ export const NetworkMapPage = () => {
   }, []);
 
   const handleResetLayout = useCallback(() => {
-    localStorage.removeItem("hamh-network-map-positions");
+    safeStorage.remove("hamh-network-map-positions");
     undoStackRef.current = [];
     setCanUndo(false);
     // Re-trigger graph build by reloading bridges

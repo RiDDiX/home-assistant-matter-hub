@@ -248,6 +248,26 @@ describe("Matter 1.4 water heater bring-up", () => {
     ]);
     expect(state.heaterTypes.other).toBe(true);
   });
+
+  it("drops operation modes that repeat a label or name", async () => {
+    const endpoint = await bringUp(
+      waterHeater("on", {
+        operation_list: ["off", "on", "foo bar", "Foo_Bar", "baz"],
+        operation_mode: "on",
+        current_temperature: 50,
+        temperature: 55,
+      }),
+    );
+    const state = await snapshot(endpoint);
+
+    expect(state.supportedModes.map((m) => [m.mode, m.label])).toEqual([
+      [OFF_MODE, "Off"],
+      [7, "On"],
+      [8, "Foo bar"],
+      [9, "Baz"],
+    ]);
+    expect(state.currentMode).toBe(7);
+  });
 });
 
 describe("Matter 1.4 water heater boost", () => {

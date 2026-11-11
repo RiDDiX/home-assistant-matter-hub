@@ -687,6 +687,12 @@ export class ThermostatServerBase extends FullFeaturedBase {
             currentMode === SystemMode.EmergencyHeat
           : currentMode === SystemMode.Cool ||
             currentMode === SystemMode.Precooling;
+        // Dry and FanOnly have no direction: one handler owns the single
+        // temperature, so a write of both setpoints still calls HA once.
+        const ownsDirectionless =
+          (currentMode === SystemMode.Dry ||
+            currentMode === SystemMode.FanOnly) &&
+          heat === !this.features.cooling;
         const isOff = currentMode === SystemMode.Off;
 
         if (isOff && (heat ? this.features.heating : this.features.cooling)) {
@@ -705,7 +711,7 @@ export class ThermostatServerBase extends FullFeaturedBase {
             source,
           );
           // Proceed to forward the temperature to HA below.
-        } else if (!isAutoMode && !isOwnMode) {
+        } else if (!isAutoMode && !isOwnMode && !ownsDirectionless) {
           // Auto mode: both setpoints update temperature (#71). Otherwise the
           // handler of the active direction forwards it.
           logger.debug(

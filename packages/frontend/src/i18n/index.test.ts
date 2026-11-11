@@ -1,5 +1,23 @@
 import { afterEach, describe, expect, it } from "vitest";
-import i18n, { applyTranslationOverrides, bundledResources } from "./index.ts";
+import i18n, {
+  applyTranslationOverrides,
+  bundledResources,
+  unflattenObject,
+} from "./index.ts";
+
+describe("unflattenObject", () => {
+  it("never writes through __proto__, constructor or prototype", () => {
+    const result = unflattenObject({
+      "__proto__.polluted": "x",
+      "a.constructor.prototype.polluted": "x",
+      "common.save": "Save",
+    });
+
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+    expect("polluted" in Object.prototype).toBe(false);
+    expect(result).toEqual({ common: { save: "Save" } });
+  });
+});
 
 describe("applyTranslationOverrides", () => {
   afterEach(() => {

@@ -518,7 +518,8 @@
     "loadFailed": "Bereiche konnten nicht geladen werden",
     "creating": "Wird erstellt...",
     "created": "Erstellt",
-    "unknownError": "Unbekannter Fehler"
+    "unknownError": "Unbekannter Fehler",
+    "alreadyExists": "Hat schon eine Bridge, übersprungen"
   },
   "lockCredentials": {
     "title": "Schloss-Zugangsdaten",

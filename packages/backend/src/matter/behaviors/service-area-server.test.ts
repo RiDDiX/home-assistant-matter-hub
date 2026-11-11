@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { ServiceAreaServerBase } from "./service-area-server.js";
 
 interface MockState {
-  supportedAreas: { areaId: number }[];
+  supportedAreas: { areaId: number; mapId?: number | null }[];
   selectedAreas: number[];
   progress: { areaId: number; status: ServiceArea.OperationalStatus }[];
   currentArea: number | null;
@@ -56,6 +56,49 @@ describe("ServiceAreaServerBase.selectAreas", () => {
     expect(res.status).toBe(ServiceArea.SelectAreasStatus.UnsupportedArea);
     expect(state.selectedAreas).toEqual([1]);
     expect(state.currentArea).toBe(1);
+  });
+
+  it("rejects a selection that spans two maps without touching state", () => {
+    // Ground: 1 Kitchen, 2 Living. Upper: 10001 Bedroom, 10002 Bath.
+    const state: MockState = {
+      supportedAreas: [
+        { areaId: 1, mapId: 1 },
+        { areaId: 2, mapId: 1 },
+        { areaId: 10001, mapId: 2 },
+        { areaId: 10002, mapId: 2 },
+      ],
+      selectedAreas: [2],
+      progress: [],
+      currentArea: null,
+    };
+
+    const res = selectAreas(state, [1, 10002]);
+
+    expect(res.status).toBe(ServiceArea.SelectAreasStatus.InvalidSet);
+    expect(state.selectedAreas).toEqual([2]);
+
+    expect(selectAreas(state, [10001, 10002]).status).toBe(
+      ServiceArea.SelectAreasStatus.Success,
+    );
+    expect(selectAreas(state, []).status).toBe(
+      ServiceArea.SelectAreasStatus.Success,
+    );
+  });
+
+  it("accepts areas without map info", () => {
+    const state: MockState = {
+      supportedAreas: [
+        { areaId: 1, mapId: null },
+        { areaId: 2, mapId: 1 },
+      ],
+      selectedAreas: [],
+      progress: [],
+      currentArea: null,
+    };
+
+    expect(selectAreas(state, [1, 2]).status).toBe(
+      ServiceArea.SelectAreasStatus.Success,
+    );
   });
 
   it("dedupes repeated areas", () => {

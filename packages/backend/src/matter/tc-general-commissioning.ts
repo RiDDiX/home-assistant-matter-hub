@@ -19,7 +19,7 @@ export class TcGeneralCommissioningServer extends TcBase {
     tcVersion,
   }: GeneralCommissioning.SetTcAcknowledgementsRequest): GeneralCommissioning.SetTcAcknowledgementsResponse {
     this.state.tcAcceptedVersion = tcVersion;
-    // ponytail: the response map is not stored, map16 state only takes bitmap
+    // The response map is not stored, map16 state only takes bitmap
     // objects and the model names no bits. Nothing reads it back.
     return { errorCode: GeneralCommissioning.CommissioningError.Ok };
   }

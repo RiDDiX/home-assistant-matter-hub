@@ -10,7 +10,7 @@ import { Environment, VariableService } from "@matter/general";
 import { Endpoint, VendorId } from "@matter/main";
 import { KeypadInput, MediaPlayback } from "@matter/main/clusters";
 import { ServerNode } from "@matter/main/node";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { BridgeDataProvider } from "../../../../services/bridges/bridge-data-provider.js";
 import {
   type HomeAssistantAction,
@@ -132,6 +132,24 @@ describe("tv media_player bring-up", () => {
     expect(calls).toEqual([]);
     await act(endpoint, (agent) => agent.onOff.off());
     expect(calls).toEqual([{ action: "media_player.turn_off" }]);
+  });
+
+  it("stays on after turn_on when TURN_OFF is not supported", async () => {
+    const entity = tvEntity(MediaPlayerDeviceFeature.TURN_ON);
+    // biome-ignore lint/suspicious/noExplicitAny: test fixture
+    (entity.state as any).state = "off";
+    const endpoint = await bringUp(entity);
+    vi.useFakeTimers({ toFake: ["setTimeout"] });
+    try {
+      await act(endpoint, (agent) => agent.onOff.on());
+      // A momentary entity would reset to the HA state here
+      await vi.advanceTimersByTimeAsync(1500);
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(calls).toEqual([{ action: "media_player.turn_on" }]);
+    // biome-ignore lint/suspicious/noExplicitAny: inspect cluster state
+    expect((endpoint.state as any).onOff.onOff).toBe(true);
   });
 
   it("sends is_volume_muted with the keypad mute keys", async () => {

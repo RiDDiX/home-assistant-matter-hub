@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import type { BridgeData } from "@home-assistant-matter-hub/common";
+import { Logger } from "@matter/general";
 import { AggregatorEndpoint } from "@matter/main/endpoints";
 import type { Node, ServerNode } from "@matter/main/node";
 import { VendorId } from "@matter/main/types";
@@ -11,6 +12,25 @@ import { trimToLength } from "../trim-to-length.js";
 
 export type BridgeServerNodeConfig =
   Node.Configuration<ServerNode.RootEndpoint>;
+
+const logger = Logger.get("BridgeServerConfig");
+const warnedCountryCodes = new Set<string>();
+
+// Matter Location is exactly two characters; older versions stored three.
+export function countryCodeLocation(
+  bridgeId: string,
+  countryCode: string | undefined,
+): { location?: string } {
+  if (!countryCode) return {};
+  if (/^[A-Za-z]{2}$/.test(countryCode)) return { location: countryCode };
+  if (!warnedCountryCodes.has(bridgeId)) {
+    warnedCountryCodes.add(bridgeId);
+    logger.warn(
+      `Bridge ${bridgeId}: ignoring country code "${countryCode}", Matter needs two letters`,
+    );
+  }
+  return {};
+}
 
 export function createBridgeServerConfig(
   data: BridgeData,
@@ -53,7 +73,7 @@ export function createBridgeServerConfig(
       // Keep the root string aligned with the numeric softwareVersion. Aqara
       // stalls bridge registration when the two diverge (#316).
       softwareVersionString: String(data.basicInformation.softwareVersion),
-      ...(data.countryCode ? { location: data.countryCode } : {}),
+      ...countryCodeLocation(data.id, data.countryCode),
     },
     subscriptions: {
       persistenceEnabled: false,

@@ -1,9 +1,13 @@
 import type { HomeAssistantEntityState } from "@home-assistant-matter-hub/common";
 import type { Agent } from "@matter/main";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { humidifierFanControlConfig } from "./humidifier-fan-control-server.js";
 
-function agentFor(attributes: Record<string, unknown>, state = "on"): Agent {
+function agentFor(
+  attributes: Record<string, unknown>,
+  state = "on",
+  callAction = vi.fn(),
+): Agent {
   const entityState = {
     entity_id: "humidifier.test",
     state,
@@ -13,7 +17,7 @@ function agentFor(attributes: Record<string, unknown>, state = "on"): Agent {
     last_updated: "x",
   } as unknown as HomeAssistantEntityState;
   return {
-    get: () => ({ state: { entity: { state: entityState } } }),
+    get: () => ({ state: { entity: { state: entityState } }, callAction }),
   } as unknown as Agent;
 }
 
@@ -62,13 +66,39 @@ describe("humidifier target humidity as fan percent", () => {
   });
 
   it("turns on without set_humidity for the power-on 100 while off", () => {
-    const agent = agentFor({ humidity: 50, max_humidity: 80 }, "off");
+    const callAction = vi.fn();
+    const agent = agentFor(
+      { humidity: 50, max_humidity: 80 },
+      "off",
+      callAction,
+    );
     expect(humidifierFanControlConfig.turnOn(100, agent)).toEqual({
       action: "humidifier.turn_on",
     });
+    expect(callAction).not.toHaveBeenCalled();
+  });
+
+  // A lower value while off is still a deliberate target (#387), but HA's
+  // set_humidity does not power the humidifier on, so the tile flipped back
+  // to off. It must turn on and keep the written target.
+  it("turns on and sets the target for a lower value while off", () => {
+    const callAction = vi.fn();
+    const agent = agentFor(
+      { humidity: 50, max_humidity: 80 },
+      "off",
+      callAction,
+    );
     expect(humidifierFanControlConfig.turnOn(40, agent)).toEqual({
       action: "humidifier.set_humidity",
       data: { humidity: 40 },
     });
+    expect(callAction).toHaveBeenCalledWith({ action: "humidifier.turn_on" });
+  });
+
+  it("sends only set_humidity while on", () => {
+    const callAction = vi.fn();
+    const agent = agentFor({ humidity: 50 }, "on", callAction);
+    humidifierFanControlConfig.turnOn(40, agent);
+    expect(callAction).not.toHaveBeenCalled();
   });
 });

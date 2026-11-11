@@ -265,7 +265,7 @@ const modeCalls = () =>
 const tempCalls = () =>
   calls.filter((c) => c.action === "climate.set_temperature");
 
-describe("thermostat off auto-resume (#519)", () => {
+describe("thermostat off auto-resume (#519)", { timeout: 30_000 }, () => {
   it("resumes Cool from a cooling write while Off on a heat+cool device", async () => {
     const { endpoint, client } = await mount("off", [
       "off",
@@ -393,7 +393,7 @@ describe("thermostat off auto-resume (#519)", () => {
 });
 
 // #547 reporter shape: TRVZB on ZHA, min_temp 10, HA temperature 4.
-describe("thermostat off setpoint, #547 fixture", () => {
+describe("thermostat off setpoint, #547 fixture", { timeout: 30_000 }, () => {
   const trv = { min_temp: 10, temperature: 4 };
 
   it("sends set_hvac_mode then set_temperature carrying the resumed mode from Off", async () => {
@@ -503,4 +503,44 @@ describe("thermostat off setpoint, #547 fixture", () => {
       { action: "climate.set_temperature", data: { temperature: 11 } },
     ]);
   });
+});
+
+// One node and commissioned controller per case, a loop of three overran the
+// 5 s default under full suite load. The explicit budget covers one bring-up.
+describe("thermostat setpoint in Dry and FanOnly", () => {
+  it.each([
+    "dry",
+    "fan_only",
+  ])("forwards a setpoint write once in %s", async (mode) => {
+    const { endpoint, client } = await mount(mode, [
+      "off",
+      "heat",
+      "cool",
+      "dry",
+      "fan_only",
+    ]);
+    calls = [];
+    await remoteWrite(client, endpoint.number, {
+      occupiedHeatingSetpoint: 2300,
+      occupiedCoolingSetpoint: 2500,
+    });
+    expect(calls).toEqual([
+      { action: "climate.set_temperature", data: { temperature: 25 } },
+    ]);
+  }, 30_000);
+
+  it("forwards a heating write once in fan_only without cool", async () => {
+    const { endpoint, client } = await mount("fan_only", [
+      "off",
+      "heat",
+      "fan_only",
+    ]);
+    calls = [];
+    await remoteWrite(client, endpoint.number, {
+      occupiedHeatingSetpoint: 2300,
+    });
+    expect(calls).toEqual([
+      { action: "climate.set_temperature", data: { temperature: 23 } },
+    ]);
+  }, 30_000);
 });

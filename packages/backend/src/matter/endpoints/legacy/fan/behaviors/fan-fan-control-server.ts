@@ -146,15 +146,19 @@ export const fanControlConfig: FanControlServerConfig = {
     } else if (mode === "sleep") {
       presetMode = presets.sleep?.[0] ?? modes.find(isEnglishSleep) ?? "Sleep";
     } else {
-      // "off" picks the first non-wind preset (the normal one, e.g. 直吹风)
+      // "off" picks the first non-wind, non-auto preset (the normal one, e.g. 直吹风),
+      // else Auto, so HA only gets a preset the entity declares
       const wind = new Set([
         ...(presets.natural ?? []),
         ...(presets.sleep ?? []),
       ]);
+      const nonWind = modes.filter(
+        (m) => !wind.has(m) && !isEnglishNatural(m) && !isEnglishSleep(m),
+      );
       presetMode =
-        modes.find(
-          (m) => !wind.has(m) && !isEnglishNatural(m) && !isEnglishSleep(m),
-        ) ?? "Normal";
+        nonWind.find((m) => m.toLowerCase() !== "auto") ??
+        nonWind[0] ??
+        "Normal";
     }
     return {
       action: "fan.set_preset_mode",

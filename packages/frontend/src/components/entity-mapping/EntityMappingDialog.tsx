@@ -106,6 +106,17 @@ function parsePinLength(value: string): number | undefined {
   return n;
 }
 
+// Empty clears the value, and so does 0 on the ms fields per their help text.
+function isInvalid(
+  value: string,
+  parse: (value: string) => number | undefined,
+  zeroClears = false,
+): boolean {
+  const trimmed = value.trim();
+  if (!trimmed || (zeroClears && Number(trimmed) === 0)) return false;
+  return parse(trimmed) === undefined;
+}
+
 interface EntityMappingDialogProps {
   open: boolean;
   entityId: string;
@@ -574,6 +585,32 @@ export function EntityMappingDialog({
     onSave,
   ]);
 
+  const vendorIdInvalid = isInvalid(customVendorId, parseVendorId);
+  const usercodeSlotInvalid = isInvalid(lockUsercodeSlot, parseUsercodeSlot);
+  const pinMinInvalid = isInvalid(lockPinMinLength, parsePinLength);
+  const pinMaxInvalid = isInvalid(lockPinMaxLength, parsePinLength);
+  const coverDebounceInvalid = isInvalid(
+    coverSliderDebounceMs,
+    parseDebounceMs,
+    true,
+  );
+  const fanDebounceInvalid = isInvalid(
+    fanSliderDebounceMs,
+    parseDebounceMs,
+    true,
+  );
+  const throttleInvalid = isInvalid(updateThrottleMs, parseThrottleMs, true);
+  // handleSave turns an invalid value into "clear", so it must not run
+  const hasInvalidInput =
+    vendorIdInvalid ||
+    usercodeSlotInvalid ||
+    pinMinInvalid ||
+    pinMaxInvalid ||
+    coverDebounceInvalid ||
+    fanDebounceInvalid ||
+    throttleInvalid ||
+    areaDataDrafts.some((draft) => !parseAreaData(draft).valid);
+
   // Show filter life entity field for air purifiers (fan domain or explicit air_purifier type)
   const showFilterLifeField =
     matterDeviceType === "air_purifier" ||
@@ -793,6 +830,7 @@ export function EntityMappingDialog({
           placeholder="0x115F"
           value={customVendorId}
           onChange={(e) => setCustomVendorId(e.target.value)}
+          error={vendorIdInvalid}
           helperText={t("mapping.customVendorIdHelp")}
         />
 
@@ -860,6 +898,7 @@ export function EntityMappingDialog({
             size="small"
             value={fanSliderDebounceMs}
             onChange={(e) => setFanSliderDebounceMs(e.target.value)}
+            error={fanDebounceInvalid}
             helperText={t("mapping.dialog.fanSliderDebounceHelp")}
             slotProps={{ htmlInput: { min: 0, max: 5000, step: 50 } }}
             sx={{ mt: 1, display: "block" }}
@@ -1023,7 +1062,8 @@ export function EntityMappingDialog({
               </Typography>
               {customFanSpeedTagsList.map((mapping, index) => (
                 <Box
-                  key={`${mapping.option}-${mapping.tag}`}
+                  // biome-ignore lint/suspicious/noArrayIndexKey: a mapping is its position, two may share option and tag
+                  key={index}
                   sx={{
                     display: "flex",
                     gap: 1,
@@ -1621,6 +1661,7 @@ export function EntityMappingDialog({
               size="small"
               value={coverSliderDebounceMs}
               onChange={(e) => setCoverSliderDebounceMs(e.target.value)}
+              error={coverDebounceInvalid}
               helperText={t("mapping.dialog.coverSliderDebounceHelp")}
               slotProps={{ htmlInput: { min: 0, max: 5000, step: 50 } }}
               sx={{ mt: 1, display: "block" }}
@@ -1665,6 +1706,7 @@ export function EntityMappingDialog({
               size="small"
               value={lockUsercodeSlot}
               onChange={(e) => setLockUsercodeSlot(e.target.value)}
+              error={usercodeSlotInvalid}
               helperText={t("mapping.dialog.lockUsercodeSlotHelp")}
               slotProps={{ htmlInput: { min: 1, step: 1 } }}
               sx={{ mt: 1, display: "block" }}
@@ -1675,6 +1717,7 @@ export function EntityMappingDialog({
               size="small"
               value={lockPinMinLength}
               onChange={(e) => setLockPinMinLength(e.target.value)}
+              error={pinMinInvalid}
               helperText={t("mapping.dialog.lockPinMinLengthHelp")}
               slotProps={{ htmlInput: { min: 1, max: 20, step: 1 } }}
               sx={{ mt: 1, display: "block" }}
@@ -1685,6 +1728,7 @@ export function EntityMappingDialog({
               size="small"
               value={lockPinMaxLength}
               onChange={(e) => setLockPinMaxLength(e.target.value)}
+              error={pinMaxInvalid}
               helperText={t("mapping.dialog.lockPinMaxLengthHelp")}
               slotProps={{ htmlInput: { min: 1, max: 20, step: 1 } }}
               sx={{ mt: 1, display: "block" }}
@@ -1911,6 +1955,7 @@ export function EntityMappingDialog({
           type="number"
           value={updateThrottleMs}
           onChange={(e) => setUpdateThrottleMs(e.target.value)}
+          error={throttleInvalid}
           helperText={t("mapping.dialog.updateThrottleHelp")}
           slotProps={{ htmlInput: { min: 0, max: 60000, step: 100 } }}
         />
@@ -1920,7 +1965,7 @@ export function EntityMappingDialog({
         <Button
           onClick={handleSave}
           variant="contained"
-          disabled={!editEntityId.trim() || saving}
+          disabled={!editEntityId.trim() || saving || hasInvalidInput}
           startIcon={saving ? <CircularProgress size={16} /> : undefined}
         >
           {t("common.save")}

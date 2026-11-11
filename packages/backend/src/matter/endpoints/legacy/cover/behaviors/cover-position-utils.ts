@@ -8,7 +8,6 @@ import type { BridgeFeatureFlags } from "@home-assistant-matter-hub/common";
 function adjustPosition(
   position: number,
   flags: BridgeFeatureFlags | undefined,
-  matterSemantics: boolean,
 ): number | null {
   if (position == null) {
     return null;
@@ -16,8 +15,7 @@ function adjustPosition(
 
   const skipInversion =
     flags?.coverDoNotInvertPercentage === true ||
-    flags?.coverUseHomeAssistantPercentage === true ||
-    matterSemantics;
+    flags?.coverUseHomeAssistantPercentage === true;
 
   if (flags?.coverSwapOpenClose === true && !skipInversion) {
     return position;
@@ -36,9 +34,8 @@ function adjustPosition(
 export function adjustPositionForReading(
   position: number,
   flags: BridgeFeatureFlags | undefined,
-  matterSemantics: boolean,
 ): number | null {
-  return adjustPosition(position, flags, matterSemantics);
+  return adjustPosition(position, flags);
 }
 
 /**
@@ -47,7 +44,6 @@ export function adjustPositionForReading(
 export function adjustPositionForWriting(
   position: number,
   flags: BridgeFeatureFlags | undefined,
-  matterSemantics: boolean,
 ): number | null {
-  return adjustPosition(position, flags, matterSemantics);
+  return adjustPosition(position, flags);
 }

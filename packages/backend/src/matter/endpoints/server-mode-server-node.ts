@@ -10,6 +10,7 @@ import { RoboticVacuumCleanerDevice } from "@matter/main/devices";
 import { type Endpoint, ServerNode } from "@matter/main/node";
 import { DeviceTypeId, VendorId } from "@matter/main/types";
 import { CAMERA_TCP_CONFIG } from "../../plugins/builtin/camera/camera-tcp-requirement.js";
+import { countryCodeLocation } from "../../utils/json/create-bridge-server-config.js";
 import { sanitizeMatterString } from "../../utils/sanitize-matter-string.js";
 import { trimToLength } from "../../utils/trim-to-length.js";
 import { legacySpecBasicInformation } from "../legacy-spec-version.js";
@@ -72,7 +73,7 @@ export class ServerModeServerNode extends ServerNode {
         softwareVersionString:
           bridgeData.basicInformation.softwareVersionString ??
           String(bridgeData.basicInformation.softwareVersion),
-        ...(bridgeData.countryCode ? { location: bridgeData.countryCode } : {}),
+        ...countryCodeLocation(bridgeData.id, bridgeData.countryCode),
       },
       subscriptions: {
         persistenceEnabled: false,

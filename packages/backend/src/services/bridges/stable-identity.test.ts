@@ -1007,8 +1007,10 @@ describe("identity lifecycle through the matter API (#404)", () => {
       id: bridgeId,
       // the route refuses a reset unless the bridge runs
       data: { id: bridgeId, status: BridgeStatus.Running },
-      async factoryReset() {
+      async factoryReset(beforeReset?: () => Promise<void>) {
+        await beforeReset?.();
         recordsSeenDuringRebuild = identity.getBridgeIdentities(bridgeId).size;
+        return true;
       },
       async start() {},
     };

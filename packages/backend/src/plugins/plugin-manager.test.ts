@@ -391,6 +391,32 @@ describe("PluginManager", () => {
       await pm.enablePlugin("test-plugin");
       expect(pm.getMetadata()[0].enabled).toBe(true);
     });
+
+    it("starts the plugin when its open circuit breaker is reset", async () => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), "hamh-test-reset-"));
+      try {
+        let fail = true;
+        const onStart = vi.fn(async () => {
+          if (fail) throw new Error("boom");
+        });
+        const pm = new PluginManager("bridge-r", dir);
+        await pm.registerBuiltIn(createMockPlugin({ onStart }));
+        for (let i = 0; i < 3; i++) await pm.startAll();
+        expect(pm.getCircuitBreakerStates().get("test-plugin")?.disabled).toBe(
+          true,
+        );
+        expect(pm.getMetadata()[0].enabled).toBe(false);
+
+        fail = false;
+        onStart.mockClear();
+        const metadata = await pm.resetPlugin("test-plugin");
+
+        expect(onStart).toHaveBeenCalledTimes(1);
+        expect(metadata?.enabled).toBe(true);
+      } finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+      }
+    });
   });
 
   describe("enabled persistence (#439)", () => {

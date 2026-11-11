@@ -69,6 +69,8 @@ export interface OnOffConfig {
   isOn?: ValueGetter<boolean>;
   turnOn?: OnOffCallback | null;
   turnOff?: OnOffCallback | null;
+  // scene/script style: onOff resets to the HA state ~1 s after an on
+  momentary?: boolean;
 }
 
 // biome-ignore lint/correctness/noUnusedVariables: Biome thinks this is unused, but it's used by the function below
@@ -120,7 +122,7 @@ class OnOffServerBase extends Base {
   }
 
   override on() {
-    const { turnOn, turnOff } = this.state.config;
+    const { turnOn, momentary } = this.state.config;
     if (turnOn === null) {
       this.scheduleAutoReset();
       return;
@@ -135,7 +137,7 @@ class OnOffServerBase extends Base {
     // on that pair until restarted (#423). disableMomentaryFlip skips both:
     // the HA action still fires, but onOff stays off and never reports.
     const skipMomentaryFlip =
-      turnOff === null && homeAssistant.state.mapping?.disableMomentaryFlip;
+      momentary && homeAssistant.state.mapping?.disableMomentaryFlip;
     if (!skipMomentaryFlip) {
       // Set onOff immediately so the controller gets instant feedback in the
       // command response. Without this, Apple Home shows "Turning on..." until
@@ -163,7 +165,7 @@ class OnOffServerBase extends Base {
     homeAssistant.callAction(action);
     // Auto-reset for momentary actions (scenes, automations) so controllers
     // don't show a permanently "on" state after activation.
-    if (turnOff === null && !skipMomentaryFlip) {
+    if (momentary && !skipMomentaryFlip) {
       this.scheduleAutoReset();
     }
   }

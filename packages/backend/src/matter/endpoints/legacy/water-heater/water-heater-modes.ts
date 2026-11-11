@@ -181,17 +181,23 @@ export function buildModeMapping(
     haOperationModes[SYNTHETIC_MANUAL_MODE] = null;
   }
 
+  // matter.js rejects a repeated label, e.g. HA "on" next to the synthetic On.
+  const usedLabels = new Set(supportedModes.map((m) => m.label));
+  const usedNames = new Set<string>();
   let nextUnknownMode = UNKNOWN_MODE_BASE;
   for (const operationMode of heatingModes) {
     const normalized = normalizeOperationMode(operationMode);
-    const mode = KNOWN_MODE_VALUES[normalized] ?? nextUnknownMode++;
-    if (haOperationModes[mode] !== undefined) {
+    const label = humanize(operationMode);
+    if (usedNames.has(normalized) || usedLabels.has(label)) {
       // Duplicate entry in operation_list, keep the first.
       continue;
     }
+    usedNames.add(normalized);
+    usedLabels.add(label);
+    const mode = KNOWN_MODE_VALUES[normalized] ?? nextUnknownMode++;
     haOperationModes[mode] = operationMode;
     supportedModes.push({
-      label: humanize(operationMode),
+      label,
       mode,
       modeTags: [
         {

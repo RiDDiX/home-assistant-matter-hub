@@ -124,8 +124,8 @@ const mapping: EntityMappingConfig = {
 
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-async function mount() {
-  const type = createLegacyEndpointType(vacuum("docked"), mapping);
+async function mount(m: EntityMappingConfig = mapping) {
+  const type = createLegacyEndpointType(vacuum("docked"), m);
   if (!type) throw new Error("no endpoint type");
   server = await ServerNode.create({
     // biome-ignore lint/suspicious/noExplicitAny: env valid at runtime
@@ -231,6 +231,68 @@ describe("#490 vacuum clean that finishes on its own", () => {
     expect(serviceArea(endpoint).progress.map((p) => p.status)).toEqual([
       ServiceArea.OperationalStatus.Operating,
     ]);
+  });
+});
+
+describe("sequential room queue", () => {
+  const queued: EntityMappingConfig = {
+    entityId: "vacuum.robot",
+    customServiceAreas: ROOMS.map((name) => ({
+      name,
+      service: "script.clean_room",
+      data: { room: name },
+    })),
+  };
+
+  async function startQueue(endpoint: Endpoint) {
+    await controllerClean(endpoint, [KITCHEN, DINING, BEDROOM]);
+    await haState(endpoint, "cleaning");
+    expect(getSession(endpoint).pendingDispatches).toHaveLength(2);
+    calls = [];
+  }
+
+  it("does not leave the dock for the next room after a controller GoHome", async () => {
+    const endpoint = await mount(queued);
+    await startQueue(endpoint);
+
+    await endpoint.act(async (agent) => {
+      // biome-ignore lint/suspicious/noExplicitAny: drive the controller command
+      await (agent as any).rvcOperationalState.goHome();
+    });
+    await haState(endpoint, "returning");
+    await haState(endpoint, "docked");
+
+    expect(calls).toEqual([{ action: "vacuum.return_to_base" }]);
+    expect(getSession(endpoint).pendingDispatches).toEqual([]);
+  });
+
+  it("keeps the room and the queue across an unavailable blip", async () => {
+    const endpoint = await mount(queued);
+    await startQueue(endpoint);
+
+    await haState(endpoint, "unavailable");
+    await haState(endpoint, "cleaning");
+
+    expect(calls).toEqual([]);
+    expect(getSession(endpoint).pendingDispatches).toHaveLength(2);
+    expect([...getSession(endpoint).completedAreas]).toEqual([]);
+    expect(currentArea(endpoint)).toBe(KITCHEN);
+  });
+
+  it("forgets the pre-blip mode when the controller stops during the blip", async () => {
+    const endpoint = await mount(queued);
+    await startQueue(endpoint);
+
+    await haState(endpoint, "unavailable");
+    expect(getSession(endpoint).modeBeforeOffline).toBe(
+      RvcSupportedRunMode.Cleaning,
+    );
+    await controllerStart(endpoint, RvcSupportedRunMode.Idle);
+    expect(getSession(endpoint).modeBeforeOffline).toBeUndefined();
+
+    await haState(endpoint, "docked");
+    expect(calls).toEqual([{ action: "vacuum.return_to_base" }]);
+    expect(getSession(endpoint).pendingDispatches).toEqual([]);
   });
 });
 

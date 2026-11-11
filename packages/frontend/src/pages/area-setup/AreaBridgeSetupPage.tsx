@@ -30,6 +30,7 @@ import { Breadcrumbs } from "../../components/breadcrumbs/Breadcrumbs.tsx";
 import { domainIconMap } from "../../components/bridge/bridgeIconUtils.ts";
 import { ControllerIcon } from "../../components/bridge/ControllerIcon.tsx";
 import { useNotifications } from "../../components/notifications/use-notifications.ts";
+import { useBridges } from "../../hooks/data/bridges.ts";
 import { navigation } from "../../routes.tsx";
 import { loadBridges } from "../../state/bridges/bridge-actions.ts";
 import { useAppDispatch } from "../../state/hooks.ts";
@@ -46,6 +47,7 @@ export const AreaBridgeSetupPage = () => {
   const navigate = useNavigate();
   const notifications = useNotifications();
   const dispatch = useAppDispatch();
+  const { content: bridges } = useBridges();
 
   const [areas, setAreas] = useState<AreaSummary[]>([]);
   const [loading, setLoading] = useState(true);
@@ -57,7 +59,7 @@ export const AreaBridgeSetupPage = () => {
   const [creating, setCreating] = useState(false);
   const [progress, setProgress] = useState(0);
   const [results, setResults] = useState<
-    Array<{ area: string; success: boolean; error?: string }>
+    Array<{ area: string; success: boolean; skipped?: boolean; error?: string }>
   >([]);
 
   useEffect(() => {
@@ -110,12 +112,28 @@ export const AreaBridgeSetupPage = () => {
     const newResults: Array<{
       area: string;
       success: boolean;
+      skipped?: boolean;
       error?: string;
     }> = [];
+    const existingAreas = new Set(
+      (bridges ?? []).flatMap(({ filter: { include } }) =>
+        include.length === 1 &&
+        include[0].type === HomeAssistantMatcherType.Area
+          ? [include[0].value]
+          : [],
+      ),
+    );
+    const done = new Set<string>();
 
     for (let i = 0; i < areasToCreate.length; i++) {
       const area = areasToCreate[i];
       setProgress(((i + 1) / areasToCreate.length) * 100);
+
+      if (existingAreas.has(area.area_id)) {
+        newResults.push({ area: area.name, success: false, skipped: true });
+        done.add(area.area_id);
+        continue;
+      }
 
       const featureFlags: BridgeFeatureFlags = {
         autoBatteryMapping: true,
@@ -143,6 +161,7 @@ export const AreaBridgeSetupPage = () => {
       try {
         await createBridge(request);
         newResults.push({ area: area.name, success: true });
+        done.add(area.area_id);
       } catch (e) {
         newResults.push({
           area: area.name,
@@ -153,12 +172,21 @@ export const AreaBridgeSetupPage = () => {
     }
 
     setResults(newResults);
+    // a second click would duplicate them, only the failed ones stay selected
+    setSelectedAreas(
+      (prev) => new Set([...prev].filter((id) => !done.has(id))),
+    );
     setCreating(false);
     dispatch(loadBridges());
 
     const succeeded = newResults.filter((r) => r.success).length;
-    const failed = newResults.filter((r) => !r.success).length;
-    if (failed === 0) {
+    const failed = newResults.filter((r) => !r.success && !r.skipped).length;
+    if (succeeded === 0 && failed === 0) {
+      notifications.show({
+        message: t("areaSetup.alreadyExists"),
+        severity: "info",
+      });
+    } else if (failed === 0) {
       notifications.show({
         message: t("areaSetup.createdSuccess", { count: succeeded }),
         severity: "success",
@@ -169,7 +197,15 @@ export const AreaBridgeSetupPage = () => {
         severity: "warning",
       });
     }
-  }, [selectedAreas, areas, selectedController, dispatch, notifications, t]);
+  }, [
+    selectedAreas,
+    areas,
+    bridges,
+    selectedController,
+    dispatch,
+    notifications,
+    t,
+  ]);
 
   if (loading) {
     return (
@@ -400,10 +436,17 @@ export const AreaBridgeSetupPage = () => {
               {results.map((r) => (
                 <Alert
                   key={r.area}
-                  severity={r.success ? "success" : "error"}
+                  severity={
+                    r.success ? "success" : r.skipped ? "info" : "error"
+                  }
                   sx={{ mb: 0.5 }}
                 >
-                  {r.area}: {r.success ? t("areaSetup.created") : r.error}
+                  {r.area}:{" "}
+                  {r.success
+                    ? t("areaSetup.created")
+                    : r.skipped
+                      ? t("areaSetup.alreadyExists")
+                      : r.error}
                 </Alert>
               ))}
               <Button

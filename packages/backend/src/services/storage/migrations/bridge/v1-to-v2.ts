@@ -3,15 +3,21 @@ import type { StorageContext } from "@matter/main";
 export async function migrateBridgeV1ToV2(
   storage: StorageContext,
 ): Promise<number> {
-  const bridgeIds = JSON.parse(await storage.get("ids", "[]")) as string[];
+  // a rerun after a crash finds values already parsed
+  const bridgeIdsValue = await storage.get<string | string[]>("ids", "[]");
+  const bridgeIds: string[] =
+    typeof bridgeIdsValue === "string"
+      ? JSON.parse(bridgeIdsValue)
+      : bridgeIdsValue;
   await storage.set("ids", bridgeIds);
 
   for (const bridgeId of bridgeIds) {
-    const bridgeValue = await storage.get<string | undefined>(bridgeId);
+    const bridgeValue = await storage.get<string | {} | undefined>(bridgeId);
     if (bridgeValue === undefined) {
       continue;
     }
-    const bridge = JSON.parse(bridgeValue);
+    const bridge =
+      typeof bridgeValue === "string" ? JSON.parse(bridgeValue) : bridgeValue;
     bridge.compatibility = undefined;
     await storage.set(bridgeId, bridge);
   }

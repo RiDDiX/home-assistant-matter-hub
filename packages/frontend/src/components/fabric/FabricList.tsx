@@ -13,7 +13,7 @@ export const FabricList = (props: FabricListProps) => {
     <>
       {props.fabrics.map((fabric) => (
         <Box
-          key={fabric.fabricId}
+          key={fabric.fabricIndex}
           display="flex"
           alignItems="center"
           gap={1.5}

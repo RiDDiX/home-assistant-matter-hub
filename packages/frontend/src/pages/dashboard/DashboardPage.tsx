@@ -57,6 +57,7 @@ import { useNotifications } from "../../components/notifications/use-notificatio
 import { useBridges } from "../../hooks/data/bridges.ts";
 import { useDashboardWidgets } from "../../hooks/use-dashboard-widgets.ts";
 import { navigation } from "../../routes.tsx";
+import { safeStorage } from "../../safe-storage.ts";
 import { loadBridges } from "../../state/bridges/bridge-actions.ts";
 import { useAppDispatch } from "../../state/hooks.ts";
 import { DashboardCustomizeDialog } from "./DashboardCustomizeDialog.tsx";
@@ -327,7 +328,7 @@ export const DashboardPage = () => {
   const [customizeOpen, setCustomizeOpen] = useState(false);
   const widgets = useDashboardWidgets();
   const [successDismissed, setSuccessDismissed] = useState(
-    () => localStorage.getItem("hamh-first-success-dismissed") === "true",
+    () => safeStorage.get("hamh-first-success-dismissed") === "true",
   );
 
   // a failed poll keeps the last data, so only the first load can end empty
@@ -475,7 +476,7 @@ export const DashboardPage = () => {
               aria-label={t("common.close")}
               onClick={() => {
                 setSuccessDismissed(true);
-                localStorage.setItem("hamh-first-success-dismissed", "true");
+                safeStorage.set("hamh-first-success-dismissed", "true");
               }}
             >
               <CloseIcon fontSize="small" />

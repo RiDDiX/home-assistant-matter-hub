@@ -577,8 +577,8 @@ export class BridgeEndpointManager extends Service {
     return await this.pluginManager?.disablePlugin(pluginName);
   }
 
-  resetPlugin(pluginName: string): void {
-    this.pluginManager?.resetPlugin(pluginName);
+  async resetPlugin(pluginName: string): Promise<PluginMetadata | undefined> {
+    return await this.pluginManager?.resetPlugin(pluginName);
   }
 
   getPluginConfigSchema(pluginName: string): PluginConfigSchema | undefined {

@@ -11,6 +11,7 @@ const ScriptOnOffServer = PlugOnOffServer({
     action: "script.turn_on",
   }),
   turnOff: null,
+  momentary: true,
 });
 
 const ScriptDeviceType = OnOffPlugInUnitDevice.with(

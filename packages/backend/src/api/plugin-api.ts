@@ -1,7 +1,9 @@
 import * as nodePath from "node:path";
+import { Logger } from "@matter/general";
 import express from "express";
 import { BUILTIN_PLUGIN_NAMES } from "../plugins/builtin/names.js";
 import { PluginInstaller } from "../plugins/plugin-installer.js";
+import { isPluginImported } from "../plugins/plugin-manager.js";
 import { PluginRegistry } from "../plugins/plugin-registry.js";
 import { type PluginConfigSchema, SECRET_UNCHANGED } from "../plugins/types.js";
 import type { BridgeService } from "../services/bridges/bridge-service.js";
@@ -20,6 +22,19 @@ function redactSecrets(
     }
   }
   return out;
+}
+
+const logger = Logger.get("PluginApi");
+
+// A bridge restart imports a package again from Node's module cache, so a copy
+// already loaded in this process keeps running until the app restarts.
+function loadMessage(packageName: string, done: string): string {
+  if (!isPluginImported(packageName)) {
+    return `${done} Restart the bridge to load it.`;
+  }
+  const message = `${done} ${packageName} is already loaded, restart the app (add-on or container) to run the new version.`;
+  logger.warn(message);
+  return message;
 }
 
 const MAX_UPLOAD_BYTES = 50 * 1024 * 1024; // 50 MB
@@ -215,12 +230,21 @@ export function pluginApi(
    * POST /api/plugins/:bridgeId/:pluginName/reset
    * Reset the circuit breaker for a plugin.
    */
-  router.post("/:bridgeId/:pluginName/reset", (req, res) => {
+  router.post("/:bridgeId/:pluginName/reset", async (req, res) => {
     const bridge = pluginBridge(req.params.bridgeId, res);
     if (!bridge) return;
     const { pluginName } = req.params;
-    bridge.resetPlugin(pluginName);
-    res.json({ success: true, pluginName, reset: true });
+    const metadata = await bridge.resetPlugin(pluginName);
+    if (!metadata) {
+      res.status(404).json({ error: "Plugin not found" });
+      return;
+    }
+    res.json({
+      success: metadata.enabled === true,
+      pluginName,
+      reset: true,
+      enabled: metadata.enabled,
+    });
   });
 
   /**
@@ -287,13 +311,13 @@ export function pluginApi(
 
       // npm puts the package under its bare name, so the registry has to store
       // that name or the entry points at a path that does not exist.
-      registry.add(baseName, config ?? {});
+      registry.add(baseName, config);
 
       res.json({
         success: true,
         packageName: baseName,
         version: result.version,
-        message: "Plugin installed. Restart the bridge to load it.",
+        message: loadMessage(baseName, "Plugin installed."),
       });
     } catch (err) {
       res.status(500).json({
@@ -383,14 +407,16 @@ export function pluginApi(
         return;
       }
 
-      registry.add(result.packageName, {});
+      registry.add(result.packageName);
 
       res.json({
         success: true,
         packageName: result.packageName,
         version: result.version,
-        message:
-          "Plugin uploaded and installed. Restart the bridge to load it.",
+        message: loadMessage(
+          result.packageName,
+          "Plugin uploaded and installed.",
+        ),
       });
     } catch (err) {
       res.status(500).json({
@@ -438,14 +464,16 @@ export function pluginApi(
         return;
       }
 
-      registry.add(result.packageName, {});
+      registry.add(result.packageName);
 
       res.json({
         success: true,
         packageName: result.packageName,
         version: result.version,
-        message:
-          "Plugin linked from local path. Restart the bridge to load it.",
+        message: loadMessage(
+          result.packageName,
+          "Plugin linked from local path.",
+        ),
       });
     } catch (err) {
       res.status(500).json({

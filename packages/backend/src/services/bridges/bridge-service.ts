@@ -41,6 +41,7 @@ function clampRecoveryInterval(ms: number): number {
 
 export class BridgeService extends Service {
   private readonly pendingPorts = new Set<number>();
+  private readonly deleting = new Map<string, Promise<void>>();
   private readonly log = Logger.get("BridgeService");
   public readonly bridges: Bridge[] = [];
   public autoRecoveryEnabled = false;
@@ -75,6 +76,17 @@ export class BridgeService extends Service {
     // Snapshot first: addBridge mutates this.bridges and we may rewrite a port.
     for (const data of [...this.bridgeStorage.bridges]) {
       let normalized = this.normalizeBridgeData(data);
+      // the schema takes two letters only, a stored "USA" would fail every save
+      if (
+        normalized.countryCode != null &&
+        !/^[A-Za-z]{2}$/.test(normalized.countryCode)
+      ) {
+        this.log.warn(
+          `Bridge ${normalized.name} country code "${normalized.countryCode}" is not two letters, dropped`,
+        );
+        const { countryCode: _, ...rest } = normalized;
+        normalized = rest;
+      }
       if (this.portUsed(normalized.port)) {
         // Two stored bridges want the same port. Only one can bind it, so move
         // this one to a free port instead of letting it fail offline (#378).
@@ -84,8 +96,18 @@ export class BridgeService extends Service {
         );
         normalized = { ...normalized, port: freePort };
       }
-      await this.bridgeStorage.add(normalized);
-      await this.addBridge(normalized);
+      try {
+        await this.bridgeStorage.add(normalized);
+        await this.addBridge(normalized);
+      } catch (e) {
+        // one broken bridge must not keep the others from loading, its stored
+        // record still owns the port
+        this.pendingPorts.add(normalized.port);
+        this.log.error(
+          `Failed to load bridge ${normalized.id} (${normalized.name}):`,
+          e,
+        );
+      }
     }
     if (this.autoRecoveryEnabled) {
       this.startAutoRecovery();
@@ -374,9 +396,28 @@ export class BridgeService extends Service {
     return bridge;
   }
 
-  async delete(bridgeId: string): Promise<void> {
+  delete(bridgeId: string): Promise<void> {
+    // a second delete while one runs (double click) waits for the first
+    let pending = this.deleting.get(bridgeId);
+    if (!pending) {
+      pending = this.runDelete(bridgeId).finally(() =>
+        this.deleting.delete(bridgeId),
+      );
+      this.deleting.set(bridgeId, pending);
+    }
+    return pending;
+  }
+
+  private async runDelete(bridgeId: string): Promise<void> {
     const bridge = this.bridges.find((bridge) => bridge.id === bridgeId);
     if (!bridge) {
+      // a stored bridge that failed to load is not live but keeps its port
+      const stored = this.bridgeStorage.bridges.find((b) => b.id === bridgeId);
+      if (stored) {
+        await this.bridgeStorage.remove(bridgeId);
+        this.pendingPorts.delete(stored.port);
+        this.onBridgeChanged?.(bridgeId);
+      }
       return;
     }
     await bridge.stop();
@@ -395,7 +436,8 @@ export class BridgeService extends Service {
     } catch {
       // Ignore disposal errors during deletion
     }
-    this.bridges.splice(this.bridges.indexOf(bridge), 1);
+    const index = this.bridges.indexOf(bridge);
+    if (index >= 0) this.bridges.splice(index, 1);
     await this.bridgeStorage.remove(bridgeId);
     this.onBridgeChanged?.(bridgeId);
   }

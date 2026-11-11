@@ -1,9 +1,10 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import express from "express";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { PluginManager } from "../plugins/plugin-manager.js";
 import type { BridgeService } from "../services/bridges/bridge-service.js";
 import { pluginApi } from "./plugin-api.js";
 
@@ -431,5 +432,41 @@ describe("npm install of a built-in plugin name (#432)", () => {
       },
       [serverModeBridge],
     );
+  });
+});
+
+describe("upload of a plugin already loaded in this process", () => {
+  it("asks for an app restart, a bridge restart would run the old code", async () => {
+    const pkg = join(dir, "hamh-plugin-reupload");
+    mkdirSync(pkg, { recursive: true });
+    writeFileSync(
+      join(pkg, "package.json"),
+      JSON.stringify({
+        name: "hamh-plugin-reupload",
+        main: "index.js",
+        type: "module",
+      }),
+    );
+    writeFileSync(
+      join(pkg, "index.js"),
+      `export default class P { name = "hamh-plugin-reupload"; version = "1.0.0"; async onStart() {} }`,
+    );
+    await new PluginManager("b1", dir).loadExternal(pkg, {});
+
+    await withRouter(async (base) => {
+      const upload = (name: string) =>
+        fetch(`${base}/plugins/upload`, {
+          method: "POST",
+          headers: { "content-type": "application/octet-stream" },
+          body: name,
+        }).then((r) => r.json() as Promise<{ message: string }>);
+
+      expect((await upload("hamh-plugin-reupload")).message).toContain(
+        "restart the app",
+      );
+      expect((await upload("hamh-plugin-fresh")).message).toContain(
+        "Restart the bridge",
+      );
+    });
   });
 });

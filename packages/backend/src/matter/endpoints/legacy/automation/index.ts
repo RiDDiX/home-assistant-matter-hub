@@ -11,6 +11,7 @@ const AutomationOnOffServer = PlugOnOffServer({
     action: "automation.trigger",
   }),
   turnOff: null,
+  momentary: true,
 });
 
 const AutomationDeviceType = OnOffPlugInUnitDevice.with(

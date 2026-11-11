@@ -6,6 +6,7 @@ import type {
 import { Logger } from "@matter/general";
 import type { EndpointType } from "@matter/main";
 import debounce from "debounce";
+import { isEqual } from "lodash-es";
 import type { BridgeRegistry } from "../../services/bridges/bridge-registry.js";
 import type { HomeAssistantStates } from "../../services/home-assistant/home-assistant-registry.js";
 import { EntityEndpoint, getMappedEntityIds } from "./entity-endpoint.js";
@@ -328,13 +329,17 @@ export class ServerModeVacuumEndpoint extends EntityEndpoint {
     // even when the actual device state/attributes are identical.
     // Skipping these prevents unnecessary Matter subscription reports
     // and reduces MRP traffic that can cause session loss.
-    if (
-      !mappedChanged &&
-      state.state === this.lastState?.state &&
-      JSON.stringify(state.attributes) ===
-        JSON.stringify(this.lastState?.attributes)
-    ) {
-      return;
+    if (!mappedChanged) {
+      // Same state object ref: the HA diff never touched this entity.
+      if (state === this.lastState) return;
+      // Reused attributes ref skips the deep compare on the hot path.
+      if (
+        state.state === this.lastState?.state &&
+        (state.attributes === this.lastState?.attributes ||
+          isEqual(state.attributes, this.lastState?.attributes))
+      ) {
+        return;
+      }
     }
 
     if (mappedChanged) {

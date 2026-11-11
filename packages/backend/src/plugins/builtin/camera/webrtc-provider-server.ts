@@ -70,6 +70,7 @@ export class CameraWebRtcProviderServer extends WebRtcTransportProviderServer {
       `provideOffer entry: entityId=${entityId} session=${id} (sdp ${request.sdp.length} chars)`,
     );
     const isNew = request.webRtcSessionId == null;
+    if (!isNew) this.checkOwner(id);
     const videoStreams = isNew
       ? this.videoStreamsFor(
           request,
@@ -146,6 +147,7 @@ export class CameraWebRtcProviderServer extends WebRtcTransportProviderServer {
     logger.info(
       `provideAnswer session=${request.webRtcSessionId} (sdp ${request.sdp.length} chars, ${this.state.entityId})`,
     );
+    this.checkOwner(request.webRtcSessionId);
     return this.state.bridge.acceptControllerAnswer(
       request.webRtcSessionId,
       request.sdp,
@@ -158,6 +160,7 @@ export class CameraWebRtcProviderServer extends WebRtcTransportProviderServer {
     logger.info(
       `provideIceCandidates session=${request.webRtcSessionId}: ${request.iceCandidates.length} candidate(s) (${this.state.entityId})`,
     );
+    this.checkOwner(request.webRtcSessionId);
     for (const c of request.iceCandidates) {
       await this.state.bridge.addControllerIceCandidate(
         request.webRtcSessionId,
@@ -174,6 +177,7 @@ export class CameraWebRtcProviderServer extends WebRtcTransportProviderServer {
     logger.info(
       `endSession session=${request.webRtcSessionId} (${this.state.entityId})`,
     );
+    this.checkOwner(request.webRtcSessionId);
     await this.state.bridge.endSession(request.webRtcSessionId);
     unregisterRequestor(request.webRtcSessionId);
     this.state.currentSessions = this.state.currentSessions.filter(
@@ -251,16 +255,10 @@ export class CameraWebRtcProviderServer extends WebRtcTransportProviderServer {
       );
   }
 
-  private trackSession(
-    id: number,
-    streamUsage: StreamUsage,
-    peerEndpointId: EndpointNumber,
-    videoStreams: number[],
-    audioStreams: number[],
-  ): void {
-    // Commands run online, so a session exists; read it structurally because
-    // the public context type also covers the offline case.
-    const session = (
+  // Commands run online, so a session exists; read it structurally because
+  // the public context type also covers the offline case.
+  private invoker() {
+    return (
       this.context as unknown as {
         session?: {
           peerNodeId?: NodeId;
@@ -268,6 +266,37 @@ export class CameraWebRtcProviderServer extends WebRtcTransportProviderServer {
         };
       }
     ).session;
+  }
+
+  // A session belongs to the controller that offered it, any other one gets
+  // NotFound. An offline act is local code and passes.
+  private checkOwner(id: number): void {
+    const session = this.invoker();
+    if (!session) return;
+    const fabricIndex = session.associatedFabric?.fabricIndex;
+    const peerNodeId = session.peerNodeId ?? NodeId(0);
+    const owned = this.state.currentSessions.some(
+      (s) =>
+        s.id === id &&
+        s.fabricIndex === fabricIndex &&
+        s.peerNodeId === peerNodeId,
+    );
+    if (!owned) {
+      throw new StatusResponseError(
+        `WebRTC session ${id} not found`,
+        StatusCode.NotFound,
+      );
+    }
+  }
+
+  private trackSession(
+    id: number,
+    streamUsage: StreamUsage,
+    peerEndpointId: EndpointNumber,
+    videoStreams: number[],
+    audioStreams: number[],
+  ): void {
+    const session = this.invoker();
     const fabricIndex = session?.associatedFabric?.fabricIndex;
     if (fabricIndex == null) {
       // No fabric (offline act in tests): a 0 sentinel fails validation.

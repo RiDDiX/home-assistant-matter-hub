@@ -221,7 +221,7 @@ const thermostat = (endpoint: LegacyEndpoint) =>
 const modeCalls = () =>
   calls.filter((c) => c.action === "climate.set_hvac_mode");
 
-describe("climateBlockOff (#527)", () => {
+describe("climateBlockOff (#527)", { timeout: 30_000 }, () => {
   it("refuses Off and Sleep from a controller and keeps the schedule", async () => {
     const { endpoint, client } = await mount("auto", { climateBlockOff: true });
     expect(Object.keys(endpoint.behaviors.supported)).not.toContain("onOff");

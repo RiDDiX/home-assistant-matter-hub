@@ -496,7 +496,8 @@ export const bridgeConfigSchema: JSONSchema7 = {
       description:
         "An ISO 3166-1 alpha-2 code to represent the country in which the Node is located. Only needed if the commissioning fails due to missing country code.",
       minLength: 2,
-      maxLength: 3,
+      maxLength: 2,
+      pattern: "^[A-Za-z]{2}$",
     },
     priority: {
       title: "Startup Priority",

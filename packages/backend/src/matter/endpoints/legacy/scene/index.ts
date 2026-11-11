@@ -16,6 +16,7 @@ const SceneOnOffServer = PlugOnOffServer({
     action: "scene.turn_on",
   }),
   turnOff: null,
+  momentary: true,
 });
 
 const SceneDeviceType = OnOffPlugInUnitDevice.with(

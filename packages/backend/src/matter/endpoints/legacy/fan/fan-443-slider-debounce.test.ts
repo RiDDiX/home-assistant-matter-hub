@@ -8,7 +8,7 @@ import type {
 import { Environment, VariableService } from "@matter/general";
 import { Endpoint, VendorId } from "@matter/main";
 import { ServerNode } from "@matter/main/node";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { BridgeDataProvider } from "../../../../services/bridges/bridge-data-provider.js";
 import {
   type HomeAssistantAction,
@@ -205,6 +205,43 @@ describe("fan slider debounce (#443)", () => {
     });
     await wait(1300);
     expect(setPercentageCalls()).toEqual([40]);
+    await server.close().catch(() => {});
+  });
+
+  it("drops a pending write when the controller turns the fan off", async () => {
+    const server = await ServerNode.create({
+      // biome-ignore lint/suspicious/noExplicitAny: env valid at runtime
+      environment: env as any,
+      id: "fan443-off-node",
+      network: { port: 0 },
+      commissioning: { passcode: 20202021, discriminator: 3840 },
+      basicInformation: { vendorId: VendorId(0xfff1), productId: 0x8000 },
+    });
+    const aggregator = new AggregatorEndpoint("aggregator");
+    await server.add(aggregator);
+    const endpoint = new Endpoint(
+      FanDevice({
+        entity: fanEntity(),
+        mapping: { entityId: "fan.test", fanSliderDebounceMs: 1000 },
+      } as never),
+      { id: "fan" },
+    );
+    await aggregator.add(endpoint);
+
+    calls.length = 0;
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      await endpoint.act((agent) => {
+        // biome-ignore lint/suspicious/noExplicitAny: drive the controller write
+        const fan = (agent as any).fanControl;
+        fan.targetPercentSettingChanged(50, 0, { subject: {} });
+        fan.onOffChanged(false, true, { subject: {} });
+      });
+      vi.advanceTimersByTime(1300);
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(setPercentageCalls()).toEqual([]);
     await server.close().catch(() => {});
   });
 });

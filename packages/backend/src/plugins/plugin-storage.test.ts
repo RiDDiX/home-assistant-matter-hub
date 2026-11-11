@@ -8,7 +8,12 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { FilePluginStorage, pluginStorageFilePath } from "./plugin-storage.js";
+import {
+  FilePluginStorage,
+  pluginStateFilePath,
+  pluginStorageFilePath,
+  removePluginFiles,
+} from "./plugin-storage.js";
 
 // #373: plugin config is edited per bridge but was stored in one file keyed by
 // plugin name only, so every bridge shared the same config. The file must be
@@ -60,5 +65,27 @@ describe("FilePluginStorage torn file", () => {
     expect(JSON.parse(readFileSync(file, "utf-8"))).toEqual({
       config: { cameras: "camera.front" },
     });
+  });
+});
+
+describe("removePluginFiles", () => {
+  it("removes only the deleted bridge's files, not those of an id it prefixes", () => {
+    const own = [
+      pluginStorageFilePath(dir, "ab", "camera"),
+      pluginStorageFilePath(dir, "ab", "vesync"),
+      pluginStateFilePath(dir, "ab"),
+    ];
+    const kept = [
+      pluginStorageFilePath(dir, "ab-x", "camera"),
+      pluginStateFilePath(dir, "ab-x"),
+      pluginStorageFilePath(dir, "cd", "camera"),
+      join(dir, "bridges.json"),
+    ];
+    for (const file of [...own, ...kept]) writeFileSync(file, "{}");
+
+    removePluginFiles(dir, "ab", ["ab-x", "cd"]);
+
+    for (const file of own) expect(existsSync(file), file).toBe(false);
+    for (const file of kept) expect(existsSync(file), file).toBe(true);
   });
 });

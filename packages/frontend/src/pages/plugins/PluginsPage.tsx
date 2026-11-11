@@ -43,6 +43,7 @@ import Typography from "@mui/material/Typography";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ConfirmDialog } from "../../components/misc/ConfirmDialog.tsx";
+import { useNotifications } from "../../components/notifications/use-notifications.ts";
 import { useBridges } from "../../hooks/data/bridges.ts";
 
 interface PluginDevice {
@@ -163,6 +164,7 @@ async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
 
 export const PluginsPage = () => {
   const { t } = useTranslation();
+  const notifications = useNotifications();
   const { content: bridges } = useBridges();
   const [bridgePlugins, setBridgePlugins] = useState<BridgePlugins[]>([]);
   const [installed, setInstalled] = useState<InstalledPlugin[]>([]);
@@ -216,18 +218,28 @@ export const PluginsPage = () => {
     refresh();
   }, [refresh]);
 
+  // The backend knows whether a bridge restart is enough or the package was
+  // already loaded in this process and needs an app restart.
+  const notifyInstalled = (message: string | undefined, hint: string) => {
+    notifications.show({ message: message ?? t(hint), severity: "success" });
+  };
+
   const handleInstall = async () => {
     if (!packageName.trim()) return;
     setInstalling(true);
     setInstallError(undefined);
     try {
-      await fetchJson("api/plugins/install", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ packageName: packageName.trim() }),
-      });
+      const data = await fetchJson<{ message?: string }>(
+        "api/plugins/install",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ packageName: packageName.trim() }),
+        },
+      );
       setPackageName("");
       setInstallOpen(false);
+      notifyInstalled(data.message, "plugins.npmHint");
       await refresh();
     } catch (e) {
       setInstallError(e instanceof Error ? e.message : String(e));
@@ -247,16 +259,17 @@ export const PluginsPage = () => {
         headers: { "Content-Type": "application/octet-stream" },
         body: buf,
       });
+      const data = (await res.json().catch(() => ({}))) as {
+        error?: string;
+        message?: string;
+      };
       if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        throw new Error(
-          (data as { error?: string }).error ??
-            `${res.status} ${res.statusText}`,
-        );
+        throw new Error(data.error ?? `${res.status} ${res.statusText}`);
       }
       setSelectedFile(null);
       if (fileInputRef.current) fileInputRef.current.value = "";
       setInstallOpen(false);
+      notifyInstalled(data.message, "plugins.uploadHint");
       await refresh();
     } catch (e) {
       setInstallError(e instanceof Error ? e.message : String(e));
@@ -270,13 +283,17 @@ export const PluginsPage = () => {
     setInstalling(true);
     setInstallError(undefined);
     try {
-      await fetchJson("api/plugins/install-local", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ path: localPath.trim() }),
-      });
+      const data = await fetchJson<{ message?: string }>(
+        "api/plugins/install-local",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ path: localPath.trim() }),
+        },
+      );
       setLocalPath("");
       setInstallOpen(false);
+      notifyInstalled(data.message, "plugins.localHint");
       await refresh();
     } catch (e) {
       setInstallError(e instanceof Error ? e.message : String(e));

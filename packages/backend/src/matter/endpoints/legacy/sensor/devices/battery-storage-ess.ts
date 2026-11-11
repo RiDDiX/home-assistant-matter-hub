@@ -39,7 +39,13 @@ class EssPowerServer extends PowerFeaturedBase {
 
     const stateProvider = this.agent.env.get(EntityStateProvider);
     const mw = mappedMilli(stateProvider, powerEntity, "power");
-    if (mw == null) return;
+    if (mw == null) {
+      // unavailable or unknown clears the reading instead of freezing the last one
+      if (stateProvider.getState(powerEntity) != null) {
+        applyPatchState(this.state, { activePower: null });
+      }
+      return;
+    }
 
     applyPatchState(this.state, { activePower: -mw });
   }

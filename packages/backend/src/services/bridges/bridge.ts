@@ -45,8 +45,8 @@ export class Bridge extends BridgeBase<
     return await this.endpointManager.disablePlugin(pluginName);
   }
 
-  resetPlugin(pluginName: string): void {
-    this.endpointManager.resetPlugin(pluginName);
+  async resetPlugin(pluginName: string): Promise<PluginMetadata | undefined> {
+    return await this.endpointManager.resetPlugin(pluginName);
   }
 
   getPluginConfigSchema(pluginName: string): PluginConfigSchema | undefined {

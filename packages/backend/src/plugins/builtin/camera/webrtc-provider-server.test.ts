@@ -888,3 +888,75 @@ describe("audio streams", () => {
     expect(allocatedAudioStreams(endpoint)).toEqual([]);
   });
 });
+
+// A session id is a small counter, so another controller on the bridge could
+// guess it. Only the controller that offered a session may touch it.
+describe("session ownership", () => {
+  function asPeer(
+    endpoint: Endpoint,
+    fabricIndex: number,
+    peerNodeId: number,
+    // biome-ignore lint/suspicious/noExplicitAny: invoke commands directly
+    fn: (provider: any) => unknown,
+  ): Promise<unknown> {
+    const session = {
+      isClosed: false,
+      peerNodeId: NodeId(peerNodeId),
+      associatedFabric: { fabricIndex: FabricIndex(fabricIndex) },
+    };
+    return LocalActorContext.act(
+      "command from a peer",
+      (context) =>
+        // biome-ignore lint/suspicious/noExplicitAny: invoke commands directly
+        fn((endpoint.agentFor(context) as any).webRtcTransportProvider),
+      { session } as never,
+    ) as Promise<unknown>;
+  }
+
+  it("answers NotFound to a controller that did not offer the session", async () => {
+    setRequestorInvokeForTests(async () => true);
+    const { bridge, endedSessions } = fakeBridge();
+    const endpoint = await mountCamera(bridge);
+    const { webRtcSessionId: id } = await provideOffer(
+      endpoint,
+      null,
+      undefined,
+      true,
+    );
+    touched.add(id);
+    await vi.waitFor(() => expect(currentSessions(endpoint)).toHaveLength(1));
+    endedSessions.length = 0;
+
+    // biome-ignore lint/suspicious/noExplicitAny: invoke commands directly
+    const calls: ((p: any) => unknown)[] = [
+      (p) => p.endSession({ webRtcSessionId: id, reason: 0 }),
+      (p) => p.provideAnswer({ webRtcSessionId: id, sdp: "v=0" }),
+      (p) => p.provideIceCandidates({ webRtcSessionId: id, iceCandidates: [] }),
+      (p) =>
+        p.provideOffer({
+          webRtcSessionId: id,
+          sdp: "v=0 takeover",
+          streamUsage: StreamUsage.LiveView,
+          originatingEndpointId: EndpointNumber(1),
+          videoStreamId: 1,
+        }),
+    ];
+    for (const call of calls) {
+      // another fabric, then the same fabric with another node
+      expect(await statusOf(() => asPeer(endpoint, 2, 1, call))).toBe(
+        StatusCode.NotFound,
+      );
+      expect(await statusOf(() => asPeer(endpoint, 1, 2, call))).toBe(
+        StatusCode.NotFound,
+      );
+    }
+    expect(endedSessions).toEqual([]);
+    expect(currentSessions(endpoint).map((s) => s.id)).toEqual([id]);
+
+    expect(await statusOf(() => asPeer(endpoint, 1, 1, calls[0]))).toBe(
+      "success",
+    );
+    expect(endedSessions).toEqual([id]);
+    expect(currentSessions(endpoint)).toEqual([]);
+  });
+});

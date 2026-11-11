@@ -1,4 +1,5 @@
 import { useCallback, useState } from "react";
+import { safeStorage } from "../safe-storage.ts";
 
 export interface DashboardWidgetDef {
   readonly id: string;
@@ -57,7 +58,7 @@ function loadConfig(): DashboardWidgetConfig {
 }
 
 function saveConfig(config: DashboardWidgetConfig) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
+  safeStorage.set(STORAGE_KEY, JSON.stringify(config));
 }
 
 export function useDashboardWidgets() {

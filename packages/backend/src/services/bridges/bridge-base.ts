@@ -370,21 +370,26 @@ export abstract class BridgeBase<
     }
   }
 
-  async factoryReset(): Promise<void> {
+  // beforeReset runs only once the reset is certain, so a bridge that stopped
+  // after the caller looked keeps what beforeReset would drop.
+  async factoryReset(beforeReset?: () => Promise<void>): Promise<boolean> {
     // A second request mid reset joins the first, it must not erase again.
     if (this.resetInFlight) {
-      return this.resetInFlight;
+      await this.resetInFlight;
+      return true;
     }
     if (this.status.code !== BridgeStatus.Running) {
-      return;
+      return false;
     }
-    this.resetInFlight = this.runFactoryReset().finally(() => {
+    this.resetInFlight = this.runFactoryReset(beforeReset).finally(() => {
       this.resetInFlight = undefined;
     });
-    return this.resetInFlight;
+    await this.resetInFlight;
+    return true;
   }
 
-  private async runFactoryReset() {
+  private async runFactoryReset(beforeReset?: () => Promise<void>) {
+    await beforeReset?.();
     // Regular stop first, or the restart rejects every plugin as already
     // registered (#477, #478).
     await this.stop(BridgeStatus.Stopped, "Factory reset");

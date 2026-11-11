@@ -26,9 +26,14 @@ async function withRouter(fn: (base: string) => Promise<void>) {
   }
 }
 
-function upload(base: string, bridgeId: string, size: number) {
+function upload(
+  base: string,
+  bridgeId: string,
+  size: number,
+  name = "icon.png",
+) {
   const form = new FormData();
-  form.append("icon", new Blob([Buffer.alloc(size, 1)]), "icon.png");
+  form.append("icon", new Blob([Buffer.alloc(size, 1)]), name);
   return fetch(`${base}/icons/${bridgeId}`, { method: "POST", body: form });
 }
 
@@ -48,6 +53,23 @@ describe("bridge icon upload", () => {
       expect(readdirSync(iconsDir).filter((f) => f.startsWith("b2"))).toEqual(
         [],
       );
+    });
+  });
+
+  it("replaces an icon with another extension, not one of a prefix id", async () => {
+    await withRouter(async (base) => {
+      await upload(base, "b3", 16);
+      await upload(base, "b30", 16);
+      await upload(base, "b3", 16, "icon.jpg");
+      const icons = () =>
+        readdirSync(iconsDir)
+          .filter((f) => f.startsWith("b3"))
+          .sort();
+      expect(icons()).toEqual(["b3.jpg", "b30.png"]);
+
+      const res = await fetch(`${base}/icons/b3`, { method: "DELETE" });
+      expect(res.status).toBe(200);
+      expect(icons()).toEqual(["b30.png"]);
     });
   });
 

@@ -5,6 +5,7 @@ import { RvcOperationalState } from "@matter/main/clusters/rvc-operational-state
 import { applyPatchState } from "../../utils/apply-patch-state.js";
 import { trimToLength } from "../../utils/trim-to-length.js";
 import { HomeAssistantEntityBehavior } from "./home-assistant-entity-behavior.js";
+import { endCleaningSession } from "./rvc-run-mode-server.js";
 import type { ValueGetter, ValueSetter } from "./utils/cluster-config.js";
 
 import OperationalState = RvcOperationalState.OperationalState;
@@ -307,6 +308,8 @@ class RvcOperationalStateServerBase extends Base.enable({
       };
     }
 
+    // Else docking reads as a between-rooms gap and fires the next room
+    endCleaningSession(this.agent);
     const goHomeAction = this.state.config.goHome;
     if (goHomeAction) {
       const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);

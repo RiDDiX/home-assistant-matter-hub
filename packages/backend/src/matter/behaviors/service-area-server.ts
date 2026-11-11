@@ -52,6 +52,22 @@ function selectAreas(
     };
   }
 
+  // One job cleans one map: room ids restart per floor
+  const mapIds = new Set(
+    state.supportedAreas
+      .filter((a) => uniqueAreas.includes(a.areaId) && a.mapId != null)
+      .map((a) => a.mapId),
+  );
+  if (mapIds.size > 1) {
+    logger.warn(
+      `Areas on ${mapIds.size} maps requested: ${uniqueAreas.join(", ")}`,
+    );
+    return {
+      status: ServiceArea.SelectAreasStatus.InvalidSet,
+      statusText: "Areas must be on one map",
+    };
+  }
+
   // Store selected areas - actual cleaning starts when RvcRunMode.changeToMode(Cleaning) is called
   state.selectedAreas = uniqueAreas;
   // A new selection, even an empty one, replaces a parked one (#492)

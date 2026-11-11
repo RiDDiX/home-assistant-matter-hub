@@ -30,8 +30,7 @@
   },
   "workspaces": [
     "apps/*",
-    "packages/*",
-    "docs"
+    "packages/*"
   ],
   "pnpm": {
     "overrides": {

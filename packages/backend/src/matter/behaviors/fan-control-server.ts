@@ -149,7 +149,10 @@ export interface FanControlServerConfig {
   setPresetMode: ValueSetter<string>;
   // Rocking (oscillation) control
   setOscillation: ValueSetter<boolean>;
-  setRockSetting?: ValueSetter<FanControlRockSetting>;
+  // undefined when the entity declares no mode for the setting, nothing is sent
+  setRockSetting?: (
+    ...args: Parameters<ValueSetter<FanControlRockSetting>>
+  ) => HomeAssistantAction | undefined;
   // Wind mode control - sets preset mode for wind
   setWindMode: ValueSetter<"natural" | "sleep" | "off">;
 }
@@ -768,11 +771,12 @@ export class FanControlServerBase extends FeaturedBase {
         return;
       }
       const config = this.state.config;
-      homeAssistant.callAction(
-        config.setRockSetting
-          ? config.setRockSetting(rockSetting, this.agent)
-          : config.setOscillation(!!rockSetting.rockUpDown, this.agent),
-      );
+      const action = config.setRockSetting
+        ? config.setRockSetting(rockSetting, this.agent)
+        : config.setOscillation(!!rockSetting.rockUpDown, this.agent);
+      if (action) {
+        homeAssistant.callAction(action);
+      }
     });
   }
 
@@ -810,8 +814,16 @@ export class FanControlServerBase extends FeaturedBase {
     if (transactionIsOffline(context)) {
       return;
     }
+    if (!onOff) {
+      // A controller off must not be undone by a slider write still in the window
+      const st = fanDebounce.get(this.endpoint);
+      if (st) {
+        clearFanDebounce(st);
+      }
+      return;
+    }
     const remembered = this.remembered();
-    if (onOff && remembered.percent > 0) {
+    if (remembered.percent > 0) {
       // Use asLocalActor so the percentSetting change is treated as offline.
       // Without this, targetPercentSettingChanged fires and sends a second
       // fan.turn_on(percentage), overriding the no-param fan.turn_on from

@@ -46,6 +46,12 @@ describe("MATTER_TRAFFIC_FACILITIES", () => {
     expect(categoryFor("FailsafeContext")).toBe("matter-traffic");
   });
 
+  it("surfaces camera plugin logs (#539)", () => {
+    expect(categoryFor("CameraPlugin")).toBe("matter-traffic");
+    expect(categoryFor("CameraWebRtc")).toBe("matter-traffic");
+    expect(categoryFor("CameraWebRtcRequestor")).toBe("matter-traffic");
+  });
+
   it("keeps the passcode-carrying Commissioning facility out", () => {
     expect(categoryFor("Commissioning")).toBeUndefined();
   });

@@ -165,8 +165,11 @@ class WaterHeaterManagementServerBase extends Base {
     const session = boostSessions.get(this.endpoint);
     const boosting =
       this.state.boostState === WaterHeaterManagement.BoostState.Active;
+    // An unavailable entity carries no operation_mode, it has not left the boost
+    const unknownState =
+      entity.state.state === "unavailable" || entity.state.state === "unknown";
 
-    if (boosting && session) {
+    if (boosting && session && !unknownState) {
       // The boost ends when Home Assistant leaves the boost mode behind our
       // back, and — for a OneShot boost — once the water is up to temperature.
       // HA confirms set_operation_mode asynchronously though, so events that

@@ -48,6 +48,10 @@ export function bridgeIconApi(storageLocation: string): express.Router {
     limits: { fileSize: MAX_FILE_SIZE },
   });
 
+  // Ids can share a prefix (b1, b10), so match the whole name.
+  const iconFiles = (bridgeId: string) =>
+    fs.readdirSync(iconsDir).filter((f) => path.parse(f).name === bridgeId);
+
   const router = express.Router();
 
   // Express decodes %2F in params and multer joins the name onto iconsDir.
@@ -66,6 +70,12 @@ export function bridgeIconApi(storageLocation: string): express.Router {
         res.status(400).json({ error: "No file uploaded" });
         return;
       }
+      // Delete any previous icon with a different extension
+      for (const f of iconFiles(req.params.bridgeId as string)) {
+        if (f !== req.file.filename) {
+          fs.unlinkSync(path.join(iconsDir, f));
+        }
+      }
       const iconUrl = `api/bridge-icons/${req.params.bridgeId}`;
       res.json({ success: true, iconUrl });
     },
@@ -75,20 +85,14 @@ export function bridgeIconApi(storageLocation: string): express.Router {
   router.get(
     "/:bridgeId/exists",
     (req: express.Request, res: express.Response) => {
-      const bridgeId = req.params.bridgeId;
-      const files = fs.readdirSync(iconsDir);
-      const exists = files.some((f) => f.startsWith(`${bridgeId}.`));
+      const exists = iconFiles(req.params.bridgeId as string).length > 0;
       res.json({ exists });
     },
   );
 
   // Get icon for a bridge
   router.get("/:bridgeId", (req: express.Request, res: express.Response) => {
-    const bridgeId = req.params.bridgeId;
-
-    // Find the icon file (could have different extensions)
-    const files = fs.readdirSync(iconsDir);
-    const iconFile = files.find((f) => f.startsWith(`${bridgeId}.`));
+    const [iconFile] = iconFiles(req.params.bridgeId as string);
 
     if (!iconFile) {
       res.status(404).json({ error: "Icon not found" });
@@ -103,19 +107,16 @@ export function bridgeIconApi(storageLocation: string): express.Router {
 
   // Delete icon for a bridge
   router.delete("/:bridgeId", (req: express.Request, res: express.Response) => {
-    const bridgeId = req.params.bridgeId;
+    const files = iconFiles(req.params.bridgeId as string);
 
-    // Find and delete the icon file
-    const files = fs.readdirSync(iconsDir);
-    const iconFile = files.find((f) => f.startsWith(`${bridgeId}.`));
-
-    if (!iconFile) {
+    if (files.length === 0) {
       res.status(404).json({ error: "Icon not found" });
       return;
     }
 
-    const filePath = path.join(iconsDir, iconFile);
-    fs.unlinkSync(filePath);
+    for (const f of files) {
+      fs.unlinkSync(path.join(iconsDir, f));
+    }
     res.json({ success: true });
   });
 

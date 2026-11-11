@@ -58,6 +58,71 @@ describe("climate fan rocking", () => {
       rockSettingToSwingMode({ rockLeftRight: true, rockUpDown: true }),
     ).toBe("both");
   });
+
+  // Rocking sent the literals "vertical"/"off", which HA rejects for entities
+  // declaring other swing modes, so the toggle did nothing.
+  it("sends the entity's declared swing modes", () => {
+    const set = (modes: string[], setting: Record<string, boolean>) =>
+      climateFanControlConfig.setRockSetting?.(
+        setting,
+        agentFor({ swing_modes: modes }),
+      );
+    expect(set(["on", "off"], { rockUpDown: true })).toEqual({
+      action: "climate.set_swing_mode",
+      data: { swing_mode: "on" },
+    });
+    expect(set(["stopped", "fixedTop", "rangeFull"], {})).toEqual({
+      action: "climate.set_swing_mode",
+      data: { swing_mode: "stopped" },
+    });
+    expect(
+      set(["stopped", "fixedTop", "rangeFull"], { rockUpDown: true }),
+    ).toEqual({
+      action: "climate.set_swing_mode",
+      data: { swing_mode: "fixedTop" },
+    });
+    expect(
+      set(["Off", "Vertical", "Horizontal"], { rockLeftRight: true }),
+    ).toEqual({
+      action: "climate.set_swing_mode",
+      data: { swing_mode: "Horizontal" },
+    });
+    expect(
+      set(["off", "vertical"], { rockLeftRight: true, rockUpDown: true }),
+    ).toEqual({
+      action: "climate.set_swing_mode",
+      data: { swing_mode: "vertical" },
+    });
+  });
+
+  it("sends nothing when no declared mode fits", () => {
+    expect(
+      climateFanControlConfig.setRockSetting?.(
+        {},
+        agentFor({ swing_modes: ["vertical", "horizontal"] }),
+      ),
+    ).toBeUndefined();
+  });
+
+  it("keeps the historic literals when no swing modes are declared", () => {
+    expect(climateFanControlConfig.setRockSetting?.({}, agentFor({}))).toEqual({
+      action: "climate.set_swing_mode",
+      data: { swing_mode: "off" },
+    });
+  });
+
+  it("reads any declared mode that is not off-like as rocking", () => {
+    const rock = (mode: string) =>
+      climateFanControlConfig.getRockSetting?.(
+        {
+          attributes: { swing_mode: mode },
+        } as unknown as HomeAssistantEntityState,
+        agentFor({}),
+      );
+    expect(rock("on")).toEqual({ rockUpDown: true });
+    expect(rock("stopped")).toEqual({});
+    expect(rock("horizontal")).toEqual({ rockLeftRight: true });
+  });
 });
 
 // #442: percentSetting 0 sent the literal fan_mode "off", which almost no

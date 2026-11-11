@@ -14,6 +14,7 @@ import { BridgeDataProvider } from "../../../../../services/bridges/bridge-data-
 import { EntityStateProvider } from "../../../../../services/bridges/entity-state-provider.js";
 import { HomeAssistantActions } from "../../../../../services/home-assistant/home-assistant-actions.js";
 import { HomeAssistantConfig } from "../../../../../services/home-assistant/home-assistant-config.js";
+import { HomeAssistantEntityBehavior } from "../../../../behaviors/home-assistant-entity-behavior.js";
 import { AggregatorEndpoint } from "../../../aggregator-endpoint.js";
 import { createLegacyEndpointType } from "../../create-legacy-endpoint-type.js";
 
@@ -195,6 +196,24 @@ describe("electrical meter bring-up (#419 seeding)", () => {
     expect(snapshot.activePower).toBe(1_500_000);
     // energy cluster seeded even though this is a power-only sensor
     expect(snapshot.cumulativeEnergy).toBe(0);
+  });
+
+  it("clears activePower when the power sensor goes unavailable, keeps the energy total", async () => {
+    await bringUp(sensorEntity("sensor.plug_power", "1500", "power", "W"));
+    await endpoint.setStateOf(HomeAssistantEntityBehavior, {
+      entity: sensorEntity("sensor.plug_power", "unavailable", "power", "W"),
+    });
+
+    let activePower: unknown;
+    let energy: unknown;
+    await endpoint.act((agent) => {
+      // biome-ignore lint/suspicious/noExplicitAny: read cluster state
+      const a = agent as any;
+      activePower = a.electricalPowerMeasurement.state.activePower;
+      energy = a.electricalEnergyMeasurement.state.cumulativeEnergyImported;
+    });
+    expect(activePower).toBeNull();
+    expect(Number((energy as { energy: number }).energy)).toBe(0);
   });
 
   it("mounts an energy sensor as ElectricalMeter with cumulativeEnergyImported in mWh", async () => {

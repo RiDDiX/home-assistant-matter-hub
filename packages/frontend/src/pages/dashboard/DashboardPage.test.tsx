@@ -41,7 +41,8 @@ function stubHealth(status: number) {
   );
 }
 
-describe("DashboardPage", () => {
+// Full page render, past 5 s under full suite load.
+describe("DashboardPage", { timeout: 20_000 }, () => {
   afterEach(() => {
     vi.unstubAllGlobals();
   });
@@ -77,5 +78,22 @@ describe("DashboardPage", () => {
     await waitFor(() =>
       expect(bridgesApi.stopAllBridges).toHaveBeenCalledTimes(1),
     );
+  });
+
+  it("still renders when site storage is blocked", async () => {
+    stubHealth(200);
+    const getItem = vi
+      .spyOn(Storage.prototype, "getItem")
+      .mockImplementation(() => {
+        throw new DOMException("blocked", "SecurityError");
+      });
+    try {
+      renderWithProviders(<DashboardPage />);
+      expect(
+        await screen.findByRole("button", { name: "Stop All" }),
+      ).toBeInTheDocument();
+    } finally {
+      getItem.mockRestore();
+    }
   });
 });

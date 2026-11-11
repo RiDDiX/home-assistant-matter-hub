@@ -38,6 +38,12 @@ import { systemApi } from "./system-api.js";
 import { webUi } from "./web-ui.js";
 import { WebSocketApi } from "./websocket-api.js";
 
+const healthProbePaths = new Set(["/api/health/live", "/api/health/ready"]);
+
+export function isLoopback(remoteAddress: string | undefined): boolean {
+  return AccessControl.ipMatch(remoteAddress ?? "", ["127.0.0.0/8", "::1"]);
+}
+
 export interface WebApiProps {
   readonly port: number;
   readonly whitelist: string[] | undefined;
@@ -105,6 +111,7 @@ export class WebApi extends Service {
           this.haRegistry,
           this.identityStorage,
           this.mappingStorage,
+          this.props.storageLocation,
         ),
       )
       .use(
@@ -197,16 +204,22 @@ export class WebApi extends Service {
 
     // Whitelist first, so denied clients never get an auth challenge.
     if (this.props.whitelist && this.props.whitelist.length > 0) {
-      middlewares.push(
-        AccessControl({
-          log: (clientIp, access) => {
-            this.log.silly(
-              `Client ${clientIp} was ${access ? "granted" : "denied"}`,
-            );
-          },
-          mode: "allow",
-          allows: this.props.whitelist,
-        }),
+      const whitelist = AccessControl({
+        log: (clientIp, access) => {
+          this.log.silly(
+            `Client ${clientIp} was ${access ? "granted" : "denied"}`,
+          );
+        },
+        mode: "allow",
+        allows: this.props.whitelist,
+        statusCode: "403",
+        message: "Forbidden",
+      });
+      // The container healthcheck probes from loopback.
+      middlewares.push((req, res, next) =>
+        healthProbePaths.has(req.path) && isLoopback(req.socket.remoteAddress)
+          ? next()
+          : whitelist(req, res, next),
       );
     }
     middlewares.push(this.createDynamicAuthMiddleware());
@@ -276,7 +289,7 @@ export class WebApi extends Service {
       realm: "Home Assistant Matter Hub",
     });
     return (req, res, next) => {
-      if (req.path === "/api/health/live" || req.path === "/api/health/ready") {
+      if (healthProbePaths.has(req.path)) {
         return next();
       }
       if (envMiddleware) {

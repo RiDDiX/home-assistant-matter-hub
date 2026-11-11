@@ -42,6 +42,7 @@ import {
   unflattenObject,
 } from "../../i18n/index.ts";
 import en from "../../i18n/locales/en.json";
+import { safeStorage } from "../../safe-storage.ts";
 import { ConfirmDialog } from "../misc/ConfirmDialog.tsx";
 import { copyText } from "../misc/copy-text.ts";
 import { useNotifications } from "../notifications/use-notifications.ts";
@@ -97,7 +98,7 @@ function loadCustomLanguages(): CustomLang[] {
 }
 
 function saveCustomLanguages(langs: CustomLang[]) {
-  localStorage.setItem(CUSTOM_LANGS_KEY, JSON.stringify(langs));
+  safeStorage.set(CUSTOM_LANGS_KEY, JSON.stringify(langs));
 }
 
 const EDITABLE_LANGUAGES = LANGUAGES.filter((l) => l.code !== "en");

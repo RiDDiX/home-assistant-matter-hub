@@ -74,6 +74,27 @@ describe("mapEvseStatus", () => {
     }
   });
 
+  it.each([
+    ["ready_to_charge"],
+    ["charge complete"],
+    ["charged"],
+    ["charge_done"],
+    ["Charging finished"],
+  ])("maps idle %s to PluggedInNoDemand, not PluggedInCharging", (raw) => {
+    const result = mapEvseStatus(raw, false);
+    expect(result.state).toBe(S.PluggedInNoDemand);
+    expect(result.supplyState).toBe(Supply.Disabled);
+  });
+
+  it.each([
+    ["discharged"],
+    ["vehicle_discharged"],
+  ])("keeps V2X %s unmatched, not idle", (raw) => {
+    const result = mapEvseStatus(raw, false);
+    expect(result.state).toBeNull();
+    expect(result.supplyState).toBe(Supply.Disabled);
+  });
+
   it("ties the idle supplyState to the charging switch", () => {
     expect(mapEvseStatus("connected", true).supplyState).toBe(
       Supply.ChargingEnabled,

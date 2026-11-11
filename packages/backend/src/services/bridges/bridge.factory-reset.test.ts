@@ -87,10 +87,26 @@ describe.each([
     const bridge = Object.create(Ctor.prototype);
     prepare(bridge, calls);
     bridge.status = { code: BridgeStatus.Stopped };
+    const beforeReset = vi.fn(async () => {});
 
-    await bridge.factoryReset();
+    expect(await bridge.factoryReset(beforeReset)).toBe(false);
 
     expect(calls).toEqual([]);
+    expect(beforeReset).not.toHaveBeenCalled();
+  });
+
+  it("runs beforeReset ahead of the stop", async () => {
+    const calls: string[] = [];
+    const bridge = Object.create(Ctor.prototype);
+    prepare(bridge, calls);
+
+    const ran = await bridge.factoryReset(async () => {
+      calls.push("beforeReset");
+    });
+
+    expect(ran).toBe(true);
+    expect(calls.indexOf("beforeReset")).toBe(0);
+    expect(calls).toContain("server.factoryReset");
   });
 });
 

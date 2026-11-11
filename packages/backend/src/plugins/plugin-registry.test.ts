@@ -26,4 +26,19 @@ describe("PluginRegistry", () => {
       false,
     );
   });
+
+  it("keeps the saved config when a package is added again without one", () => {
+    const registry = new PluginRegistry(dir);
+    registry.add("hamh-plugin-d", { token: "secret" });
+
+    registry.add("hamh-plugin-d");
+    expect(new PluginRegistry(dir).get("hamh-plugin-d")?.config).toEqual({
+      token: "secret",
+    });
+
+    registry.add("hamh-plugin-d", { token: "new" });
+    expect(new PluginRegistry(dir).get("hamh-plugin-d")?.config).toEqual({
+      token: "new",
+    });
+  });
 });

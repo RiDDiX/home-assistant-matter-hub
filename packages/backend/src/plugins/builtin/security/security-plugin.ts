@@ -453,14 +453,23 @@ export class SecurityPlugin implements MatterHubPlugin {
   }
 
   private machineConfig(): SecurityMachineConfig {
-    const seconds = (value: unknown, fallback: number): number =>
+    // setTimeout fires after 1 ms for delays above 2^31-1 ms
+    const max = Math.floor(0x7fffffff / 1000);
+    const seconds = (
+      value: unknown,
+      fallback: number,
+      overMax = max,
+    ): number =>
       typeof value === "number" && Number.isFinite(value) && value >= 0
-        ? Math.floor(value)
+        ? value > max
+          ? overMax
+          : Math.floor(value)
         : fallback;
     return {
       exitDelaySeconds: seconds(this.config.exitDelaySeconds, 60),
       entryDelaySeconds: seconds(this.config.entryDelaySeconds, 60),
-      triggerTimeSeconds: seconds(this.config.triggerTimeSeconds, 120),
+      // Longer than a timer can wait means stay triggered, same as 0.
+      triggerTimeSeconds: seconds(this.config.triggerTimeSeconds, 120, 0),
       triggers: this.lists.triggers,
       triggers24h: this.lists.triggers24h,
     };

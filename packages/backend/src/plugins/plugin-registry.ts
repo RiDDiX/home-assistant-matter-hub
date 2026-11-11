@@ -67,19 +67,17 @@ export class PluginRegistry {
     return this.plugins.find((p) => p.packageName === packageName);
   }
 
-  add(
-    packageName: string,
-    config: Record<string, unknown> = {},
-  ): InstalledPlugin {
+  // A re-install without a config keeps the saved one, secrets included.
+  add(packageName: string, config?: Record<string, unknown>): InstalledPlugin {
     const existing = this.get(packageName);
     if (existing) {
-      existing.config = config;
+      if (config) existing.config = config;
       this.save();
       return existing;
     }
     const entry: InstalledPlugin = {
       packageName,
-      config,
+      config: config ?? {},
       autoLoad: true,
       installedAt: Date.now(),
     };

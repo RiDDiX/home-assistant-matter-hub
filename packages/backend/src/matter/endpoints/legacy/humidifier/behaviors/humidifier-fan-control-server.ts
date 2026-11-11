@@ -22,11 +22,16 @@ function getHumidityPercent(state: HomeAssistantEntityState): number {
 }
 
 function setHumidityFromPercent(percent: number, agent: Agent) {
-  const entityState = agent.get(HomeAssistantEntityBehavior).state.entity.state;
-  // Off reads 0, so Apple's power-on injects 100. Turn on and let HA keep the
-  // stored target instead of jumping it to max (#387).
-  if (entityState.state === "off" && Math.round(percent) >= 100) {
-    return { action: "humidifier.turn_on" };
+  const homeAssistant = agent.get(HomeAssistantEntityBehavior);
+  const entityState = homeAssistant.state.entity.state;
+  if (entityState.state === "off") {
+    // Off reads 0, so Apple's power-on injects 100. Turn on and let HA keep
+    // the stored target instead of jumping it to max (#387).
+    if (Math.round(percent) >= 100) {
+      return { action: "humidifier.turn_on" };
+    }
+    // set_humidity alone leaves HA off and the tile flips back.
+    homeAssistant.callAction({ action: "humidifier.turn_on" });
   }
   // The percent is the target humidity, kept inside the entity's range so HA
   // accepts it.

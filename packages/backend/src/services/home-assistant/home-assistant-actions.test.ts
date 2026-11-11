@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { LoggerService } from "../../core/app/logger.js";
+import { diagnosticEventBus } from "../diagnostics/diagnostic-event-bus.js";
 import {
   HomeAssistantActions,
   type HomeAssistantActionsConfig,
@@ -438,6 +439,56 @@ describe("HomeAssistantActions call order", () => {
       ]);
       for (const resolve of pending) resolve({});
     } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe("HomeAssistantActions lock PIN", () => {
+  it("keeps the PIN out of the diagnostic event, hamh_action and the log", async () => {
+    vi.useFakeTimers();
+    const events: unknown[] = [];
+    const unsubscribe = diagnosticEventBus.subscribe((e) => events.push(e));
+    try {
+      const debug = vi.fn();
+      const logger = {
+        get: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug }),
+      } as unknown as LoggerService;
+      const sent: { type: string; [key: string]: unknown }[] = [];
+      const client = {
+        haRunning: true,
+        messageTimeoutMs: 50,
+        connection: {
+          sendMessagePromise: async (message: {
+            type: string;
+            [key: string]: unknown;
+          }) => {
+            sent.push(message);
+            return {};
+          },
+        },
+      } as unknown as HomeAssistantClient;
+      const actions = new HomeAssistantActions(logger, client, {
+        retryAttempts: 1,
+      });
+
+      actions.call(
+        { action: "lock.unlock", data: { code: "482913" } },
+        "lock.front",
+      );
+      await vi.advanceTimersByTimeAsync(150);
+
+      const call = sent.find((m) => m.type === "call_service");
+      expect(call?.service_data).toEqual({ code: "482913" });
+      const fired = sent.find((m) => m.type === "fire_event");
+      expect(fired).toBeDefined();
+      expect(JSON.stringify(fired)).not.toContain("482913");
+      expect(events).toHaveLength(1);
+      expect(JSON.stringify(events)).not.toContain("482913");
+      expect(debug).toHaveBeenCalled();
+      expect(JSON.stringify(debug.mock.calls)).not.toContain("482913");
+    } finally {
+      unsubscribe();
       vi.useRealTimers();
     }
   });

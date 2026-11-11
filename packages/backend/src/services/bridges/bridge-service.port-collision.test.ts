@@ -15,24 +15,28 @@ function storedBridge(id: string, port: number): BridgeData {
 
 // The factory echoes back the data it was built with, so each bridge's
 // final port is readable via svc.get(id).data.port.
-function makeFactory(): BridgeFactory {
+function makeFactory(broken?: string): BridgeFactory {
   return {
-    create: vi.fn(async (data: BridgeData) => ({
-      id: data.id,
-      data,
-      onStatusChange: undefined,
-      start: vi.fn().mockResolvedValue(undefined),
-    })),
+    create: vi.fn(async (data: BridgeData) => {
+      if (data.id === broken) throw new Error("broken");
+      return {
+        id: data.id,
+        data,
+        onStatusChange: undefined,
+        start: vi.fn().mockResolvedValue(undefined),
+      };
+    }),
   } as unknown as BridgeFactory;
 }
 
 function makeService(
   stored: BridgeData[],
   add = vi.fn(),
+  broken?: string,
 ): Promise<BridgeService> {
   const svc = new BridgeService(
     { bridges: stored, add } as unknown as BridgeStorage,
-    makeFactory(),
+    makeFactory(broken),
     {
       basicInformation: {},
       autoRecovery: false,
@@ -54,6 +58,17 @@ describe("BridgeService stored port collision", () => {
     expect(add).toHaveBeenCalledWith(
       expect.objectContaining({ id: "c", port: 5541 }),
     );
+  });
+
+  it("keeps the port of a stored bridge that failed to load", async () => {
+    const svc = await makeService(
+      [storedBridge("a", 5540), storedBridge("b", 5541)],
+      vi.fn(),
+      "a",
+    );
+
+    expect(svc.get("a")).toBeUndefined();
+    expect(svc.getNextAvailablePort()).toBe(5542);
   });
 
   it("leaves distinct ports untouched", async () => {
