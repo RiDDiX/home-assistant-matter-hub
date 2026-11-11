@@ -1,5 +1,8 @@
+import { mkdtempSync, rmSync } from "node:fs";
 import type * as http from "node:http";
 import type { AddressInfo } from "node:net";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { WebSocket } from "ws";
 import { LoggerService } from "../core/app/logger.js";
@@ -15,6 +18,8 @@ afterEach(async () => {
 });
 
 async function serve(whitelist?: string[]) {
+  const dir = mkdtempSync(join(tmpdir(), "hamh-web-api-"));
+  cleanup.push(async () => rmSync(dir, { recursive: true, force: true }));
   const stub = {} as never;
   const api = new WebApi(
     new LoggerService({ level: "error", disableColors: true }),
@@ -32,7 +37,7 @@ async function serve(whitelist?: string[]) {
       whitelist,
       allowedHosts: [],
       version: "test",
-      storageLocation: "/nonexistent",
+      storageLocation: dir,
       basePath: "/",
       auth,
     },
