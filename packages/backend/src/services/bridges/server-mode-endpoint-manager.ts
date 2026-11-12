@@ -318,8 +318,15 @@ export class ServerModeEndpointManager extends Service {
   // that only passes with time (HA down, heap pressure, a failed add).
   refreshDevices(): Promise<boolean> {
     const next = this.refreshChain.then(async () => {
-      await this.runRefreshDevices();
-      return !this._refreshIncomplete;
+      let complete = false;
+      try {
+        await this.runRefreshDevices();
+        complete = !this._refreshIncomplete;
+      } finally {
+        // a start, an API refresh or a recheck needs the retry as much as a tick
+        if (!complete) this.registry.markRefreshIncomplete();
+      }
+      return complete;
     });
     this.refreshChain = next.catch(() => undefined);
     return next;
@@ -587,7 +594,9 @@ export class ServerModeEndpointManager extends Service {
           if (!endpoint) {
             this._failedEntities.push({
               entityId,
-              reason: "Failed to create endpoint - unsupported device type",
+              reason: this.registry.initialState(entityId)
+                ? "Failed to create endpoint - unsupported device type"
+                : "No state in Home Assistant yet",
             });
             continue;
           }

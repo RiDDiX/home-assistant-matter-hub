@@ -5,9 +5,10 @@ import {
   type FailedEntity,
   type VacuumDeviceAttributes,
 } from "@home-assistant-matter-hub/common";
-import type { Logger } from "@matter/general";
+import { type Logger, Time } from "@matter/general";
 import { Endpoint, type MutableEndpoint, ServerNodeStore } from "@matter/main";
 import { DescriptorServer } from "@matter/main/behaviors";
+import { Descriptor } from "@matter/main/clusters";
 import { FabricManager, SessionManager } from "@matter/main/protocol";
 import { Service } from "../../core/ioc/service.js";
 import { AggregatorEndpoint } from "../../matter/endpoints/aggregator-endpoint.js";
@@ -100,6 +101,21 @@ function isEntityPart(p: Endpoint): p is EntityEndpoint {
 // removal and isolation flows (it has no entity_id to reconcile against).
 function hasEntityIdentity(p: Endpoint): p is EntityEndpoint {
   return typeof (p as Partial<EntityEndpoint>).entityId === "string";
+}
+
+// Whether an attribute path selects Descriptor PartsList on the root or the
+// aggregator, a missing id in a path being a wildcard.
+export function selectsPartsList(paths: unknown, aggregator: number): boolean {
+  if (!Array.isArray(paths)) return false;
+  return paths.some(
+    (p: { endpointId?: unknown; clusterId?: unknown; attributeId?: unknown }) =>
+      (p?.endpointId == null ||
+        p.endpointId === 0 ||
+        p.endpointId === aggregator) &&
+      (p?.clusterId == null || p.clusterId === Descriptor.Cluster.id) &&
+      (p?.attributeId == null ||
+        p.attributeId === Descriptor.Cluster.attributes.partsList.id),
+  );
 }
 
 // matter.js Observable is dynamically typed per endpoint.
@@ -251,32 +267,81 @@ export class BridgeEndpointManager extends Service {
   }
 
   // Whether each controller held a subscription when the device list moved,
-  // one that did not only sees the change when it subscribes again.
+  // one that did not only sees the change when it subscribes again. A held
+  // subscription does not prove the peer is still there (#545).
   private controllerFabricLines(): string[] {
     try {
       const env = this.root.env;
       const fabrics = env.maybeGet(FabricManager)?.fabrics ?? [];
-      const counts = new Map<number, { sessions: number; subs: number }>();
+      const aggregator = this.root.number;
+      const counts = new Map<
+        number,
+        {
+          sessions: number;
+          subs: number;
+          heard: number;
+          maxInterval: number;
+          covered: boolean;
+        }
+      >();
       for (const session of env.maybeGet(SessionManager)?.sessions ?? []) {
         const index = session.fabric?.fabricIndex;
         if (index === undefined) continue;
-        const count = counts.get(index) ?? { sessions: 0, subs: 0 };
+        const count = counts.get(index) ?? {
+          sessions: 0,
+          subs: 0,
+          heard: 0,
+          maxInterval: 0,
+          covered: false,
+        };
         count.sessions++;
         count.subs += session.subscriptions.size;
+        count.heard = Math.max(count.heard, session.activeTimestamp);
+        for (const sub of session.subscriptions) {
+          const s = sub as {
+            maxInterval?: number;
+            request?: { attributeRequests?: unknown };
+          };
+          count.maxInterval = Math.max(count.maxInterval, s.maxInterval ?? 0);
+          count.covered ||= selectsPartsList(
+            s.request?.attributeRequests,
+            aggregator,
+          );
+        }
         counts.set(index, count);
       }
       return fabrics.map((fabric) => {
-        const { sessions, subs } = counts.get(fabric.fabricIndex) ?? {
+        const { sessions, subs, heard, maxInterval, covered } = counts.get(
+          fabric.fabricIndex,
+        ) ?? {
           sessions: 0,
           subs: 0,
+          heard: 0,
+          maxInterval: 0,
+          covered: false,
         };
         const vendor = fabric.rootVendorId;
         const name = classifyController(vendor) ?? "vendor";
+        // same clock as Session.activeTimestamp, milliseconds despite the name
+        const silence = Time.nowUs - heard;
+        let seen = sessions > 0 ? ", never heard" : "";
+        if (heard > 0) {
+          const amount =
+            silence < 120_000
+              ? `${Math.round(silence / 1000)} s`
+              : `${Math.round(silence / 60_000)} min`;
+          seen = `, last heard ${amount} ago`;
+          if (maxInterval > 0 && silence > maxInterval) {
+            seen += ", silent past its report interval";
+          }
+        }
         const hint =
           subs === 0
             ? ", not subscribed, it sees the new device list when it subscribes again"
-            : "";
-        return `Controller fabric ${fabric.fabricIndex} (${name} 0x${vendor.toString(16)}): ${sessions} ${sessions === 1 ? "session" : "sessions"}, ${subs} ${subs === 1 ? "subscription" : "subscriptions"}${hint}`;
+            : covered
+              ? ""
+              : ", device list not in its subscription";
+        return `Controller fabric ${fabric.fabricIndex} (${name} 0x${vendor.toString(16)}): ${sessions} ${sessions === 1 ? "session" : "sessions"}, ${subs} ${subs === 1 ? "subscription" : "subscriptions"}${seen}${hint}`;
       });
     } catch {
       return [];
@@ -899,8 +964,15 @@ export class BridgeEndpointManager extends Service {
   // that only passes with time (HA down, heap pressure, a failed add).
   refreshDevices(): Promise<boolean> {
     const next = this.refreshChain.then(async () => {
-      await this.runRefreshDevices();
-      return !this._refreshIncomplete;
+      let complete = false;
+      try {
+        await this.runRefreshDevices();
+        complete = !this._refreshIncomplete;
+      } finally {
+        // a start, an API refresh or a recheck needs the retry as much as a tick
+        if (!complete) this.registry.markRefreshIncomplete();
+      }
+      return complete;
     });
     this.refreshChain = next.catch(() => undefined);
     return next;
@@ -1269,6 +1341,7 @@ export class BridgeEndpointManager extends Service {
     }
 
     let memoryLimitReached = false;
+    const waiting: string[] = [];
 
     for (const entityId of this.entityIds) {
       // Check heap pressure before creating a new endpoint.
@@ -1377,8 +1450,24 @@ export class BridgeEndpointManager extends Service {
             }
             this.addFailedEntity(entityId, reason);
           }
+        } else if (!this.registry.initialState(entityId)) {
+          // the registry poll that brings its state mounts it, no retry needed
+          const reason = "No state in Home Assistant yet";
+          if (this.createFailures.get(entityId)?.reason !== reason) {
+            this.createFailures.set(entityId, { reason, count: 1 });
+            waiting.push(entityId);
+          }
+          this.addFailedEntity(entityId, reason);
         }
       }
+    }
+
+    if (waiting.length > 0) {
+      const one = waiting.length === 1;
+      const more = waiting.length > 5 ? ` and ${waiting.length - 5} more` : "";
+      this.log.info(
+        `No state in Home Assistant yet for ${waiting.length} matched ${one ? "entity, it is added once it has" : "entities, they are added once they have"} one: ${waiting.slice(0, 5).join(", ")}${more}`,
+      );
     }
 
     // a success or an entity that left the pass starts its count over

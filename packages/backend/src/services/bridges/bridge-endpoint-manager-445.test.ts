@@ -98,6 +98,7 @@ interface FakeHa {
   areas: Map<string, string>;
   labels: unknown[];
   snapshotGeneration: number;
+  markRefreshIncomplete: ReturnType<typeof vi.fn>;
 }
 
 function makeHa(): FakeHa {
@@ -108,6 +109,7 @@ function makeHa(): FakeHa {
     areas: new Map(),
     labels: [],
     snapshotGeneration: 1,
+    markRefreshIncomplete: vi.fn(),
   };
   ha.entities[VACUUM] = { entity_id: VACUUM };
   ha.states[VACUUM] = {

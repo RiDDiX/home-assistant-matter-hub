@@ -32,6 +32,8 @@ describe("MATTER_TRAFFIC_FACILITIES", () => {
     expect(MATTER_TRAFFIC_FACILITIES.has("MessageExchange")).toBe(true);
     expect(MATTER_TRAFFIC_FACILITIES.has("MessageChannel")).toBe(true);
     expect(MATTER_TRAFFIC_FACILITIES.has("ServerSubscription")).toBe(true);
+    expect(MATTER_TRAFFIC_FACILITIES.has("InteractionMessenger")).toBe(true);
+    expect(MATTER_TRAFFIC_FACILITIES.has("ExchangeManager")).toBe(true);
   });
 
   it("surfaces rejected invokes in the traffic category (#423)", () => {

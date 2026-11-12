@@ -200,7 +200,7 @@ Get all domains with entity counts.
 
 ### POST /api/home-assistant/refresh
 
-Force refresh the HA entity registry.
+Force refresh the HA entity registry. Bridges pick up a change it finds on the next registry refresh interval (60 s by default).
 
 ### GET /api/home-assistant/related-buttons/:entityId
 

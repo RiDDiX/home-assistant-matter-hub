@@ -112,6 +112,10 @@ export class BridgeRegistry {
     return this.registry.snapshotGeneration;
   }
 
+  markRefreshIncomplete() {
+    this.registry.markRefreshIncomplete();
+  }
+
   // composed sub-entities may sit outside the bridge filter (#408), so these
   // fall back to the full HA registry. keep them separate from the strict
   // accessors above, every other caller must stay filtered.

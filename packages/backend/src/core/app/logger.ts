@@ -24,7 +24,7 @@ export const MATTER_TRAFFIC_FACILITIES = new Set([
   "MessageExchange",
   "MessageChannel",
   "ServerSubscription",
-  "IncomingInteractionServerMessenger",
+  "InteractionMessenger",
   "ExchangeManager",
   // Rejected invokes (UnsupportedEndpoint and friends) log here at INFO; a
   // controller aiming at a stale endpoint number is invisible without it (#423).

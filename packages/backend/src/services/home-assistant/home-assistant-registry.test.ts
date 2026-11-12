@@ -317,6 +317,60 @@ describe("HomeAssistantRegistry", () => {
     expect(registry.devices.d1?.default_model).toBe("New");
   });
 
+  // identity-resolver keys endpoints on it
+  it("picks up an entity unique_id change on its own", async () => {
+    const fake = makeConnection();
+    let uniqueId = "old";
+    fake.connection.sendMessagePromise = vi.fn((message: { type: string }) =>
+      Promise.resolve(
+        message.type === "config/entity_registry/list"
+          ? [{ entity_id: "light.a", unique_id: uniqueId }]
+          : [],
+      ),
+    ) as unknown as Connection["sendMessagePromise"];
+    const client = {
+      connection: fake.connection,
+      haRunning: true,
+    } as unknown as HomeAssistantClient & { haRunning: boolean };
+    const registry = new HomeAssistantRegistry(client, defaultOptions);
+    const initPromise = registry.construction;
+    await vi.runAllTimersAsync();
+    await initPromise;
+
+    await expect(registry.reload()).resolves.toBe(false);
+    uniqueId = "new";
+    await expect(registry.reload()).resolves.toBe(true);
+    expect(registry.entities["light.a"]?.unique_id).toBe("new");
+  });
+
+  it("rebuilds on the retry after a rebuild that threw", async () => {
+    const fake = makeConnection();
+    let entities: object[] = [];
+    fake.connection.sendMessagePromise = vi.fn((message: { type: string }) => {
+      if (message.type !== "config/entity_registry/list") {
+        return Promise.resolve([]);
+      }
+      const served = entities;
+      entities = served.map((e) => ({ ...e }));
+      return Promise.resolve(served);
+    }) as unknown as Connection["sendMessagePromise"];
+    const client = {
+      connection: fake.connection,
+      haRunning: true,
+    } as unknown as HomeAssistantClient & { haRunning: boolean };
+    const registry = new HomeAssistantRegistry(client, defaultOptions);
+    const initPromise = registry.construction;
+    await vi.runAllTimersAsync();
+    await initPromise;
+
+    // the rebuild writes device_id onto a frozen entity and throws once
+    entities = [Object.freeze({ entity_id: "light.a" })];
+    const reload = registry.reload();
+    await vi.runAllTimersAsync();
+    await expect(reload).resolves.toBe(true);
+    expect(registry.entities["light.a"]).toBeDefined();
+  });
+
   it("keeps the last areas when the area query fails", async () => {
     const fake = makeConnection();
     let areasFail = false;
@@ -561,8 +615,14 @@ describe("HomeAssistantRegistry", () => {
 
     async function setup(onRefresh: () => Promise<boolean | undefined>) {
       const fake = makeConnection();
-      fake.connection.sendMessagePromise = vi.fn(() =>
-        Promise.resolve([]),
+      const entities: { entity_id: string }[] = [];
+      fake.connection.sendMessagePromise = vi.fn((message: { type: string }) =>
+        Promise.resolve(
+          // copies: a reload fills in device_id on what it gets
+          message.type === "config/entity_registry/list"
+            ? entities.map((e) => ({ ...e }))
+            : [],
+        ),
       ) as unknown as Connection["sendMessagePromise"];
       const client = {
         connection: fake.connection,
@@ -577,8 +637,56 @@ describe("HomeAssistantRegistry", () => {
         .mockResolvedValueOnce(true)
         .mockResolvedValue(false);
       registry.enableAutoRefresh(onRefresh);
-      return { registry, reload };
+      return { registry, reload, entities };
     }
+
+    it("refreshes for a change an outside reload found first", async () => {
+      const onRefresh = vi.fn<() => Promise<boolean>>().mockResolvedValue(true);
+      const { registry, reload, entities } = await setup(onRefresh);
+      await tick();
+      expect(onRefresh).toHaveBeenCalledTimes(1);
+
+      // POST /api/home-assistant/refresh takes the change, the tick sees none
+      reload.mockRestore();
+      entities.push({ entity_id: "light.new" });
+      await expect(registry.reload()).resolves.toBe(true);
+      await tick();
+      expect(onRefresh).toHaveBeenCalledTimes(2);
+      await tick();
+      expect(onRefresh).toHaveBeenCalledTimes(2);
+      registry.disableAutoRefresh();
+    });
+
+    it("refreshes again for a change found while a refresh was running", async () => {
+      let ctx: Awaited<ReturnType<typeof setup>> | undefined;
+      const onRefresh = vi.fn(async () => {
+        if (onRefresh.mock.calls.length === 1 && ctx) {
+          ctx.entities.push({ entity_id: "light.new" });
+          await ctx.registry.reload();
+        }
+        return true;
+      });
+      ctx = await setup(onRefresh);
+      ctx.reload.mockRestore();
+      await tick();
+      expect(onRefresh).toHaveBeenCalledTimes(1);
+      await tick();
+      expect(onRefresh).toHaveBeenCalledTimes(2);
+      await tick();
+      expect(onRefresh).toHaveBeenCalledTimes(2);
+      ctx.registry.disableAutoRefresh();
+    });
+
+    it("does not refresh for an outside reload that found nothing new", async () => {
+      const onRefresh = vi.fn<() => Promise<boolean>>().mockResolvedValue(true);
+      const { registry, reload } = await setup(onRefresh);
+      await tick();
+      reload.mockRestore();
+      await expect(registry.reload()).resolves.toBe(false);
+      await tick();
+      expect(onRefresh).toHaveBeenCalledTimes(1);
+      registry.disableAutoRefresh();
+    });
 
     it("retries an incomplete refresh once it reports complete", async () => {
       const onRefresh = vi

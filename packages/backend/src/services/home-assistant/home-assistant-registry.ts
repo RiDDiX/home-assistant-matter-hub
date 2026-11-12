@@ -37,6 +37,9 @@ export type HomeAssistantAreas = Map<string, string>;
 export class HomeAssistantRegistry extends Service {
   private autoRefresh?: NodeJS.Timeout;
   private refreshPending = false;
+  // Set with every new fingerprint, so a change found by an outside reload()
+  // still reaches the bridges on the next tick.
+  private registryChanged = false;
   private lastRegistryFingerprint = "";
 
   // Bumped on every successful reload, even an unchanged one. Endpoint
@@ -154,7 +157,7 @@ export class HomeAssistantRegistry extends Service {
         // refresh (#438).
         const runningSince = this.client.runningSince;
         const restarted = runningSince !== this.lastRunningSince;
-        const changed = await this.reload();
+        const changed = (await this.reload()) || this.registryChanged;
         // stamp only now: a reload that failed must not consume the restart
         this.lastRunningSince = runningSince;
         if (changed || restarted) {
@@ -169,6 +172,7 @@ export class HomeAssistantRegistry extends Service {
         }
         // cleared before the run, a late refresh may mark it during the run
         this.refreshPending = false;
+        this.registryChanged = false;
         try {
           if ((await onRefresh()) === false) this.refreshPending = true;
         } catch (e) {
@@ -188,7 +192,7 @@ export class HomeAssistantRegistry extends Service {
     }, this.options.refreshInterval * 1000);
   }
 
-  // A refresh that finished after its tick was incomplete. Arms the retry
+  // Every device refresh that ends incomplete calls this. Arms the retry
   // without resetting its count, only a registry change does that.
   markRefreshIncomplete() {
     this.refreshPending = true;
@@ -294,7 +298,7 @@ export class HomeAssistantRegistry extends Service {
     const hash = createHash("md5");
     for (const e of entityRegistry) {
       hash.update(
-        `${e.entity_id}\0${e.device_id ?? ""}\0${e.disabled_by ?? ""}\0${e.hidden_by ?? ""}\0${e.area_id ?? ""}\0${(e.labels ?? []).join(",")}\0${e.platform ?? ""}\0${e.entity_category ?? ""}\0${e.name ?? ""}\0${e.original_name ?? ""}\n`,
+        `${e.entity_id}\0${e.unique_id ?? ""}\0${e.device_id ?? ""}\0${e.disabled_by ?? ""}\0${e.hidden_by ?? ""}\0${e.area_id ?? ""}\0${(e.labels ?? []).join(",")}\0${e.platform ?? ""}\0${e.entity_category ?? ""}\0${e.name ?? ""}\0${e.original_name ?? ""}\n`,
       );
     }
     for (const s of statesList) {
@@ -341,7 +345,6 @@ export class HomeAssistantRegistry extends Service {
       logger.debug("Registry unchanged, skipping full refresh");
       return false;
     }
-    this.lastRegistryFingerprint = fingerprint;
 
     // Structure changed, full rebuild
     entityRegistry.forEach((e) => {
@@ -375,6 +378,9 @@ export class HomeAssistantRegistry extends Service {
 
     this._labels = labels;
     this._areas = new Map(areas.map((a) => [a.area_id, a.name]));
+    // only now: a rebuild that threw must not read as unchanged next time
+    this.lastRegistryFingerprint = fingerprint;
+    this.registryChanged = true;
 
     return true;
   }

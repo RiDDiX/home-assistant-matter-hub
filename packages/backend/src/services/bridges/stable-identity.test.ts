@@ -389,6 +389,7 @@ interface FakeHa {
   devices: Record<string, any>;
   areas: Map<string, string>;
   labels: unknown[];
+  markRefreshIncomplete: () => void;
 }
 
 function makeHa(): FakeHa {
@@ -398,6 +399,7 @@ function makeHa(): FakeHa {
     devices: {},
     areas: new Map(),
     labels: [],
+    markRefreshIncomplete: () => {},
   };
 }
 

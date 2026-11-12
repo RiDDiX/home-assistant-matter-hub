@@ -196,8 +196,6 @@ describe("BridgeService refreshAll", () => {
     vi.useFakeTimers();
     const changed = vi.fn();
     svc.onBridgeChanged = changed;
-    const incomplete = vi.fn();
-    svc.onRefreshIncomplete = incomplete;
     const a = makeRefreshBridge("a");
     const b = makeRefreshBridge("b");
     let release = () => {};
@@ -227,7 +225,6 @@ describe("BridgeService refreshAll", () => {
     expect(a.refreshDevices).toHaveBeenCalledTimes(2);
     await expect(svc.refreshAll()).resolves.toBe(true);
     expect(a.refreshDevices).toHaveBeenCalledTimes(3);
-    expect(incomplete).not.toHaveBeenCalled();
   });
 
   it("logs a hung refresh that fails late and skips the follow-up once the bridge is gone", async () => {
@@ -285,8 +282,6 @@ describe("BridgeService refreshAll", () => {
     vi.useFakeTimers();
     const changed = vi.fn();
     svc.onBridgeChanged = changed;
-    const incomplete = vi.fn();
-    svc.onRefreshIncomplete = incomplete;
     const a = makeRefreshBridge("a");
     let release = () => {};
     a.refreshDevices
@@ -306,8 +301,7 @@ describe("BridgeService refreshAll", () => {
     release();
     await vi.waitFor(() => expect(changed).toHaveBeenCalledWith("a"));
     expect(a.refreshDevices).toHaveBeenCalledTimes(2);
-    expect(incomplete).toHaveBeenCalledTimes(1);
-    const stillIncomplete = warn.mock.calls.filter((c) =>
+    const incomplete = warn.mock.calls.filter((c) =>
       String(c[0]).includes("still incomplete"),
     );
     const failures = error.mock.calls.filter(
@@ -315,10 +309,10 @@ describe("BridgeService refreshAll", () => {
     );
     if (label === "rejects") {
       expect(failures).toHaveLength(1);
-      expect(stillIncomplete).toHaveLength(0);
+      expect(incomplete).toHaveLength(0);
     } else {
       expect(failures).toHaveLength(0);
-      expect(stillIncomplete).toHaveLength(1);
+      expect(incomplete).toHaveLength(1);
     }
 
     await vi.waitFor(async () => {
@@ -326,7 +320,6 @@ describe("BridgeService refreshAll", () => {
       expect(a.refreshDevices).toHaveBeenCalledTimes(3);
     });
     expect(changed).toHaveBeenCalledTimes(2);
-    expect(incomplete).toHaveBeenCalledTimes(1);
   });
 
   it.each([

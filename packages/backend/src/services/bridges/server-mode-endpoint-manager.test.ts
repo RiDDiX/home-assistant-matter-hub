@@ -76,6 +76,7 @@ interface Harness {
     // biome-ignore lint/suspicious/noExplicitAny: registry stub
     fullEntities: Record<string, any>;
     snapshotGeneration: number;
+    markRefreshIncomplete: ReturnType<typeof vi.fn>;
   };
   client: { connection: object; haRunning: boolean; runningSince: number };
   mappingStorage: { getMapping: ReturnType<typeof vi.fn> };
@@ -126,6 +127,7 @@ function makeHarness(
     forgetBatteryCacheForDevice: vi.fn(),
     fullEntities,
     snapshotGeneration: 1,
+    markRefreshIncomplete: vi.fn(),
   };
   const mappingStorage = {
     getMapping: vi.fn(() => undefined),
@@ -618,14 +620,45 @@ describe("ServerModeEndpointManager (#301)", () => {
     ]);
   });
 
-  it("reports a create that threw as incomplete until a later one mounts it", async () => {
+  it("names a missing HA state instead of an unsupported type", async () => {
+    legacyCreate.mockImplementation(async (_registry, entityId) =>
+      entityId === "light.bad"
+        ? undefined
+        : (fakeEndpoint(entityId as string) as unknown as LegacyEndpoint),
+    );
+    const h = makeHarness(["light.good", "light.bad"]);
+    h.registry.initialState.mockImplementation((id: string) =>
+      id === "light.bad" ? undefined : { state: "on" },
+    );
+    await h.manager.refreshDevices();
+
+    expect(h.manager.failedEntities).toEqual([
+      { entityId: "light.bad", reason: "No state in Home Assistant yet" },
+    ]);
+  });
+
+  it("reports a create that threw as incomplete and arms the registry retry until a later one mounts it", async () => {
     legacyCreate.mockRejectedValueOnce(new Error("create failed"));
     const h = makeHarness(["light.one"]);
     await expect(h.manager.refreshDevices()).resolves.toBe(false);
     expect(h.manager.devices).toEqual([]);
+    expect(h.registry.markRefreshIncomplete).toHaveBeenCalledTimes(1);
 
     await expect(h.manager.refreshDevices()).resolves.toBe(true);
     expect(h.manager.devices).toHaveLength(1);
+    expect(h.registry.markRefreshIncomplete).toHaveBeenCalledTimes(1);
+  });
+
+  it("arms the registry retry when the refresh itself throws", async () => {
+    const h = makeHarness(["light.one"]);
+    h.registry.refresh.mockImplementationOnce(() => {
+      throw new Error("boom");
+    });
+    await expect(h.manager.refreshDevices()).rejects.toThrow("boom");
+    expect(h.registry.markRefreshIncomplete).toHaveBeenCalledTimes(1);
+
+    await expect(h.manager.refreshDevices()).resolves.toBe(true);
+    expect(h.registry.markRefreshIncomplete).toHaveBeenCalledTimes(1);
   });
 
   it("logs a create that keeps failing once", async () => {
