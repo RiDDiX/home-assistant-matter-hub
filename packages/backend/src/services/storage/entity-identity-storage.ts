@@ -37,6 +37,10 @@ const PERSIST_DEBOUNCE_MS = 500;
 
 const logger = Logger.get("EntityIdentityStorage");
 
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 export class EntityIdentityStorage extends Service {
   private storage!: StorageContext;
   private identities: Map<string, Map<string, IdentityRecord>> = new Map();
@@ -77,12 +81,25 @@ export class EntityIdentityStorage extends Service {
       );
     }
 
+    // Valid JSON of the wrong shape must not stop every bridge from starting.
+    let skipped = 0;
     for (const [bridgeId, records] of Object.entries(data.identities ?? {})) {
+      if (!isPlainObject(records)) {
+        skipped++;
+        continue;
+      }
       const bridgeMap = new Map<string, IdentityRecord>();
       for (const [key, record] of Object.entries(records)) {
-        bridgeMap.set(key, record);
+        if (!isPlainObject(record) || typeof record.endpointId !== "string") {
+          skipped++;
+          continue;
+        }
+        bridgeMap.set(key, record as unknown as IdentityRecord);
       }
       this.identities.set(bridgeId, bridgeMap);
+    }
+    if (skipped > 0) {
+      logger.warn(`Skipped ${skipped} unreadable identity entries`);
     }
   }
 

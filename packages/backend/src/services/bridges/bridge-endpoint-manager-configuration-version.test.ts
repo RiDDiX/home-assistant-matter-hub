@@ -6,8 +6,11 @@ import {
   HomeAssistantMatcherType,
 } from "@home-assistant-matter-hub/common";
 import { Environment, type Logger, VariableService } from "@matter/general";
-import { VendorId } from "@matter/main";
-import { BasicInformationServer } from "@matter/main/behaviors";
+import { Endpoint, ServerNodeStore, VendorId } from "@matter/main";
+import {
+  BasicInformationServer,
+  DescriptorServer,
+} from "@matter/main/behaviors";
 import { ServerNode } from "@matter/main/node";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -57,6 +60,14 @@ class FakeIdentityStorage {
 
 class FakeMappingStorage {
   private m = new Map<string, Map<string, EntityMappingConfig>>();
+  set(b: string, mapping: EntityMappingConfig) {
+    let bm = this.m.get(b);
+    if (!bm) {
+      bm = new Map();
+      this.m.set(b, bm);
+    }
+    bm.set(mapping.entityId, mapping);
+  }
   getMapping(b: string, e: string) {
     return this.m.get(b)?.get(e);
   }
@@ -140,6 +151,7 @@ function makeProvider(patterns: string[]): BridgeDataProvider {
 let dir: string;
 let server: ServerNode | undefined;
 let manager: BridgeEndpointManager | undefined;
+let mappings: FakeMappingStorage;
 
 // One bridge process: same storage dir and node id across restarts.
 async function startBridge(ha: FakeHa, patterns = ["vacuum.*"]) {
@@ -174,7 +186,7 @@ async function startBridge(ha: FakeHa, patterns = ["vacuum.*"]) {
     // biome-ignore lint/suspicious/noExplicitAny: client only used for observing
     client as any,
     registry,
-    new FakeMappingStorage() as unknown as EntityMappingStorage,
+    mappings as unknown as EntityMappingStorage,
     new FakeIdentityStorage() as unknown as EntityIdentityStorage,
     provider.id,
     {
@@ -225,6 +237,7 @@ async function settle(bem: BridgeEndpointManager) {
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "hamh-bem-cv-"));
+  mappings = new FakeMappingStorage();
 });
 
 afterEach(async () => {
@@ -370,6 +383,97 @@ describe("root ConfigurationVersion follows the bridged endpoint set", () => {
     await restarted.bem.refreshDevices();
     await settle(restarted.bem);
     expect(version()).toBe(2);
+  });
+
+  it("bumps once for an endpoint rebuilt under its id with another device type", async () => {
+    const ha = makeHa(["switch.a"]);
+    const { bem } = await startBridge(ha, ["switch.*"]);
+    await settle(bem);
+    const before = [...bem.root.parts].map((p) => p.id);
+    mappings.set(BRIDGE_ID, {
+      entityId: "switch.a",
+      matterDeviceType: "on_off_light",
+    } as EntityMappingConfig);
+    await bem.refreshDevices();
+    expect([...bem.root.parts].map((p) => p.id)).toEqual(before);
+    expect(version()).toBe(1);
+    await settle(bem);
+    expect(version()).toBe(2);
+    await bem.refreshDevices();
+    await settle(bem);
+    expect(version()).toBe(2);
+  });
+
+  it("replaces a signature stored in the old format without bumping", async () => {
+    const ha = makeHa(["vacuum.a"]);
+    const { bem } = await startBridge(ha);
+    await settle(bem);
+    await stopBridge();
+
+    // the old format hashed the part ids only, no prefix
+    const restarted = await startBridge(ha);
+    const storage = restarted.bem.root.env
+      .get(ServerNodeStore)
+      .storage.createContext("hamh");
+    await storage.set("topology", "0123456789abcdef");
+    addEntity(ha, "vacuum.b");
+    await restarted.bem.refreshDevices();
+    await settle(restarted.bem);
+    expect(version()).toBe(1);
+    expect(await storage.get<string>("topology", "")).toMatch(/^v2:/);
+    await stopBridge();
+
+    const again = await startBridge(ha);
+    await settle(again.bem);
+    expect(version()).toBe(1);
+  });
+
+  it("survives a part whose Descriptor state cannot be read", async () => {
+    // only the signature read throws, matter.js itself reads the state too
+    const proto = BridgeEndpointManager.prototype as unknown as {
+      topologySignature(): string;
+    };
+    const signature = proto.topologySignature;
+    let inSignature = false;
+    vi.spyOn(proto, "topologySignature").mockImplementation(function (
+      this: BridgeEndpointManager,
+    ) {
+      inSignature = true;
+      try {
+        return signature.call(this);
+      } finally {
+        inSignature = false;
+      }
+    });
+    const stateOf = Endpoint.prototype.stateOf;
+    vi.spyOn(Endpoint.prototype, "stateOf").mockImplementation(function (
+      this: Endpoint,
+      ...args: Parameters<Endpoint["stateOf"]>
+    ) {
+      if (
+        inSignature &&
+        args[0] === DescriptorServer &&
+        this.id === "vacuum_b"
+      ) {
+        throw new Error("not initialized");
+      }
+      return stateOf.apply(this, args);
+    });
+    try {
+      const ha = makeHa(["vacuum.a", "vacuum.b"]);
+      const { bem } = await startBridge(ha);
+      await settle(bem);
+      await expect(bem.refreshDevices()).resolves.toBeUndefined();
+      expect(bem.root.parts.size).toBe(2);
+      expect(version()).toBe(1);
+      await stopBridge();
+
+      const restarted = await startBridge(ha);
+      await settle(restarted.bem);
+      expect(version()).toBe(1);
+    } finally {
+      vi.restoreAllMocks();
+    }
   });
 
   it("keeps a change that was still settling when the bridge stopped", async () => {

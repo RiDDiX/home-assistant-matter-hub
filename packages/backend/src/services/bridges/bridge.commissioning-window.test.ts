@@ -141,4 +141,42 @@ describe("commissioning window of a running bridge", () => {
     expect(act).not.toHaveBeenCalled();
     expect(windowOpen()).toBe(false);
   });
+
+  it("leaves a window that is still open alone", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    const { bridge, node, info, windowOpen } = await make();
+    await bridge.start();
+    await vi.waitFor(() => expect(windowOpen()).toBe(true));
+    const act = vi.spyOn(node, "act");
+
+    await vi.advanceTimersByTimeAsync(COMMISSIONING_CHECK_MS);
+
+    expect(act).not.toHaveBeenCalled();
+    expect(info).not.toHaveBeenCalledWith(
+      "Commissioning window expired before pairing, reopened it",
+    );
+    expect(windowOpen()).toBe(true);
+  });
+
+  it.each([
+    BridgeStatus.Starting,
+    BridgeStatus.Stopped,
+    BridgeStatus.Failed,
+  ])("leaves the window closed while the status is %s", async (code) => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    const { bridge, node, windowOpen } = await make();
+    await bridge.start();
+    await vi.waitFor(() => expect(windowOpen()).toBe(true));
+    await node.env.get(DeviceCommissioner).endCommissioning();
+    // the status alone, the check interval keeps running
+    (bridge as unknown as { status: { code: BridgeStatus } }).status = {
+      code,
+    };
+    const act = vi.spyOn(node, "act");
+
+    await vi.advanceTimersByTimeAsync(COMMISSIONING_CHECK_MS);
+
+    expect(act).not.toHaveBeenCalled();
+    expect(windowOpen()).toBe(false);
+  });
 });

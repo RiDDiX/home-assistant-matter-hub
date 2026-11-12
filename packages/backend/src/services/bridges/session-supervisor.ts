@@ -27,7 +27,6 @@ import {
   replacedSessionTimeoutMs,
   SESSION_MAX_AGE_HOURS_RANGE,
   seedExistingSessionStarts,
-  selectSupersededSessions,
   staleSessionQuietWindowMs,
   staleSessionShouldClose,
 } from "./session-rotation.js";
@@ -256,10 +255,15 @@ export class SessionSupervisor {
         const subscribeTimes = this.subscribeTimesMs.get(s) ?? [];
         const giveUpTimes = this.giveUpTimesMs.get(s) ?? [];
         const lastRotatedAt = this.wedgeLastRotatedAt.get(s);
+        const peerCmdAt = this.newestPeerStamp(
+          this.lastCommandImAt,
+          s,
+          sessions,
+        );
         const wedgeV2WouldRotate = decideWedgeRotationV2({
           subscriptionCount: subCount,
           sessionAgeMs: startedAt != null ? nowMs - startedAt : 0,
-          commandSilenceMs: lastCommandImRequestMsAgo,
+          commandSilenceMs: peerCmdAt != null ? nowMs - peerCmdAt : null,
           subscribeTimesMs: subscribeTimes,
           giveUpTimesMs: giveUpTimes,
           nowMs,
@@ -461,33 +465,9 @@ export class SessionSupervisor {
             );
           }
         }
-        // Sweep superseded sessions the #105 loop cannot: same peer+fabric
-        // sessions still holding a dead subscription escaped every cleanup
-        // path and piled up 160 deep for one flapping Echo (#400). The
-        // selector also returns the 0-sub ones the loop above just handled,
-        // so skip those here.
-        const quietWindowMs = staleSessionQuietWindowMs(
-          this.dataProvider.featureFlags,
-        );
-        const now = Time.nowUs;
-        const supersededIds = new Set(
-          selectSupersededSessions(
-            [...sessionManager.sessions],
-            newSession,
-            quietWindowMs,
-            now,
-          ),
-        );
-        const closes: Promise<unknown>[] = [];
-        for (const s of [...sessionManager.sessions]) {
-          if (!supersededIds.has(s.id) || s.subscriptions.size === 0) continue;
-          const quietSec = Math.round((now - s.timestamp) / 1000);
-          this.log.info(
-            `Closing superseded session ${s.id} (peer ${s.peerNodeId}, ${s.subscriptions.size} subs [${subscriptionIds(s)}], quiet ${quietSec}s), replaced by session ${newSession.id}`,
-          );
-          closes.push(closeGracefully(s, "superseded session, forcing"));
-        }
-        void Promise.allSettled(closes);
+        // Older sessions that still hold subscriptions stay open: matter.js
+        // reports on the peer's newest session and ends dead subscriptions
+        // itself, which hands the emptied session to the stale timer.
       };
       this.sessionDeletedHandler = (session: {
         id: number;
@@ -629,7 +609,9 @@ export class SessionSupervisor {
     if (this.stopped) return;
     const sessionId = session.id;
     if (typeof sessionId !== "number") return;
-    if (this.staleSessionTimers.has(sessionId)) return;
+    // Replace any shorter timer armed earlier, it would fire mid priming.
+    const armed = this.staleSessionTimers.get(sessionId);
+    if (armed) clearTimeout(armed);
     this.staleSessionTimers.set(
       sessionId,
       setTimeout(() => {
@@ -897,6 +879,27 @@ export class SessionSupervisor {
     }
   }
 
+  // A controller talks on its newest session while matter.js reports an older
+  // session's subscription there too, so silence counts per peer and fabric.
+  private newestPeerStamp(
+    stamps: WeakMap<object, number>,
+    s: { peerNodeId: unknown; fabric?: { fabricIndex?: unknown } },
+    sessions: (typeof s)[],
+  ): number | undefined {
+    let newest: number | undefined;
+    for (const p of sessions) {
+      if (
+        p.peerNodeId !== s.peerNodeId ||
+        p.fabric?.fabricIndex !== s.fabric?.fabricIndex
+      ) {
+        continue;
+      }
+      const at = stamps.get(p);
+      if (at != null && (newest == null || at > newest)) newest = at;
+    }
+    return newest;
+  }
+
   // Rotate exactly the sessions the pure rule flags as wedged. Closing is the
   // same graceful-then-force path age rotation uses, so a false positive just
   // re-CASEs the controller.
@@ -905,11 +908,16 @@ export class SessionSupervisor {
       const sessionManager = this.server.env.get(SessionManager);
       const now = Date.now();
       const closes: Promise<void>[] = [];
-      for (const s of [...sessionManager.sessions]) {
+      const sessions = [...sessionManager.sessions];
+      for (const s of sessions) {
         if (s.isClosing) continue;
         const startedAt = this.sessionStartedAt.get(s.id);
         const sessionAgeMs = startedAt != null ? now - startedAt : 0;
-        const lastImAt = this.lastImRequestAt.get(s);
+        const lastImAt = this.newestPeerStamp(
+          this.lastImRequestAt,
+          s,
+          sessions,
+        );
         const lastImRequestMsAgo = lastImAt != null ? now - lastImAt : null;
         const lastRotatedAt = this.wedgeLastRotatedAt.get(s);
         const lastRotatedMsAgo =
@@ -922,7 +930,11 @@ export class SessionSupervisor {
         });
         // V2 shadow (#365): evaluate and log only, so the soak can compare
         // both rules before v2 is allowed to close anything.
-        const lastCmdAt = this.lastCommandImAt.get(s);
+        const lastCmdAt = this.newestPeerStamp(
+          this.lastCommandImAt,
+          s,
+          sessions,
+        );
         const commandSilenceMs = lastCmdAt != null ? now - lastCmdAt : null;
         const subscribeTimes = this.subscribeTimesMs.get(s) ?? [];
         const giveUpTimes = this.giveUpTimesMs.get(s) ?? [];

@@ -3,7 +3,7 @@
 // (so activeTimestamp/isPeerActive stay fresh) while it has stopped consuming
 // data and stopped sending any inbound Interaction Model request. The only
 // controller-side signal that survives that state is the absence of inbound IM
-// requests, so the rule keys on that alone.
+// requests on any of its sessions, so the rule keys on that alone.
 
 export const WEDGE_WARMUP_MS = 15 * 60 * 1000;
 export const WEDGE_IM_SILENCE_MS = 45 * 60 * 1000;
@@ -12,7 +12,8 @@ export const WEDGE_MIN_ROTATE_INTERVAL_MS = 60 * 60 * 1000;
 export interface WedgeInput {
   subscriptionCount: number;
   sessionAgeMs: number;
-  // ms since the last inbound IM request, or null when one was never seen.
+  // ms since the last inbound IM request on any session of the same peer and
+  // fabric, or null when one was never seen.
   lastImRequestMsAgo: number | null;
   // ms since this session was last rotated by the watchdog, or null if never.
   lastRotatedMsAgo: number | null;

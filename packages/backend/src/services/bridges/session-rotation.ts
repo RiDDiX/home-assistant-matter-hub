@@ -70,8 +70,7 @@ export function staleSessionQuietWindowMs(flags?: BridgeFeatureFlags): number {
 // dead session has a frozen timestamp and still closes via the re-arm
 // loops (#266/#105).
 // True once a session is not closing, its peer stopped talking, and its last
-// traffic is past the quiet window. Shared by the 0-sub stale check and the
-// superseded-session sweep so both agree on what "quiet" means (#287/#398).
+// traffic is past the quiet window (#287/#398).
 export function sessionIsQuiet(
   session: {
     isClosing: boolean;
@@ -109,44 +108,6 @@ export function staleSessionShouldClose(
     session.subscriptions.size === 0 &&
     sessionIsQuiet(session, quietWindowMs, now)
   );
-}
-
-// A peer that re-CASEs leaves its old sessions behind. The #105 loop only
-// force-closes the 0-sub ones; sessions still holding a dead subscription
-// escaped every cleanup path and piled up 160 deep for one flapping Echo
-// (#400). Returns superseded sessions for the same peer+fabric that have
-// gone quiet, regardless of subscription count.
-export function selectSupersededSessions(
-  sessions: Iterable<{
-    id: number;
-    peerNodeId: unknown;
-    fabric?: { fabricIndex?: unknown };
-    isClosing: boolean;
-    isPeerActive: boolean;
-    timestamp?: number;
-    subscriptions: { size: number };
-  }>,
-  newSession: {
-    id: number;
-    peerNodeId: unknown;
-    fabric?: { fabricIndex?: unknown };
-  },
-  quietWindowMs = STALE_SESSION_QUIET_WINDOW_MS,
-  now: number = Time.nowUs,
-): number[] {
-  const ids: number[] = [];
-  for (const s of sessions) {
-    if (
-      s.id !== newSession.id &&
-      s.peerNodeId === newSession.peerNodeId &&
-      s.fabric?.fabricIndex === newSession.fabric?.fabricIndex &&
-      !s.isClosing &&
-      sessionIsQuiet(s, quietWindowMs, now)
-    ) {
-      ids.push(s.id);
-    }
-  }
-  return ids;
 }
 
 export function seedExistingSessionStarts(

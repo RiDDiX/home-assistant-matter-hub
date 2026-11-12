@@ -1,3 +1,4 @@
+import { MutexClosedError } from "@matter/general";
 import { describe, expect, it } from "vitest";
 import {
   isIsolatableError,
@@ -56,6 +57,10 @@ describe("shouldSuppressError", () => {
     ]) {
       expect(shouldSuppressError(new Error(msg)), msg).toBe(true);
     }
+  });
+
+  it("suppresses the matter.js closed mutex error", () => {
+    expect(shouldSuppressError(new MutexClosedError())).toBe(true);
   });
 
   it("still crashes on an unrelated error", () => {

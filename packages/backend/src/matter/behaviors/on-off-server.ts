@@ -2,7 +2,7 @@ import type {
   HomeAssistantEntityInformation,
   HomeAssistantEntityState,
 } from "@home-assistant-matter-hub/common";
-import { Logger, type Timer } from "@matter/general";
+import { Logger, Seconds, type Timer } from "@matter/general";
 import type { Agent } from "@matter/main";
 import {
   OnOffServer as Base,
@@ -193,10 +193,16 @@ class OnOffServerBase extends Base {
     homeAssistant.callAction(action);
   }
 
-  // callback() installs a reactor until the behavior closes, so build it once
+  // One reset per endpoint: a new press restarts the window, close stops it.
+  // The reset waits for the lock instead of dropping its write.
   private scheduleAutoReset() {
-    this.internal.autoReset ??= this.callback(this.autoReset);
-    setTimeout(this.internal.autoReset, 1000);
+    this.internal.autoReset ??= this.reactorTimer(
+      "momentary-auto-reset",
+      Seconds(1),
+      this.autoReset,
+      { offline: true, lock: true },
+    );
+    this.internal.autoReset.start();
   }
 
   private autoReset() {
@@ -208,7 +214,7 @@ class OnOffServerBase extends Base {
 
 namespace OnOffServerBase {
   export class Internal extends Base.Internal {
-    autoReset?: () => void;
+    autoReset?: Timer;
   }
   export class State extends Base.State {
     config!: OnOffConfig;

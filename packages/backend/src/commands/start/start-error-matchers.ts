@@ -30,6 +30,7 @@ export function shouldSuppressError(error: unknown): boolean {
     msg.includes("DestroyedDependencyError") ||
     msg.includes("UninitializedDependencyError") ||
     msg.includes("mutex-closed") ||
+    msg.includes("mutex is closed") ||
     msg.includes("not a node and is not owned") ||
     msg.includes("aggregator.") ||
     AGGREGATOR_PATH_RE.test(msg)

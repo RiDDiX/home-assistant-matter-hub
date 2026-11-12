@@ -162,6 +162,43 @@ describe("EntityIdentityStorage", () => {
     expect(reloaded.getIdentity("bridge1", "hue light abc")).toEqual(record);
   });
 
+  it("skips a bridge that is not a record object", async () => {
+    const ctx = appStorage.createContext("entity-identities");
+    await ctx.set("data", {
+      version: 1,
+      identities: { bridge1: null, bridge2: { k1: record } },
+      // biome-ignore lint/suspicious/noExplicitAny: raw stored shape
+    } as any);
+
+    const storage = new EntityIdentityStorage(appStorage);
+    await storage.construction;
+    expect(storage.getBridgeIdentities("bridge1").size).toBe(0);
+    expect(storage.getIdentity("bridge2", "k1")).toEqual(record);
+  });
+
+  it("skips records without a string endpointId", async () => {
+    const ctx = appStorage.createContext("entity-identities");
+    await ctx.set("data", {
+      version: 1,
+      identities: {
+        bridge1: {
+          k1: record,
+          k2: { anchorEntityId: "light.other" },
+          k3: { ...record, endpointId: 7 },
+          k4: null,
+        },
+      },
+      // biome-ignore lint/suspicious/noExplicitAny: raw stored shape
+    } as any);
+
+    const storage = new EntityIdentityStorage(appStorage);
+    await storage.construction;
+    expect(storage.getIdentity("bridge1", "k1")).toEqual(record);
+    expect(storage.getIdentity("bridge1", "k2")).toBeUndefined();
+    expect(storage.getIdentity("bridge1", "k3")).toBeUndefined();
+    expect(storage.getIdentity("bridge1", "k4")).toBeUndefined();
+  });
+
   it("leaves a file from a newer build alone until a record changes", async () => {
     const ctx = appStorage.createContext("entity-identities");
     const newer = { version: 2, identities: { bridge1: { k1: record } } };

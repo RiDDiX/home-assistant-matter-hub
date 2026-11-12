@@ -6,6 +6,7 @@ import type {
 } from "@home-assistant-matter-hub/common";
 import type { Logger } from "@matter/general";
 import { Endpoint, type MutableEndpoint, ServerNodeStore } from "@matter/main";
+import { DescriptorServer } from "@matter/main/behaviors";
 import { Service } from "../../core/ioc/service.js";
 import { AggregatorEndpoint } from "../../matter/endpoints/aggregator-endpoint.js";
 import {
@@ -68,6 +69,8 @@ const REGISTRY_PUSH_TIMEOUT_MS = 10_000;
 // registry tick after a start (60 s by default) and its reload, which mounts
 // the entities whose state arrived late.
 const TOPOLOGY_SETTLE_MS = 90_000;
+// Prefix of the stored topology signature, changes with what it covers.
+const TOPOLOGY_FORMAT = "v2:";
 
 // First absence stamp: removal also needs a fresh successful HA reload after
 // this, so the 65s recheck can never delete from the same stale snapshot.
@@ -159,12 +162,32 @@ export class BridgeEndpointManager extends Service {
     this.topologyTimer.unref?.();
   }
 
+  // Ids and Descriptor device types, child parts included, so a rebuild
+  // under the same id with another device type counts as a change.
   private topologySignature(): string {
-    const ids = [...this.root.parts].map((part) => part.id).sort();
-    return createHash("sha256")
-      .update(ids.join("\n"))
+    const lines: string[] = [];
+    const walk = (parts: Iterable<Endpoint>, prefix: string) => {
+      for (const part of parts) {
+        const id = `${prefix}${part.id}`;
+        // an uninitialized or crashed part throws here, it must not fail
+        // the whole refresh, so it counts with no device types
+        let types: string[] = [];
+        try {
+          types = part
+            .stateOf(DescriptorServer)
+            .deviceTypeList.map((d) => `${d.deviceType}.${d.revision}`)
+            .sort();
+        } catch {}
+        lines.push(`${id}=${types.join(",")}`);
+        walk(part.parts, `${id}/`);
+      }
+    };
+    walk(this.root.parts, "");
+    const hash = createHash("sha256")
+      .update(lines.sort().join("\n"))
       .digest("hex")
       .slice(0, 16);
+    return `${TOPOLOGY_FORMAT}${hash}`;
   }
 
   // ConfigurationVersion has to move when the set of bridged endpoints does.
@@ -180,8 +203,9 @@ export class BridgeEndpointManager extends Service {
         .storage.createContext("hamh");
       const announced = await storage.get<string>("topology", "");
       if (announced === signature) return;
-      // a first run only records the set, the version starts fresh anyway
-      if (announced !== "") {
+      // a first run only records the set, the version starts fresh anyway.
+      // An older format counts as a first run, an upgrade must not bump.
+      if (announced.startsWith(TOPOLOGY_FORMAT)) {
         await this.topologyChangeHandler(async () => undefined);
       }
       await storage.set("topology", signature);
