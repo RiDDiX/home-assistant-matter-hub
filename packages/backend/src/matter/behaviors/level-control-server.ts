@@ -380,8 +380,10 @@ export class LevelControlServerBase extends FeaturedBase {
     );
     // Skip a level HA already shows, but not while an earlier write is still
     // in flight: HA's stale value would swallow the newer target.
+    // Some lights keep brightness while off, so off never counts.
     const pending = optimisticLevelState.get(entityId);
     if (
+      homeAssistant.entity.state?.state !== "off" &&
       current != null &&
       Math.round(current * this.maxLevel) === level &&
       (pending == null ||

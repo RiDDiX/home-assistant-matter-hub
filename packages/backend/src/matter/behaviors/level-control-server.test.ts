@@ -67,13 +67,13 @@ afterEach(async () => {
 });
 
 // Brightness 128 is Matter level round(128 / 255 * 254) = 127.
-async function mountLight() {
+async function mountLight(haState = "on", withOnOff = false) {
   const entityId = `light.level_${counter}`;
   const entity: HomeAssistantEntityInformation = {
     entity_id: entityId,
     state: {
       entity_id: entityId,
-      state: "on",
+      state: haState,
       attributes: {
         supported_color_modes: [LightDeviceColorMode.BRIGHTNESS],
         color_mode: LightDeviceColorMode.BRIGHTNESS,
@@ -103,7 +103,9 @@ async function mountLight() {
   return (level: number) =>
     endpoint.act(async (agent) => {
       // biome-ignore lint/suspicious/noExplicitAny: drive the controller command
-      await (agent as any).levelControl.moveToLevel({
+      await (agent as any).levelControl[
+        withOnOff ? "moveToLevelWithOnOff" : "moveToLevel"
+      ]({
         level,
         transitionTime: 0,
         optionsMask: {},
@@ -126,5 +128,22 @@ describe("moveToLevel", () => {
     expect(
       calls.map((c) => (c.data as { brightness?: number }).brightness),
     ).toEqual([201, 128]);
+  });
+
+  it("turns on an off light that still carries the requested brightness", async () => {
+    const moveToLevelWithOnOff = await mountLight("off", true);
+    await moveToLevelWithOnOff(127);
+    expect(calls).toEqual([
+      expect.objectContaining({
+        action: "light.turn_on",
+        data: expect.objectContaining({ brightness: 128 }),
+      }),
+    ]);
+  });
+
+  it("sends nothing with OnOff for an on light already at that level", async () => {
+    const moveToLevelWithOnOff = await mountLight("on", true);
+    await moveToLevelWithOnOff(127);
+    expect(calls).toEqual([]);
   });
 });

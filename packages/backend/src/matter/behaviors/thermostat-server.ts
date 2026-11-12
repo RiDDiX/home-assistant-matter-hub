@@ -393,20 +393,26 @@ export class ThermostatServerBase extends FullFeaturedBase {
     const currentTemperature = isAvailable
       ? config.getCurrentTemperature(entity.state, this.agent)?.celsius(true)
       : this.state.localTemperature;
-    const targetHeatingTemperature = this.features.heating
-      ? isAvailable
-        ? (config
+    const haHeatingTemperature =
+      this.features.heating && isAvailable
+        ? config
             .getTargetHeatingTemperature(entity.state, this.agent)
-            ?.celsius(true) ?? this.state.occupiedHeatingSetpoint)
-        : this.state.occupiedHeatingSetpoint
+            ?.celsius(true)
+        : undefined;
+    const haCoolingTemperature =
+      this.features.cooling && isAvailable
+        ? config
+            .getTargetCoolingTemperature(entity.state, this.agent)
+            ?.celsius(true)
+        : undefined;
+    const targetHeatingTemperature = this.features.heating
+      ? (haHeatingTemperature ?? this.state.occupiedHeatingSetpoint)
       : undefined;
     const targetCoolingTemperature = this.features.cooling
-      ? isAvailable
-        ? (config
-            .getTargetCoolingTemperature(entity.state, this.agent)
-            ?.celsius(true) ?? this.state.occupiedCoolingSetpoint)
-        : this.state.occupiedCoolingSetpoint
+      ? (haCoolingTemperature ?? this.state.occupiedCoolingSetpoint)
       : undefined;
+    // A stored setpoint read back while Off already carries the nudge.
+    const wasOff = this.state.systemMode === Thermostat.SystemMode.Off;
 
     const systemMode = isAvailable
       ? this.getSystemMode(entity)
@@ -537,7 +543,10 @@ export class ThermostatServerBase extends FullFeaturedBase {
         ...(this.features.heating
           ? {
               occupiedHeatingSetpoint:
-                systemMode === Thermostat.SystemMode.Off
+                systemMode === Thermostat.SystemMode.Off &&
+                (haHeatingTemperature != null ||
+                  !wasOff ||
+                  clampedHeatingSetpoint !== this.state.occupiedHeatingSetpoint)
                   ? nudgeSetpoint(
                       clampedHeatingSetpoint,
                       maxHeatLimit ?? WIDE_MAX,
@@ -548,7 +557,10 @@ export class ThermostatServerBase extends FullFeaturedBase {
         ...(this.features.cooling
           ? {
               occupiedCoolingSetpoint:
-                systemMode === Thermostat.SystemMode.Off
+                systemMode === Thermostat.SystemMode.Off &&
+                (haCoolingTemperature != null ||
+                  !wasOff ||
+                  clampedCoolingSetpoint !== this.state.occupiedCoolingSetpoint)
                   ? nudgeSetpoint(
                       clampedCoolingSetpoint,
                       maxCoolLimit ?? WIDE_MAX,
