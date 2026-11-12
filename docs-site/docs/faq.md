@@ -125,7 +125,7 @@ access_token: "your-long-lived-access-token"
 home_assistant_url: "http://127.0.0.1:8123"
 ```
 
-An administrator keeps everything working. A normal user (default Users group) works for entities and commands, but Home Assistant then rejects the `hamh_action` event and the vacuum room segment lookup, which need an administrator. A user in a restricted or read-only group does not work.
+An administrator keeps everything working. A normal user (default Users group) works for entities and commands. The `hamh_action` event and the vacuum room segment lookup need an administrator, so HAMH asks Home Assistant once per connection whether the user is one. For a normal user it logs one INFO line, `Home Assistant user "<name>" is not an admin, hamh_action events and the vacuum segment lookup stay off`, and stops sending both. Everything else keeps working. A user in a restricted or read-only group does not work.
 
 Home Assistant counts a wrong or deleted token as a failed login from `127.0.0.1`. If you have set `login_attempts_threshold` in the `http` integration, repeated starts with a bad token can ban `127.0.0.1`, and you then have to remove it from `ip_bans.yaml` by hand.
 

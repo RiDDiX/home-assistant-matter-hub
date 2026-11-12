@@ -428,6 +428,12 @@ Home, ...) are not placed in the same network segment. Please make sure to revie
 <details>
 <summary><strong>🧪 Alpha (v2.1.0-alpha.x)</strong></summary>
 
+**v2.1.0-alpha.980:**
+- **Non-admin Home Assistant token**: the bridge now asks Home Assistant once per connection whether the token's user is an admin. For a non-admin it logs one INFO line and no longer sends the `hamh_action` event or looks up vacuum segments, so the warning `Failed to fire event 'hamh_action': Unauthorized` and the matching error in Home Assistant are gone. Admin tokens and the add-on default behave as before ([#548](https://github.com/RiDDiX/home-assistant-matter-hub/issues/548)).
+- **Add-on access token and URL**: the add-on trims `home_assistant_url` and passes the access token to the app through the environment instead of the command line, so it no longer shows in the process list. The app also trims the Home Assistant URL and removes repeated trailing slashes ([#548](https://github.com/RiDDiX/home-assistant-matter-hub/issues/548)).
+- **Web UI password**: when the password is set, changed or removed, open `/api/ws` connections are closed and have to log in again ([#550](https://github.com/RiDDiX/home-assistant-matter-hub/issues/550)).
+- **Device refresh retries**: an entity that failed to be created is retried by the next registry refresh, up to three times, instead of waiting for the next change in Home Assistant. A failure that keeps repeating is logged once and no longer costs retries on every change. A slow bridge whose late refresh ends incomplete is retried too, and a failed configuration version update is retried after 10 seconds and logged when it gives up ([#545](https://github.com/RiDDiX/home-assistant-matter-hub/issues/545)).
+
 **v2.1.0-alpha.979:**
 - **Incomplete refresh retried**: a device refresh that ended incomplete, for example because Home Assistant was not ready yet, memory was low or a device failed to mount, is retried on the next registry checks, up to three times, instead of waiting for the next change in Home Assistant ([#545](https://github.com/RiDDiX/home-assistant-matter-hub/issues/545)).
 - **Slow bridges**: one bridge whose refresh takes longer than 2 minutes, or whose start takes longer than 5 minutes, no longer holds up the other bridges. It is logged and caught up afterwards.
