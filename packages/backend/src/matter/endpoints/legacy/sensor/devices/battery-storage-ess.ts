@@ -152,7 +152,7 @@ const BatteryStorageEssBase = BatteryStorageDevice.with(
   PowerSourceServer({
     getBatteryPercent(entity) {
       const state = entity.state;
-      if (state == null || Number.isNaN(+state)) {
+      if (state == null || state.trim() === "" || Number.isNaN(+state)) {
         return null;
       }
       return +state;

@@ -72,7 +72,9 @@ class StandalonePowerServer extends PowerFeaturedBase {
     if (primary != null) {
       // unavailable or unknown clears the reading instead of freezing the last one
       const reading = (quantity: "power" | "voltage" | "current") =>
-        Number.isNaN(+primary) ? null : toMatterMilli(+primary, quantity, unit);
+        primary.trim() === "" || Number.isNaN(+primary)
+          ? null
+          : toMatterMilli(+primary, quantity, unit);
       if (dc === SensorDeviceClass.power) {
         patch.activePower = reading("power");
       } else if (dc === SensorDeviceClass.voltage) {
@@ -204,7 +206,7 @@ class StandaloneEnergyServer extends EnergyFeaturedBase {
       | undefined;
     if (attrs?.device_class === SensorDeviceClass.energy) {
       const state = entity.state?.state;
-      if (state != null && !Number.isNaN(+state)) {
+      if (state != null && state.trim() !== "" && !Number.isNaN(+state)) {
         energyMwh = toMatterMilli(+state, "energy", attrs.unit_of_measurement);
       }
     }

@@ -216,6 +216,41 @@ describe("electrical meter bring-up (#419 seeding)", () => {
     expect(Number((energy as { energy: number }).energy)).toBe(0);
   });
 
+  it.each([
+    "",
+    " ",
+  ])("treats a blank power state %j as no reading", async (blank) => {
+    await bringUp(sensorEntity("sensor.plug_power", "1500", "power", "W"));
+    await endpoint.setStateOf(HomeAssistantEntityBehavior, {
+      entity: sensorEntity("sensor.plug_power", blank, "power", "W"),
+    });
+
+    let activePower: unknown;
+    await endpoint.act((agent) => {
+      // biome-ignore lint/suspicious/noExplicitAny: read cluster state
+      activePower = (agent as any).electricalPowerMeasurement.state.activePower;
+    });
+    expect(activePower).toBeNull();
+  });
+
+  it.each([
+    "",
+    " ",
+  ])("keeps the energy total on a blank state %j", async (blank) => {
+    await bringUp(sensorEntity("sensor.grid_energy", "12.5", "energy", "kWh"));
+    await endpoint.setStateOf(HomeAssistantEntityBehavior, {
+      entity: sensorEntity("sensor.grid_energy", blank, "energy", "kWh"),
+    });
+
+    let energy: unknown;
+    await endpoint.act((agent) => {
+      // biome-ignore lint/suspicious/noExplicitAny: read cluster state
+      energy = (agent as any).electricalEnergyMeasurement.state
+        .cumulativeEnergyImported;
+    });
+    expect(Number((energy as { energy: number }).energy)).toBe(12_500_000);
+  });
+
   it("mounts an energy sensor as ElectricalMeter with cumulativeEnergyImported in mWh", async () => {
     const snapshot = await bringUp(
       sensorEntity("sensor.grid_energy", "12.5", "energy", "kWh"),

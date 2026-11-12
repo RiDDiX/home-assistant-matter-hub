@@ -17,6 +17,32 @@ describe("toMatterMilli", () => {
     expect(toMatterMilli(0.5, "energy", "MWh")).toBe(500_000_000);
   });
 
+  it.each([
+    [3600, "energy", "J", 1_000],
+    [3.6, "energy", "kJ", 1_000],
+    [3.6, "energy", "MJ", 1_000_000],
+    [3.6, "energy", "GJ", 1_000_000_000],
+    [1500, "energy", "mWh", 1500],
+    [1.5, "energy", "GWh", 1_500_000_000_000],
+    [1.5, "energy", "TWh", 1_500_000_000_000_000],
+    [1000, "energy", "cal", 1162],
+    [1, "energy", "kcal", 1162],
+    [1, "energy", "Mcal", 1_162_222],
+    [1, "energy", "Gcal", 1_162_222_222],
+    [1.5, "power", "GW", 1_500_000_000_000],
+    [1.5, "power", "TW", 1_500_000_000_000_000],
+    [1000, "power", "BTU/h", 293_071],
+    [5000, "voltage", "μV", 5],
+    [5000, "voltage", "µV", 5],
+    [0.5, "voltage", "MV", 500_000_000],
+  ] as const)("scales %d %s %s to %d", (value, quantity, unit, milli) => {
+    expect(toMatterMilli(value, quantity, unit)).toBe(milli);
+  });
+
+  it("falls back to kWh for an unknown energy unit", () => {
+    expect(toMatterMilli(7.5, "energy", "kwh")).toBe(7_500_000);
+  });
+
   it("keeps W, V, A and kWh for a missing, unknown or foreign unit", () => {
     expect(toMatterMilli(42, "power", undefined)).toBe(42_000);
     expect(toMatterMilli(42, "power", "hp")).toBe(42_000);

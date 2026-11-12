@@ -210,6 +210,22 @@ describe("battery storage ESS bring-up (#386)", () => {
     ).toBe(EXPECTED_ENERGY);
   });
 
+  it.each([
+    "",
+    " ",
+  ])("keeps the battery percent on a blank state %j", async (blank) => {
+    const endpoint = await mount({
+      entityId: BATTERY,
+      batteryPowerEntity: BATTERY_POWER,
+    });
+    await updateEntityState(endpoint, batteryEntity(blank).state);
+    await delay(50);
+
+    // biome-ignore lint/suspicious/noExplicitAny: read cluster state
+    const state = endpoint.state as any;
+    expect(state.powerSource.batPercentRemaining).toBe(EXPECTED_BAT_PERCENT);
+  });
+
   it("keeps a plain battery as BatterySensorType without electrical clusters", async () => {
     const endpoint = await mount();
 
