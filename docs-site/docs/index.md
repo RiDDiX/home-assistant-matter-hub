@@ -428,6 +428,10 @@ Home, ...) are not placed in the same network segment. Please make sure to revie
 <details>
 <summary><strong>🧪 Alpha (v2.1.0-alpha.x)</strong></summary>
 
+**v2.1.0-alpha.982:**
+- **Lights that keep their brightness while off**: some template and MQTT lights keep showing their brightness while off. A controller asking for that same brightness now turns them on again. Since alpha.962 such a request was dropped and the light stayed off.
+- **Off thermostat without target**: a thermostat that is Off and reports no target temperature no longer drifts. Its setpoint used to rise by 0.01 degrees with every state update.
+
 **v2.1.0-alpha.981:**
 - **Sensor units**: power, voltage and energy sensors now convert every unit Home Assistant allows for them: GW, TW, BTU/h, µV, MV, J, kJ, MJ, GJ, mWh, GWh, TWh, cal, kcal, Mcal and Gcal. A unit missing from the table used to be read as W, V or kWh, so a GWh sensor showed a value a million times too small.
 - **Empty sensor state**: a sensor with an empty state no longer reports 0 W, 0 kWh or 0 % battery. It counts as no reading.
