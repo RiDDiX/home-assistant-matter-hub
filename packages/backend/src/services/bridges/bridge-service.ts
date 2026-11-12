@@ -39,9 +39,14 @@ function clampRecoveryInterval(ms: number): number {
   );
 }
 
+// a hung bridge must not keep the others from picking up registry changes
+const REFRESH_TIMEOUT_MS = 120_000;
+const START_TIMEOUT_MS = 5 * 60_000;
+
 export class BridgeService extends Service {
   private readonly pendingPorts = new Set<number>();
   private readonly deleting = new Map<string, Promise<void>>();
+  private readonly slowRefreshes = new Map<string, boolean>();
   private readonly log = Logger.get("BridgeService");
   public readonly bridges: Bridge[] = [];
   public autoRecoveryEnabled = false;
@@ -257,7 +262,15 @@ export class BridgeService extends Service {
     });
     for (const bridge of sortedBridges) {
       try {
-        await bridge.start();
+        const start = bridge.start();
+        if (!(await this.settlesWithin(start, START_TIMEOUT_MS))) {
+          this.log.warn(
+            `Start of bridge ${bridge.id} still pending after ${START_TIMEOUT_MS / 60_000} min, continuing with the next bridge`,
+          );
+          start.catch((e) =>
+            this.log.error(`Failed to start bridge ${bridge.id}:`, e),
+          );
+        }
       } catch (e) {
         // Isolate per-bridge failures so one failing bridge doesn't prevent others from starting
         this.log.error(`Failed to start bridge ${bridge.id}:`, e);
@@ -313,16 +326,80 @@ export class BridgeService extends Service {
     }
   }
 
-  async refreshAll() {
+  async refreshAll(): Promise<boolean> {
+    let complete = true;
     // a delete finishing mid-pass must not shift the next bridge out of the loop
     for (const bridge of [...this.bridges]) {
+      if (this.deleting.has(bridge.id)) continue;
+      // the follow-up of a slow refresh owns this bridge, not the caller's retries
+      if (this.slowRefreshes.has(bridge.id)) {
+        this.slowRefreshes.set(bridge.id, true);
+        continue;
+      }
       try {
-        await bridge.refreshDevices();
+        const refresh = bridge.refreshDevices();
+        const settled = await this.settlesWithin(refresh, REFRESH_TIMEOUT_MS);
+        if (!settled) {
+          this.log.warn(
+            `Refresh of bridge ${bridge.id} did not finish within ${REFRESH_TIMEOUT_MS / 1000} s, continuing with the next bridge`,
+          );
+          this.slowRefreshes.set(bridge.id, false);
+          const failed = (e: unknown) =>
+            this.log.error(`Failed to refresh bridge ${bridge.id}:`, e);
+          // a delete removes the bridge from the list only after stopping it
+          const live = () =>
+            this.bridges.includes(bridge) && !this.deleting.has(bridge.id);
+          void refresh.catch(failed).then(async () => {
+            try {
+              while (live()) {
+                this.slowRefreshes.set(bridge.id, false);
+                try {
+                  if (!(await bridge.refreshDevices())) {
+                    this.log.warn(
+                      `Refresh of bridge ${bridge.id} is still incomplete`,
+                    );
+                  }
+                } catch (e) {
+                  failed(e);
+                }
+                try {
+                  if (live()) this.onBridgeChanged?.(bridge.id);
+                } catch (e) {
+                  failed(e);
+                }
+                // a pass skipped during this attempt may carry a newer registry change
+                if (!this.slowRefreshes.get(bridge.id)) break;
+              }
+            } finally {
+              this.slowRefreshes.delete(bridge.id);
+            }
+          });
+          continue;
+        }
         this.onBridgeChanged?.(bridge.id);
+        if (!settled.value) complete = false;
       } catch (e) {
+        complete = false;
         // Isolate per-bridge failures so one failing bridge doesn't block others
         this.log.error(`Failed to refresh bridge ${bridge.id}:`, e);
       }
+    }
+    return complete;
+  }
+
+  // undefined when the work is still running after ms, rejects with its error
+  private async settlesWithin<T>(
+    work: Promise<T>,
+    ms: number,
+  ): Promise<{ value: T } | undefined> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<undefined>((resolve) => {
+      timer = setTimeout(() => resolve(undefined), ms);
+    });
+    try {
+      return await Promise.race([work.then((value) => ({ value })), timeout]);
+    } finally {
+      clearTimeout(timer);
     }
   }
 

@@ -129,7 +129,7 @@ describe.each(Object.entries(modes))("port edit, %s", (_, mode) => {
         root: aggregator,
         devices: [],
         refreshDevices: noop,
-        startObserving() {},
+        startObserving: noop,
         stopObserving() {},
         startPlugins: noop,
         stopPlugins: noop,

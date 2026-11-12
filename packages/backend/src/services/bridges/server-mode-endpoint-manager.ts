@@ -63,6 +63,7 @@ export class ServerModeEndpointManager extends Service {
   private unsubscribe?: () => void;
   private observingRequested = false;
   private _failedEntities: FailedEntity[] = [];
+  private _refreshIncomplete = false;
   private readonly endpoints = new Map<string, ManagedEndpoint>();
   // Identity inputs of the primary entity as last pushed to the root node,
   // so a rename re-runs it and an unchanged refresh does not (#467).
@@ -156,7 +157,10 @@ export class ServerModeEndpointManager extends Service {
     const subscriptionIds = this.collectSubscriptionEntityIds();
     this.unsubscribe = subscribeEntities(
       this.client.connection,
-      (e, changed) => this.updateStates(e, changed),
+      (e, changed) =>
+        this.updateStates(e, changed).catch((err) =>
+          this.log.warn("State update failed:", err),
+        ),
       subscriptionIds,
     );
   }
@@ -304,13 +308,19 @@ export class ServerModeEndpointManager extends Service {
   // the map entry of the mounted endpoint, so runs queue up like in bridge mode.
   private refreshChain: Promise<unknown> = Promise.resolve();
 
-  refreshDevices(): Promise<void> {
-    const next = this.refreshChain.then(() => this.runRefreshDevices());
+  // Resolves false when the run left matching entities unmounted for a reason
+  // that only passes with time (HA down, heap pressure, a failed add).
+  refreshDevices(): Promise<boolean> {
+    const next = this.refreshChain.then(async () => {
+      await this.runRefreshDevices();
+      return !this._refreshIncomplete;
+    });
     this.refreshChain = next.catch(() => undefined);
     return next;
   }
 
   private async runRefreshDevices(): Promise<void> {
+    this._refreshIncomplete = false;
     this.registry.refresh();
 
     const lifecycle = this.lifecycle;
@@ -327,6 +337,7 @@ export class ServerModeEndpointManager extends Service {
         this.log.warn(
           "HA not running or registry empty, deferring server mode reconcile",
         );
+        this._refreshIncomplete = true;
         return;
       }
 
@@ -546,6 +557,7 @@ export class ServerModeEndpointManager extends Service {
         }
 
         if (isHeapUnderPressure()) {
+          this._refreshIncomplete = true;
           this.log.error(
             "Memory pressure detected, cannot create device endpoint. " +
               "Reduce entities on other bridges or raise the heap (add-on: heap_size_mb option, container: NODE_OPTIONS=--max-old-space-size=1024).",
@@ -652,6 +664,7 @@ export class ServerModeEndpointManager extends Service {
           if (entry.tag !== undefined) setNumberTag(entry.endpoint, entry.tag);
           await this.serverNode.addDevice(entry.endpoint);
         } catch (e) {
+          this._refreshIncomplete = true;
           this.endpoints.delete(entityId);
           const reason = e instanceof Error ? e.message : String(e);
           this.log.error(`Failed to create server mode device ${entityId}:`, e);
@@ -715,7 +728,9 @@ export class ServerModeEndpointManager extends Service {
       );
       // re-subscribe on every path so mapped-entity subscriptions stay fresh
       if (this.observingRequested) {
-        this.startObserving();
+        this.startObserving().catch((e) =>
+          this.log.warn("Failed to subscribe to entity states:", e),
+        );
       }
     }
   }
@@ -729,7 +744,7 @@ export class ServerModeEndpointManager extends Service {
     this.registry.mergeExternalStates(states, changed);
 
     this.mappingSync.maybeRetry(states, changed, this.observingRequested, () =>
-      this.refreshDevices(),
+      this.refreshDevices().then(() => undefined),
     );
 
     for (const [entityId, entry] of this.endpoints) {

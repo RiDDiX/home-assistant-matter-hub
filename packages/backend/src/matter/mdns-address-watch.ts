@@ -78,7 +78,7 @@ export interface MdnsAddressWatchDeps {
   stripGlobalIpv6?: boolean;
   ipv4Enabled?: boolean;
   currentSnapshot: string[];
-  // consecutive ticks that kept the old snapshot because every fabric failed
+  // consecutive ticks that kept the old snapshot because a fabric failed
   failedRetries?: number;
   fabrics: () => Iterable<unknown>;
   refresh: (fabric: unknown) => Promise<void>;
@@ -109,11 +109,9 @@ export async function runMdnsAddressWatchTick(
   if (retries === 0) {
     deps.onChange?.(deps.currentSnapshot, next);
   }
-  let attempted = 0;
   let failed = 0;
-  // one failing fabric must not skip the rest; only an all-fail tick retries
+  // one failing fabric must not skip the rest; any failure retries the whole set
   for (const fabric of deps.fabrics()) {
-    attempted++;
     try {
       await deps.refresh(fabric);
     } catch (e) {
@@ -121,11 +119,7 @@ export async function runMdnsAddressWatchTick(
       deps.onRefreshError?.(fabric, e);
     }
   }
-  if (
-    attempted > 0 &&
-    failed === attempted &&
-    retries < MDNS_REFRESH_MAX_RETRIES
-  ) {
+  if (failed > 0 && retries < MDNS_REFRESH_MAX_RETRIES) {
     return { snapshot: deps.currentSnapshot, failedRetries: retries + 1 };
   }
   return { snapshot: next, failedRetries: 0 };

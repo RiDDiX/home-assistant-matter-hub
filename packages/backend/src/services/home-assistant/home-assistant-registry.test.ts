@@ -1,3 +1,4 @@
+import { Logger } from "@matter/general";
 import type { Connection } from "home-assistant-js-websocket";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { HomeAssistantClient } from "./home-assistant-client.js";
@@ -548,6 +549,106 @@ describe("HomeAssistantRegistry", () => {
     await vi.advanceTimersByTimeAsync(defaultOptions.refreshInterval * 1000);
     expect(onRefresh).toHaveBeenCalledTimes(1);
     registry.disableAutoRefresh();
+  });
+
+  describe("incomplete bridge refresh", () => {
+    const tick = () =>
+      vi.advanceTimersByTimeAsync(defaultOptions.refreshInterval * 1000);
+
+    async function setup(onRefresh: () => Promise<boolean | undefined>) {
+      const fake = makeConnection();
+      fake.connection.sendMessagePromise = vi.fn(() =>
+        Promise.resolve([]),
+      ) as unknown as Connection["sendMessagePromise"];
+      const client = {
+        connection: fake.connection,
+        haRunning: true,
+        runningSince: 1_000,
+      } as unknown as HomeAssistantClient;
+      const registry = new HomeAssistantRegistry(client, defaultOptions);
+      await vi.runAllTimersAsync();
+      await registry.construction;
+      const reload = vi
+        .spyOn(registry, "reload")
+        .mockResolvedValueOnce(true)
+        .mockResolvedValue(false);
+      registry.enableAutoRefresh(onRefresh);
+      return { registry, reload };
+    }
+
+    it("retries an incomplete refresh once it reports complete", async () => {
+      const onRefresh = vi
+        .fn<() => Promise<boolean>>()
+        .mockResolvedValueOnce(false)
+        .mockResolvedValue(true);
+      const { registry } = await setup(onRefresh);
+      await tick();
+      expect(onRefresh).toHaveBeenCalledTimes(1);
+      await tick();
+      expect(onRefresh).toHaveBeenCalledTimes(2);
+      await tick();
+      expect(onRefresh).toHaveBeenCalledTimes(2);
+      registry.disableAutoRefresh();
+    });
+
+    it("stops after three retries and warns once until the next change", async () => {
+      const warn = vi
+        .spyOn(Logger.prototype, "warn")
+        .mockImplementation(() => {});
+      const onRefresh = vi
+        .fn<() => Promise<boolean>>()
+        .mockResolvedValue(false);
+      const { registry, reload } = await setup(onRefresh);
+      for (let i = 0; i < 6; i++) await tick();
+      expect(onRefresh).toHaveBeenCalledTimes(4);
+      const incomplete = () =>
+        warn.mock.calls.filter((c) => String(c[0]).includes("still incomplete"))
+          .length;
+      expect(incomplete()).toBe(1);
+
+      reload.mockResolvedValueOnce(true);
+      await tick();
+      expect(onRefresh).toHaveBeenCalledTimes(5);
+      registry.disableAutoRefresh();
+      warn.mockRestore();
+    });
+
+    it("retries a refresh that threw", async () => {
+      const onRefresh = vi
+        .fn<() => Promise<undefined>>()
+        .mockRejectedValueOnce(new Error("boom"))
+        .mockResolvedValue(undefined);
+      const { registry } = await setup(onRefresh);
+      await tick();
+      expect(onRefresh).toHaveBeenCalledTimes(1);
+      await tick();
+      expect(onRefresh).toHaveBeenCalledTimes(2);
+      await tick();
+      expect(onRefresh).toHaveBeenCalledTimes(2);
+      registry.disableAutoRefresh();
+    });
+
+    it("counts a throw on the last retry as incomplete, not as a failed reload", async () => {
+      const warn = vi
+        .spyOn(Logger.prototype, "warn")
+        .mockImplementation(() => {});
+      const onRefresh = vi
+        .fn<() => Promise<boolean>>()
+        .mockResolvedValueOnce(false)
+        .mockResolvedValueOnce(false)
+        .mockResolvedValueOnce(false)
+        .mockRejectedValueOnce(new Error("boom"));
+      const { registry } = await setup(onRefresh);
+      for (let i = 0; i < 4; i++) await tick();
+      expect(onRefresh).toHaveBeenCalledTimes(4);
+      const logged = (text: string) =>
+        warn.mock.calls.filter((c) => String(c[0]).includes(text)).length;
+      expect(logged("still incomplete")).toBe(1);
+      expect(logged("will retry next interval")).toBe(0);
+      expect(logged("Bridge refresh failed")).toBe(1);
+      registry.disableAutoRefresh();
+      warn.mockRestore();
+    });
   });
 
   it("keeps the last trusted registry contents through an untrusted reload (#438)", async () => {

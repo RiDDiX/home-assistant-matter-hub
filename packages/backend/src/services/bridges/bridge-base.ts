@@ -45,8 +45,8 @@ export const COMMISSIONING_CHECK_MS = 10 * 60_000;
 
 interface LifecycleEndpointManager {
   readonly failedEntities: FailedEntity[];
-  refreshDevices(): Promise<void>;
-  startObserving(): void;
+  refreshDevices(): Promise<boolean>;
+  startObserving(): Promise<void>;
   stopObserving(): void;
 }
 
@@ -162,8 +162,9 @@ export abstract class BridgeBase<
     await this.stop();
   }
 
-  async refreshDevices(): Promise<void> {
-    await this.endpointManager.refreshDevices();
+  /** Resolves false when matching entities stayed unmounted for a transient reason. */
+  async refreshDevices(): Promise<boolean> {
+    const complete = await this.endpointManager.refreshDevices();
     // Prune stale entries from lastSyncedStates for entities that were removed
     const currentEntityIds = new Set(
       this.topLevelEndpoints().map(
@@ -175,6 +176,7 @@ export abstract class BridgeBase<
         this.lastSyncedStates.delete(entityId);
       }
     }
+    return complete;
   }
 
   private setStatus(status: BridgeServerStatus) {
@@ -207,7 +209,11 @@ export abstract class BridgeBase<
         this.log,
         `after refreshDevices (${this.topLevelEndpoints().length} endpoints)`,
       );
-      this.endpointManager.startObserving();
+      this.endpointManager
+        .startObserving()
+        .catch((e) =>
+          this.log.warn("Failed to subscribe to entity states:", e),
+        );
       ensureCommissioningConfig(this.server);
       // before start: a fast commissioner can PASE immediately, and a node
       // kept across a flag change must follow the flag (#449)

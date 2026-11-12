@@ -858,7 +858,7 @@ describe("ServerModeEndpointManager (#301)", () => {
 
     const refresh = vi
       .spyOn(h.manager, "refreshDevices")
-      .mockResolvedValue(undefined);
+      .mockResolvedValue(true);
     h.registry.batteryFingerprintFor.mockReturnValue("sensor.robo_battery");
     await h.manager.updateStates({
       "sensor.robo_battery": { state: "85" },

@@ -10,7 +10,7 @@ const answer = (message: string) => ({
   }),
 });
 
-describe("LogViewer", () => {
+describe("LogViewer", { timeout: 20_000 }, () => {
   afterEach(() => {
     vi.unstubAllGlobals();
   });

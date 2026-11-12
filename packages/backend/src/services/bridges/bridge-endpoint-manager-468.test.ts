@@ -8,6 +8,7 @@ import {
 import { Environment, type Logger, VariableService } from "@matter/general";
 import { VendorId } from "@matter/main";
 import { ServerNode } from "@matter/main/node";
+import { FabricManager, SessionManager } from "@matter/main/protocol";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { EntityEndpoint } from "../../matter/endpoints/entity-endpoint.js";
 import { VacuumAreaSwitchEndpoint } from "../../matter/endpoints/legacy/vacuum/vacuum-area-switch.js";
@@ -294,6 +295,78 @@ describe("filter edits reconcile without the grace window (#468)", () => {
       "Device list changed: 1 removed, 0 added, 1 mounted",
       "Device list changed: 1 removed, 1 added (vacuum_robot), 1 mounted",
     ]);
+  });
+
+  it("logs each controller fabric's subscriptions when a live device list moves", async () => {
+    const ha = makeHa();
+    const { manager, provider, log } = await buildManager(ha, ["vacuum.other"]);
+    const env = manager.root.env;
+    const maybeGet = env.maybeGet.bind(env);
+    vi.spyOn(env, "maybeGet").mockImplementation(((type: unknown) => {
+      if (type === FabricManager) {
+        return {
+          fabrics: [
+            { fabricIndex: 2, rootVendorId: 0x6006 },
+            { fabricIndex: 3, rootVendorId: 0x1349 },
+          ],
+        };
+      }
+      if (type === SessionManager) {
+        return {
+          sessions: [
+            { fabric: { fabricIndex: 2 }, subscriptions: { size: 2 } },
+            { fabric: undefined, subscriptions: { size: 0 } },
+          ],
+        };
+      }
+      return maybeGet(type as Parameters<typeof maybeGet>[0]);
+    }) as typeof env.maybeGet);
+    const fabricLines = () =>
+      vi
+        .mocked(log.info)
+        .mock.calls.map((c) => String(c[0]))
+        .filter((m) => m.startsWith("Controller fabric"));
+
+    await manager.refreshDevices();
+    expect(mountedEntityIds(manager)).toEqual([OTHER]);
+    expect(fabricLines()).toEqual([]);
+
+    setFilter(provider, ["vacuum.*"]);
+    await manager.refreshDevices();
+    expect(fabricLines()).toEqual([
+      "Controller fabric 2 (google 0x6006): 1 session, 2 subscriptions",
+      "Controller fabric 3 (apple 0x1349): 0 sessions, 0 subscriptions, not subscribed, it sees the new device list when it subscribes again",
+    ]);
+  });
+
+  it("reports a refresh with a failed add as incomplete until a later one mounts it", async () => {
+    const ha = makeHa();
+    const { manager } = await buildManager(ha);
+    const add = manager.root.add.bind(manager.root);
+    vi.spyOn(manager.root, "add")
+      .mockRejectedValueOnce(new Error("add failed"))
+      .mockImplementation(add);
+
+    await expect(manager.refreshDevices()).resolves.toBe(false);
+    expect(mountedEntityIds(manager)).toHaveLength(1);
+
+    await expect(manager.refreshDevices()).resolves.toBe(true);
+    expect(mountedEntityIds(manager)).toEqual([OTHER, VACUUM].sort());
+  });
+
+  it("reports each queued refresh by its own outcome", async () => {
+    const ha = makeHa();
+    const { manager } = await buildManager(ha);
+    const add = manager.root.add.bind(manager.root);
+    vi.spyOn(manager.root, "add")
+      .mockRejectedValueOnce(new Error("add failed"))
+      .mockImplementation(add);
+
+    const first = manager.refreshDevices();
+    const second = manager.refreshDevices();
+    await expect(first).resolves.toBe(false);
+    await expect(second).resolves.toBe(true);
+    expect(mountedEntityIds(manager)).toEqual([OTHER, VACUUM].sort());
   });
 
   it("keeps the grace window for an entity that vanished from HA itself", async () => {

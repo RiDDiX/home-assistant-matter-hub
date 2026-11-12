@@ -91,7 +91,7 @@ async function make() {
       root: aggregator,
       devices: [],
       refreshDevices: noop,
-      startObserving() {},
+      startObserving: noop,
       stopObserving() {},
       startPlugins: noop,
       stopPlugins: noop,

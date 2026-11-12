@@ -26,6 +26,7 @@ import type {
 const logger = Logger.get("HomeAssistantRegistry");
 // shortcut: groups still incomplete after 60s use auto-refresh; revisit if controllers still rediscover devices.
 const GROUP_SENSOR_STARTUP_WAIT_MS = 60_000;
+const INCOMPLETE_REFRESH_RETRIES = 3;
 
 export type HomeAssistantDevices = Record<string, HomeAssistantDeviceRegistry>;
 export type HomeAssistantEntities = Record<string, HomeAssistantEntityRegistry>;
@@ -129,10 +130,14 @@ export class HomeAssistantRegistry extends Service {
     this.disableAutoRefresh();
   }
 
-  enableAutoRefresh(onRefresh: () => Promise<void> | void) {
+  enableAutoRefresh(
+    onRefresh: () => Promise<boolean | undefined> | boolean | undefined,
+  ) {
     this.disableAutoRefresh();
 
     let refreshing = false;
+    let pending = false;
+    let retries = 0;
     this.autoRefresh = setInterval(async () => {
       if (refreshing) {
         // Previous tick is still mid-retry (HA slow / reconnecting).
@@ -152,7 +157,22 @@ export class HomeAssistantRegistry extends Service {
         // stamp only now: a reload that failed must not consume the restart
         this.lastRunningSince = runningSince;
         if (changed || restarted) {
-          await onRefresh();
+          retries = 0;
+        } else if (!pending || retries >= INCOMPLETE_REFRESH_RETRIES) {
+          return;
+        } else {
+          retries++;
+        }
+        try {
+          pending = (await onRefresh()) === false;
+        } catch (e) {
+          logger.warn("Bridge refresh failed:", e);
+          pending = true;
+        }
+        if (pending && retries === INCOMPLETE_REFRESH_RETRIES) {
+          logger.warn(
+            "Bridge refresh still incomplete, waiting for the next registry change",
+          );
         }
       } catch (e) {
         logger.warn("Failed to refresh registry, will retry next interval:", e);

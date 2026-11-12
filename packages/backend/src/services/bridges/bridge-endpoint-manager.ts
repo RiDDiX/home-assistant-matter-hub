@@ -1,12 +1,14 @@
 import { createHash } from "node:crypto";
-import type {
-  EntityMappingConfig,
-  FailedEntity,
-  VacuumDeviceAttributes,
+import {
+  classifyController,
+  type EntityMappingConfig,
+  type FailedEntity,
+  type VacuumDeviceAttributes,
 } from "@home-assistant-matter-hub/common";
 import type { Logger } from "@matter/general";
 import { Endpoint, type MutableEndpoint, ServerNodeStore } from "@matter/main";
 import { DescriptorServer } from "@matter/main/behaviors";
+import { FabricManager, SessionManager } from "@matter/main/protocol";
 import { Service } from "../../core/ioc/service.js";
 import { AggregatorEndpoint } from "../../matter/endpoints/aggregator-endpoint.js";
 import {
@@ -71,6 +73,7 @@ const REGISTRY_PUSH_TIMEOUT_MS = 10_000;
 const TOPOLOGY_SETTLE_MS = 90_000;
 // Prefix of the stored topology signature, changes with what it covers.
 const TOPOLOGY_FORMAT = "v2:";
+const TOPOLOGY_RETRIES = 3;
 
 // First absence stamp: removal also needs a fresh successful HA reload after
 // this, so the 65s recheck can never delete from the same stale snapshot.
@@ -107,6 +110,7 @@ export class BridgeEndpointManager extends Service {
   private unsubscribe?: () => void;
   private observingRequested = false;
   private _failedEntities: FailedEntity[] = [];
+  private _refreshIncomplete = false;
   private readonly mappingFingerprints = new Map<string, string>();
   private readonly mappingSync: EntityMappingSync;
   // entityId -> first absence stamp (grace window)
@@ -134,6 +138,9 @@ export class BridgeEndpointManager extends Service {
   // Last set a reconcile saw, so only a reconcile that moved it re-arms.
   private reconciledTopology = "";
   private topologyTimer: ReturnType<typeof setTimeout> | undefined;
+  // a retry after a failed write must not bump the version a second time
+  private announcedTopology = "";
+  private topologyRetries = 0;
 
   private async enqueueTopology(run: () => Promise<unknown>): Promise<void> {
     const next = this.topologyQueue.then(run);
@@ -152,7 +159,8 @@ export class BridgeEndpointManager extends Service {
 
   // Every change re-arms the timer, so a start that passes through partial
   // sets (late states, #450 retry, #498 cleanup, area switches) compares once.
-  private settleTopology(): void {
+  private settleTopology(retry = false): void {
+    if (!retry) this.topologyRetries = 0;
     if (!this.topologyKnown()) return;
     clearTimeout(this.topologyTimer);
     this.topologyTimer = setTimeout(() => {
@@ -205,12 +213,55 @@ export class BridgeEndpointManager extends Service {
       if (announced === signature) return;
       // a first run only records the set, the version starts fresh anyway.
       // An older format counts as a first run, an upgrade must not bump.
-      if (announced.startsWith(TOPOLOGY_FORMAT)) {
+      if (
+        announced.startsWith(TOPOLOGY_FORMAT) &&
+        this.announcedTopology !== signature
+      ) {
         await this.topologyChangeHandler(async () => undefined);
+        this.announcedTopology = signature;
       }
       await storage.set("topology", signature);
+      this.announcedTopology = "";
+      this.topologyRetries = 0;
     } catch (e) {
       this.log.warn("Failed to announce the bridge topology change:", e);
+      if (this.topologyRetries < TOPOLOGY_RETRIES) {
+        this.topologyRetries++;
+        this.settleTopology(true);
+      }
+    }
+  }
+
+  // Whether each controller held a subscription when the device list moved,
+  // one that did not only sees the change when it subscribes again.
+  private controllerFabricLines(): string[] {
+    try {
+      const env = this.root.env;
+      const fabrics = env.maybeGet(FabricManager)?.fabrics ?? [];
+      const counts = new Map<number, { sessions: number; subs: number }>();
+      for (const session of env.maybeGet(SessionManager)?.sessions ?? []) {
+        const index = session.fabric?.fabricIndex;
+        if (index === undefined) continue;
+        const count = counts.get(index) ?? { sessions: 0, subs: 0 };
+        count.sessions++;
+        count.subs += session.subscriptions.size;
+        counts.set(index, count);
+      }
+      return fabrics.map((fabric) => {
+        const { sessions, subs } = counts.get(fabric.fabricIndex) ?? {
+          sessions: 0,
+          subs: 0,
+        };
+        const vendor = fabric.rootVendorId;
+        const name = classifyController(vendor) ?? "vendor";
+        const hint =
+          subs === 0
+            ? ", not subscribed, it sees the new device list when it subscribes again"
+            : "";
+        return `Controller fabric ${fabric.fabricIndex} (${name} 0x${vendor.toString(16)}): ${sessions} ${sessions === 1 ? "session" : "sessions"}, ${subs} ${subs === 1 ? "subscription" : "subscriptions"}${hint}`;
+      });
+    } catch {
+      return [];
     }
   }
 
@@ -552,6 +603,7 @@ export class BridgeEndpointManager extends Service {
     // A pending compare is dropped, the next start compares against storage.
     this.pluginsStarted = false;
     clearTimeout(this.topologyTimer);
+    this.topologyRetries = 0;
     if (!this.pluginManager) return;
     await this.pluginManager.shutdownAll("Bridge stopping");
     // close() keeps the numbers, so plugin devices survive every bridge stop
@@ -762,7 +814,10 @@ export class BridgeEndpointManager extends Service {
     const subscriptionIds = this.collectSubscriptionEntityIds();
     this.unsubscribe = subscribeEntities(
       this.client.connection,
-      (e, changed) => this.updateStates(e, changed),
+      (e, changed) =>
+        this.updateStates(e, changed).catch((err) =>
+          this.log.warn("State update failed:", err),
+        ),
       subscriptionIds,
     );
   }
@@ -794,6 +849,7 @@ export class BridgeEndpointManager extends Service {
     this.entitiesReconciled = false;
     this.reconciledTopology = "";
     clearTimeout(this.topologyTimer);
+    this.topologyRetries = 0;
     this.lifecycle++;
     this.clearSubscription();
     // Bridges stop through this, never through dispose(), so the recheck
@@ -810,15 +866,22 @@ export class BridgeEndpointManager extends Service {
   // runs queue up. Chained, not joined: a tick mid-run carries a newer registry.
   private refreshChain: Promise<unknown> = Promise.resolve();
 
-  refreshDevices(): Promise<void> {
-    const next = this.refreshChain.then(() => this.runRefreshDevices());
+  // Resolves false when the run left matching entities unmounted for a reason
+  // that only passes with time (HA down, heap pressure, a failed add).
+  refreshDevices(): Promise<boolean> {
+    const next = this.refreshChain.then(async () => {
+      await this.runRefreshDevices();
+      return !this._refreshIncomplete;
+    });
     this.refreshChain = next.catch(() => undefined);
     return next;
   }
 
   private async runRefreshDevices() {
+    this._refreshIncomplete = false;
     this.registry.refresh();
     const lifecycle = this.lifecycle;
+    const wasLive = this.entitiesReconciled;
 
     // Area switches (#355) share the vacuum's entity_id but ride their own
     // reconcile pass keyed off the surviving vacuum endpoint, so they must never
@@ -839,6 +902,7 @@ export class BridgeEndpointManager extends Service {
       this.log.warn(
         `HA not running or registry empty, deferring reconcile of ${endpoints.length} endpoints`,
       );
+      this._refreshIncomplete = true;
       return;
     }
 
@@ -1192,6 +1256,7 @@ export class BridgeEndpointManager extends Service {
       if (memoryLimitReached) {
         // Skip existing endpoints that are already loaded
         if (!existingEndpoints.some((e) => e.entityId === entityId)) {
+          this._refreshIncomplete = true;
           this.addFailedEntity(
             entityId,
             "Skipped due to memory pressure, reduce entities or increase heap size",
@@ -1273,6 +1338,7 @@ export class BridgeEndpointManager extends Service {
             // Extract detailed behavior error info for debugging
             this.logDetailedError(entityId, e);
             this.addFailedEntity(entityId, this.extractErrorReason(e));
+            this._refreshIncomplete = true;
           }
         }
       }
@@ -1301,6 +1367,9 @@ export class BridgeEndpointManager extends Service {
       this.log.info(
         `Device list changed: ${removed.length} removed, ${added.length} added${names}, ${mountedNow.size} mounted`,
       );
+      if (wasLive) {
+        for (const line of this.controllerFabricLines()) this.log.info(line);
+      }
     }
     // Not added/removed: an isolation closes endpoints between reconciles.
     if (lifecycle === this.lifecycle) {
@@ -1313,7 +1382,9 @@ export class BridgeEndpointManager extends Service {
     }
 
     if (this.observingRequested) {
-      this.startObserving();
+      this.startObserving().catch((e) =>
+        this.log.warn("Failed to subscribe to entity states:", e),
+      );
     }
   }
 
@@ -1503,7 +1574,7 @@ export class BridgeEndpointManager extends Service {
     this.registry.mergeExternalStates(states, changed);
 
     this.mappingSync.maybeRetry(states, changed, this.observingRequested, () =>
-      this.refreshDevices(),
+      this.refreshDevices().then(() => undefined),
     );
 
     const allEndpoints = [...this.root.parts].filter(isEntityPart);

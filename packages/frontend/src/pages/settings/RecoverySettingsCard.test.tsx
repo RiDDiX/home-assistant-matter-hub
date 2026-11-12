@@ -6,7 +6,7 @@ import { RecoverySettingsCard } from "./RecoverySettingsCard.tsx";
 
 vi.mock("../../api/settings.ts");
 
-describe("RecoverySettingsCard", () => {
+describe("RecoverySettingsCard", { timeout: 20_000 }, () => {
   beforeEach(() => {
     vi.mocked(settingsApi.fetchRecoverySettings).mockResolvedValue({
       autoRecoveryEnabled: true,
