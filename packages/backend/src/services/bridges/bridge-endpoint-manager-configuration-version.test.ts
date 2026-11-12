@@ -611,6 +611,39 @@ describe("root ConfigurationVersion follows the bridged endpoint set", () => {
     expect(settleArmed(bem)).toBe(true);
   });
 
+  it("retries a failed announcement after a short delay and gives up with one warning", async () => {
+    const ha = makeHa(["vacuum.a"]);
+    const { bem } = await startBridge(ha);
+    await settle(bem);
+    bem.setTopologyChangeHandler(async () => {
+      throw new Error("lock held");
+    });
+    const timeouts = vi.spyOn(globalThis, "setTimeout");
+    const armedDelay = () => {
+      const timer = (bem as unknown as { topologyTimer?: unknown })
+        .topologyTimer;
+      const i = timeouts.mock.results.findIndex((r) => r.value === timer);
+      return timeouts.mock.calls[i]?.[1];
+    };
+    const log = (bem as unknown as { log: Logger }).log;
+    const givenUp = () =>
+      vi
+        .mocked(log.warn)
+        .mock.calls.filter((c) => String(c[0]).startsWith("Giving up")).length;
+
+    addEntity(ha, "vacuum.b");
+    await bem.refreshDevices();
+    expect(armedDelay()).toBe(90_000);
+    for (let i = 0; i < 3; i++) {
+      await settle(bem);
+      expect(armedDelay()).toBe(10_000);
+      expect(givenUp()).toBe(0);
+    }
+    await settle(bem);
+    expect(settleArmed(bem)).toBe(false);
+    expect(givenUp()).toBe(1);
+  });
+
   it("keeps a change that was still settling when the bridge stopped", async () => {
     const ha = makeHa(["vacuum.a"]);
     const { bem } = await startBridge(ha);

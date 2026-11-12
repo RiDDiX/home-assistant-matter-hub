@@ -74,6 +74,12 @@ const TOPOLOGY_SETTLE_MS = 90_000;
 // Prefix of the stored topology signature, changes with what it covers.
 const TOPOLOGY_FORMAT = "v2:";
 const TOPOLOGY_RETRIES = 3;
+// A failed write retries soon, the set already settled before it.
+const TOPOLOGY_RETRY_MS = 10_000;
+
+// Same count as the registry's INCOMPLETE_REFRESH_RETRIES: one registry change
+// retries a failing entity, after that the failure counts as permanent.
+export const ENTITY_FAILURE_RETRIES = 3;
 
 // First absence stamp: removal also needs a fresh successful HA reload after
 // this, so the 65s recheck can never delete from the same stale snapshot.
@@ -111,6 +117,11 @@ export class BridgeEndpointManager extends Service {
   private observingRequested = false;
   private _failedEntities: FailedEntity[] = [];
   private _refreshIncomplete = false;
+  // last create or add failure per entity and how often it repeated in a row
+  private readonly createFailures = new Map<
+    string,
+    { reason: string; count: number }
+  >();
   private readonly mappingFingerprints = new Map<string, string>();
   private readonly mappingSync: EntityMappingSync;
   // entityId -> first absence stamp (grace window)
@@ -163,10 +174,13 @@ export class BridgeEndpointManager extends Service {
     if (!retry) this.topologyRetries = 0;
     if (!this.topologyKnown()) return;
     clearTimeout(this.topologyTimer);
-    this.topologyTimer = setTimeout(() => {
-      this.topologyTimer = undefined;
-      void this.enqueueTopology(() => this.compareTopology());
-    }, TOPOLOGY_SETTLE_MS);
+    this.topologyTimer = setTimeout(
+      () => {
+        this.topologyTimer = undefined;
+        void this.enqueueTopology(() => this.compareTopology());
+      },
+      retry ? TOPOLOGY_RETRY_MS : TOPOLOGY_SETTLE_MS,
+    );
     this.topologyTimer.unref?.();
   }
 
@@ -228,6 +242,10 @@ export class BridgeEndpointManager extends Service {
       if (this.topologyRetries < TOPOLOGY_RETRIES) {
         this.topologyRetries++;
         this.settleTopology(true);
+      } else {
+        this.log.warn(
+          "Giving up on the bridge topology announcement until the endpoints change again",
+        );
       }
     }
   }
@@ -269,6 +287,17 @@ export class BridgeEndpointManager extends Service {
     // Combine static failed entities with dynamically isolated entities
     const isolated = EntityIsolationService.getIsolatedEntities(this.bridgeId);
     return [...this._failedEntities, ...isolated];
+  }
+
+  // True for the first failure with this reason, repeats log at debug. Only
+  // the first retries mark the run incomplete, a failure that keeps coming
+  // back would otherwise cost every registry change its full retry budget.
+  private trackFailure(entityId: string, reason: string): boolean {
+    const last = this.createFailures.get(entityId);
+    const count = last?.reason === reason ? last.count + 1 : 1;
+    this.createFailures.set(entityId, { reason, count });
+    if (count <= ENTITY_FAILURE_RETRIES) this._refreshIncomplete = true;
+    return count === 1;
   }
 
   private addFailedEntity(entityId: string, reason: string) {
@@ -1306,7 +1335,12 @@ export class BridgeEndpointManager extends Service {
         } catch (e) {
           // Handle all endpoint creation errors gracefully to prevent boot crashes
           const reason = this.extractErrorReason(e);
-          this.log.warn(`Failed to create device ${entityId}: ${reason}`);
+          const message = `Failed to create device ${entityId}: ${reason}`;
+          if (this.trackFailure(entityId, reason)) {
+            this.log.warn(message);
+          } else {
+            this.log.debug(message);
+          }
           this.addFailedEntity(entityId, reason);
           continue;
         }
@@ -1331,16 +1365,26 @@ export class BridgeEndpointManager extends Service {
             );
           } catch (e) {
             const errorMessage = e instanceof Error ? e.message : String(e);
+            const reason = this.extractErrorReason(e);
+            const message = `Failed to add endpoint for ${entityId}: ${errorMessage}`;
             // Handle all endpoint initialization errors gracefully
-            this.log.warn(
-              `Failed to add endpoint for ${entityId}: ${errorMessage}`,
-            );
-            // Extract detailed behavior error info for debugging
-            this.logDetailedError(entityId, e);
-            this.addFailedEntity(entityId, this.extractErrorReason(e));
-            this._refreshIncomplete = true;
+            if (this.trackFailure(entityId, reason)) {
+              this.log.warn(message);
+              // Extract detailed behavior error info for debugging
+              this.logDetailedError(entityId, e);
+            } else {
+              this.log.debug(message);
+            }
+            this.addFailedEntity(entityId, reason);
           }
         }
+      }
+    }
+
+    // a success or an entity that left the pass starts its count over
+    for (const id of this.createFailures.keys()) {
+      if (!this._failedEntities.some((f) => f.entityId === id)) {
+        this.createFailures.delete(id);
       }
     }
 

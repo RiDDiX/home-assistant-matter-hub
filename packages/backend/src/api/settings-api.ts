@@ -17,6 +17,7 @@ export function settingsApi(
   settingsStorage: AppSettingsStorage,
   bridgeService: BridgeService,
   envAuth?: { username: string; password: string },
+  onAuthChange?: () => void,
 ): Router {
   const router = Router();
 
@@ -60,6 +61,7 @@ export function settingsApi(
         username: username.trim(),
         password: password.trim(),
       });
+      onAuthChange?.();
       res.json({
         enabled: true,
         username: username.trim(),
@@ -82,6 +84,7 @@ export function settingsApi(
         return;
       }
       await settingsStorage.setAuth(undefined);
+      onAuthChange?.();
       res.json({ enabled: false, source: "none" });
     },
   );

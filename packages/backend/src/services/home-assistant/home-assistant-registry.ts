@@ -36,6 +36,7 @@ export type HomeAssistantAreas = Map<string, string>;
 
 export class HomeAssistantRegistry extends Service {
   private autoRefresh?: NodeJS.Timeout;
+  private refreshPending = false;
   private lastRegistryFingerprint = "";
 
   // Bumped on every successful reload, even an unchanged one. Endpoint
@@ -136,8 +137,8 @@ export class HomeAssistantRegistry extends Service {
     this.disableAutoRefresh();
 
     let refreshing = false;
-    let pending = false;
     let retries = 0;
+    this.refreshPending = false;
     this.autoRefresh = setInterval(async () => {
       if (refreshing) {
         // Previous tick is still mid-retry (HA slow / reconnecting).
@@ -158,18 +159,23 @@ export class HomeAssistantRegistry extends Service {
         this.lastRunningSince = runningSince;
         if (changed || restarted) {
           retries = 0;
-        } else if (!pending || retries >= INCOMPLETE_REFRESH_RETRIES) {
+        } else if (
+          !this.refreshPending ||
+          retries >= INCOMPLETE_REFRESH_RETRIES
+        ) {
           return;
         } else {
           retries++;
         }
+        // cleared before the run, a late refresh may mark it during the run
+        this.refreshPending = false;
         try {
-          pending = (await onRefresh()) === false;
+          if ((await onRefresh()) === false) this.refreshPending = true;
         } catch (e) {
           logger.warn("Bridge refresh failed:", e);
-          pending = true;
+          this.refreshPending = true;
         }
-        if (pending && retries === INCOMPLETE_REFRESH_RETRIES) {
+        if (this.refreshPending && retries === INCOMPLETE_REFRESH_RETRIES) {
           logger.warn(
             "Bridge refresh still incomplete, waiting for the next registry change",
           );
@@ -180,6 +186,12 @@ export class HomeAssistantRegistry extends Service {
         refreshing = false;
       }
     }, this.options.refreshInterval * 1000);
+  }
+
+  // A refresh that finished after its tick was incomplete. Arms the retry
+  // without resetting its count, only a registry change does that.
+  markRefreshIncomplete() {
+    this.refreshPending = true;
   }
 
   disableAutoRefresh() {

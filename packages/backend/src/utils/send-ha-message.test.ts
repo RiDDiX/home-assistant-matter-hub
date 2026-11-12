@@ -1,5 +1,5 @@
 import type { Connection } from "home-assistant-js-websocket";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { HA_MESSAGE_TIMEOUT_MS, sendHaMessage } from "./send-ha-message.js";
 
 type FakeConnection = Pick<Connection, "sendMessagePromise">;
@@ -9,6 +9,10 @@ function fakeConnection(impl: Connection["sendMessagePromise"]): Connection {
 }
 
 describe("sendHaMessage", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("resolves with the value returned by the connection", async () => {
     const conn = fakeConnection(vi.fn().mockResolvedValue({ ok: true }));
     await expect(
@@ -57,6 +61,19 @@ describe("sendHaMessage", () => {
     );
     expect(clearSpy).toHaveBeenCalled();
     clearSpy.mockRestore();
+  });
+
+  it("rejects and leaves no timer when the call throws synchronously", async () => {
+    vi.useFakeTimers();
+    const conn = fakeConnection(
+      vi.fn().mockImplementation(() => {
+        throw new Error("socket gone");
+      }),
+    );
+    await expect(sendHaMessage(conn, { type: "ping" }, 50)).rejects.toThrow(
+      "socket gone",
+    );
+    expect(vi.getTimerCount()).toBe(0);
   });
 
   it("exposes a 60s default timeout", () => {

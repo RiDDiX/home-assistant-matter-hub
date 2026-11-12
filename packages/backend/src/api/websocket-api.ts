@@ -191,15 +191,20 @@ export class WebSocketApi {
     }
   }
 
+  // Auth runs only at the upgrade, so clients must reconnect to be checked again.
+  disconnectAll() {
+    for (const client of this.wss?.clients ?? []) {
+      client.terminate();
+    }
+  }
+
   close() {
     this.unsubscribeDiagnostics?.();
     if (this.pingInterval) {
       clearInterval(this.pingInterval);
     }
     // ws 8 leaves open clients running, which keeps the http server open.
-    for (const client of this.wss?.clients ?? []) {
-      client.terminate();
-    }
+    this.disconnectAll();
     this.wss?.close();
     this.clients.clear();
     this.diagnosticSubscribers.clear();

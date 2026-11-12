@@ -11,6 +11,7 @@ import { ServerNode } from "@matter/main/node";
 import { FabricManager, SessionManager } from "@matter/main/protocol";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { EntityEndpoint } from "../../matter/endpoints/entity-endpoint.js";
+import { LegacyEndpoint } from "../../matter/endpoints/legacy/legacy-endpoint.js";
 import { VacuumAreaSwitchEndpoint } from "../../matter/endpoints/legacy/vacuum/vacuum-area-switch.js";
 import {
   type HomeAssistantAction,
@@ -352,6 +353,141 @@ describe("filter edits reconcile without the grace window (#468)", () => {
 
     await expect(manager.refreshDevices()).resolves.toBe(true);
     expect(mountedEntityIds(manager)).toEqual([OTHER, VACUUM].sort());
+  });
+
+  it("reports a refresh with a failed create as incomplete until a later one mounts it", async () => {
+    const ha = makeHa();
+    const { manager } = await buildManager(ha);
+    vi.spyOn(LegacyEndpoint, "create").mockRejectedValueOnce(
+      new Error("create failed"),
+    );
+
+    await expect(manager.refreshDevices()).resolves.toBe(false);
+    expect(mountedEntityIds(manager)).toHaveLength(1);
+
+    await expect(manager.refreshDevices()).resolves.toBe(true);
+    expect(mountedEntityIds(manager)).toEqual([OTHER, VACUUM].sort());
+  });
+
+  it("warns once for a create that keeps failing", async () => {
+    const ha = makeHa();
+    const { manager, log } = await buildManager(ha);
+    const create = LegacyEndpoint.create.bind(LegacyEndpoint);
+    vi.spyOn(LegacyEndpoint, "create").mockImplementation(
+      async (...args: Parameters<typeof LegacyEndpoint.create>) => {
+        if (args[1] === VACUUM) throw new Error("create failed");
+        return create(...args);
+      },
+    );
+    const lines = (level: "warn" | "debug") =>
+      vi
+        .mocked(log[level])
+        .mock.calls.filter((c) =>
+          String(c[0]).startsWith(`Failed to create device ${VACUUM}`),
+        );
+
+    for (let i = 0; i < 3; i++) {
+      await expect(manager.refreshDevices()).resolves.toBe(false);
+    }
+    expect(lines("warn")).toHaveLength(1);
+    expect(lines("debug")).toHaveLength(2);
+    expect(mountedEntityIds(manager)).toEqual([OTHER]);
+  });
+
+  it("stops marking a refresh incomplete after three failures with one reason", async () => {
+    const ha = makeHa();
+    const { manager, log } = await buildManager(ha);
+    const create = LegacyEndpoint.create.bind(LegacyEndpoint);
+    let reason: string | undefined = "create failed";
+    vi.spyOn(LegacyEndpoint, "create").mockImplementation(
+      async (...args: Parameters<typeof LegacyEndpoint.create>) => {
+        if (args[1] === VACUUM && reason) throw new Error(reason);
+        return create(...args);
+      },
+    );
+    const failed = () => manager.failedEntities.map((f) => f.entityId);
+    const warns = () =>
+      vi
+        .mocked(log.warn)
+        .mock.calls.filter((c) =>
+          String(c[0]).startsWith(`Failed to create device ${VACUUM}`),
+        );
+
+    for (let i = 0; i < 3; i++) {
+      await expect(manager.refreshDevices()).resolves.toBe(false);
+    }
+    for (let i = 0; i < 2; i++) {
+      await expect(manager.refreshDevices()).resolves.toBe(true);
+      expect(failed()).toEqual([VACUUM]);
+    }
+    expect(warns()).toHaveLength(1);
+
+    reason = "another reason";
+    await expect(manager.refreshDevices()).resolves.toBe(false);
+    expect(warns()).toHaveLength(2);
+
+    reason = undefined;
+    await expect(manager.refreshDevices()).resolves.toBe(true);
+    expect(mountedEntityIds(manager)).toEqual([OTHER, VACUUM].sort());
+
+    // a success starts the count over
+    reason = "create failed";
+    vi.mocked(log.warn).mockClear();
+    const robot = [...manager.root.parts].find(
+      (p) => (p as EntityEndpoint).entityId === VACUUM,
+    );
+    await robot?.close();
+    await expect(manager.refreshDevices()).resolves.toBe(false);
+    expect(warns()).toHaveLength(1);
+  });
+
+  it("logs an add that keeps failing in full once and stops marking it incomplete", async () => {
+    const ha = makeHa();
+    const { manager, log } = await buildManager(ha);
+    const add = manager.root.add.bind(manager.root);
+    vi.spyOn(manager.root, "add").mockImplementation(((ep: EntityEndpoint) => {
+      if (ep.entityId === VACUUM) throw new Error("add failed");
+      return add(ep);
+    }) as typeof manager.root.add);
+    const lines = (level: "warn" | "debug") =>
+      vi
+        .mocked(log[level])
+        .mock.calls.filter((c) =>
+          String(c[0]).startsWith(`Failed to add endpoint for ${VACUUM}`),
+        );
+
+    for (let i = 0; i < 3; i++) {
+      await expect(manager.refreshDevices()).resolves.toBe(false);
+    }
+    await expect(manager.refreshDevices()).resolves.toBe(true);
+    expect(manager.failedEntities.map((f) => f.entityId)).toEqual([VACUUM]);
+    expect(lines("warn")).toHaveLength(1);
+    expect(lines("debug")).toHaveLength(3);
+  });
+
+  it("logs a failure in full again after the entity left the bridge and came back", async () => {
+    const ha = makeHa();
+    const { manager, provider, log } = await buildManager(ha);
+    const create = LegacyEndpoint.create.bind(LegacyEndpoint);
+    vi.spyOn(LegacyEndpoint, "create").mockImplementation(
+      async (...args: Parameters<typeof LegacyEndpoint.create>) => {
+        if (args[1] === VACUUM) throw new Error("create failed");
+        return create(...args);
+      },
+    );
+    const warns = () =>
+      vi
+        .mocked(log.warn)
+        .mock.calls.filter((c) =>
+          String(c[0]).startsWith(`Failed to create device ${VACUUM}`),
+        );
+
+    await manager.refreshDevices();
+    setFilter(provider, ["vacuum.other"]);
+    await manager.refreshDevices();
+    setFilter(provider, ["vacuum.*"]);
+    await expect(manager.refreshDevices()).resolves.toBe(false);
+    expect(warns()).toHaveLength(2);
   });
 
   it("reports each queued refresh by its own outcome", async () => {

@@ -700,24 +700,27 @@ export class BridgeRegistry {
       // Fetch the vacuum's current segments to detect stale area_mapping
       // entries whose segment IDs no longer exist on the device.
       let validSegmentIds: Set<string> | undefined;
-      try {
-        const segmentsResponse = await sendHaMessage<
-          { id: string; name: string; group?: string | null }[]
-        >(this.client.connection, {
-          type: "vacuum/get_segments",
-          entity_id: entityId,
-        });
-        if (Array.isArray(segmentsResponse)) {
-          validSegmentIds = new Set(segmentsResponse.map((s) => s.id));
+      // admin only in HA, a refusal would log an error there per call (#548)
+      if (this.client.isAdmin !== false) {
+        try {
+          const segmentsResponse = await sendHaMessage<
+            { id: string; name: string; group?: string | null }[]
+          >(this.client.connection, {
+            type: "vacuum/get_segments",
+            entity_id: entityId,
+          });
+          if (Array.isArray(segmentsResponse)) {
+            validSegmentIds = new Set(segmentsResponse.map((s) => s.id));
+            BridgeRegistry.cleanAreaLogger.debug(
+              `${entityId}: Current vacuum segments: ${[...validSegmentIds].join(", ")}`,
+            );
+          }
+        } catch {
+          // Older HA versions may not have the vacuum/get_segments endpoint.
           BridgeRegistry.cleanAreaLogger.debug(
-            `${entityId}: Current vacuum segments: ${[...validSegmentIds].join(", ")}`,
+            `${entityId}: vacuum/get_segments not available, skipping stale entry detection`,
           );
         }
-      } catch {
-        // Older HA versions may not have the vacuum/get_segments endpoint.
-        BridgeRegistry.cleanAreaLogger.debug(
-          `${entityId}: vacuum/get_segments not available, skipping stale entry detection`,
-        );
       }
 
       const rooms: CleanAreaRoom[] = [];

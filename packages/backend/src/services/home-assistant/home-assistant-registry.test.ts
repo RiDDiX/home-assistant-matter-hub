@@ -552,6 +552,10 @@ describe("HomeAssistantRegistry", () => {
   });
 
   describe("incomplete bridge refresh", () => {
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
     const tick = () =>
       vi.advanceTimersByTimeAsync(defaultOptions.refreshInterval * 1000);
 
@@ -610,7 +614,40 @@ describe("HomeAssistantRegistry", () => {
       await tick();
       expect(onRefresh).toHaveBeenCalledTimes(5);
       registry.disableAutoRefresh();
-      warn.mockRestore();
+    });
+
+    it("retries a refresh marked incomplete after its tick", async () => {
+      const onRefresh = vi.fn<() => Promise<boolean>>().mockResolvedValue(true);
+      const { registry } = await setup(onRefresh);
+      await tick();
+      await tick();
+      expect(onRefresh).toHaveBeenCalledTimes(1);
+
+      registry.markRefreshIncomplete();
+      await tick();
+      expect(onRefresh).toHaveBeenCalledTimes(2);
+      await tick();
+      expect(onRefresh).toHaveBeenCalledTimes(2);
+      registry.disableAutoRefresh();
+    });
+
+    it("keeps the retry cap for a refresh marked incomplete every time", async () => {
+      vi.spyOn(Logger.prototype, "warn").mockImplementation(() => {});
+      let mark = () => {};
+      // marked while its own run is still going, like a parked bridge
+      const onRefresh = vi.fn(async () => {
+        mark();
+        return true;
+      });
+      const { registry, reload } = await setup(onRefresh);
+      mark = () => registry.markRefreshIncomplete?.();
+      for (let i = 0; i < 6; i++) await tick();
+      expect(onRefresh).toHaveBeenCalledTimes(4);
+
+      reload.mockResolvedValueOnce(true);
+      await tick();
+      expect(onRefresh).toHaveBeenCalledTimes(5);
+      registry.disableAutoRefresh();
     });
 
     it("retries a refresh that threw", async () => {
@@ -647,7 +684,6 @@ describe("HomeAssistantRegistry", () => {
       expect(logged("will retry next interval")).toBe(0);
       expect(logged("Bridge refresh failed")).toBe(1);
       registry.disableAutoRefresh();
-      warn.mockRestore();
     });
   });
 

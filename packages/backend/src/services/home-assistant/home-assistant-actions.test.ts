@@ -493,3 +493,55 @@ describe("HomeAssistantActions lock PIN", () => {
     }
   });
 });
+
+// #548: HA allows fire_event for admins only, a non-admin token got a WARN
+// here and an error in HA for every command.
+describe("HomeAssistantActions hamh_action for non-admin users", () => {
+  function sut(isAdmin: boolean | undefined) {
+    const warn = vi.fn();
+    const logger = {
+      get: () => ({ info: vi.fn(), warn, error: vi.fn(), debug: vi.fn() }),
+    } as unknown as LoggerService;
+    const sent: string[] = [];
+    const client = {
+      isAdmin,
+      haRunning: true,
+      messageTimeoutMs: 50,
+      connection: {
+        sendMessagePromise: async (message: { type: string }) => {
+          sent.push(message.type);
+          if (message.type === "fire_event") throw { message: "Unauthorized" };
+          return {};
+        },
+      },
+    } as unknown as HomeAssistantClient;
+    const actions = new HomeAssistantActions(logger, client, {
+      retryAttempts: 1,
+    });
+    return { actions, sent, warn };
+  }
+
+  it("sends no event and logs no warn when not an admin", async () => {
+    vi.useFakeTimers();
+    try {
+      const { actions, sent, warn } = sut(false);
+      actions.fireEvent("hamh_action", {});
+      actions.call({ action: "light.turn_off" }, "light.desk");
+      await vi.advanceTimersByTimeAsync(150);
+
+      expect(sent).toEqual(["call_service"]);
+      expect(warn).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("still fires when admin or unknown", async () => {
+    for (const isAdmin of [true, undefined]) {
+      const { actions, sent } = sut(isAdmin);
+      actions.fireEvent("hamh_action", {});
+      await Promise.resolve();
+      expect(sent).toEqual(["fire_event"]);
+    }
+  });
+});

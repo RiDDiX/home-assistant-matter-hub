@@ -84,11 +84,14 @@ access_token="${access_token//[[:space:]]/}"
 if [ -n "$access_token" ] && [ "$access_token" != "null" ]; then
   ha_token="$access_token"
   ha_url=$(bashio::config 'home_assistant_url' '')
+  ha_url="${ha_url//[[:space:]]/}"
   if [ -z "$ha_url" ] || [ "$ha_url" = "null" ]; then
     ha_url='http://127.0.0.1:8123'
   fi
   bashio::log.info "Home Assistant: using the configured access token at ${ha_url}"
 fi
+# The CLI reads HAMH_* variables; argv would show the token in ps.
+export HAMH_HOME_ASSISTANT_ACCESS_TOKEN="$ha_token"
 
 exec home-assistant-matter-hub start \
   --log-level=$(bashio::config 'app_log_level') \
@@ -100,5 +103,4 @@ exec home-assistant-matter-hub start \
   --storage-location=/config/data \
   --web-port=$(bashio::addon.ingress_port) \
   --home-assistant-url="$ha_url" \
-  --home-assistant-access-token="$ha_token" \
   --http-ip-whitelist="172.30.32.2"

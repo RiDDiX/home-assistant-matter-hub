@@ -22,7 +22,10 @@ export function sendHaMessage<T>(
     }, timeoutMs);
   });
   return Promise.race([
-    connection.sendMessagePromise<T>(message),
+    // a synchronous throw must reject here, or the timer outlives the call
+    new Promise<T>((resolve) =>
+      resolve(connection.sendMessagePromise<T>(message)),
+    ),
     timeout,
   ]).finally(() => {
     if (timer) clearTimeout(timer);

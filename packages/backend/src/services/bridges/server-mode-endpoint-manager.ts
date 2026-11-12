@@ -31,6 +31,7 @@ import {
 import type { BridgeDataProvider } from "./bridge-data-provider.js";
 import {
   ENDPOINT_REMOVAL_GRACE_MS,
+  ENTITY_FAILURE_RETRIES,
   type PendingRemoval,
 } from "./bridge-endpoint-manager.js";
 import type { BridgeRegistry } from "./bridge-registry.js";
@@ -64,6 +65,11 @@ export class ServerModeEndpointManager extends Service {
   private observingRequested = false;
   private _failedEntities: FailedEntity[] = [];
   private _refreshIncomplete = false;
+  // last create or add failure per entity and how often it repeated in a row
+  private readonly createFailures = new Map<
+    string,
+    { reason: string; count: number }
+  >();
   private readonly endpoints = new Map<string, ManagedEndpoint>();
   // Identity inputs of the primary entity as last pushed to the root node,
   // so a rename re-runs it and an unchanged refresh does not (#467).
@@ -598,7 +604,12 @@ export class ServerModeEndpointManager extends Service {
           fresh.set(entityId, endpointId);
         } catch (e) {
           const reason = e instanceof Error ? e.message : String(e);
-          this.log.error(`Failed to create server mode device ${entityId}:`, e);
+          this.logCreateFailure(
+            entityId,
+            reason,
+            `Failed to create server mode device ${entityId}:`,
+            e,
+          );
           this._failedEntities.push({ entityId, reason });
         }
       }
@@ -648,7 +659,9 @@ export class ServerModeEndpointManager extends Service {
           fresh.set(entityId, endpoint.id);
         } catch (e) {
           const reason = e instanceof Error ? e.message : String(e);
-          this.log.error(
+          this.logCreateFailure(
+            entityId,
+            reason,
             `Failed to rebuild server mode device ${entityId}:`,
             e,
           );
@@ -664,10 +677,14 @@ export class ServerModeEndpointManager extends Service {
           if (entry.tag !== undefined) setNumberTag(entry.endpoint, entry.tag);
           await this.serverNode.addDevice(entry.endpoint);
         } catch (e) {
-          this._refreshIncomplete = true;
           this.endpoints.delete(entityId);
           const reason = e instanceof Error ? e.message : String(e);
-          this.log.error(`Failed to create server mode device ${entityId}:`, e);
+          this.logCreateFailure(
+            entityId,
+            reason,
+            `Failed to create server mode device ${entityId}:`,
+            e,
+          );
           this._failedEntities.push({ entityId, reason });
           continue;
         }
@@ -716,6 +733,12 @@ export class ServerModeEndpointManager extends Service {
         }
       }
     } finally {
+      // a success or an entity that left the pass starts its count over
+      for (const id of this.createFailures.keys()) {
+        if (!this._failedEntities.some((f) => f.entityId === id)) {
+          this.createFailures.delete(id);
+        }
+      }
       // A stop that landed mid-refresh wins: no timer on a stopped bridge.
       if (lifecycle === this.lifecycle) {
         this.scheduleRemovalRecheck();
@@ -787,6 +810,25 @@ export class ServerModeEndpointManager extends Service {
       ok = (await this.serverNode.updateAdvertisedDeviceType(deviceType)) && ok;
     }
     return ok;
+  }
+
+  private logCreateFailure(
+    entityId: string,
+    reason: string,
+    message: string,
+    e: unknown,
+  ): void {
+    const last = this.createFailures.get(entityId);
+    const count = last?.reason === reason ? last.count + 1 : 1;
+    this.createFailures.set(entityId, { reason, count });
+    // a failure that keeps coming back stops costing every registry change
+    // its full retry budget
+    if (count <= ENTITY_FAILURE_RETRIES) this._refreshIncomplete = true;
+    if (count === 1) {
+      this.log.error(message, e);
+    } else {
+      this.log.debug(message, e);
+    }
   }
 
   // Vacuums use ServerModeVacuumDevice (no bridgedDeviceBasicInformation) so

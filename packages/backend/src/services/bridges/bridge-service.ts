@@ -56,6 +56,9 @@ export class BridgeService extends Service {
   // Called whenever a bridge's status changes (start, stop, update, delete, recovery).
   // Set by the caller (e.g. start-handler) to broadcast updates via WebSocket.
   public onBridgeChanged?: (bridgeId: string) => void;
+  // Called when the late follow-up of a slow refresh ends incomplete, so the
+  // registry retries it like a refresh it ran itself.
+  public onRefreshIncomplete?: () => void;
 
   private recoveryInterval?: ReturnType<typeof setInterval>;
   private recoveryIntervalMs = 60000;
@@ -353,8 +356,10 @@ export class BridgeService extends Service {
             try {
               while (live()) {
                 this.slowRefreshes.set(bridge.id, false);
+                let done = false;
                 try {
-                  if (!(await bridge.refreshDevices())) {
+                  done = await bridge.refreshDevices();
+                  if (!done) {
                     this.log.warn(
                       `Refresh of bridge ${bridge.id} is still incomplete`,
                     );
@@ -363,6 +368,7 @@ export class BridgeService extends Service {
                   failed(e);
                 }
                 try {
+                  if (!done && live()) this.onRefreshIncomplete?.();
                   if (live()) this.onBridgeChanged?.(bridge.id);
                 } catch (e) {
                   failed(e);

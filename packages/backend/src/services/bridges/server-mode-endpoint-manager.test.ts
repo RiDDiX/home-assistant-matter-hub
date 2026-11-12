@@ -618,6 +618,133 @@ describe("ServerModeEndpointManager (#301)", () => {
     ]);
   });
 
+  it("reports a create that threw as incomplete until a later one mounts it", async () => {
+    legacyCreate.mockRejectedValueOnce(new Error("create failed"));
+    const h = makeHarness(["light.one"]);
+    await expect(h.manager.refreshDevices()).resolves.toBe(false);
+    expect(h.manager.devices).toEqual([]);
+
+    await expect(h.manager.refreshDevices()).resolves.toBe(true);
+    expect(h.manager.devices).toHaveLength(1);
+  });
+
+  it("logs a create that keeps failing once", async () => {
+    legacyCreate.mockRejectedValue(new Error("create failed"));
+    const h = makeHarness(["light.one"]);
+    // biome-ignore lint/suspicious/noExplicitAny: reach the private logger
+    const log = (h.manager as any).log as Logger;
+    for (let i = 0; i < 3; i++) {
+      await expect(h.manager.refreshDevices()).resolves.toBe(false);
+    }
+    expect(log.error).toHaveBeenCalledTimes(1);
+    expect(log.debug).toHaveBeenCalledWith(
+      "Failed to create server mode device light.one:",
+      expect.any(Error),
+    );
+  });
+
+  it("stops marking a refresh incomplete after three failures with one reason", async () => {
+    let reason: string | undefined = "create failed";
+    legacyCreate.mockImplementation(async (_registry, entityId) => {
+      if (reason) throw new Error(reason);
+      return fakeEndpoint(entityId as string) as unknown as LegacyEndpoint;
+    });
+    const h = makeHarness(["light.one"]);
+    // biome-ignore lint/suspicious/noExplicitAny: reach the private logger
+    const log = (h.manager as any).log as Logger;
+    for (let i = 0; i < 3; i++) {
+      await expect(h.manager.refreshDevices()).resolves.toBe(false);
+    }
+    for (let i = 0; i < 2; i++) {
+      await expect(h.manager.refreshDevices()).resolves.toBe(true);
+      expect(h.manager.failedEntities.map((f) => f.entityId)).toEqual([
+        "light.one",
+      ]);
+    }
+    expect(log.error).toHaveBeenCalledTimes(1);
+
+    reason = "another reason";
+    await expect(h.manager.refreshDevices()).resolves.toBe(false);
+    expect(log.error).toHaveBeenCalledTimes(2);
+
+    reason = undefined;
+    await expect(h.manager.refreshDevices()).resolves.toBe(true);
+    expect(h.manager.devices).toHaveLength(1);
+
+    // a success starts the count over
+    reason = "create failed";
+    h.mappingStorage.getMapping.mockReturnValue({ customName: "changed" });
+    await expect(h.manager.refreshDevices()).resolves.toBe(false);
+    expect(log.error).toHaveBeenCalledTimes(3);
+  });
+
+  it("logs an add that keeps failing in full once and stops marking it incomplete", async () => {
+    const h = makeHarness(["light.one"]);
+    h.serverNode.addDevice.mockRejectedValue(new Error("add failed"));
+    // biome-ignore lint/suspicious/noExplicitAny: reach the private logger
+    const log = (h.manager as any).log as Logger;
+    for (let i = 0; i < 3; i++) {
+      await expect(h.manager.refreshDevices()).resolves.toBe(false);
+    }
+    await expect(h.manager.refreshDevices()).resolves.toBe(true);
+    expect(h.manager.failedEntities.map((f) => f.entityId)).toEqual([
+      "light.one",
+    ]);
+    expect(log.error).toHaveBeenCalledTimes(1);
+    expect(log.debug).toHaveBeenCalledWith(
+      "Failed to create server mode device light.one:",
+      expect.any(Error),
+    );
+  });
+
+  it("logs a failure in full again after the entity left the node and came back", async () => {
+    legacyCreate.mockImplementation(async (_registry, entityId) => {
+      if (entityId === "light.one") throw new Error("create failed");
+      return fakeEndpoint(entityId as string) as unknown as LegacyEndpoint;
+    });
+    const h = makeHarness(["light.one", "light.two"]);
+    // biome-ignore lint/suspicious/noExplicitAny: reach the private logger
+    const log = (h.manager as any).log as Logger;
+    await h.manager.refreshDevices();
+    h.registry.entityIds = ["light.two"];
+    await h.manager.refreshDevices();
+    h.registry.entityIds = ["light.one", "light.two"];
+    await expect(h.manager.refreshDevices()).resolves.toBe(false);
+    expect(log.error).toHaveBeenCalledTimes(2);
+  });
+
+  it("reports a tag rebuild that threw as incomplete and logs it once", async () => {
+    let failRebuild = false;
+    legacyCreate.mockImplementation(async (_registry, entityId) => {
+      if (failRebuild && entityId === "switch.b") {
+        throw new Error("rebuild failed");
+      }
+      return fakeEndpoint(entityId as string, {
+        deviceType: 0x010a,
+      }) as unknown as LegacyEndpoint;
+    });
+    const h = makeHarness(["switch.b"]);
+    // biome-ignore lint/suspicious/noExplicitAny: reach the private logger
+    const log = (h.manager as any).log as Logger;
+    await h.manager.refreshDevices();
+
+    failRebuild = true;
+    h.registry.entityIds = ["switch.b", "switch.a"];
+    h.registry.fullEntities["switch.a"] = { entity_id: "switch.a" };
+    await expect(h.manager.refreshDevices()).resolves.toBe(false);
+    expect(h.manager.devices.map((d) => d.entityId)).toEqual(["switch.a"]);
+    // the next pass builds it fresh and fails the same way
+    await expect(h.manager.refreshDevices()).resolves.toBe(false);
+    expect(log.error).toHaveBeenCalledTimes(1);
+
+    failRebuild = false;
+    await expect(h.manager.refreshDevices()).resolves.toBe(true);
+    expect(h.manager.devices.map((d) => d.entityId).sort()).toEqual([
+      "switch.a",
+      "switch.b",
+    ]);
+  });
+
   it("uses the vacuum endpoint and skips entities the vacuum already claims", async () => {
     vacuumCreate.mockImplementation(
       async (_registry, entityId) =>

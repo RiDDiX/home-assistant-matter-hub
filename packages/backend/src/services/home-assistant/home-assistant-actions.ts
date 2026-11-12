@@ -335,6 +335,8 @@ export class HomeAssistantActions extends Service {
   }
 
   fireEvent(eventType: string, eventData?: Record<string, unknown>): void {
+    // HA allows fire_event for admins only (#548)
+    if (this.client.isAdmin === false) return;
     sendHaMessage(this.client.connection, {
       type: "fire_event",
       event_type: eventType,

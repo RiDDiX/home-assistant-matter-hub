@@ -5,6 +5,7 @@ import {
   ERR_CANNOT_CONNECT,
   ERR_INVALID_AUTH,
   getConfig,
+  getUser,
   type HaWebSocket,
 } from "home-assistant-js-websocket";
 import type { BetterLogger, LoggerService } from "../../core/app/logger.js";
@@ -58,6 +59,8 @@ export class HomeAssistantClient extends Service {
   private runningPollGeneration = 0;
   private heartbeat?: ReturnType<typeof setInterval>;
   private missedPongs = 0;
+  private userLookupGeneration = 0;
+  private _isAdmin: boolean | undefined;
 
   get connection(): Connection {
     return this._connection;
@@ -74,6 +77,12 @@ export class HomeAssistantClient extends Service {
   // start, so it counts from here, not from wall time (#438).
   get runningSince(): number {
     return this._runningSince;
+  }
+
+  // HA refuses fire_event and vacuum/get_segments for non-admin users (#548).
+  // Undefined until the user lookup answered.
+  get isAdmin(): boolean | undefined {
+    return this._isAdmin;
   }
 
   get baseUrl(): string {
@@ -103,6 +112,7 @@ export class HomeAssistantClient extends Service {
     this.watchRunningState(this._connection);
     this.setRunning(this._connection.connected ?? true);
     this.startHeartbeat(this._connection);
+    await this.lookupUser(this._connection);
   }
 
   private startHeartbeat(connection: Connection) {
@@ -152,6 +162,8 @@ export class HomeAssistantClient extends Service {
       this.setRunning(false);
     });
     connection.addEventListener("ready", () => {
+      // the token may belong to another user after a reconnect
+      void this.lookupUser(connection);
       const generation = ++this.runningPollGeneration;
       this.setRunning(false);
       this.confirmRunning(connection, generation).catch((e) => {
@@ -212,6 +224,37 @@ export class HomeAssistantClient extends Service {
     }
   }
 
+  // A failed lookup keeps the old value, it never fails the connect.
+  private async lookupUser(connection: Connection) {
+    const generation = ++this.userLookupGeneration;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const user = await Promise.race([
+        getUser(connection),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(
+            () => reject(new Error("auth/current_user timed out")),
+            this.options.messageTimeoutMs,
+          );
+        }),
+      ]);
+      // a flapping reconnect can answer out of order, only the newest counts
+      if (generation !== this.userLookupGeneration) return;
+      if (user.is_admin === false && this._isAdmin !== false) {
+        this.log.info(
+          `Home Assistant user "${user.name}" is not an admin, hamh_action events and the vacuum segment lookup stay off`,
+        );
+      }
+      this._isAdmin = user.is_admin;
+    } catch (e) {
+      this.log.debugCtx("Home Assistant user lookup failed", {
+        reason: e instanceof Error ? e.message : String(e),
+      });
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
   private async confirmRunning(connection: Connection, generation: number) {
     while (this.runningPollGeneration === generation) {
       // Timed out, not raw getConfig: an HA that holds the socket open but
@@ -239,7 +282,7 @@ export class HomeAssistantClient extends Service {
       try {
         const connection = await createConnection({
           auth: createLongLivedTokenAuth(
-            props.url.replace(/\/$/, ""),
+            props.url.trim().replace(/\/+$/, ""),
             props.accessToken,
           ),
         });

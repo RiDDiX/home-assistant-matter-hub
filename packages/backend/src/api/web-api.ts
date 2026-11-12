@@ -144,7 +144,12 @@ export class WebApi extends Service {
       )
       .use(
         "/settings",
-        settingsApi(this.settingsStorage, this.bridgeService, this.props.auth),
+        settingsApi(
+          this.settingsStorage,
+          this.bridgeService,
+          this.props.auth,
+          () => this.wsApi.disconnectAll(),
+        ),
       )
       .use(
         "/backup",

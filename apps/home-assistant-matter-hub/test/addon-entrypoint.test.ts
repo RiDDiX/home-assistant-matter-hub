@@ -33,7 +33,10 @@ describe.skipIf(process.platform === "win32")(
       dir = mkdtempSync(join(tmpdir(), "hamh-entrypoint-"));
       writeFileSync(join(dir, "bashio.sh"), bashioStub);
       const bin = join(dir, "home-assistant-matter-hub");
-      writeFileSync(bin, '#!/bin/sh\nfor a in "$@"; do echo "$a"; done\n');
+      writeFileSync(
+        bin,
+        '#!/bin/sh\nfor a in "$@"; do echo "$a"; done\necho "TOKEN=$HAMH_HOME_ASSISTANT_ACCESS_TOKEN"\n',
+      );
       chmodSync(bin, 0o755);
     });
 
@@ -60,12 +63,14 @@ describe.skipIf(process.platform === "win32")(
         { env, encoding: "utf8", timeout: 15_000 },
       );
       expect(result.status, result.stderr).toBe(0);
-      const args = result.stdout.split("\n");
+      const lines = result.stdout.split("\n");
+      const args = lines.filter((a) => !a.startsWith("TOKEN="));
       const arg = (name: string) =>
         args.find((a) => a.startsWith(`--${name}=`))?.slice(name.length + 3);
       return {
         url: arg("home-assistant-url"),
-        token: arg("home-assistant-access-token"),
+        token: lines.find((a) => a.startsWith("TOKEN="))?.slice(6),
+        args,
         stderr: result.stderr,
       };
     }
@@ -105,6 +110,28 @@ describe.skipIf(process.platform === "win32")(
     it("falls back to the local url when the url option is empty", () => {
       const r = run({ access_token: "user-token", home_assistant_url: "" });
       expect(r.url).toBe("http://127.0.0.1:8123");
+    });
+
+    it("trims whitespace around the url", () => {
+      const r = run({
+        access_token: "user-token",
+        home_assistant_url: " https://ha.local:8443 \n",
+      });
+      expect(r.url).toBe("https://ha.local:8443");
+    });
+
+    it("falls back to the local url when the url is only whitespace", () => {
+      const r = run({ access_token: "user-token", home_assistant_url: " \n " });
+      expect(r.url).toBe("http://127.0.0.1:8123");
+    });
+
+    it("keeps the token out of argv", () => {
+      const user = run({ access_token: "user-token" });
+      expect(user.token).toBe("user-token");
+      expect(user.args.join("\n")).not.toContain("user-token");
+      const supervisor = run({});
+      expect(supervisor.token).toBe("supervisor-secret");
+      expect(supervisor.args.join("\n")).not.toContain("supervisor-secret");
     });
 
     it("never logs the token", () => {
