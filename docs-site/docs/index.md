@@ -428,6 +428,11 @@ Home, ...) are not placed in the same network segment. Please make sure to revie
 <details>
 <summary><strong>🧪 Alpha (v2.1.0-alpha.x)</strong></summary>
 
+**v2.1.0-alpha.984:**
+- **Stable device identity**: with the opt-in `stableIdentity` flag, an entity renamed in Home Assistant and a different entity that then took its old name could end up on the same endpoint id, and one of the two devices stayed missing after every refresh. The renamed entity now keeps its endpoint id and number and the new one gets its own, also for entities without a unique id and also when both changes arrive in the same refresh on a running bridge. Stored records that already share an id are repaired on the next refresh, with one warning in the log.
+- **Stored device identities after a downgrade**: an identity file written by a newer version is no longer overwritten after a downgrade, and entries the running version cannot read are kept as they are.
+- **Incomplete refresh retry**: a bridge start, a bridge edit or a manual refresh that ends incomplete is retried again, also when earlier retries had already run out. Before, such a start waited for the next change in Home Assistant.
+
 **v2.1.0-alpha.983:**
 - **Registry refresh endpoint**: `POST /api/home-assistant/refresh` used to take a registry change without the bridges ever being refreshed for it. Bridges now follow on the next registry refresh interval.
 - **Incomplete refresh retry**: a device refresh that ends incomplete, for example after a failed add, is now retried whatever started it: a bridge start or restart, a bridge edit or the manual refresh, not only the registry poll.

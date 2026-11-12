@@ -39,7 +39,7 @@ of port forwarding etc.
 | Channel | Branch | Current Version | Description |
 |---------|--------|-----------------|-------------|
 | **Stable** | `main` | v2.0.59 | Production-ready, recommended for most users |
-| **Alpha** | `alpha` | v2.1.0-alpha.983 | Ahead of Stable, carries the additions listed under Alpha Features |
+| **Alpha** | `alpha` | v2.1.0-alpha.984 | Ahead of Stable, carries the additions listed under Alpha Features |
 | **Testing** | `testing` | v4.1.0-testing.x | ⚠️ **Highly unstable!** Experimental features, may break |
 
 ### Which version should I use?
@@ -427,6 +427,11 @@ Re-assign the affected devices to their rooms after they reconnect. See the [doc
 
 <details>
 <summary><strong>🧪 Alpha Features (v2.1.0-alpha.x)</strong> - Click to expand</summary>
+
+**v2.1.0-alpha.984:**
+- **Stable device identity**: with the opt-in `stableIdentity` flag, an entity renamed in Home Assistant and a different entity that then took its old name could end up on the same endpoint id, and one of the two devices stayed missing after every refresh. The renamed entity now keeps its endpoint id and number and the new one gets its own, also for entities without a unique id and also when both changes arrive in the same refresh on a running bridge. Stored records that already share an id are repaired on the next refresh, with one warning in the log.
+- **Stored device identities after a downgrade**: an identity file written by a newer version is no longer overwritten after a downgrade, and entries the running version cannot read are kept as they are.
+- **Incomplete refresh retry**: a bridge start, a bridge edit or a manual refresh that ends incomplete is retried again, also when earlier retries had already run out. Before, such a start waited for the next change in Home Assistant.
 
 **v2.1.0-alpha.983:**
 - **Registry refresh endpoint**: `POST /api/home-assistant/refresh` used to take a registry change without the bridges ever being refreshed for it. Bridges now follow on the next registry refresh interval.
