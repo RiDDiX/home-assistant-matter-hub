@@ -27,6 +27,7 @@ import type {
   BridgeDataProvider,
   BridgeServerStatus,
 } from "./bridge-data-provider.js";
+import { BridgeRegistry } from "./bridge-registry.js";
 import { SessionSupervisor } from "./session-supervisor.js";
 
 // Auto Force Sync interval in milliseconds (90 seconds).
@@ -163,8 +164,16 @@ export abstract class BridgeBase<
   }
 
   /** Resolves false when matching entities stayed unmounted for a transient reason. */
-  async refreshDevices(): Promise<boolean> {
-    const complete = await this.endpointManager.refreshDevices();
+  async refreshDevices(tick = false): Promise<boolean> {
+    let complete = false;
+    try {
+      complete = await this.endpointManager.refreshDevices();
+    } finally {
+      // a start, update or API refresh earns new retries, a tick never does
+      if (!complete && !tick) {
+        this.server.env.maybeGet(BridgeRegistry)?.grantRefreshRetries();
+      }
+    }
     // Prune stale entries from lastSyncedStates for entities that were removed
     const currentEntityIds = new Set(
       this.topLevelEndpoints().map(

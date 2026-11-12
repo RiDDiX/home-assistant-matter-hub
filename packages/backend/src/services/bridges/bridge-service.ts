@@ -337,7 +337,7 @@ export class BridgeService extends Service {
         continue;
       }
       try {
-        const refresh = bridge.refreshDevices();
+        const refresh = bridge.refreshDevices(true);
         const settled = await this.settlesWithin(refresh, REFRESH_TIMEOUT_MS);
         if (!settled) {
           this.log.warn(
@@ -354,7 +354,7 @@ export class BridgeService extends Service {
               while (live()) {
                 this.slowRefreshes.set(bridge.id, false);
                 try {
-                  if (!(await bridge.refreshDevices())) {
+                  if (!(await bridge.refreshDevices(true))) {
                     this.log.warn(
                       `Refresh of bridge ${bridge.id} is still incomplete`,
                     );

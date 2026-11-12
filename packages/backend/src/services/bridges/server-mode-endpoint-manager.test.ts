@@ -80,6 +80,10 @@ interface Harness {
   };
   client: { connection: object; haRunning: boolean; runningSince: number };
   mappingStorage: { getMapping: ReturnType<typeof vi.fn> };
+  identityStorage: Pick<
+    EntityIdentityStorage,
+    "setIdentity" | "getBridgeIdentities"
+  >;
   // biome-ignore lint/suspicious/noExplicitAny: harness data provider stub
   dataProvider: any;
 }
@@ -193,6 +197,7 @@ function makeHarness(
     registry,
     client,
     mappingStorage,
+    identityStorage,
     dataProvider,
   };
 }
@@ -1073,6 +1078,104 @@ describe("ServerModeEndpointManager (#301)", () => {
     expect(h.serverNode.addDevice).toHaveBeenCalledTimes(1);
     expect(h.manager.devices.map((d) => d.entityId)).toEqual(["light.new"]);
   });
+
+  it("a renamed entity keeps its frozen id when a new entity takes its old name (#404)", async () => {
+    const h = makeHarness(["light.a", "light.b"], "light.a", {
+      flags: { stableIdentity: true },
+      entities: {
+        "light.a": { unique_id: "UY", platform: "hue" },
+        "light.b": { unique_id: "UX", platform: "hue" },
+      },
+    });
+    // light.b was light.a before the rename
+    h.identityStorage.setIdentity("bridge1", "hue\u0000light\u0000UX", {
+      endpointId: "light_a",
+      anchorEntityId: "light.a",
+      lastEntityId: "light.a",
+    });
+    legacyCreate.mockImplementation(
+      async (_registry, entityId, ...rest) =>
+        fakeEndpoint(entityId as string, {
+          id: rest[3] as string,
+        }) as unknown as LegacyEndpoint,
+    );
+    await h.manager.refreshDevices();
+
+    const ids = Object.fromEntries(
+      h.serverNode.addDevice.mock.calls.map((c) => [
+        (c[0] as EntityEndpoint).entityId,
+        (c[0] as EntityEndpoint).id,
+      ]),
+    );
+    expect(ids).toEqual({ "light.a": "light_a_2", "light.b": "light_a" });
+    expect(h.manager.failedEntities).toEqual([]);
+  });
+
+  for (const yFirst of [true, false]) {
+    it(`a mounted entity renamed while another takes its old name keeps its endpoint (#404, ${yFirst ? "new first" : "renamed first"})`, async () => {
+      legacyCreate.mockImplementation(
+        async (_registry, entityId, ...rest) =>
+          fakeEndpoint(entityId as string, {
+            id: rest[3] as string,
+          }) as unknown as LegacyEndpoint,
+      );
+      const order = yFirst ? ["light.a", "light.b"] : ["light.b", "light.a"];
+      for (const y of ["keyed", "keyless", "next refresh"]) {
+        const x = { unique_id: "UX", platform: "hue" };
+        const entities: Record<
+          string,
+          { unique_id?: string; platform?: string }
+        > = { "light.a": x };
+        const h = makeHarness(["light.a"], "light.a", {
+          flags: { stableIdentity: true },
+          entities,
+        });
+        await h.manager.refreshDevices();
+        const mounted = h.serverNode.addDevice.mock
+          .calls[0][0] as EntityEndpoint;
+
+        entities["light.b"] = x;
+        h.registry.fullEntities["light.b"] = { entity_id: "light.b", ...x };
+        if (y === "next refresh") {
+          h.registry.entityIds = ["light.b"];
+          h.registry.firstEntityMatching = vi.fn(() => "light.b");
+          delete entities["light.a"];
+          await h.manager.refreshDevices();
+        }
+        entities["light.a"] =
+          y === "keyless" ? {} : { unique_id: "UY", platform: "hue" };
+        h.registry.fullEntities["light.a"] = {
+          entity_id: "light.a",
+          ...entities["light.a"],
+        };
+        h.registry.entityIds = order;
+        h.registry.firstEntityMatching = vi.fn(() => order[0]);
+        await h.manager.refreshDevices();
+
+        // close(), not delete(): the renamed entity keeps the number
+        expect(mounted.close).toHaveBeenCalledTimes(1);
+        expect(mounted.delete).not.toHaveBeenCalled();
+        const ids = (m: ServerModeEndpointManager) =>
+          Object.fromEntries(m.devices.map((d) => [d.entityId, d.id]));
+        expect(ids(h.manager), y).toEqual({
+          "light.a": "light_a_2",
+          "light.b": "light_a",
+        });
+        expect(h.manager.failedEntities).toEqual([]);
+
+        // a restart with the same registry and records mounts the same ids
+        const restarted = makeHarness(order, order[0], {
+          flags: { stableIdentity: true },
+          entities,
+        });
+        for (const [k, r] of h.identityStorage.getBridgeIdentities("bridge1")) {
+          restarted.identityStorage.setIdentity("bridge1", k, { ...r });
+        }
+        await restarted.manager.refreshDevices();
+        expect(ids(restarted.manager)).toEqual(ids(h.manager));
+      }
+    });
+  }
 
   it("a rename resolving a pending absence drops the stamp (#438)", async () => {
     const reg = { unique_id: "U", platform: "hue" };

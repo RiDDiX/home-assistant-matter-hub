@@ -37,6 +37,7 @@ export type HomeAssistantAreas = Map<string, string>;
 export class HomeAssistantRegistry extends Service {
   private autoRefresh?: NodeJS.Timeout;
   private refreshPending = false;
+  private refreshRetries = 0;
   // Set with every new fingerprint, so a change found by an outside reload()
   // still reaches the bridges on the next tick.
   private registryChanged = false;
@@ -140,7 +141,7 @@ export class HomeAssistantRegistry extends Service {
     this.disableAutoRefresh();
 
     let refreshing = false;
-    let retries = 0;
+    this.refreshRetries = 0;
     this.refreshPending = false;
     this.autoRefresh = setInterval(async () => {
       if (refreshing) {
@@ -161,14 +162,14 @@ export class HomeAssistantRegistry extends Service {
         // stamp only now: a reload that failed must not consume the restart
         this.lastRunningSince = runningSince;
         if (changed || restarted) {
-          retries = 0;
+          this.refreshRetries = 0;
         } else if (
           !this.refreshPending ||
-          retries >= INCOMPLETE_REFRESH_RETRIES
+          this.refreshRetries >= INCOMPLETE_REFRESH_RETRIES
         ) {
           return;
         } else {
-          retries++;
+          this.refreshRetries++;
         }
         // cleared before the run, a late refresh may mark it during the run
         this.refreshPending = false;
@@ -179,7 +180,10 @@ export class HomeAssistantRegistry extends Service {
           logger.warn("Bridge refresh failed:", e);
           this.refreshPending = true;
         }
-        if (this.refreshPending && retries === INCOMPLETE_REFRESH_RETRIES) {
+        if (
+          this.refreshPending &&
+          this.refreshRetries === INCOMPLETE_REFRESH_RETRIES
+        ) {
           logger.warn(
             "Bridge refresh still incomplete, waiting for the next registry change",
           );
@@ -192,10 +196,18 @@ export class HomeAssistantRegistry extends Service {
     }, this.options.refreshInterval * 1000);
   }
 
-  // Every device refresh that ends incomplete calls this. Arms the retry
-  // without resetting its count, only a registry change does that.
+  // Every device refresh that ends incomplete calls this, also one finishing
+  // after its tick. Arms the retry without resetting its count, only a
+  // registry change or grantRefreshRetries does that.
   markRefreshIncomplete() {
     this.refreshPending = true;
+  }
+
+  // A start, update or API refresh that ended incomplete gets a fresh retry
+  // budget. Ticks and internal rechecks never call this, so the cap holds.
+  grantRefreshRetries() {
+    this.refreshPending = true;
+    this.refreshRetries = 0;
   }
 
   disableAutoRefresh() {

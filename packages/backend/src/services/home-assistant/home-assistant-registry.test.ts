@@ -758,6 +758,44 @@ describe("HomeAssistantRegistry", () => {
       registry.disableAutoRefresh();
     });
 
+    it("keeps a spent budget for a refresh marked incomplete after its tick", async () => {
+      vi.spyOn(Logger.prototype, "warn").mockImplementation(() => {});
+      const onRefresh = vi
+        .fn<() => Promise<boolean>>()
+        .mockResolvedValue(false);
+      const { registry } = await setup(onRefresh);
+      for (let i = 0; i < 6; i++) await tick();
+      expect(onRefresh).toHaveBeenCalledTimes(4);
+
+      // a slow refresh the tick gave up on, finishing late
+      registry.markRefreshIncomplete();
+      for (let i = 0; i < 6; i++) await tick();
+      expect(onRefresh).toHaveBeenCalledTimes(4);
+      registry.disableAutoRefresh();
+    });
+
+    it("grants a fresh retry budget on an explicit grant", async () => {
+      const warn = vi
+        .spyOn(Logger.prototype, "warn")
+        .mockImplementation(() => {});
+      const onRefresh = vi
+        .fn<() => Promise<boolean>>()
+        .mockResolvedValue(false);
+      const { registry } = await setup(onRefresh);
+      for (let i = 0; i < 6; i++) await tick();
+      expect(onRefresh).toHaveBeenCalledTimes(4);
+
+      // a later bridge start or API refresh that also ended incomplete
+      registry.grantRefreshRetries();
+      for (let i = 0; i < 6; i++) await tick();
+      expect(onRefresh).toHaveBeenCalledTimes(7);
+      expect(
+        warn.mock.calls.filter((c) => String(c[0]).includes("still incomplete"))
+          .length,
+      ).toBe(2);
+      registry.disableAutoRefresh();
+    });
+
     it("retries a refresh that threw", async () => {
       const onRefresh = vi
         .fn<() => Promise<undefined>>()

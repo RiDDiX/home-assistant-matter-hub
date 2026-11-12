@@ -45,9 +45,13 @@ export class EntityIdentityStorage extends Service {
   private storage!: StorageContext;
   private identities: Map<string, Map<string, IdentityRecord>> = new Map();
   private persistTimer: ReturnType<typeof setTimeout> | null = null;
-  // Only a change writes, so a file this build could not read stays on disk
-  // until a record changes.
+  // Only a change writes. A newer build's file is never written, and entries
+  // this build could not read are written back as they were.
   private dirty = false;
+  private newerFile = false;
+  // Raw entries load skipped, written back as they were.
+  private unreadableBridges = new Map<string, unknown>();
+  private unreadableRecords = new Map<string, Map<string, unknown>>();
 
   constructor(private readonly appStorage: AppStorage) {
     super("EntityIdentityStorage");
@@ -76,8 +80,9 @@ export class EntityIdentityStorage extends Service {
     if (data.version > CURRENT_VERSION) {
       // A file written by a newer build. Starting empty would let the next
       // write persist an empty set over it.
+      this.newerFile = true;
       logger.warn(
-        `Identity file has unsupported version ${data.version}, reading the records that look readable`,
+        `Identity file has unsupported version ${data.version}, reading the records that look readable and not saving changes until the newer build runs again`,
       );
     }
 
@@ -85,18 +90,22 @@ export class EntityIdentityStorage extends Service {
     let skipped = 0;
     for (const [bridgeId, records] of Object.entries(data.identities ?? {})) {
       if (!isPlainObject(records)) {
+        this.unreadableBridges.set(bridgeId, records);
         skipped++;
         continue;
       }
       const bridgeMap = new Map<string, IdentityRecord>();
+      const raw = new Map<string, unknown>();
       for (const [key, record] of Object.entries(records)) {
         if (!isPlainObject(record) || typeof record.endpointId !== "string") {
+          raw.set(key, record);
           skipped++;
           continue;
         }
         bridgeMap.set(key, record as unknown as IdentityRecord);
       }
       this.identities.set(bridgeId, bridgeMap);
+      if (raw.size > 0) this.unreadableRecords.set(bridgeId, raw);
     }
     if (skipped > 0) {
       logger.warn(`Skipped ${skipped} unreadable identity entries`);
@@ -104,13 +113,19 @@ export class EntityIdentityStorage extends Service {
   }
 
   private async persist(): Promise<void> {
+    if (this.newerFile) return;
     const data: StoredIdentities = {
       version: CURRENT_VERSION,
       identities: {},
     };
 
+    for (const [bridgeId, raw] of this.unreadableBridges) {
+      data.identities[bridgeId] = raw as Record<string, IdentityRecord>;
+    }
     for (const [bridgeId, bridgeMap] of this.identities) {
-      const records: Record<string, IdentityRecord> = {};
+      const records = Object.fromEntries(
+        this.unreadableRecords.get(bridgeId) ?? [],
+      ) as Record<string, IdentityRecord>;
       for (const [key, record] of bridgeMap) {
         records[key] = record;
       }
@@ -160,13 +175,17 @@ export class EntityIdentityStorage extends Service {
     if (!bridgeMap) {
       bridgeMap = new Map();
       this.identities.set(bridgeId, bridgeMap);
+      this.unreadableBridges.delete(bridgeId);
     }
     bridgeMap.set(key, record);
+    this.unreadableRecords.get(bridgeId)?.delete(key);
     this.schedulePersist();
   }
 
   async deleteBridgeIdentities(bridgeId: string): Promise<void> {
-    if (this.identities.delete(bridgeId)) {
+    this.unreadableRecords.delete(bridgeId);
+    const hadRaw = this.unreadableBridges.delete(bridgeId);
+    if (this.identities.delete(bridgeId) || hadRaw) {
       this.dirty = true;
       await this.flush();
     }

@@ -49,11 +49,7 @@ import {
 import type { BridgeRegistry } from "./bridge-registry.js";
 import { EntityIsolationService } from "./entity-isolation-service.js";
 import { EntityMappingSync } from "./entity-mapping-sync.js";
-import {
-  IdentityResolver,
-  identityKey,
-  type ResolvedIdentity,
-} from "./identity-resolver.js";
+import { IdentityResolver } from "./identity-resolver.js";
 
 const MAX_ENTITY_ID_LENGTH = 150;
 
@@ -1052,29 +1048,18 @@ export class BridgeEndpointManager extends Service {
     // maps to the same endpoint id, so the endpoint is rebuilt under its
     // preserved number instead of being torn down and re-added (#404).
     const stableIdentity = this.registry.isStableIdentityEnabled();
-    const resolvedByEntity = new Map<string, ResolvedIdentity>();
-    const endpointIdToEntity = new Map<string, string>();
-    const claimedEndpointIds = new Map<string, string>();
-    for (const entityId of this.entityIds) {
-      const entityInfo = {
+    const resolvedByEntity = await this.identityResolver.resolveIdentities(
+      this.bridgeId,
+      this.entityIds.map((entityId) => ({
         entity_id: entityId,
         registry: this.registry.entity(entityId),
-      };
-      const resolved = await this.identityResolver.resolveIdentity(
-        this.bridgeId,
-        entityInfo,
-        this.getEntityMapping(entityId),
-        {
-          stableIdentity,
-          isEndpointIdTaken: (id, key) =>
-            claimedEndpointIds.has(id) && claimedEndpointIds.get(id) !== key,
-        },
-      );
-      resolvedByEntity.set(entityId, resolved);
-      claimedEndpointIds.set(
-        resolved.endpointId,
-        identityKey(entityInfo) ?? `\u0000e:${entityId}`,
-      );
+      })),
+      (entityId) => this.getEntityMapping(entityId),
+      stableIdentity,
+      this.log,
+    );
+    const endpointIdToEntity = new Map<string, string>();
+    for (const [entityId, resolved] of resolvedByEntity) {
       endpointIdToEntity.set(resolved.endpointId, entityId);
       // Carry the in-memory fingerprint to the new entity id so the create loop
       // does not read a spurious mapping change after a rename re-key.
@@ -1141,11 +1126,19 @@ export class BridgeEndpointManager extends Service {
       const present = this.entityIds.includes(endpoint.entityId);
 
       // Rename: a different current entity now owns this endpoint's id while
-      // this endpoint's own entity is gone. close() keeps the persisted number
-      // pre-allocated so the create loop rebuilds it under the same id with the
-      // renamed entity. Never delete() here, that would erase the number (#404).
+      // this endpoint's own entity is gone, or the protected entity renamed off
+      // it owns it while a new entity took the old name. close() keeps the
+      // persisted number pre-allocated so the create loop rebuilds it under the
+      // same id with the renamed entity. Never delete() here, that would erase
+      // the number (#404).
       const claimant = endpointIdToEntity.get(endpoint.id);
-      if (!present && claimant != null && claimant !== endpoint.entityId) {
+      const renamed = claimant ? resolvedByEntity.get(claimant) : undefined;
+      if (
+        claimant != null &&
+        claimant !== endpoint.entityId &&
+        (!present ||
+          (renamed?.protected && renamed.renamedFrom === endpoint.entityId))
+      ) {
         this.log.info(
           `Entity renamed ${endpoint.entityId} -> ${claimant}, keeping endpoint ${endpoint.id}`,
         );

@@ -199,7 +199,7 @@ describe("EntityIdentityStorage", () => {
     expect(storage.getIdentity("bridge1", "k4")).toBeUndefined();
   });
 
-  it("leaves a file from a newer build alone until a record changes", async () => {
+  it("leaves a file from a newer build alone", async () => {
     const ctx = appStorage.createContext("entity-identities");
     const newer = { version: 2, identities: { bridge1: { k1: record } } };
     // biome-ignore lint/suspicious/noExplicitAny: raw stored shape
@@ -211,5 +211,104 @@ describe("EntityIdentityStorage", () => {
     await storage.dispose();
 
     expect(await ctx.get("data")).toEqual(newer);
+  });
+
+  it("never overwrites a file from a newer build when a record changes", async () => {
+    const ctx = appStorage.createContext("entity-identities");
+    const newer = {
+      version: 2,
+      identities: {
+        b1: { k1: record, k2: { anchorEntityId: "light.other" } },
+        b2: { k: record },
+      },
+    };
+    // biome-ignore lint/suspicious/noExplicitAny: raw stored shape
+    await ctx.set("data", newer as any);
+
+    const storage = new EntityIdentityStorage(appStorage);
+    await storage.construction;
+    storage.setIdentity("b2", "k9", record);
+    await storage.flush();
+    expect(storage.getIdentity("b2", "k9")).toEqual(record);
+    storage.markIdentityMissing("b1", "k1", "2026-07-01T00:00:00.000Z");
+    storage.clearIdentityMissing("b1", "k1");
+    await storage.deleteIdentity("b1", "k1");
+    await storage.deleteBridgeIdentities("b2");
+    await storage.dispose();
+
+    expect(await ctx.get("data")).toEqual(newer);
+  });
+
+  it("writes unreadable entries back unchanged when a record changes", async () => {
+    const ctx = appStorage.createContext("entity-identities");
+    const unreadable = { anchorEntityId: "light.other" };
+    await ctx.set("data", {
+      version: 1,
+      identities: { b1: { k1: record, k2: unreadable }, b2: null },
+      // biome-ignore lint/suspicious/noExplicitAny: raw stored shape
+    } as any);
+
+    const storage = new EntityIdentityStorage(appStorage);
+    await storage.construction;
+    storage.setIdentity("b1", "k9", record);
+    await storage.flush();
+
+    expect(await ctx.get("data")).toEqual({
+      version: 1,
+      identities: { b1: { k1: record, k2: unreadable, k9: record }, b2: null },
+    });
+  });
+
+  it("deletes a bridge's unreadable entries with the bridge", async () => {
+    const ctx = appStorage.createContext("entity-identities");
+    await ctx.set("data", {
+      version: 1,
+      identities: {
+        b1: { k1: record, k2: { anchorEntityId: "light.other" } },
+        b2: null,
+        b3: { k1: record },
+      },
+      // biome-ignore lint/suspicious/noExplicitAny: raw stored shape
+    } as any);
+
+    const storage = new EntityIdentityStorage(appStorage);
+    await storage.construction;
+    await storage.deleteBridgeIdentities("b2");
+    expect(await ctx.get("data")).toEqual({
+      version: 1,
+      identities: {
+        b1: { k1: record, k2: { anchorEntityId: "light.other" } },
+        b3: { k1: record },
+      },
+    });
+
+    await storage.deleteBridgeIdentities("b1");
+    storage.setIdentity("b1", "k9", record);
+    await storage.flush();
+
+    expect(await ctx.get("data")).toEqual({
+      version: 1,
+      identities: { b1: { k9: record }, b3: { k1: record } },
+    });
+  });
+
+  it("drops the raw copy once a readable record takes its key", async () => {
+    const ctx = appStorage.createContext("entity-identities");
+    await ctx.set("data", {
+      version: 1,
+      identities: { b1: { k1: record, k2: { anchorEntityId: "light.other" } } },
+      // biome-ignore lint/suspicious/noExplicitAny: raw stored shape
+    } as any);
+
+    const storage = new EntityIdentityStorage(appStorage);
+    await storage.construction;
+    storage.setIdentity("b1", "k2", record);
+    await storage.flush();
+    await storage.deleteIdentity("b1", "k2");
+
+    expect(await ctx.get("data")).toEqual({
+      version: 1,
+      identities: { b1: { k1: record } },
+    });
   });
 });

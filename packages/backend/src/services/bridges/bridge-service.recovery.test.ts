@@ -1,7 +1,7 @@
 import { Logger } from "@matter/general";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { BridgeStorage } from "../storage/bridge-storage.js";
-import type { Bridge } from "./bridge.js";
+import { Bridge } from "./bridge.js";
 import type { BridgeFactory } from "./bridge-factory.js";
 import { BridgeService, type BridgeServiceProps } from "./bridge-service.js";
 
@@ -167,6 +167,30 @@ describe("BridgeService refreshAll", () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.restoreAllMocks();
+  });
+
+  it("grants new retries for an incomplete update, never for a tick refresh", async () => {
+    const svc = await makeService();
+    const registry = { grantRefreshRetries: vi.fn() };
+    // the real refreshDevices of a bridge whose endpoints stay incomplete
+    const bridge = Object.create(Bridge.prototype);
+    Object.assign(bridge, {
+      dataProvider: { id: "a", port: 1, update() {} },
+      server: { env: { maybeGet: () => registry } },
+      status: { code: "stopped" },
+      lastSyncedStates: new Map(),
+      endpointManager: {
+        root: { parts: [] },
+        refreshDevices: async () => false,
+      },
+    });
+    svc.bridges.push(bridge as Bridge);
+
+    await expect(svc.refreshAll()).resolves.toBe(false);
+    expect(registry.grantRefreshRetries).not.toHaveBeenCalled();
+
+    await (bridge as Bridge).update({ port: 1 } as never);
+    expect(registry.grantRefreshRetries).toHaveBeenCalledTimes(1);
   });
 
   it("reports false when a bridge throws or is incomplete, still refreshing the others", async () => {

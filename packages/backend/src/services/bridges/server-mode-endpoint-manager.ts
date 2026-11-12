@@ -36,11 +36,7 @@ import {
 } from "./bridge-endpoint-manager.js";
 import type { BridgeRegistry } from "./bridge-registry.js";
 import { EntityMappingSync } from "./entity-mapping-sync.js";
-import {
-  IdentityResolver,
-  identityKey,
-  type ResolvedIdentity,
-} from "./identity-resolver.js";
+import { IdentityResolver } from "./identity-resolver.js";
 
 // Hard cap so a wildcard matcher cannot mint dozens of root endpoints (#301).
 export const MAX_SERVER_MODE_DEVICES = 10;
@@ -408,40 +404,38 @@ export class ServerModeEndpointManager extends Service {
       // existing endpoint id and keeps the device number (#404).
       const stableIdentity =
         this.dataProvider.featureFlags?.stableIdentity === true;
-      const resolvedByEntity = new Map<string, ResolvedIdentity>();
-      const endpointIdToEntity = new Map<string, string>();
-      const claimedEndpointIds = new Map<string, string>();
-      for (const entityId of orderedIds) {
-        const entityInfo = {
+      const resolvedByEntity = await this.identityResolver.resolveIdentities(
+        this.dataProvider.id,
+        orderedIds.map((entityId) => ({
           entity_id: entityId,
           registry: this.registry.entity(entityId),
-        };
-        const resolved = await this.identityResolver.resolveIdentity(
-          this.dataProvider.id,
-          entityInfo,
-          this.getEntityMapping(entityId),
-          {
-            stableIdentity,
-            isEndpointIdTaken: (id, key) =>
-              claimedEndpointIds.has(id) && claimedEndpointIds.get(id) !== key,
-          },
-        );
-        resolvedByEntity.set(entityId, resolved);
-        claimedEndpointIds.set(
-          resolved.endpointId,
-          identityKey(entityInfo) ?? `\u0000e:${entityId}`,
-        );
+        })),
+        (entityId) => this.getEntityMapping(entityId),
+        stableIdentity,
+        this.log,
+      );
+      const endpointIdToEntity = new Map<string, string>();
+      for (const [entityId, resolved] of resolvedByEntity) {
         endpointIdToEntity.set(resolved.endpointId, entityId);
       }
 
       // drop endpoints whose entity no longer matches the filter. A rename keeps
       // its endpoint id under a different entity, so close() (keep number)
-      // instead of delete() (frees number) for those (#404).
+      // instead of delete() (frees number) for those (#404). That includes a
+      // protected rename whose old name a new entity took in the same pass.
       const keep = new Set(orderedIds);
       for (const id of keep) {
         this.pendingRemovals.delete(id);
       }
-      const removed = [...this.endpoints.keys()].filter((id) => !keep.has(id));
+      const removed = [...this.endpoints].flatMap(([id, entry]) => {
+        const renamed = resolvedByEntity.get(
+          endpointIdToEntity.get(entry.endpoint.id) ?? "",
+        );
+        return !keep.has(id) ||
+          (renamed?.protected && renamed.renamedFrom === id)
+          ? [id]
+          : [];
+      });
       const genuinelyRemoved: string[] = [];
       for (const oldId of removed) {
         const entry = this.endpoints.get(oldId);
