@@ -39,7 +39,7 @@ of port forwarding etc.
 | Channel | Branch | Current Version | Description |
 |---------|--------|-----------------|-------------|
 | **Stable** | `main` | v2.0.59 | Production-ready, recommended for most users |
-| **Alpha** | `alpha` | v2.1.0-alpha.976 | Ahead of Stable, carries the additions listed under Alpha Features |
+| **Alpha** | `alpha` | v2.1.0-alpha.979 | Ahead of Stable, carries the additions listed under Alpha Features |
 | **Testing** | `testing` | v4.1.0-testing.x | ⚠️ **Highly unstable!** Experimental features, may break |
 
 ### Which version should I use?
@@ -427,6 +427,29 @@ Re-assign the affected devices to their rooms after they reconnect. See the [doc
 
 <details>
 <summary><strong>🧪 Alpha Features (v2.1.0-alpha.x)</strong> - Click to expand</summary>
+
+**v2.1.0-alpha.979:**
+- **Incomplete refresh retried**: a device refresh that ended incomplete, for example because Home Assistant was not ready yet, memory was low or a device failed to mount, is retried on the next registry checks, up to three times, instead of waiting for the next change in Home Assistant ([#545](https://github.com/RiDDiX/home-assistant-matter-hub/issues/545)).
+- **Slow bridges**: one bridge whose refresh takes longer than 2 minutes, or whose start takes longer than 5 minutes, no longer holds up the other bridges. It is logged and caught up afterwards.
+- **Controllers in the log**: after "Device list changed" the log shows one line per paired controller with its sessions and subscriptions, for example `Controller fabric 2 (google 0x6006): 1 session, 2 subscriptions`. A controller without a subscription only sees the new device list when it subscribes again. Useful when a new device does not show up in a controller ([#545](https://github.com/RiDDiX/home-assistant-matter-hub/issues/545)).
+- **Configuration version**: a failed update of the bridge's configuration version after a device list change is retried.
+- **mDNS after an address change**: the re-announce is retried when it failed for one of several controllers, before only when it failed for all of them.
+
+**v2.1.0-alpha.978:**
+- **Live subscriptions stay open**: older sessions of a controller that still carry subscriptions are no longer closed when it opens a new session. The sweep of superseded sessions listed under v2.0.49 is removed: since matter.js 0.18.0 the bridge sends reports on the controller's newest session, so an older session can look quiet while its subscription is live, and closing it stopped those updates. Sessions without subscriptions are still closed once they go quiet.
+- **Fast Session Recovery**: a session that just subscribed always gets the full 30 seconds before it can be closed as stale.
+- **Wedge Watchdog**: requests count across all sessions of a controller, so a controller that talks on its newest session no longer looks silent on an older one.
+- **Scenes, scripts and automations**: the switch back to off after a press restarts with every press, so a second press within a second no longer resets early, and the reset is no longer dropped while the device is busy.
+- **Device type changes**: a device rebuilt with another device type under the same id now also raises the bridge's configuration version. The first start after the update only records the list.
+- **Bridge shutdown**: a "mutex is closed" error while a bridge stops is ignored like the other shutdown errors and can no longer end the app.
+- **Stored device identities**: a damaged entry is skipped with one warning instead of stopping every bridge from starting.
+
+**v2.1.0-alpha.977:**
+- **Pairing window reopens**: Matter closes the pairing window of a bridge that is still unpaired after 48 hours without telling anyone. The bridge now reopens it within 10 minutes and logs `Commissioning window expired before pairing, reopened it`.
+- **Configuration version follows the device list**: when devices are added to or removed from a bridge, its configuration version goes up once, about 90 seconds after the list settles. Before, only plugin devices did this. The device list itself was always reported right away. A restart with the same devices changes nothing.
+- **mDNS and container networks**: without a set mDNS interface, network links of other containers (`docker`, `veth`, `cni`) coming and going no longer make the bridges announce themselves again. `hassio` is still watched.
+- **Network check**: the IPv6 check only looks at the interfaces the bridge advertises, and a new warning shows when more than one bridge is waiting to be paired, because Alexa finds only one unpaired bridge at a time.
+- **mDNS warnings**: with `mdns-strip-global-ipv6` on, the startup warnings about Docker-internal and Thread interfaces now show too.
 
 **v2.1.0-alpha.976:**
 - **Cross-site requests behind a reverse proxy**: requests that arrive through a proxy on the same host no longer skip the `Origin` check. A proxy that rewrites the `Host` header needs its public name in `--http-allowed-hosts`, as described under "Read this before updating to alpha.969". Without it the page loads, but changes and live updates answer 403 and name the host to add. The Home Assistant add-on panel needs no setting.
