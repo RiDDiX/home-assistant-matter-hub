@@ -39,7 +39,7 @@ of port forwarding etc.
 | Channel | Branch | Current Version | Description |
 |---------|--------|-----------------|-------------|
 | **Stable** | `main` | v2.0.59 | Production-ready, recommended for most users |
-| **Alpha** | `alpha` | v2.1.0-alpha.980 | Ahead of Stable, carries the additions listed under Alpha Features |
+| **Alpha** | `alpha` | v2.1.0-alpha.981 | Ahead of Stable, carries the additions listed under Alpha Features |
 | **Testing** | `testing` | v4.1.0-testing.x | ⚠️ **Highly unstable!** Experimental features, may break |
 
 ### Which version should I use?
@@ -427,6 +427,10 @@ Re-assign the affected devices to their rooms after they reconnect. See the [doc
 
 <details>
 <summary><strong>🧪 Alpha Features (v2.1.0-alpha.x)</strong> - Click to expand</summary>
+
+**v2.1.0-alpha.981:**
+- **Sensor units**: power, voltage and energy sensors now convert every unit Home Assistant allows for them: GW, TW, BTU/h, µV, MV, J, kJ, MJ, GJ, mWh, GWh, TWh, cal, kcal, Mcal and Gcal. A unit missing from the table used to be read as W, V or kWh, so a GWh sensor showed a value a million times too small.
+- **Empty sensor state**: a sensor with an empty state no longer reports 0 W, 0 kWh or 0 % battery. It counts as no reading.
 
 **v2.1.0-alpha.980:**
 - **Non-admin Home Assistant token**: the bridge now asks Home Assistant once per connection whether the token's user is an admin. For a non-admin it logs one INFO line and no longer sends the `hamh_action` event or looks up vacuum segments, so the warning `Failed to fire event 'hamh_action': Unauthorized` and the matching error in Home Assistant are gone. Admin tokens and the add-on default behave as before ([#548](https://github.com/RiDDiX/home-assistant-matter-hub/issues/548)).
