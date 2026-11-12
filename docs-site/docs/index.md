@@ -428,6 +428,13 @@ Home, ...) are not placed in the same network segment. Please make sure to revie
 <details>
 <summary><strong>🧪 Alpha (v2.1.0-alpha.x)</strong></summary>
 
+**v2.1.0-alpha.983:**
+- **Registry refresh endpoint**: `POST /api/home-assistant/refresh` used to take a registry change without the bridges ever being refreshed for it. Bridges now follow on the next registry refresh interval.
+- **Incomplete refresh retry**: a device refresh that ends incomplete, for example after a failed add, is now retried whatever started it: a bridge start or restart, a bridge edit or the manual refresh, not only the registry poll.
+- **Entities without state**: an entity that matches a bridge filter but has no state in Home Assistant yet is no longer skipped silently. It shows in the failed entities list as "No state in Home Assistant yet", with one log line, and is added once it has a state.
+- **Controller fabric log**: the "Controller fabric" line after "Device list changed" now also says when the controller was last heard and whether its subscription contains the device list at all ([#545](https://github.com/RiDDiX/home-assistant-matter-hub/issues/545)).
+- **Diagnostic export**: the export now includes the matter.js interaction messenger lines. They were filtered out because of a wrong facility name.
+
 **v2.1.0-alpha.982:**
 - **Lights that keep their brightness while off**: some template and MQTT lights keep showing their brightness while off. A controller asking for that same brightness now turns them on again. Since alpha.962 such a request was dropped and the light stayed off.
 - **Off thermostat without target**: a thermostat that is Off and reports no target temperature no longer drifts. Its setpoint used to rise by 0.01 degrees with every state update.
