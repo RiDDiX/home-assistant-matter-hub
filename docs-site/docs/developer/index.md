@@ -141,7 +141,7 @@ The `@matter/*` packages are pinned to a specific version in `packages/backend/p
 6. Test composed devices (temperature + humidity + pressure sensor grouping).
 7. Test server mode (vacuum endpoint).
 8. Test forceSync behavior (enable `autoForceSync`, verify changed states are pushed).
-9. Test session cleanup (verify stale sessions are closed when a new CASE session opens for the same peer).
+9. Test session cleanup (when a new CASE session opens for the same peer, an older session without subscriptions is closed once it goes quiet, and one that still holds a subscription stays until matter.js drops it).
 10. Build Docker image and verify it starts correctly:
     ```bash
     docker build -f apps/home-assistant-matter-hub/Dockerfile -t hamh-test .

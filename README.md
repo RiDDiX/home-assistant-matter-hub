@@ -39,7 +39,7 @@ of port forwarding etc.
 | Channel | Branch | Current Version | Description |
 |---------|--------|-----------------|-------------|
 | **Stable** | `main` | v2.0.59 | Production-ready, recommended for most users |
-| **Alpha** | `alpha` | v2.1.0-alpha.967 | Ahead of Stable, carries the additions listed under Alpha Features |
+| **Alpha** | `alpha` | v2.1.0-alpha.982 | Ahead of Stable, carries the additions listed under Alpha Features |
 | **Testing** | `testing` | v4.1.0-testing.x | ⚠️ **Highly unstable!** Experimental features, may break |
 
 ### Which version should I use?
@@ -47,6 +47,12 @@ of port forwarding etc.
 - **Most users**: Use **Stable** (`main` branch) - thoroughly tested
 - **Early adopters**: Use **Alpha** (`alpha` branch) - gets every fix and feature first, see Alpha Features below
 - **Developers/Testers**: Use **Testing** (`testing` branch) - bleeding edge, expect breakage
+
+### Read this before updating to alpha.969
+
+The web UI now checks the `Host` and `Origin` headers to block DNS rebinding and cross-site WebSocket access. Requests are only answered when the host is an IP address, `localhost`, a single-label name, or a name ending in `.local`, `.localhost`, `.home.arpa`, `.lan`, `.internal` or `.fritz.box`. Home Assistant ingress and direct access by IP keep working without any change.
+
+If you reach HAMH through a reverse proxy on a public name such as `matter.example.org`, add that name before you update, or the UI answers with 403 until you do: `--http-allowed-hosts=matter.example.org` for a container, or `HAMH_HTTP_ALLOWED_HOSTS=matter.example.org` as environment variable. This is needed whether or not the proxy rewrites the `Host` header. The WebSocket also requires the basic auth credentials now when auth is enabled, browsers send them on their own. The Home Assistant add-on panel is not affected. See the [reverse proxy guide](https://riddix.github.io/home-assistant-matter-hub/guides/reverse-proxy) for detail.
 
 ### Upgrading from 2.0.46
 
@@ -421,6 +427,80 @@ Re-assign the affected devices to their rooms after they reconnect. See the [doc
 
 <details>
 <summary><strong>🧪 Alpha Features (v2.1.0-alpha.x)</strong> - Click to expand</summary>
+
+**v2.1.0-alpha.982:**
+- **Lights that keep their brightness while off**: some template and MQTT lights keep showing their brightness while off. A controller asking for that same brightness now turns them on again. Since alpha.962 such a request was dropped and the light stayed off.
+- **Off thermostat without target**: a thermostat that is Off and reports no target temperature no longer drifts. Its setpoint used to rise by 0.01 degrees with every state update.
+
+**v2.1.0-alpha.981:**
+- **Sensor units**: power, voltage and energy sensors now convert every unit Home Assistant allows for them: GW, TW, BTU/h, µV, MV, J, kJ, MJ, GJ, mWh, GWh, TWh, cal, kcal, Mcal and Gcal. A unit missing from the table used to be read as W, V or kWh, so a GWh sensor showed a value a million times too small.
+- **Empty sensor state**: a sensor with an empty state no longer reports 0 W, 0 kWh or 0 % battery. It counts as no reading.
+
+**v2.1.0-alpha.980:**
+- **Non-admin Home Assistant token**: the bridge now asks Home Assistant once per connection whether the token's user is an admin. For a non-admin it logs one INFO line and no longer sends the `hamh_action` event or looks up vacuum segments, so the warning `Failed to fire event 'hamh_action': Unauthorized` and the matching error in Home Assistant are gone. Admin tokens and the add-on default behave as before ([#548](https://github.com/RiDDiX/home-assistant-matter-hub/issues/548)).
+- **Add-on access token and URL**: the add-on trims `home_assistant_url` and passes the access token to the app through the environment instead of the command line, so it no longer shows in the process list. The app also trims the Home Assistant URL and removes repeated trailing slashes ([#548](https://github.com/RiDDiX/home-assistant-matter-hub/issues/548)).
+- **Web UI password**: when the password is set, changed or removed, open `/api/ws` connections are closed and have to log in again ([#550](https://github.com/RiDDiX/home-assistant-matter-hub/issues/550)).
+- **Device refresh retries**: an entity that failed to be created is retried by the next registry refresh, up to three times, instead of waiting for the next change in Home Assistant. A failure that keeps repeating is logged once and no longer costs retries on every change. A slow bridge whose late refresh ends incomplete is retried too, and a failed configuration version update is retried after 10 seconds and logged when it gives up ([#545](https://github.com/RiDDiX/home-assistant-matter-hub/issues/545)).
+
+**v2.1.0-alpha.979:**
+- **Incomplete refresh retried**: a device refresh that ended incomplete, for example because Home Assistant was not ready yet, memory was low or a device failed to mount, is retried on the next registry checks, up to three times, instead of waiting for the next change in Home Assistant ([#545](https://github.com/RiDDiX/home-assistant-matter-hub/issues/545)).
+- **Slow bridges**: one bridge whose refresh takes longer than 2 minutes, or whose start takes longer than 5 minutes, no longer holds up the other bridges. It is logged and caught up afterwards.
+- **Controllers in the log**: after "Device list changed" the log shows one line per paired controller with its sessions and subscriptions, for example `Controller fabric 2 (google 0x6006): 1 session, 2 subscriptions`. A controller without a subscription only sees the new device list when it subscribes again. Useful when a new device does not show up in a controller ([#545](https://github.com/RiDDiX/home-assistant-matter-hub/issues/545)).
+- **Configuration version**: a failed update of the bridge's configuration version after a device list change is retried.
+- **mDNS after an address change**: the re-announce is retried when it failed for one of several controllers, before only when it failed for all of them.
+
+**v2.1.0-alpha.978:**
+- **Live subscriptions stay open**: older sessions of a controller that still carry subscriptions are no longer closed when it opens a new session. The sweep of superseded sessions listed under v2.0.49 is removed: since matter.js 0.18.0 the bridge sends reports on the controller's newest session, so an older session can look quiet while its subscription is live, and closing it stopped those updates. Sessions without subscriptions are still closed once they go quiet.
+- **Fast Session Recovery**: a session that just subscribed always gets the full 30 seconds before it can be closed as stale.
+- **Wedge Watchdog**: requests count across all sessions of a controller, so a controller that talks on its newest session no longer looks silent on an older one.
+- **Scenes, scripts and automations**: the switch back to off after a press restarts with every press, so a second press within a second no longer resets early, and the reset is no longer dropped while the device is busy.
+- **Device type changes**: a device rebuilt with another device type under the same id now also raises the bridge's configuration version. The first start after the update only records the list.
+- **Bridge shutdown**: a "mutex is closed" error while a bridge stops is ignored like the other shutdown errors and can no longer end the app.
+- **Stored device identities**: a damaged entry is skipped with one warning instead of stopping every bridge from starting.
+
+**v2.1.0-alpha.977:**
+- **Pairing window reopens**: Matter closes the pairing window of a bridge that is still unpaired after 48 hours without telling anyone. The bridge now reopens it within 10 minutes and logs `Commissioning window expired before pairing, reopened it`.
+- **Configuration version follows the device list**: when devices are added to or removed from a bridge, its configuration version goes up once, about 90 seconds after the list settles. Before, only plugin devices did this. The device list itself was always reported right away. A restart with the same devices changes nothing.
+- **mDNS and container networks**: without a set mDNS interface, network links of other containers (`docker`, `veth`, `cni`) coming and going no longer make the bridges announce themselves again. `hassio` is still watched.
+- **Network check**: the IPv6 check only looks at the interfaces the bridge advertises, and a new warning shows when more than one bridge is waiting to be paired, because Alexa finds only one unpaired bridge at a time.
+- **mDNS warnings**: with `mdns-strip-global-ipv6` on, the startup warnings about Docker-internal and Thread interfaces now show too.
+
+**v2.1.0-alpha.976:**
+- **Cross-site requests behind a reverse proxy**: requests that arrive through a proxy on the same host no longer skip the `Origin` check. A proxy that rewrites the `Host` header needs its public name in `--http-allowed-hosts`, as described under "Read this before updating to alpha.969". Without it the page loads, but changes and live updates answer 403 and name the host to add. The Home Assistant add-on panel needs no setting.
+- **Backup restore**: an archive with an invalid size field is refused, it could get past the 200 MB limit. An archive that is too large is refused before anything is written.
+- **Error responses**: API errors answer as short JSON without stack traces or file paths.
+- **Icons and device images**: a wrong file type answers 400 instead of 500, invalid ids are refused, and the browser can no longer read a served image as another content type.
+- **Plugins**: package names that npm would read as a local file or folder are refused, and uninstalling with a version in the name removes the plugin from the list.
+
+**v2.1.0-alpha.975:**
+- **Add-on panel on a public address**: the add-on panel opens again when Home Assistant is reached by a public name such as a Nabu Casa or DuckDNS address. Since alpha.969 it answered 403 Host not allowed.
+
+**v2.1.0-alpha.974:**
+- **Add-on access token**: the add-on can log in to Home Assistant with a long-lived access token of your own user through the new `access_token` and `home_assistant_url` options, so bridge actions show up as that user instead of Supervisor. Leave `access_token` empty to keep the Supervisor connection. See the FAQ for which user to pick.
+
+**v2.1.0-alpha.972:**
+- **Vacuum jobs**: Dock from a controller ends a queued multi-room job instead of starting the next room, a vacuum that is unavailable for a moment during a clean no longer counts as finished, a room selection that spans two maps is rejected, and Ecovacs rooms with several ids per room are no longer treated as Dreame.
+- **Lock PINs**: PINs no longer show in the diagnostics view, the `hamh_action` event or the debug log.
+- **Home Assistant connection and bridges**: a dead connection is detected by a ping every 30 s and reconnected, and a refused reconnect is logged as an error. One broken stored bridge no longer stops the other bridges from starting, and a stored country code that is not two letters is dropped with a warning.
+- **Plugins**: re-uploading a plugin keeps its saved config, reset starts the plugin again, an upgraded plugin needs an app restart and the message says so, and deleting a bridge removes its plugin files.
+- **Sensors**: power, voltage and current show no value while the sensor is unavailable instead of the last one, EVSE states like ready to charge no longer show as charging, and moisture and cold sensors keep their battery level.
+- **Climate, fans and covers**: setpoint changes in Dry and Fan only mode reach Home Assistant, the fan slider debounce no longer turns a fan back on after off, a water heater Boost survives a short unavailable, a lawn mower that is unavailable shows Stopped instead of an error, and tilt-only covers report their position.
+- **Web UI and access**: the bridge wizard no longer keeps flags of a deselected controller profile, the mapping dialog blocks Save on invalid input, and IP whitelist denials answer 403 instead of 401.
+
+**v2.1.0-alpha.971:**
+- **Thermostat setpoint from Off**: a setpoint set while the thermostat is Off now resumes it and sends the mode together with the temperature. ZHA climate entities such as the Sonoff TRVZB ignored the temperature while still reading off ([#547](https://github.com/RiDDiX/home-assistant-matter-hub/issues/547)).
+- **Raise and lower from Off**: a raise or lower command also resumes an Off thermostat and starts from a value inside its limits, water heaters included.
+- **Wizard labels and mDNS retry**: the bridge wizard label filter now matches labels set on the device as well as on the entity, and the mDNS address check retries at most 3 times when every fabric fails ([#545](https://github.com/RiDDiX/home-assistant-matter-hub/issues/545)).
+
+**v2.1.0-alpha.970:**
+- **Fans on Auto**: a fan or air purifier that Home Assistant reports as on without a speed, such as a Dyson in Auto, now shows as on instead of off, so the Apple Home tile no longer hangs on "Turning...". The stand-in speed is not saved, a restart does not push it back to the fan ([#546](https://github.com/RiDDiX/home-assistant-matter-hub/issues/546)).
+- **Label renames and mDNS log**: a renamed Home Assistant label is picked up on the next refresh, a failed label or area fetch is logged as a warning, and the mDNS address warning lists which addresses were added or removed ([#545](https://github.com/RiDDiX/home-assistant-matter-hub/issues/545)).
+
+**v2.1.0-alpha.969:**
+- **Host and Origin checks**: the web UI and the WebSocket reject requests whose `Host` is not a local name or IP and browser requests whose `Origin` does not match, which blocks DNS rebinding and cross-site WebSocket access. Public proxy names go into the new `--http-allowed-hosts` option, see the warning above. The WebSocket upgrade now enforces basic auth, before it answered without credentials and sent the pairing codes of every bridge to any client. The IP whitelist runs before basic auth, so denied addresses get no login prompt. Plugin names starting with a dash are rejected, a backup restore is capped at 200 MB in total, and the ingress path is escaped in the page header.
+
+**v2.1.0-alpha.968:**
+- **Session logs and switch callbacks**: a session close now logs the matter.js subscription ids, the stale session timer is cleared before it is re-armed, a close error is logged instead of swallowed, and a switch press reuses one callback instead of leaking a handler per press ([#543](https://github.com/RiDDiX/home-assistant-matter-hub/issues/543)).
 
 **v2.1.0-alpha.967:**
 - **Google voice colors**: a voice color or brightness command on a light that is already on no longer sends a second empty turn on to Home Assistant. That second call cut the color fade short on lights such as the Shelly RGBW, so the light kept its old color ([#542](https://github.com/RiDDiX/home-assistant-matter-hub/issues/542)).

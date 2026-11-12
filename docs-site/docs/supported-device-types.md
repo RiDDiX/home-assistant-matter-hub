@@ -247,7 +247,7 @@ Various sensor types mapped based on `device_class` and `unit_of_measurement`.
 
 #### Pressure Sensor
 - **Device Class:** `pressure`, `atmospheric_pressure`
-- **Units:** `hPa`, `mbar`, `kPa`, `Pa`
+- **Units:** `hPa`, `mbar`, `kPa`, `Pa`, `bar`, `cbar`, `psi`, `inHg`, `mmHg`
 - **Matter Type:** PressureSensor
 
 #### Flow Sensor
@@ -456,7 +456,6 @@ Mapped to **RoboticVacuumCleaner**.
 | Flag | Description |
 |------|-------------|
 | `serverMode` | Expose as standalone device (required for Apple Home/Alexa) |
-| `vacuumIncludeUnnamedRooms` | Include rooms without names in room selection |
 
 **Important Limitations:**
 - **Server Mode recommended** - For full voice command support (Siri, Alexa)
