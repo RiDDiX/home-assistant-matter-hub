@@ -39,6 +39,7 @@ import {
   decideWedgeRotation,
   decideWedgeRotationV2,
   WEDGE_GIVE_UP_QUIET_MS,
+  WEDGE_MIN_ROTATE_INTERVAL_MS,
   WEDGE_RING_SIZE,
 } from "./wedge-watchdog.js";
 
@@ -94,6 +95,14 @@ function subscriptionIds(s: {
   return Array.from(s.subscriptions, (x) => x.subscriptionId).join(",");
 }
 
+// The same peer and fabric identity newestPeerStamp compares.
+function peerKey(s: {
+  peerNodeId: unknown;
+  fabric?: { fabricIndex?: unknown };
+}): string {
+  return `${s.fabric?.fabricIndex}:${s.peerNodeId}`;
+}
+
 // Everything a bridge does to its controller sessions once the node runs:
 // diagnostics, stale and dead session cleanup, rotation, the wedge watchdog
 // and the mDNS address watch. Bridge and ServerModeBridge carried this twice,
@@ -108,11 +117,12 @@ export class SessionSupervisor {
   private rotationTimer: ReturnType<typeof setInterval> | null = null;
   private maxSessionAgeMs = 0;
 
-  // Wedge watchdog: last inbound Interaction Model request time per session and
-  // last time the watchdog rotated it, both keyed by the long-lived session
-  // object so they clear when the session goes away.
+  // Wedge watchdog: last inbound Interaction Model request time per session,
+  // keyed by the long-lived session object so it clears when the session goes
+  // away. The last rotation is kept per peer, the rotated session is gone and
+  // its replacement must still be throttled.
   private lastImRequestAt = new WeakMap<object, number>();
-  private wedgeLastRotatedAt = new WeakMap<object, number>();
+  private wedgeLastRotatedAt = new Map<string, number>();
   private wedgeWatchdogTimer: ReturnType<typeof setInterval> | null = null;
 
   // V2 shadow signals (#365): last command-class request per session, plus
@@ -145,8 +155,9 @@ export class SessionSupervisor {
   // biome-ignore lint/suspicious/noExplicitAny: matter.js internal types
   private fabricAddedHandler?: (fabric: any) => void;
 
-  // the onNewExchange wrapper outlives stop(), so it must not arm timers then
-  private stopped = false;
+  // the onNewExchange wrapper outlives stop(), so it must not arm timers then;
+  // a supervisor that never started counts as stopped
+  private stopped = true;
 
   constructor(
     private readonly log: Logger,
@@ -174,10 +185,13 @@ export class SessionSupervisor {
     this.stopped = true;
     this.unwireSessionDiagnostics();
     this.unwireFabricWarnings();
+    this.wedgeLastRotatedAt.clear();
   }
 
   // bridge config changed while running
   reconfigure(): void {
+    // nothing would clear the intervals after stop()
+    if (this.stopped) return;
     this.startSessionRotation();
     this.startWedgeWatchdog();
   }
@@ -254,7 +268,7 @@ export class SessionSupervisor {
           lastCmdAt != null ? nowMs - lastCmdAt : null;
         const subscribeTimes = this.subscribeTimesMs.get(s) ?? [];
         const giveUpTimes = this.giveUpTimesMs.get(s) ?? [];
-        const lastRotatedAt = this.wedgeLastRotatedAt.get(s);
+        const lastRotatedAt = this.wedgeLastRotatedAt.get(peerKey(s));
         const peerCmdAt = this.newestPeerStamp(
           this.lastCommandImAt,
           s,
@@ -517,17 +531,22 @@ export class SessionSupervisor {
       }
       const original = is.onNewExchange.bind(is);
       is.onNewExchange = (exchange, message) => {
-        const session = exchange.session;
-        if (session) {
-          const now = Date.now();
-          this.lastImRequestAt.set(session, now);
-          const type = message?.payloadHeader?.messageType;
-          if (type === MessageType.SubscribeRequest) {
-            this.pushWedgeRing(this.subscribeTimesMs, session, now);
-            this.armSubscribeWatchdog(session);
-          } else if (type != null && commandMessageTypes.includes(type)) {
-            this.lastCommandImAt.set(session, now);
+        // bookkeeping must never swallow the request
+        try {
+          const session = exchange.session;
+          if (session) {
+            const now = Date.now();
+            this.lastImRequestAt.set(session, now);
+            const type = message?.payloadHeader?.messageType;
+            if (type === MessageType.SubscribeRequest) {
+              this.pushWedgeRing(this.subscribeTimesMs, session, now);
+              this.armSubscribeWatchdog(session);
+            } else if (type != null && commandMessageTypes.includes(type)) {
+              this.lastCommandImAt.set(session, now);
+            }
           }
+        } catch (e) {
+          this.log.debug(`IM request tracking failed: ${e}`);
         }
         return original(exchange, message);
       };
@@ -909,6 +928,14 @@ export class SessionSupervisor {
       const now = Date.now();
       const closes: Promise<void>[] = [];
       const sessions = [...sessionManager.sessions];
+      // past the interval a stamp no longer throttles, drop it
+      for (const [key, at] of this.wedgeLastRotatedAt) {
+        if (now - at > WEDGE_MIN_ROTATE_INTERVAL_MS) {
+          this.wedgeLastRotatedAt.delete(key);
+        }
+      }
+      // stamped after the loop, so wedged sessions of one peer all go together
+      const rotatedPeers: string[] = [];
       for (const s of sessions) {
         if (s.isClosing) continue;
         const startedAt = this.sessionStartedAt.get(s.id);
@@ -919,7 +946,7 @@ export class SessionSupervisor {
           sessions,
         );
         const lastImRequestMsAgo = lastImAt != null ? now - lastImAt : null;
-        const lastRotatedAt = this.wedgeLastRotatedAt.get(s);
+        const lastRotatedAt = this.wedgeLastRotatedAt.get(peerKey(s));
         const lastRotatedMsAgo =
           lastRotatedAt != null ? now - lastRotatedAt : null;
         const v1 = decideWedgeRotation({
@@ -966,9 +993,10 @@ export class SessionSupervisor {
         this.log.info(
           `Wedge watchdog: rotating session ${s.id} (subs [${subscriptionIds(s)}]), no inbound interaction for ${silenceMin}min`,
         );
-        this.wedgeLastRotatedAt.set(s, now);
+        rotatedPeers.push(peerKey(s));
         closes.push(closeGracefully(s, "wedge watchdog, forcing"));
       }
+      for (const key of rotatedPeers) this.wedgeLastRotatedAt.set(key, now);
       void Promise.allSettled(closes);
     } catch {
       // SessionManager may be disposed

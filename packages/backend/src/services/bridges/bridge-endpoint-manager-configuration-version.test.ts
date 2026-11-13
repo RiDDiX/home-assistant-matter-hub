@@ -505,6 +505,73 @@ describe("root ConfigurationVersion follows the bridged endpoint set", () => {
     expect(version()).toBe(1);
   });
 
+  // Fails the Descriptor read of vacuum_b inside the signature while
+  // failures() says so, matter.js itself reads the state too.
+  function unreadableInSignature(failures: () => boolean) {
+    const proto = BridgeEndpointManager.prototype as unknown as {
+      topologySignature(...args: unknown[]): string;
+    };
+    const signature = proto.topologySignature;
+    let inSignature = false;
+    vi.spyOn(proto, "topologySignature").mockImplementation(function (
+      this: BridgeEndpointManager,
+      ...args: unknown[]
+    ) {
+      inSignature = true;
+      try {
+        return signature.apply(this, args);
+      } finally {
+        inSignature = false;
+      }
+    });
+    const stateOf = Endpoint.prototype.stateOf;
+    vi.spyOn(Endpoint.prototype, "stateOf").mockImplementation(function (
+      this: Endpoint,
+      ...args: Parameters<Endpoint["stateOf"]>
+    ) {
+      if (
+        inSignature &&
+        args[0] === DescriptorServer &&
+        this.id === "vacuum_b" &&
+        failures()
+      ) {
+        throw new Error("not initialized");
+      }
+      return stateOf.apply(this, args);
+    });
+  }
+
+  it("retries a compare that met an unreadable part instead of bumping (#543)", async () => {
+    const { bem } = await startBridge(makeHa(["vacuum.a", "vacuum.b"]));
+    await settle(bem);
+    let fail = 1;
+    unreadableInSignature(() => fail-- > 0);
+
+    await compare(bem);
+    expect(version()).toBe(1);
+    expect(settleArmed(bem)).toBe(true);
+    await settle(bem);
+    expect(version()).toBe(1);
+    expect(settleArmed(bem)).toBe(false);
+  });
+
+  it("announces once when a part stays unreadable through every retry (#543)", async () => {
+    const { bem } = await startBridge(makeHa(["vacuum.a", "vacuum.b"]));
+    await settle(bem);
+    unreadableInSignature(() => true);
+
+    await compare(bem);
+    let compares = 1;
+    while (settleArmed(bem) && compares < 10) {
+      await settle(bem);
+      compares++;
+    }
+    expect(compares).toBe(4);
+    expect(version()).toBe(2);
+    await compare(bem);
+    expect(version()).toBe(2);
+  });
+
   it("bumps once when the signature write fails and is retried", async () => {
     const ha = makeHa(["vacuum.a"]);
     const { bem } = await startBridge(ha);

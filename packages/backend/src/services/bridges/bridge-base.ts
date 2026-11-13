@@ -23,6 +23,7 @@ import { applyTcpFlagBeforeStart } from "../../plugins/builtin/camera/camera-tcp
 import { ensureCommissioningConfig } from "../../utils/ensure-commissioning-config.js";
 import { isHeapUnderPressure, logMemoryUsage } from "../../utils/log-memory.js";
 import { diagnosticEventBus } from "../diagnostics/diagnostic-event-bus.js";
+import { HomeAssistantRegistry } from "../home-assistant/home-assistant-registry.js";
 import type {
   BridgeDataProvider,
   BridgeServerStatus,
@@ -40,12 +41,24 @@ const AUTO_FORCE_SYNC_INTERVAL_MS = 90_000;
 // dispose and shutdown
 const START_WAIT_MS = 60_000;
 
+// a node that goes online before HA is ready shows controllers an empty set
+// and every device comes back a refresh later (#543). A stop ends the wait,
+// shutdown has only a few seconds.
+const HA_READY_WAIT_MS = 30_000;
+const HA_READY_POLL_MS = 3000;
+// bridges start one after the other, once one gave up the others do not
+// wait the full time again for the same HA outage. Only for a while: HA can
+// recover through the auto-refresh, which never clears it, and fail again.
+const HA_WAIT_GAVE_UP_MS = 2 * 60_000;
+let haWaitGaveUpAt = Number.NEGATIVE_INFINITY;
+
 // matter.js closes the window of an unpaired node after 48 h without telling
 // anyone, so a running bridge checks for that and reopens it
 export const COMMISSIONING_CHECK_MS = 10 * 60_000;
 
 interface LifecycleEndpointManager {
   readonly failedEntities: FailedEntity[];
+  readonly refreshDeferred: boolean;
   refreshDevices(): Promise<boolean>;
   startObserving(): Promise<void>;
   stopObserving(): void;
@@ -79,6 +92,9 @@ export abstract class BridgeBase<
   private startInFlight?: Promise<void>;
   private stopInFlight?: Promise<void>;
   private resetInFlight?: Promise<void>;
+  // a stop during a start: the start does not take the node online
+  private stopRequested = false;
+  private wakeHaWait?: () => void;
 
   // Tracks the last synced state JSON per entity to avoid pushing unchanged states.
   // Key: entity_id, Value: JSON.stringify of entity.state
@@ -105,6 +121,9 @@ export abstract class BridgeBase<
 
   /** The device endpoints directly under the node or the aggregator. */
   protected abstract topLevelEndpoints(): Endpoint[];
+
+  /** Runs right before server.start, once the endpoints are mounted. */
+  protected async onServerStarting(): Promise<void> {}
 
   /** Runs after server.start, before the bridge reports Running. */
   protected async onServerStarted(): Promise<void> {}
@@ -208,12 +227,15 @@ export abstract class BridgeBase<
 
   protected async runStart(): Promise<void> {
     this.lastSyncedStates.clear();
+    this.stopRequested = false;
     try {
       this.setStatus({
         code: BridgeStatus.Starting,
         reason: `The ${this.label.toLowerCase()} is starting... Please wait.`,
       });
       await this.refreshDevices();
+      await this.waitForHomeAssistant();
+      if (this.stopRequested) return;
       logMemoryUsage(
         this.log,
         `after refreshDevices (${this.topLevelEndpoints().length} endpoints)`,
@@ -243,6 +265,9 @@ export abstract class BridgeBase<
       if (this.server.state.network.port !== this.dataProvider.port) {
         await this.server.set({ network: { port: this.dataProvider.port } });
       }
+      await this.onServerStarting();
+      // a stop that gave up waiting has cancelled the node already
+      if (this.stopRequested) return;
       await this.server.start();
       await this.onServerStarted();
       this.setStatus({ code: BridgeStatus.Running });
@@ -276,6 +301,47 @@ export abstract class BridgeBase<
     }
   }
 
+  // Only a refresh deferred for HA waits, failed entities or heap pressure
+  // would not pass by waiting here.
+  private async waitForHomeAssistant(): Promise<void> {
+    const deadline = Date.now() + HA_READY_WAIT_MS;
+    let reload: Promise<unknown> | undefined;
+    while (this.endpointManager.refreshDeferred && !this.stopRequested) {
+      const left = deadline - Date.now();
+      const gaveUp = Date.now() - haWaitGaveUpAt < HA_WAIT_GAVE_UP_MS;
+      if (left <= 0 || gaveUp) {
+        this.log.warn(
+          `Home Assistant data not ready${gaveUp ? "" : ` after ${HA_READY_WAIT_MS / 1000}s`}, starting with what the bridge has`,
+        );
+        if (!gaveUp) haWaitGaveUpAt = Date.now();
+        return;
+      }
+      // HA not running clears on the client's own poll, an empty registry
+      // only on a reload, and the auto-refresh starts after all bridges
+      const registry = this.server.env.maybeGet(HomeAssistantRegistry);
+      if (!reload && registry && Object.keys(registry.entities).length === 0) {
+        reload = registry
+          .reload()
+          .catch((e) => this.log.debug("Registry reload failed:", e))
+          .finally(() => {
+            reload = undefined;
+          });
+      }
+      await new Promise<void>((resolve) => {
+        const timer = setTimeout(resolve, Math.min(HA_READY_POLL_MS, left));
+        this.wakeHaWait = () => {
+          clearTimeout(timer);
+          resolve();
+        };
+      });
+      this.wakeHaWait = undefined;
+      if (!this.stopRequested) await this.refreshDevices();
+    }
+    if (!this.endpointManager.refreshDeferred) {
+      haWaitGaveUpAt = Number.NEGATIVE_INFINITY;
+    }
+  }
+
   private async waitForStart(): Promise<void> {
     const start = this.startInFlight;
     if (!start) {
@@ -302,6 +368,8 @@ export abstract class BridgeBase<
   ): Promise<void> {
     // a stop racing a start would cancel the node mid start, and the start
     // then finishes and brings it back up
+    this.stopRequested = true;
+    this.wakeHaWait?.();
     await this.waitForStart();
     if (this.stopInFlight) {
       return this.stopInFlight;
@@ -390,8 +458,9 @@ export abstract class BridgeBase<
         return;
       }
       await this.refreshDevices();
-      // Re-evaluate auto force sync and session rotation after config update
-      if (this.status.code === BridgeStatus.Running) {
+      // Re-evaluate auto force sync and session rotation after config update,
+      // not on a bridge a stop is taking down, it sets the status last
+      if (this.status.code === BridgeStatus.Running && !this.stopInFlight) {
         this.startAutoForceSyncIfEnabled();
         // Re-read sessionMaxAgeHours so UI changes apply without restart (#287)
         this.sessions.reconfigure();

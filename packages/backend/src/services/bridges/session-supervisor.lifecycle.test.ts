@@ -43,34 +43,54 @@ function fakeSession(id: number, subs = 0): FakeSession {
   };
 }
 
-function makeSupervisor(sessions: FakeSession[], featureFlags: object = {}) {
+function makeSupervisor(
+  sessions: FakeSession[],
+  featureFlags: object = {},
+  provider: object = {},
+) {
   const handlers: {
     subscriptionsChanged?: Handler;
     added?: Handler;
     deleted?: Handler;
+    fabricAdded?: Handler;
   } = {};
-  const interactionServer = {
-    onNewExchange: (_e: unknown, _m: unknown) => {},
+  // every handler currently on each event, to catch stacked or leaked ones
+  const registered: Record<string, Set<Handler>> = {};
+  const event = (name: keyof typeof handlers) => {
+    const fns = new Set<Handler>();
+    registered[name] = fns;
+    return {
+      on: (fn: Handler) => {
+        handlers[name] = fn;
+        fns.add(fn);
+      },
+      off: (fn: Handler) => fns.delete(fn),
+    };
   };
+  const imOriginal = vi.fn((_e: unknown, _m: unknown) => {});
+  const interactionServer = { onNewExchange: imOriginal };
   const list = Object.assign(sessions, {
-    added: { on: (fn: Handler) => (handlers.added = fn), off() {} },
-    deleted: { on: (fn: Handler) => (handlers.deleted = fn), off() {} },
+    added: event("added"),
+    deleted: event("deleted"),
   });
   const sessionManager = {
     sessions: list,
-    subscriptionsChanged: {
-      on: (fn: Handler) => (handlers.subscriptionsChanged = fn),
-      off() {},
-    },
+    subscriptionsChanged: event("subscriptionsChanged"),
   };
+  const fabricManager = { events: { added: event("fabricAdded") } };
   const env = {
     get: (type: { name?: string }) =>
-      type?.name === "InteractionServer" ? interactionServer : sessionManager,
+      type?.name === "InteractionServer"
+        ? interactionServer
+        : type?.name === "FabricManager"
+          ? fabricManager
+          : sessionManager,
   };
+  const log = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
   const sup = new SessionSupervisor(
-    { debug() {}, info() {}, warn() {}, error() {} } as never,
+    log as never,
     { env } as never,
-    { id: "b", featureFlags } as unknown as BridgeDataProvider,
+    { id: "b", featureFlags, ...provider } as unknown as BridgeDataProvider,
     () => ({ id: "b", name: "b" }),
     0,
   );
@@ -78,6 +98,10 @@ function makeSupervisor(sessions: FakeSession[], featureFlags: object = {}) {
     wireSessionDiagnostics(): void;
     startWedgeWatchdog(): void;
     staleSessionTimers: Map<number, unknown>;
+    deadSessionTimer: unknown;
+    rotationTimer: unknown;
+    wedgeWatchdogTimer: unknown;
+    mdnsAddressTimer: unknown;
   };
   internals.wireSessionDiagnostics();
   const imRequest = (session: FakeSession, messageType: number) =>
@@ -85,7 +109,17 @@ function makeSupervisor(sessions: FakeSession[], featureFlags: object = {}) {
       { session } as never,
       { payloadHeader: { messageType } } as never,
     );
-  return { sup, internals, handlers, list, imRequest };
+  return {
+    sup,
+    internals,
+    handlers,
+    registered,
+    list,
+    imRequest,
+    interactionServer,
+    imOriginal,
+    log,
+  };
 }
 
 beforeEach(() => {
@@ -254,6 +288,34 @@ describe("wedge watchdog per peer", () => {
     expect(await olderRotated(other, true)).toBe(true);
   });
 
+  it("throttles the replacement session of a rotated peer, not another peer", async () => {
+    const older = fakeSession(1, 1);
+    const { internals, handlers, list } = makeSupervisor([older], {
+      wedgeWatchdog: true,
+    });
+    internals.startWedgeWatchdog();
+    await vi.advanceTimersByTimeAsync(50 * 60_000);
+    expect(older.initiateClose).toHaveBeenCalled();
+
+    list.splice(0);
+    handlers.deleted?.(older as never);
+    const newer = fakeSession(2, 1);
+    const other = fakeSession(3, 1);
+    other.peerNodeId = 98n;
+    for (const s of [newer, other]) {
+      list.push(s);
+      handlers.added?.(s as never);
+    }
+
+    // both are wedged 50min later, only the other peer may rotate yet
+    await vi.advanceTimersByTimeAsync(60 * 60_000);
+    expect(other.initiateClose).toHaveBeenCalled();
+    expect(newer.initiateClose).not.toHaveBeenCalled();
+    // the first check past the minimum interval since the rotation
+    await vi.advanceTimersByTimeAsync(5 * 60_000);
+    expect(newer.initiateClose).toHaveBeenCalled();
+  });
+
   // older carries the full v2 churn signature, the peer invokes on newer
   async function olderV2Flagged(request: boolean) {
     const older = fakeSession(1, 1);
@@ -284,5 +346,93 @@ describe("wedge watchdog per peer", () => {
 
   it("v2 flags it when the peer is command silent on all its sessions", async () => {
     expect(await olderV2Flagged(false)).toBe(true);
+  });
+});
+
+describe("lifecycle", () => {
+  const timed = () =>
+    makeSupervisor([], { wedgeWatchdog: true }, { sessionMaxAgeHours: 1 });
+
+  it("reconfigure after stop arms no timer", () => {
+    const { sup } = timed();
+    sup.start();
+    sup.stop();
+    sup.reconfigure();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("reconfigure before start arms no timer", () => {
+    timed().sup.reconfigure();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("reconfigure while running re-arms the timers", () => {
+    const { sup, internals } = timed();
+    sup.start();
+    const count = vi.getTimerCount();
+    const { rotationTimer, wedgeWatchdogTimer } = internals;
+    sup.reconfigure();
+    expect(vi.getTimerCount()).toBe(count);
+    expect(internals.rotationTimer).not.toBe(rotationTimer);
+    expect(internals.wedgeWatchdogTimer).not.toBe(wedgeWatchdogTimer);
+  });
+
+  it("start twice then stop leaves no handler and no timer", () => {
+    const { sup, registered } = timed();
+    sup.start();
+    sup.start();
+    for (const fns of Object.values(registered)) expect(fns.size).toBe(1);
+    sup.stop();
+    for (const fns of Object.values(registered)) expect(fns.size).toBe(0);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("warns once per added Alexa fabric after a second start", () => {
+    const { sup, registered, log } = makeSupervisor([], {}, { port: 5541 });
+    sup.start();
+    sup.start();
+    for (const fn of registered.fabricAdded)
+      fn({ rootVendorId: 4631 } as never);
+    const warns = log.warn.mock.calls.filter((c) =>
+      String(c[0]).includes("Fabric added by Amazon Alexa"),
+    );
+    expect(warns).toHaveLength(1);
+  });
+
+  it("stop clears the mdns address watch", () => {
+    const { sup, internals } = makeSupervisor([]);
+    sup.start();
+    expect(internals.mdnsAddressTimer).not.toBeNull();
+    sup.stop();
+    expect(internals.mdnsAddressTimer).toBeNull();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("arms the dead session timer at zero subscriptions, cancels it on recovery", () => {
+    const s = fakeSession(1);
+    s.timestamp = Time.nowUs - STALE_SESSION_QUIET_WINDOW_MS;
+    const { handlers, internals } = makeSupervisor([s]);
+
+    handlers.subscriptionsChanged?.(s as never);
+    expect(internals.deadSessionTimer).not.toBeNull();
+    s.subscriptions.size = 1;
+    handlers.subscriptionsChanged?.(s as never);
+    expect(internals.deadSessionTimer).toBeNull();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("runs the original request handler when the bookkeeping throws", () => {
+    const { interactionServer, imOriginal } = makeSupervisor([]);
+    const exchange = { session: fakeSession(1) };
+    const message = {
+      get payloadHeader(): never {
+        throw new Error("boom");
+      },
+    };
+    interactionServer.onNewExchange(exchange, message);
+    // compared by identity, a deep compare would hit the throwing getter
+    expect(imOriginal).toHaveBeenCalledOnce();
+    expect(imOriginal.mock.calls[0][0]).toBe(exchange);
+    expect(imOriginal.mock.calls[0][1]).toBe(message);
   });
 });

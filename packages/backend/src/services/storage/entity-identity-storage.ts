@@ -34,6 +34,7 @@ const CURRENT_VERSION = 1;
 // Records are written on every seeding pass, so persist is debounced to coalesce
 // the initial burst into a single write. dispose flushes any pending write.
 const PERSIST_DEBOUNCE_MS = 500;
+const PERSIST_RETRY_MS = 30_000;
 
 const logger = Logger.get("EntityIdentityStorage");
 
@@ -49,6 +50,8 @@ export class EntityIdentityStorage extends Service {
   // this build could not read are written back as they were.
   private dirty = false;
   private newerFile = false;
+  private persistFailing = false;
+  private disposed = false;
   // Raw entries load skipped, written back as they were.
   private unreadableBridges = new Map<string, unknown>();
   private unreadableRecords = new Map<string, Map<string, unknown>>();
@@ -63,6 +66,7 @@ export class EntityIdentityStorage extends Service {
   }
 
   override async dispose(): Promise<void> {
+    this.disposed = true;
     await this.flush();
   }
 
@@ -135,6 +139,8 @@ export class EntityIdentityStorage extends Service {
     this.dirty = false;
     try {
       await this.storage.set("data", data as unknown as StorageObjectType);
+      // any write that lands ends the run, a flush too
+      this.persistFailing = false;
     } catch (e) {
       this.dirty = true;
       throw e;
@@ -143,14 +149,24 @@ export class EntityIdentityStorage extends Service {
 
   private schedulePersist(): void {
     this.dirty = true;
+    this.armPersist(PERSIST_DEBOUNCE_MS);
+  }
+
+  private armPersist(delay: number): void {
     if (this.persistTimer) return;
     this.persistTimer = setTimeout(() => {
       this.persistTimer = null;
-      // Still dirty on failure, the next change or dispose writes again.
-      this.persist().catch((e) =>
-        logger.warn("Failed to persist entity identities:", e),
-      );
-    }, PERSIST_DEBOUNCE_MS);
+      this.persist().catch((e) => {
+        // Still dirty on failure, retry until a write lands. Warn once per
+        // run of failures, not every retry. A write in flight at dispose
+        // must not re-arm on a torn down storage.
+        if (!this.persistFailing) {
+          logger.warn("Failed to persist entity identities:", e);
+        }
+        this.persistFailing = true;
+        if (this.dirty && !this.disposed) this.armPersist(PERSIST_RETRY_MS);
+      });
+    }, delay);
   }
 
   // Flush any pending debounced write, used on dispose and by tests.

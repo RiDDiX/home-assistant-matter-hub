@@ -1,9 +1,9 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Environment, VariableService } from "@matter/general";
+import { Environment, Logger, VariableService } from "@matter/general";
 import { StorageService } from "@matter/main";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AppStorage } from "./app-storage.js";
 import {
   EntityIdentityStorage,
@@ -23,6 +23,8 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  vi.useRealTimers();
+  vi.restoreAllMocks();
   await appStorage.dispose().catch(() => {});
   rmSync(dir, { recursive: true, force: true });
 });
@@ -46,6 +48,99 @@ describe("EntityIdentityStorage", () => {
     const reloaded = new EntityIdentityStorage(appStorage);
     await reloaded.construction;
     expect(reloaded.getIdentity("bridge1", key)).toEqual(record);
+  });
+
+  it("retries a failed write without a further change and warns once", async () => {
+    const storage = new EntityIdentityStorage(appStorage);
+    await storage.construction;
+    const warn = vi
+      .spyOn(Logger.prototype, "warn")
+      .mockImplementation(() => {});
+    const set = vi
+      .spyOn(
+        (storage as unknown as { storage: { set: () => Promise<void> } })
+          .storage,
+        "set",
+      )
+      .mockRejectedValueOnce(new Error("disk full"))
+      .mockRejectedValueOnce(new Error("disk full"))
+      .mockResolvedValue(undefined);
+    vi.useFakeTimers();
+
+    storage.setIdentity("bridge1", "k1", record);
+    await vi.advanceTimersByTimeAsync(500);
+    expect(set).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(set).toHaveBeenCalledTimes(2);
+    expect(warn).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(set).toHaveBeenCalledTimes(3);
+    expect(set).toHaveBeenLastCalledWith("data", {
+      version: 1,
+      identities: { bridge1: { k1: record } },
+    });
+
+    // clean now: no further retry and nothing left to flush
+    await vi.advanceTimersByTimeAsync(60_000);
+    await storage.flush();
+    expect(set).toHaveBeenCalledTimes(3);
+    expect(warn).toHaveBeenCalledTimes(1);
+  });
+
+  it("warns again for a failure after a flush that landed", async () => {
+    const storage = new EntityIdentityStorage(appStorage);
+    await storage.construction;
+    const warn = vi
+      .spyOn(Logger.prototype, "warn")
+      .mockImplementation(() => {});
+    vi.spyOn(
+      (storage as unknown as { storage: { set: () => Promise<void> } }).storage,
+      "set",
+    )
+      .mockRejectedValueOnce(new Error("disk full"))
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error("disk full"))
+      .mockResolvedValue(undefined);
+    vi.useFakeTimers();
+
+    storage.setIdentity("bridge1", "k1", record);
+    await vi.advanceTimersByTimeAsync(500);
+    expect(warn).toHaveBeenCalledTimes(1);
+    await storage.flush();
+
+    storage.setIdentity("bridge1", "k2", record);
+    await vi.advanceTimersByTimeAsync(500);
+    expect(warn).toHaveBeenCalledTimes(2);
+  });
+
+  it("a write in flight at dispose that fails arms no retry", async () => {
+    const storage = new EntityIdentityStorage(appStorage);
+    await storage.construction;
+    vi.spyOn(Logger.prototype, "warn").mockImplementation(() => {});
+    let fail!: (e: Error) => void;
+    const set = vi
+      .spyOn(
+        (storage as unknown as { storage: { set: () => Promise<void> } })
+          .storage,
+        "set",
+      )
+      .mockImplementationOnce(
+        () => new Promise<void>((_, reject) => (fail = reject)),
+      )
+      .mockResolvedValue(undefined);
+    vi.useFakeTimers();
+
+    storage.setIdentity("bridge1", "k1", record);
+    await vi.advanceTimersByTimeAsync(500);
+    expect(set).toHaveBeenCalledTimes(1);
+    await storage.dispose();
+    fail(new Error("disk full"));
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(vi.getTimerCount()).toBe(0);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(set).toHaveBeenCalledTimes(1);
   });
 
   it("keeps records scoped per bridge and deletes only the asked bridge", async () => {

@@ -160,13 +160,15 @@ describe("BridgeRegistry battery mapping", () => {
     );
   });
 
-  it("resolves the sensor after a refresh once it becomes available (#450)", () => {
+  it("resolves the sensor after a refresh once it has a state (#450)", () => {
     const states: Record<string, HomeAssistantEntityState> = {
-      "sensor.robot_battery": state("sensor.robot_battery", "unavailable", {
+      "sensor.robot_battery": state("sensor.robot_battery", "85", {
         device_class: SensorDeviceClass.battery,
       }),
     };
     const registry = sut(states);
+    // registry entry without a state yet, an unavailable one counts (#543)
+    delete states["sensor.robot_battery"];
     expect(registry.findBatteryEntityForDevice(deviceId)).toBeUndefined();
     // negative answer is cached until the next refresh
     expect(registry.findBatteryEntityForDevice(deviceId)).toBeUndefined();
@@ -178,6 +180,44 @@ describe("BridgeRegistry battery mapping", () => {
     expect(registry.findBatteryEntityForDevice(deviceId)).toBe(
       "sensor.robot_battery",
     );
+  });
+
+  it.each([
+    "unavailable",
+    "unknown",
+  ])("maps a %s battery sensor so the device shape does not wait for a value (#543)", (value) => {
+    const registry = sut({
+      "sensor.robot_battery": state("sensor.robot_battery", value, {
+        device_class: SensorDeviceClass.battery,
+      }),
+    });
+
+    expect(registry.findBatteryEntityForDevice(deviceId)).toBe(
+      "sensor.robot_battery",
+    );
+  });
+
+  it("prefers a live battery sensor over an unavailable one (#543)", () => {
+    const registry = sut({
+      "sensor.a_battery": state("sensor.a_battery", "unavailable", {
+        device_class: SensorDeviceClass.battery,
+      }),
+      "sensor.b_battery": state("sensor.b_battery", "74", {
+        device_class: SensorDeviceClass.battery,
+      }),
+    });
+
+    expect(registry.findBatteryEntityForDevice(deviceId)).toBe(
+      "sensor.b_battery",
+    );
+  });
+
+  it("does not map an unavailable sensor without the battery class (#461, #543)", () => {
+    const registry = sut({
+      "sensor.robot_battery": state("sensor.robot_battery", "unavailable", {}),
+    });
+
+    expect(registry.findBatteryEntityForDevice(deviceId)).toBeUndefined();
   });
 
   it("prefers a real battery sensor over a classless last_clean_area sibling", () => {
@@ -210,8 +250,11 @@ describe("batteryFingerprintFor (#450)", () => {
   }
 
   it("follows the resolver across a refresh", () => {
-    const states = vacuumStates("unavailable");
+    const states = vacuumStates("85");
     const registry = sut(states);
+    // registry entry without a state yet, an unavailable one counts (#543)
+    delete states[BATTERY];
+    registry.refresh();
     expect(registry.batteryFingerprintFor(VACUUM, undefined)).toBe("");
 
     states[BATTERY] = state(BATTERY, "85", {
@@ -219,6 +262,19 @@ describe("batteryFingerprintFor (#450)", () => {
     });
     registry.refresh();
     expect(registry.batteryFingerprintFor(VACUUM, undefined)).toBe(BATTERY);
+  });
+
+  it("is the same for an unavailable battery and its later value, no rebuild (#543)", () => {
+    const states = vacuumStates("unavailable");
+    const registry = sut(states);
+    const before = registry.batteryFingerprintFor(VACUUM, undefined);
+    expect(before).toBe(BATTERY);
+
+    states[BATTERY] = state(BATTERY, "85", {
+      device_class: SensorDeviceClass.battery,
+    });
+    registry.refresh();
+    expect(registry.batteryFingerprintFor(VACUUM, undefined)).toBe(before);
   });
 
   it("stays empty when the mapping already decides the battery", () => {

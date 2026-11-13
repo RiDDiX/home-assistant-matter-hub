@@ -249,6 +249,27 @@ export class BridgeRegistry {
       }
     }
 
+    // Last: a battery with no value right now still decides the device shape,
+    // or a start with it unavailable builds the device without PowerSource
+    // and rebuilds it once the value arrives, so controllers see it leave
+    // and come back (#543). Known limit: with two such sensors the first one
+    // stays mapped when only the other comes back, until the next registry
+    // refresh clears the cache.
+    for (const prefix of ["sensor.", "binary_sensor."]) {
+      for (const entity of sameDevice) {
+        if (!entity.entity_id.startsWith(prefix)) continue;
+        const state = this.registry.states[entity.entity_id];
+        if (
+          (state?.attributes as SensorDeviceAttributes | undefined)
+            ?.device_class === SensorDeviceClass.battery &&
+          (state?.state === "unavailable" || state?.state === "unknown")
+        ) {
+          this._batteryEntityCache.set(deviceId, entity.entity_id);
+          return entity.entity_id;
+        }
+      }
+    }
+
     // Cache the negative result
     this._batteryEntityCache.set(deviceId, null);
     return undefined;

@@ -25,7 +25,7 @@ import type {
 
 const logger = Logger.get("HomeAssistantRegistry");
 // shortcut: groups still incomplete after 60s use auto-refresh; revisit if controllers still rediscover devices.
-const GROUP_SENSOR_STARTUP_WAIT_MS = 60_000;
+const STARTUP_WAIT_MS = 60_000;
 const INCOMPLETE_REFRESH_RETRIES = 3;
 
 export type HomeAssistantDevices = Record<string, HomeAssistantDeviceRegistry>;
@@ -90,18 +90,40 @@ export class HomeAssistantRegistry extends Service {
   protected override async initialize(): Promise<void> {
     try {
       await this.reload();
-      // HA can report RUNNING before group sensors inherit their members' classes.
-      const deadline = Date.now() + GROUP_SENSOR_STARTUP_WAIT_MS;
-      let pending = this.pendingGroupSensors();
-      if (pending.length > 0) {
+      // A snapshot fetched while HA was starting is dropped, bridges started on
+      // it would go online with no devices (#543). HA can also report RUNNING
+      // before group sensors inherit their members' classes. The deadline is
+      // checked between reloads, each reload has its own retry bound.
+      const deadline = Date.now() + STARTUP_WAIT_MS;
+      if (this._snapshotGeneration === 0) {
         logger.info(
-          "Waiting for group sensor attributes before starting bridges",
+          "Waiting for Home Assistant to finish starting before starting bridges",
         );
       }
-      while (pending.length > 0 && Date.now() < deadline) {
+      let pending = this.pendingGroupSensors();
+      let groupsLogged = false;
+      while (
+        (this._snapshotGeneration === 0 || pending.length > 0) &&
+        Date.now() < deadline
+      ) {
+        if (pending.length > 0 && !groupsLogged) {
+          groupsLogged = true;
+          logger.info(
+            "Waiting for group sensor attributes before starting bridges",
+          );
+        }
         await new Promise((resolve) => setTimeout(resolve, 3000));
-        await this.reload();
+        try {
+          await this.reload();
+        } catch (e) {
+          logger.debug("Startup registry reload failed, retrying:", e);
+        }
         pending = this.pendingGroupSensors();
+      }
+      if (this._snapshotGeneration === 0) {
+        logger.warn(
+          "Home Assistant still starting after the startup wait, continuing with auto-refresh",
+        );
       }
       if (pending.length > 0) {
         logger.warn(

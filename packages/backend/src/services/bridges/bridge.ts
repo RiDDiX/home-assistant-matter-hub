@@ -154,7 +154,9 @@ export class Bridge extends BridgeBase<
     await super.runStart();
   }
 
-  protected override async onServerStarted(): Promise<void> {
+  // before the node goes online, or plugin devices miss the first PartsList
+  // after every restart and controllers see them come back
+  protected override async onServerStarting(): Promise<void> {
     await this.endpointManager.startPlugins();
   }
 

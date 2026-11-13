@@ -276,6 +276,173 @@ describe("IdentityResolver", () => {
     expect(id.getIdentity("b", key)?.lastEntityId).toBe("light.new");
   });
 
+  it("a failed mapping re-key leaves the record on the old entity_id and the next pass retries (#543)", async () => {
+    const id = new FakeIdentityStorage();
+    const map = new FakeMappingStorage();
+    const entity = { entity_id: "light.new", registry: reg("U", "hue") };
+    const key = identityKey(entity)!;
+    id.setIdentity("b", key, {
+      endpointId: "light_old",
+      anchorEntityId: "light.old",
+      lastEntityId: "light.old",
+    });
+    map.put("b", { entityId: "light.old", customName: "Lamp" });
+    vi.spyOn(map, "setMapping").mockRejectedValueOnce(new Error("disk full"));
+    const resolver = new IdentityResolver(asIdentity(id), asMapping(map));
+    const pass = () =>
+      resolver.resolveIdentities(
+        "b",
+        [entity],
+        (e) => map.getMapping("b", e),
+        true,
+        fakeLogger(),
+      );
+
+    await expect(pass()).rejects.toThrow("disk full");
+    expect(id.getIdentity("b", key)?.lastEntityId).toBe("light.old");
+    expect(map.getMapping("b", "light.old")?.customName).toBe("Lamp");
+
+    const res = (await pass()).get("light.new");
+    expect(res).toMatchObject({
+      endpointId: "light_old",
+      renamedFrom: "light.old",
+    });
+    expect(map.getMapping("b", "light.new")).toMatchObject({
+      entityId: "light.new",
+      customName: "Lamp",
+    });
+    expect(map.getMapping("b", "light.old")).toBeUndefined();
+    expect(id.getIdentity("b", key)?.lastEntityId).toBe("light.new");
+  });
+
+  it("two entities swapping entity_ids in one pass keep their own mappings (#543)", async () => {
+    const id = new FakeIdentityStorage();
+    const map = new FakeMappingStorage();
+    const a = { entity_id: "light.b", registry: reg("UA", "hue") };
+    const b = { entity_id: "light.a", registry: reg("UB", "hue") };
+    id.setIdentity("b", identityKey(a)!, {
+      endpointId: "light_a",
+      anchorEntityId: "light.a",
+      lastEntityId: "light.a",
+    });
+    id.setIdentity("b", identityKey(b)!, {
+      endpointId: "light_b",
+      anchorEntityId: "light.b",
+      lastEntityId: "light.b",
+    });
+    map.put("b", { entityId: "light.a", customName: "A" });
+    map.put("b", { entityId: "light.b", customName: "B" });
+    const resolver = new IdentityResolver(asIdentity(id), asMapping(map));
+
+    const res = await resolver.resolveIdentities(
+      "b",
+      [a, b],
+      (e) => map.getMapping("b", e),
+      true,
+      fakeLogger(),
+    );
+
+    expect(res.get("light.b")).toMatchObject({
+      endpointId: "light_a",
+      renamedFrom: "light.a",
+    });
+    expect(res.get("light.a")).toMatchObject({
+      endpointId: "light_b",
+      renamedFrom: "light.b",
+    });
+    expect(map.getMapping("b", "light.b")).toMatchObject({
+      entityId: "light.b",
+      customName: "A",
+    });
+    expect(map.getMapping("b", "light.a")).toMatchObject({
+      entityId: "light.a",
+      customName: "B",
+    });
+    expect(id.getIdentity("b", identityKey(a)!)?.lastEntityId).toBe("light.b");
+    expect(id.getIdentity("b", identityKey(b)!)?.lastEntityId).toBe("light.a");
+  });
+
+  it.each([
+    ["a swap", "light.b", "light.a", "light.b"],
+    ["a shift chain", "light.b", "light.c", "light.b"],
+  ])("%s with one mapping moves it once (#543)", async (_name, aTo, bTo, want) => {
+    const id = new FakeIdentityStorage();
+    const map = new FakeMappingStorage();
+    const a = { entity_id: aTo, registry: reg("UA", "hue") };
+    const b = { entity_id: bTo, registry: reg("UB", "hue") };
+    id.setIdentity("b", identityKey(a)!, {
+      endpointId: "light_a",
+      anchorEntityId: "light.a",
+      lastEntityId: "light.a",
+    });
+    id.setIdentity("b", identityKey(b)!, {
+      endpointId: "light_b",
+      anchorEntityId: "light.b",
+      lastEntityId: "light.b",
+    });
+    map.put("b", { entityId: "light.a", customName: "A" });
+    const resolver = new IdentityResolver(asIdentity(id), asMapping(map));
+
+    await resolver.resolveIdentities(
+      "b",
+      [a, b],
+      (e) => map.getMapping("b", e),
+      true,
+      fakeLogger(),
+    );
+
+    expect(map.getMappingsForBridge("b")).toEqual([
+      { entityId: want, customName: "A" },
+    ]);
+  });
+
+  it("a swap whose second write fails is put back, so the retry does not swap it back (#543)", async () => {
+    const id = new FakeIdentityStorage();
+    const map = new FakeMappingStorage();
+    const a = { entity_id: "light.b", registry: reg("UA", "hue") };
+    const b = { entity_id: "light.a", registry: reg("UB", "hue") };
+    id.setIdentity("b", identityKey(a)!, {
+      endpointId: "light_a",
+      anchorEntityId: "light.a",
+      lastEntityId: "light.a",
+    });
+    id.setIdentity("b", identityKey(b)!, {
+      endpointId: "light_b",
+      anchorEntityId: "light.b",
+      lastEntityId: "light.b",
+    });
+    map.put("b", { entityId: "light.a", customName: "A" });
+    map.put("b", { entityId: "light.b", customName: "B" });
+    // like the real storage: memory changes, then the file write fails
+    const setMapping = map.setMapping.bind(map);
+    let calls = 0;
+    // biome-ignore lint/suspicious/noExplicitAny: mirrors the request shape loosely
+    vi.spyOn(map, "setMapping").mockImplementation(async (req: any) => {
+      const cfg = await setMapping(req);
+      if (++calls === 2) throw new Error("disk full");
+      return cfg;
+    });
+    const resolver = new IdentityResolver(asIdentity(id), asMapping(map));
+    const pass = () =>
+      resolver.resolveIdentities(
+        "b",
+        [a, b],
+        (e) => map.getMapping("b", e),
+        true,
+        fakeLogger(),
+      );
+
+    await expect(pass()).rejects.toThrow("disk full");
+    expect(map.getMapping("b", "light.a")?.customName).toBe("A");
+    expect(map.getMapping("b", "light.b")?.customName).toBe("B");
+    expect(id.getIdentity("b", identityKey(a)!)?.lastEntityId).toBe("light.a");
+
+    await pass();
+    expect(map.getMapping("b", "light.b")?.customName).toBe("A");
+    expect(map.getMapping("b", "light.a")?.customName).toBe("B");
+    expect(id.getIdentity("b", identityKey(a)!)?.lastEntityId).toBe("light.b");
+  });
+
   it("does not re-key the mapping on rename when the flag is off, but still tracks lastEntityId (finding 2)", async () => {
     const id = new FakeIdentityStorage();
     const map = new FakeMappingStorage();
@@ -1098,6 +1265,40 @@ describe("stable identity through BridgeEndpointManager (#404)", () => {
     expect((await read(manager, "switch.b"))?.id).toBe("switch_b");
   });
 
+  it("a second entity on a taken endpoint id is a failed entity naming the holder", async () => {
+    const ha = makeHa();
+    setEntity(ha, "switch.one");
+    setEntity(ha, "switch.two");
+    const mapping = new FakeMappingStorage();
+    for (const entityId of ["switch.one", "switch.two"]) {
+      mapping.put("bridge-dup-name", { entityId, customName: "Lamp" });
+    }
+    const manager = await buildManager(
+      ha,
+      makeProvider("bridge-dup-name", { stableIdentity: false }),
+      mapping,
+      new FakeIdentityStorage(),
+    );
+
+    await expect(manager.refreshDevices()).resolves.toBe(true);
+    expect((await read(manager, "switch.one"))?.id).toBe("Lamp");
+    expect(await read(manager, "switch.two")).toBeUndefined();
+    expect(manager.failedEntities).toEqual([
+      expect.objectContaining({
+        entityId: "switch.two",
+        reason:
+          "Endpoint id collides with switch.one. Set distinct custom names.",
+      }),
+    ]);
+
+    // the next pass keeps the mounted one and reports the same
+    await manager.refreshDevices();
+    expect((await read(manager, "switch.one"))?.id).toBe("Lamp");
+    expect(manager.failedEntities.map((f) => f.entityId)).toEqual([
+      "switch.two",
+    ]);
+  });
+
   it("two stored records on the same endpoint id: the first keeps it, the later one moves and is rewritten", async () => {
     const ha = makeHa();
     setEntity(ha, "switch.one", { unique_id: "U1", platform: "hue" });
@@ -1149,6 +1350,96 @@ describe("stable identity through BridgeEndpointManager (#404)", () => {
         String(c[0]).includes("shares endpoint id"),
       ),
     ).toHaveLength(0);
+  });
+
+  it.each([
+    true,
+    false,
+  ])("two mounted entities swapping entity_ids keep their numbers without a mapping recreate (stableIdentity %s) (#543)", async (stableIdentity) => {
+    const ha = makeHa();
+    setEntity(ha, "switch.a", { unique_id: "UA", platform: "hue" });
+    setEntity(ha, "switch.b", { unique_id: "UB", platform: "hue" });
+    const mapping = new FakeMappingStorage();
+    const bridgeId = `bridge-swap-mapped-${stableIdentity}`;
+    mapping.put(bridgeId, { entityId: "switch.a", customName: "Lamp A" });
+    mapping.put(bridgeId, { entityId: "switch.b", customName: "Lamp B" });
+    const manager = await buildManager(
+      ha,
+      makeProvider(bridgeId, { stableIdentity }),
+      mapping,
+      new FakeIdentityStorage(),
+    );
+    await manager.refreshDevices();
+    const a = await read(manager, "switch.a");
+    const b = await read(manager, "switch.b");
+
+    setEntity(ha, "switch.a", { unique_id: "UB", platform: "hue" });
+    setEntity(ha, "switch.b", { unique_id: "UA", platform: "hue" });
+    // biome-ignore lint/suspicious/noExplicitAny: read the injected logger
+    const info = (manager as any).log.info as ReturnType<typeof vi.fn>;
+    info.mockClear();
+    await manager.refreshDevices();
+
+    expect(manager.failedEntities).toEqual([]);
+    // with the flag on the identity carries the number, off the entity_id does
+    const [onA, onB] = stableIdentity ? [b, a] : [a, b];
+    expect(await read(manager, "switch.a")).toMatchObject({
+      id: onA?.id,
+      number: onA?.number,
+    });
+    expect(await read(manager, "switch.b")).toMatchObject({
+      id: onB?.id,
+      number: onB?.number,
+    });
+    expect(
+      info.mock.calls.filter((c) => String(c[0]).includes("Mapping changed")),
+    ).toEqual([]);
+  });
+
+  it("two stored records on the same endpoint id: the mounted one keeps it even when the other comes first (#543)", async () => {
+    const ha = makeHa();
+    setEntity(ha, "switch.two", { unique_id: "U2", platform: "hue" });
+    const identity = new FakeIdentityStorage();
+    const bridgeId = "bridge-dup-mounted";
+    const key = (entity_id: string, u: string) =>
+      identityKey({ entity_id, registry: reg(u, "hue") })!;
+    const dup = (e: string) => ({
+      endpointId: "switch_dup",
+      anchorEntityId: e,
+      lastEntityId: e,
+    });
+    identity.setIdentity(bridgeId, key("switch.two", "U2"), dup("switch.two"));
+    const manager = await buildManager(
+      ha,
+      makeProvider(bridgeId, { stableIdentity: true }),
+      new FakeMappingStorage(),
+      identity,
+    );
+    await manager.refreshDevices();
+    const before = await read(manager, "switch.two");
+    expect(before?.id).toBe("switch_dup");
+
+    // switch.one appears ahead of switch.two with a record on the same id
+    const { entities } = ha;
+    ha.entities = {};
+    setEntity(ha, "switch.one", { unique_id: "U1", platform: "hue" });
+    Object.assign(ha.entities, entities);
+    identity.setIdentity(bridgeId, key("switch.one", "U1"), dup("switch.one"));
+    await manager.refreshDevices();
+
+    expect(Object.keys(ha.entities)).toEqual(["switch.one", "switch.two"]);
+    expect(await read(manager, "switch.two")).toMatchObject({
+      id: "switch_dup",
+      number: before?.number,
+    });
+    expect((await read(manager, "switch.one"))?.id).toBe("switch_dup_2");
+    expect(
+      identity.getIdentity(bridgeId, key("switch.two", "U2"))?.endpointId,
+    ).toBe("switch_dup");
+    expect(
+      identity.getIdentity(bridgeId, key("switch.one", "U1"))?.endpointId,
+    ).toBe("switch_dup_2");
+    expect(manager.failedEntities).toEqual([]);
   });
 });
 

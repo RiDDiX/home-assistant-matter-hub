@@ -129,6 +129,7 @@ export class BridgeEndpointManager extends Service {
   private observingRequested = false;
   private _failedEntities: FailedEntity[] = [];
   private _refreshIncomplete = false;
+  private _refreshDeferred = false;
   // last create or add failure per entity and how often it repeated in a row
   private readonly createFailures = new Map<
     string,
@@ -138,6 +139,8 @@ export class BridgeEndpointManager extends Service {
   private readonly mappingSync: EntityMappingSync;
   // entityId -> first absence stamp (grace window)
   private readonly pendingRemovals = new Map<string, PendingRemoval>();
+  // area switch id -> first stamp its area was missing from the parent (#543)
+  private areaSwitchRemovals = new Map<string, PendingRemoval>();
   private removalRecheckTimer: ReturnType<typeof setTimeout> | null = null;
   // Bumped on every stop, so a refresh that was already running cannot arm a
   // timer on a bridge that has since stopped (#438).
@@ -197,8 +200,10 @@ export class BridgeEndpointManager extends Service {
   }
 
   // Ids and Descriptor device types, child parts included, so a rebuild
-  // under the same id with another device type counts as a change.
-  private topologySignature(): string {
+  // under the same id with another device type counts as a change. Strict
+  // throws on an unreadable part, so a compare retries it before hashing it
+  // blank, a passing read failure would bump the version twice otherwise.
+  private topologySignature(strict = false): string {
     const lines: string[] = [];
     const walk = (parts: Iterable<Endpoint>, prefix: string) => {
       for (const part of parts) {
@@ -211,7 +216,9 @@ export class BridgeEndpointManager extends Service {
             .stateOf(DescriptorServer)
             .deviceTypeList.map((d) => `${d.deviceType}.${d.revision}`)
             .sort();
-        } catch {}
+        } catch (e) {
+          if (strict) throw e;
+        }
         lines.push(`${id}=${types.join(",")}`);
         walk(part.parts, `${id}/`);
       }
@@ -231,7 +238,9 @@ export class BridgeEndpointManager extends Service {
     // a stop that began after the timer fired leaves a half unmounted set
     if (!this.topologyKnown()) return;
     try {
-      const signature = this.topologySignature();
+      const signature = this.topologySignature(
+        this.topologyRetries < TOPOLOGY_RETRIES,
+      );
       const storage = this.root.env
         .get(ServerNodeStore)
         .storage.createContext("hamh");
@@ -826,7 +835,8 @@ export class BridgeEndpointManager extends Service {
       clearTimeout(this.removalRecheckTimer);
       this.removalRecheckTimer = null;
     }
-    if (this.pendingRemovals.size === 0) return;
+    if (this.pendingRemovals.size === 0 && this.areaSwitchRemovals.size === 0)
+      return;
     const lifecycle = this.lifecycle;
     this.removalRecheckTimer = setTimeout(() => {
       this.removalRecheckTimer = null;
@@ -837,6 +847,17 @@ export class BridgeEndpointManager extends Service {
         if (lifecycle === this.lifecycle) this.scheduleRemovalRecheck();
       });
     }, ENDPOINT_REMOVAL_GRACE_MS + 5_000);
+  }
+
+  // An absent entity or area keeps its endpoint until the grace passed since
+  // it was first missed, HA has been up as long, and a newer snapshot still
+  // misses it (#438).
+  private removalDue(entry: PendingRemoval, now: number): boolean {
+    return !(
+      now - entry.since < ENDPOINT_REMOVAL_GRACE_MS ||
+      now - this.client.runningSince < ENDPOINT_REMOVAL_GRACE_MS ||
+      this.registry.snapshotGeneration <= entry.generation
+    );
   }
 
   private getPluginDomainMappings(): Map<string, string> | undefined {
@@ -871,6 +892,7 @@ export class BridgeEndpointManager extends Service {
       this.removalRecheckTimer = null;
     }
     this.pendingRemovals.clear();
+    this.areaSwitchRemovals.clear();
     EntityIsolationService.unregisterIsolationCallback(this.bridgeId);
     EntityIsolationService.clearIsolatedEntities(this.bridgeId);
 
@@ -956,6 +978,12 @@ export class BridgeEndpointManager extends Service {
   // runs queue up. Chained, not joined: a tick mid-run carries a newer registry.
   private refreshChain: Promise<unknown> = Promise.resolve();
 
+  // Whether the last run skipped the reconcile because HA was down or the
+  // registry empty, unlike the other incomplete runs it mounted nothing.
+  get refreshDeferred(): boolean {
+    return this._refreshDeferred;
+  }
+
   // Resolves false when the run left matching entities unmounted for a reason
   // that only passes with time (HA down, heap pressure, a failed add).
   refreshDevices(): Promise<boolean> {
@@ -976,6 +1004,8 @@ export class BridgeEndpointManager extends Service {
 
   private async runRefreshDevices() {
     this._refreshIncomplete = false;
+    const wasDeferred = this._refreshDeferred;
+    this._refreshDeferred = false;
     this.registry.refresh();
     const lifecycle = this.lifecycle;
     const wasLive = this.entitiesReconciled;
@@ -996,10 +1026,13 @@ export class BridgeEndpointManager extends Service {
     const fullEntities = this.registry.fullEntities;
     if (!this.client.haRunning || Object.keys(fullEntities).length === 0) {
       this.pendingRemovals.clear();
-      this.log.warn(
-        `HA not running or registry empty, deferring reconcile of ${endpoints.length} endpoints`,
-      );
+      this.areaSwitchRemovals.clear();
+      const message = `HA not running or registry empty, deferring reconcile of ${endpoints.length} endpoints`;
+      // once per outage, the start gate retries every few seconds
+      if (wasDeferred) this.log.debug(message);
+      else this.log.warn(message);
       this._refreshIncomplete = true;
+      this._refreshDeferred = true;
       return;
     }
 
@@ -1057,21 +1090,25 @@ export class BridgeEndpointManager extends Service {
       (entityId) => this.getEntityMapping(entityId),
       stableIdentity,
       this.log,
+      new Map(endpoints.map((e) => [e.entityId, e.id])),
     );
     const endpointIdToEntity = new Map<string, string>();
+    // Carry the in-memory fingerprint to the new entity id so the create loop
+    // does not read a spurious mapping change after a rename re-key. Only a
+    // protected rename re-keys the mapping, and all old values are read first,
+    // so a swap of two entity ids moves both.
+    const carried: [string, string, string][] = [];
     for (const [entityId, resolved] of resolvedByEntity) {
       endpointIdToEntity.set(resolved.endpointId, entityId);
-      // Carry the in-memory fingerprint to the new entity id so the create loop
-      // does not read a spurious mapping change after a rename re-key.
-      if (
-        resolved.renamedFrom &&
-        this.mappingFingerprints.has(resolved.renamedFrom)
-      ) {
-        const fp = this.mappingFingerprints.get(resolved.renamedFrom)!;
-        this.mappingFingerprints.delete(resolved.renamedFrom);
-        this.mappingFingerprints.set(entityId, fp);
+      const fp = resolved.renamedFrom
+        ? this.mappingFingerprints.get(resolved.renamedFrom)
+        : undefined;
+      if (resolved.protected && fp !== undefined) {
+        carried.push([resolved.renamedFrom!, entityId, fp]);
       }
     }
+    for (const [from] of carried) this.mappingFingerprints.delete(from);
+    for (const [, to, fp] of carried) this.mappingFingerprints.set(to, fp);
 
     // Reconcile orphan tombstones against the FULL HA registry (keyed by the
     // rename-stable identity key, so a rename, a filter change, or a scope
@@ -1191,11 +1228,7 @@ export class BridgeEndpointManager extends Service {
           existingEndpoints.push(endpoint);
           continue;
         }
-        if (
-          now - entry.since < ENDPOINT_REMOVAL_GRACE_MS ||
-          now - this.client.runningSince < ENDPOINT_REMOVAL_GRACE_MS ||
-          this.registry.snapshotGeneration <= entry.generation
-        ) {
+        if (!this.removalDue(entry, now)) {
           existingEndpoints.push(endpoint);
           continue;
         }
@@ -1386,9 +1419,25 @@ export class BridgeEndpointManager extends Service {
 
       let endpoint = existingEndpoints.find((e) => e.entityId === entityId);
       if (!endpoint) {
+        // matter.js rejects duplicate endpoint ids, say which entity holds it
+        const resolved = resolvedByEntity.get(entityId);
+        const endpointId =
+          resolved?.endpointId ??
+          createEndpointId(entityId, mapping?.customName);
+        const holder = this.root.parts.find(
+          (p) =>
+            p.id === endpointId &&
+            (p as Partial<EntityEndpoint>).entityId !== entityId,
+        ) as Partial<EntityEndpoint> | undefined;
+        if (holder) {
+          this.addFailedEntity(
+            entityId,
+            `Endpoint id collides with ${holder.entityId ?? holder.id}. Set distinct custom names.`,
+          );
+          continue;
+        }
         try {
           const domainMappings = this.getPluginDomainMappings();
-          const resolved = resolvedByEntity.get(entityId);
           endpoint = await LegacyEndpoint.create(
             this.registry,
             entityId,
@@ -1472,6 +1521,11 @@ export class BridgeEndpointManager extends Service {
 
     await this.reconcileAreaSwitches();
 
+    // Again for the area switch removals the reconcile just held.
+    if (lifecycle === this.lifecycle) {
+      this.scheduleRemovalRecheck();
+    }
+
     this.mappingSync.rebuildCandidates(
       [...this.root.parts].filter(hasEntityIdentity).flatMap((p) => {
         const fp = this.mappingFingerprints.get(p.entityId);
@@ -1523,7 +1577,8 @@ export class BridgeEndpointManager extends Service {
   // Switches are kept while their parent endpoint survives with the flag on
   // (the parent's removal grace is mirrored for free), rebuilt via close() when
   // the parent was recreated for a mapping change so numbers survive, and
-  // deleted when the flag goes off, the area is gone, or the parent is gone.
+  // deleted when the flag goes off, the area stays gone past the removal
+  // grace, or the parent is gone.
   private async reconcileAreaSwitches(): Promise<void> {
     const parts = this.root.parts.map((p) => p as EntityEndpoint);
     const switches = parts.filter(
@@ -1548,6 +1603,10 @@ export class BridgeEndpointManager extends Service {
       (parent.entityId != null && isolated.has(parent.entityId));
 
     const kept = new Set<string>();
+    // only switches still missing their area carry their stamp over
+    const missingBefore = this.areaSwitchRemovals;
+    this.areaSwitchRemovals = new Map();
+    const now = Date.now();
     for (const sw of switches) {
       const parent = vacuumById.get(sw.vacuumEndpointId);
       const mapping = parent
@@ -1573,6 +1632,17 @@ export class BridgeEndpointManager extends Service {
           } else {
             // Parent was recreated, its effective config is a fresh object.
             rebuild = true;
+          }
+        } else {
+          // A vacuum rebuilt while unavailable can list fewer rooms, and
+          // delete() would give the switch a new number when the room returns.
+          const entry = missingBefore.get(sw.id) ?? {
+            since: now,
+            generation: this.registry.snapshotGeneration,
+          };
+          if (!this.removalDue(entry, now)) {
+            this.areaSwitchRemovals.set(sw.id, entry);
+            keep = true;
           }
         }
       }

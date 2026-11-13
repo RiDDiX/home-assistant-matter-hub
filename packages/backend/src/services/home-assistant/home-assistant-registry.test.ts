@@ -164,6 +164,90 @@ describe("HomeAssistantRegistry", () => {
     expect(Object.keys(registry.devices)).toHaveLength(0);
   });
 
+  describe("trusted snapshot startup (#543)", () => {
+    function makeStartingRegistry(haRunning: boolean) {
+      const fake = makeConnection();
+      fake.connection.sendMessagePromise = vi.fn((message: { type: string }) =>
+        Promise.resolve(
+          message.type === "config/entity_registry/list"
+            ? [{ entity_id: "light.a" }]
+            : [],
+        ),
+      ) as unknown as Connection["sendMessagePromise"];
+      const client = {
+        connection: fake.connection,
+        haRunning,
+      } as unknown as HomeAssistantClient & { haRunning: boolean };
+      const registry = new HomeAssistantRegistry(client, defaultOptions);
+      const initialized = vi.fn();
+      void registry.construction.then(initialized);
+      return { registry, client, initialized };
+    }
+
+    it("waits for a trusted snapshot when the first fetch was untrusted", async () => {
+      const { registry, client, initialized } = makeStartingRegistry(false);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(initialized).not.toHaveBeenCalled();
+      expect(Object.keys(registry.entities)).toHaveLength(0);
+
+      client.haRunning = true;
+      await vi.advanceTimersByTimeAsync(3000);
+      await registry.construction;
+      expect(initialized).toHaveBeenCalledOnce();
+      expect(registry.snapshotGeneration).toBe(1);
+      expect(Object.keys(registry.entities)).toEqual(["light.a"]);
+    });
+
+    it("gives up on a snapshot that never becomes trusted after the startup wait", async () => {
+      const warn = vi
+        .spyOn(Logger.prototype, "warn")
+        .mockImplementation(() => {});
+      const { registry, initialized } = makeStartingRegistry(false);
+      await vi.advanceTimersByTimeAsync(59_999);
+      expect(initialized).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+      await registry.construction;
+      expect(initialized).toHaveBeenCalledOnce();
+      expect(registry.snapshotGeneration).toBe(0);
+      expect(
+        warn.mock.calls.filter((c) =>
+          String(c[0]).includes("still starting after the startup wait"),
+        ),
+      ).toHaveLength(1);
+      warn.mockRestore();
+    });
+
+    it("keeps waiting after a startup reload that threw", async () => {
+      const warn = vi
+        .spyOn(Logger.prototype, "warn")
+        .mockImplementation(() => {});
+      const { registry, client, initialized } = makeStartingRegistry(false);
+      await vi.advanceTimersByTimeAsync(1);
+      const reload = vi
+        .spyOn(registry, "reload")
+        .mockRejectedValueOnce(new Error("boom"));
+      await vi.advanceTimersByTimeAsync(2999);
+      expect(reload).toHaveBeenCalledOnce();
+      expect(initialized).not.toHaveBeenCalled();
+
+      client.haRunning = true;
+      await vi.advanceTimersByTimeAsync(3000);
+      await registry.construction;
+      expect(initialized).toHaveBeenCalledOnce();
+      expect(registry.snapshotGeneration).toBe(1);
+      expect(Object.keys(registry.entities)).toEqual(["light.a"]);
+      expect(warn).not.toHaveBeenCalled();
+      warn.mockRestore();
+    });
+
+    it("does not wait after a trusted first fetch", async () => {
+      const { registry, initialized } = makeStartingRegistry(true);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(initialized).toHaveBeenCalledOnce();
+      expect(registry.snapshotGeneration).toBe(1);
+    });
+  });
+
   it("recovers within a single attempt when a mid-flight drop is followed by success", async () => {
     const fake = makeConnection();
     let phase = 0;
@@ -469,14 +553,16 @@ describe("HomeAssistantRegistry", () => {
     }) as unknown as Connection["sendMessagePromise"];
     const registry = new HomeAssistantRegistry(client, defaultOptions);
     const initPromise = registry.construction;
-    await vi.runAllTimersAsync();
-    await initPromise;
+    // only the first fetch, initialize retries it 3 s later (#543)
+    await vi.advanceTimersByTimeAsync(0);
 
     // The fetch started untrusted, so nothing it returned may confirm a
     // removal, and the next full RUNNING reload must still read as changed.
     expect(registry.snapshotGeneration).toBe(0);
     await expect(registry.reload()).resolves.toBe(true);
     expect(registry.snapshotGeneration).toBe(1);
+    await vi.runAllTimersAsync();
+    await initPromise;
   });
 
   it("discards a snapshot that started trusted but lost HA before it finished (#438)", async () => {

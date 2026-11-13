@@ -61,6 +61,7 @@ export class ServerModeEndpointManager extends Service {
   private observingRequested = false;
   private _failedEntities: FailedEntity[] = [];
   private _refreshIncomplete = false;
+  private _refreshDeferred = false;
   // last create or add failure per entity and how often it repeated in a row
   private readonly createFailures = new Map<
     string,
@@ -310,6 +311,12 @@ export class ServerModeEndpointManager extends Service {
   // the map entry of the mounted endpoint, so runs queue up like in bridge mode.
   private refreshChain: Promise<unknown> = Promise.resolve();
 
+  // Whether the last run skipped the reconcile because HA was down or the
+  // registry empty, unlike the other incomplete runs it mounted nothing.
+  get refreshDeferred(): boolean {
+    return this._refreshDeferred;
+  }
+
   // Resolves false when the run left matching entities unmounted for a reason
   // that only passes with time (HA down, heap pressure, a failed add).
   refreshDevices(): Promise<boolean> {
@@ -330,6 +337,8 @@ export class ServerModeEndpointManager extends Service {
 
   private async runRefreshDevices(): Promise<void> {
     this._refreshIncomplete = false;
+    const wasDeferred = this._refreshDeferred;
+    this._refreshDeferred = false;
     this.registry.refresh();
 
     const lifecycle = this.lifecycle;
@@ -343,10 +352,13 @@ export class ServerModeEndpointManager extends Service {
       // last good entity list and wait for HA.
       if (!this.client.haRunning || Object.keys(fullEntities).length === 0) {
         this.pendingRemovals.clear();
-        this.log.warn(
-          "HA not running or registry empty, deferring server mode reconcile",
-        );
+        const message =
+          "HA not running or registry empty, deferring server mode reconcile";
+        // once per outage, the start gate retries every few seconds
+        if (wasDeferred) this.log.debug(message);
+        else this.log.warn(message);
         this._refreshIncomplete = true;
+        this._refreshDeferred = true;
         return;
       }
 
@@ -413,6 +425,9 @@ export class ServerModeEndpointManager extends Service {
         (entityId) => this.getEntityMapping(entityId),
         stableIdentity,
         this.log,
+        new Map(
+          [...this.endpoints].map(([entityId, e]) => [entityId, e.endpoint.id]),
+        ),
       );
       const endpointIdToEntity = new Map<string, string>();
       for (const [entityId, resolved] of resolvedByEntity) {

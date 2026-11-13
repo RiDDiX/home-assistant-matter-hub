@@ -654,6 +654,21 @@ describe("ServerModeEndpointManager (#301)", () => {
     expect(h.registry.markRefreshIncomplete).toHaveBeenCalledTimes(1);
   });
 
+  it("flags only a refresh deferred for HA as deferred", async () => {
+    legacyCreate.mockRejectedValueOnce(new Error("create failed"));
+    const h = makeHarness(["light.one"]);
+    await expect(h.manager.refreshDevices()).resolves.toBe(false);
+    expect(h.manager.refreshDeferred).toBe(false);
+
+    h.client.haRunning = false;
+    await expect(h.manager.refreshDevices()).resolves.toBe(false);
+    expect(h.manager.refreshDeferred).toBe(true);
+
+    h.client.haRunning = true;
+    await expect(h.manager.refreshDevices()).resolves.toBe(true);
+    expect(h.manager.refreshDeferred).toBe(false);
+  });
+
   it("arms the registry retry when the refresh itself throws", async () => {
     const h = makeHarness(["light.one"]);
     h.registry.refresh.mockImplementationOnce(() => {
@@ -664,6 +679,30 @@ describe("ServerModeEndpointManager (#301)", () => {
 
     await expect(h.manager.refreshDevices()).resolves.toBe(true);
     expect(h.registry.markRefreshIncomplete).toHaveBeenCalledTimes(1);
+  });
+
+  it("warns about a deferred refresh once per HA outage", async () => {
+    const h = makeHarness(["light.one"]);
+    // biome-ignore lint/suspicious/noExplicitAny: reach the private logger
+    const log = (h.manager as any).log as Logger;
+    const deferWarns = () =>
+      vi
+        .mocked(log.warn)
+        .mock.calls.filter((c) => String(c[0]).includes("deferring server"));
+
+    h.client.haRunning = false;
+    await h.manager.refreshDevices();
+    await h.manager.refreshDevices();
+    expect(deferWarns()).toHaveLength(1);
+    expect(log.debug).toHaveBeenCalledWith(
+      expect.stringContaining("deferring server"),
+    );
+
+    h.client.haRunning = true;
+    await h.manager.refreshDevices();
+    h.client.haRunning = false;
+    await h.manager.refreshDevices();
+    expect(deferWarns()).toHaveLength(2);
   });
 
   it("logs a create that keeps failing once", async () => {

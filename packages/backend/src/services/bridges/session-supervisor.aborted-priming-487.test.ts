@@ -82,9 +82,12 @@ function makeBridge(sessions: FakeSession[], featureFlags: object = {}) {
     .sessions as unknown as {
     wireSessionDiagnostics(): void;
     stop(): void;
+    stopped: boolean;
     staleSessionTimers: Map<number, unknown>;
   };
   const before = interactionServer.onNewExchange;
+  // stands in for start() without its rotation and watchdog intervals
+  supervisor.stopped = false;
   supervisor.wireSessionDiagnostics();
   const wrapped = interactionServer.onNewExchange;
   onNewExchange = () => {};

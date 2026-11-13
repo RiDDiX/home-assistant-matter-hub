@@ -109,6 +109,7 @@ interface FakeHa {
   devices: Record<string, any>;
   areas: Map<string, string>;
   labels: unknown[];
+  snapshotGeneration?: number;
 }
 
 function makeHa(): FakeHa {
@@ -349,6 +350,7 @@ beforeEach(() => {
 });
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   for (const m of managers.splice(0)) {
     await m.dispose().catch(() => {});
   }
@@ -795,6 +797,96 @@ describe("vacuum room switches (#355)", () => {
 
     // Drain the momentary auto-reset timer before teardown.
     await delay(1200);
+  });
+
+  // The vacuum is rebuilt (mapping edit) while its state lists fewer rooms,
+  // as an unavailable vacuum or one without its room attributes does (#543).
+  let rebuilds = 0;
+  async function rebuildWithRooms(
+    ha: FakeHa,
+    mapping: FakeMappingStorage,
+    manager: BridgeEndpointManager,
+    rooms: Record<string, string>,
+    extra: Partial<EntityMappingConfig> = {},
+  ) {
+    const old = ha.states[VACUUM];
+    ha.states[VACUUM] = { ...old, attributes: { ...old.attributes, rooms } };
+    mapping.put("bridge-355", {
+      entityId: VACUUM,
+      vacuumRoomSwitches: true,
+      customVendorName: `rebuild ${rebuilds++}`,
+      ...extra,
+    });
+    await manager.refreshDevices();
+  }
+
+  const bedroom = (manager: BridgeEndpointManager) =>
+    switchEndpoints(manager).find((s) => s.id === "vacuum_robot_roomsw_17");
+
+  it("a room missing for one rebuild keeps its switch and number (#543)", async () => {
+    const ha = makeHa();
+    const mapping = new FakeMappingStorage();
+    mapping.put("bridge-355", { entityId: VACUUM, vacuumRoomSwitches: true });
+    const manager = await buildManager(ha, mapping);
+    await manager.refreshDevices();
+    const before = bedroom(manager)!;
+    await before.construction.ready;
+    const number = before.number;
+
+    await rebuildWithRooms(ha, mapping, manager, { "16": "Kitchen" });
+    expect(bedroom(manager)).toBe(before);
+
+    await rebuildWithRooms(ha, mapping, manager, ROOMS);
+    const after = bedroom(manager)!;
+    await after.construction.ready;
+    expect(after.number).toBe(number);
+    // biome-ignore lint/suspicious/noExplicitAny: the pending stamp is gone
+    expect((manager as any).areaSwitchRemovals.size).toBe(0);
+  });
+
+  it("a room missing past the grace and a newer snapshot loses its switch (#543)", async () => {
+    const ha = makeHa();
+    ha.snapshotGeneration = 1;
+    const mapping = new FakeMappingStorage();
+    mapping.put("bridge-355", { entityId: VACUUM, vacuumRoomSwitches: true });
+    const manager = await buildManager(ha, mapping);
+    await manager.refreshDevices();
+
+    await rebuildWithRooms(ha, mapping, manager, { "16": "Kitchen" });
+    expect(bedroom(manager)).toBeDefined();
+
+    // grace passed, but no newer snapshot: still kept
+    const base = Date.now();
+    vi.spyOn(Date, "now").mockImplementation(() => base + 301_000);
+    await manager.refreshDevices();
+    expect(bedroom(manager)).toBeDefined();
+
+    ha.snapshotGeneration++;
+    await manager.refreshDevices();
+    expect(switchEndpoints(manager).map((s) => s.id)).toEqual([
+      "vacuum_robot_roomsw_16",
+    ]);
+  });
+
+  it("turning the flag off drops a switch whose room is missing at once (#543)", async () => {
+    const ha = makeHa();
+    const mapping = new FakeMappingStorage();
+    mapping.put("bridge-355", { entityId: VACUUM, vacuumRoomSwitches: true });
+    const manager = await buildManager(ha, mapping);
+    await manager.refreshDevices();
+    await rebuildWithRooms(ha, mapping, manager, { "16": "Kitchen" });
+    expect(bedroom(manager)).toBeDefined();
+
+    await rebuildWithRooms(
+      ha,
+      mapping,
+      manager,
+      { "16": "Kitchen" },
+      {
+        vacuumRoomSwitches: false,
+      },
+    );
+    expect(switchEndpoints(manager)).toHaveLength(0);
   });
 });
 
