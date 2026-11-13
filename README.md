@@ -39,7 +39,7 @@ of port forwarding etc.
 | Channel | Branch | Current Version | Description |
 |---------|--------|-----------------|-------------|
 | **Stable** | `main` | v2.0.60 | Production-ready, recommended for most users |
-| **Alpha** | `alpha` | v2.1.0-alpha.990 | Ahead of Stable, carries the additions listed under Alpha Features |
+| **Alpha** | `alpha` | v2.1.0-alpha.991 | Ahead of Stable, carries the additions listed under Alpha Features |
 | **Testing** | `testing` | v4.1.0-testing.x | ⚠️ **Highly unstable!** Experimental features, may break |
 
 ### Which version should I use?
@@ -550,8 +550,11 @@ Re-assign the affected devices to their rooms after they reconnect. See the [doc
 <details>
 <summary><strong>🧪 Alpha Features (v2.1.0-alpha.x)</strong> - Click to expand</summary>
 
+**v2.1.0-alpha.991:**
+- **Local access switch in the add-on**: local access in the alpha add-on is now turned on with the new option `allow_local_access`, off by default ([#551](https://github.com/RiDDiX/home-assistant-matter-hub/issues/551)). `local_api_password` is optional and no longer turns local access on by itself, as it did in alpha.990. With the switch on and a password set, local clients log in with basic auth, user name `hamh`. With the switch on and no password, local clients need no login, unless a password is set under **Settings** in the HAMH UI. The add-on log then warns at start that every process on the host has full control. With a password set and the switch off, local access stays closed and the add-on log says so. If you set only the password on alpha.990, turn the switch on after updating. See the FAQ entry "How can an integration on the same host reach the add-on API?" in the documentation.
+
 **v2.1.0-alpha.990:**
-- **Local API access in the add-on**: the alpha add-on has a new option `local_api_password` ([#551](https://github.com/RiDDiX/home-assistant-matter-hub/issues/551)). It is empty by default, and the add-on API then only answers the Supervisor, as before. Once set, programs on the Home Assistant host, for example a custom integration in Home Assistant Core, reach the API at `http://127.0.0.1:<port>` with basic auth, user name `hamh` and that password. The add-on log prints the URL at start. The sidebar panel keeps working without the password. The password gives full control of HAMH, see the FAQ entry "How can an integration on the same host reach the add-on API?" in the documentation.
+- **Local API access in the add-on**: the alpha add-on has a new option `local_api_password` ([#551](https://github.com/RiDDiX/home-assistant-matter-hub/issues/551)). It is empty by default, and the add-on API then only answers the Supervisor, as before. Once set, programs on the Home Assistant host, for example a custom integration in Home Assistant Core, reach the API at `http://127.0.0.1:<port>` with basic auth, user name `hamh` and that password. The add-on log prints the URL at start. The sidebar panel keeps working without the password. The password gives full control of HAMH, see the FAQ entry "How can an integration on the same host reach the add-on API?" in the documentation. Changed in alpha.991, see above.
 - **IP whitelist log**: a client refused by `--http-ip-whitelist` now shows in the log as a warning, once per address and at most 50 per run, for all install types. Before, it was only visible at the lowest log level, or not at all for WebSocket. An entry that is neither an IP nor a CIDR is reported at start and ignored. Whitespace around an entry is trimmed.
 
 **v2.1.0-alpha.988:**
