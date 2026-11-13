@@ -15,6 +15,7 @@ import { applyPatchState } from "../../utils/apply-patch-state.js";
 import { trimToLength } from "../../utils/trim-to-length.js";
 import { HomeAssistantEntityBehavior } from "./home-assistant-entity-behavior.js";
 import { inferCleanedAreaProgress } from "./infer-cleaned-area-progress.js";
+import { clampCurrentMode } from "./utils/clamp-current-mode.js";
 import type { ValueGetter, ValueSetter } from "./utils/cluster-config.js";
 
 const logger = Logger.get("RvcRunModeServer");
@@ -137,6 +138,7 @@ class RvcRunModeServerBase extends Base {
   override async initialize() {
     // supportedModes and currentMode are set via .set() before initialize,
     // so matter.js has the modes ready at pairing time.
+    clampCurrentMode(this.state, RvcSupportedRunMode.Idle);
     await super.initialize();
     const homeAssistant = await this.agent.load(HomeAssistantEntityBehavior);
     this.update(homeAssistant.entity);
@@ -158,21 +160,22 @@ class RvcRunModeServerBase extends Base {
     const s = getSession(this.endpoint);
     const previousMode = s.modeBeforeOffline ?? this.state.currentMode;
     const newMode = this.state.config.getCurrentMode(entity.state, this.agent);
+    const offline = ["unavailable", "unknown"].includes(entity.state.state);
 
     applyPatchState(
       this.state,
       {
         currentMode: newMode,
-        supportedModes: this.state.config.getSupportedModes(
-          entity.state,
-          this.agent,
-        ),
+        // undefined skips the write, the room modes stay while offline
+        supportedModes: offline
+          ? undefined
+          : this.state.config.getSupportedModes(entity.state, this.agent),
       },
       { force: true },
     );
     // An offline vacuum has not finished a room or the job, and unavailable
     // drops the rooms, keep the last names
-    if (["unavailable", "unknown"].includes(entity.state.state)) {
+    if (offline) {
       s.modeBeforeOffline = previousMode;
       return;
     }
@@ -842,32 +845,33 @@ class RvcRunModeServerBase extends Base {
     if (isRoomMode(newMode)) {
       // When selectedAreas exist (e.g. Apple Home sends selectAreas before
       // changeToMode), prefer area-based cleaning over mode-based room selection.
+      let serviceArea: ServiceAreaBehavior | undefined;
       try {
-        const serviceArea = this.agent.get(ServiceAreaBehavior);
-        if (serviceArea.state.selectedAreas?.length > 0) {
-          // Snapshot selected areas before the start handler clears them
-          s.activeAreas = this.orderSelectedAreas(
-            serviceArea.state.selectedAreas,
-          );
-          // Dispatch reads selectedAreas, so write the order back in case the
-          // selection was stored before the flag changed (#368).
-          serviceArea.state.selectedAreas = [...s.activeAreas];
-          s.completedAreas.clear();
-          s.lastCurrentArea = null;
-          s.loggedShortCircuits.clear();
-          s.pendingDispatches = [];
-          s.cleanedAreaBaseline = this.readCleanedAreaSqm();
-          this.trySetCurrentArea(s.activeAreas[0]);
-          homeAssistant.callAction(this.state.config.start(void 0, this.agent));
-          this.showRunning();
-          this.state.currentMode = newMode;
-          return {
-            status: ModeBase.ModeChangeStatus.Success,
-            statusText: "Starting room cleaning",
-          };
-        }
+        serviceArea = this.agent.get(ServiceAreaBehavior);
       } catch {
         // ServiceArea not available, fall through to mode-based room cleaning
+      }
+      if (serviceArea && serviceArea.state.selectedAreas?.length > 0) {
+        // Snapshot selected areas before the start handler clears them
+        s.activeAreas = this.orderSelectedAreas(
+          serviceArea.state.selectedAreas,
+        );
+        // Dispatch reads selectedAreas, so write the order back in case the
+        // selection was stored before the flag changed (#368).
+        serviceArea.state.selectedAreas = [...s.activeAreas];
+        s.completedAreas.clear();
+        s.lastCurrentArea = null;
+        s.loggedShortCircuits.clear();
+        s.pendingDispatches = [];
+        s.cleanedAreaBaseline = this.readCleanedAreaSqm();
+        this.trySetCurrentArea(s.activeAreas[0]);
+        homeAssistant.callAction(this.state.config.start(void 0, this.agent));
+        this.showRunning();
+        this.state.currentMode = newMode;
+        return {
+          status: ModeBase.ModeChangeStatus.Success,
+          statusText: "Starting room cleaning",
+        };
       }
 
       if (this.state.config.cleanRoom) {

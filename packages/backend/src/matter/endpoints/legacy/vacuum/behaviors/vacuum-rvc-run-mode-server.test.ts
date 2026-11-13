@@ -3,17 +3,21 @@ import type {
   EntityMappingConfig,
   VacuumDeviceAttributes,
 } from "@home-assistant-matter-hub/common";
-import { describe, expect, it } from "vitest";
+import { Logger } from "@matter/general";
+import type { Agent } from "@matter/main";
+import { ServiceAreaBehavior } from "@matter/main/behaviors";
+import { describe, expect, it, vi } from "vitest";
 import type { HomeAssistantAction } from "../../../../../services/home-assistant/home-assistant-actions.js";
 import type { CleaningSession } from "../../../../behaviors/rvc-run-mode-server.js";
+import { toAreaId } from "../utils/parse-vacuum-rooms.js";
 import {
   buildSupportedModes,
+  createVacuumRvcRunModeServer,
   customAreaModeLabels,
   customAreaModes,
   dispatchRoomClean,
   handleCustomServiceAreas,
 } from "./vacuum-rvc-run-mode-server.js";
-import { toAreaId } from "./vacuum-service-area-server.js";
 
 function session(): CleaningSession {
   return {
@@ -304,6 +308,54 @@ describe("custom area mode labels (#506)", () => {
   });
 });
 
+describe("buildSupportedModes room ids", () => {
+  it("skips negative and repeated room ids instead of duplicating a mode", () => {
+    const modes = buildSupportedModes({
+      rooms: [
+        { id: 16, name: "Kitchen" },
+        { id: -100, name: "Hall" },
+        { id: 16, name: "Pantry" },
+        { id: 17, name: "Bedroom" },
+      ],
+    } as VacuumDeviceAttributes);
+    expect(modes.map((m) => [m.mode, m.label])).toEqual([
+      [0, "Idle"],
+      [1, "Cleaning"],
+      [117, "Bedroom"],
+      [116, "Kitchen"],
+    ]);
+  });
+
+  it("warns once per skip list when vacuums are built alternately", () => {
+    const warn = vi
+      .spyOn(Logger.prototype, "warn")
+      .mockImplementation(() => {});
+    // The warn-once memory is module level, unique names keep reruns independent
+    const tag = Math.random().toString(36).slice(2, 8);
+    const vacuums = [
+      [{ id: -5, name: `Den ${tag}` }],
+      [
+        { id: 20, name: `Attic ${tag}` },
+        { id: 20, name: `Loft ${tag}` },
+      ],
+      [{ id: 21, name: `Office ${tag}` }],
+    ];
+    for (let i = 0; i < 3; i++) {
+      for (const rooms of vacuums) {
+        buildSupportedModes({ rooms } as VacuumDeviceAttributes);
+      }
+    }
+    const skips = warn.mock.calls
+      .map((c) => String(c[0]))
+      .filter((m) => m.startsWith("Rooms dropped"));
+    warn.mockRestore();
+    expect(skips).toEqual([
+      `Rooms dropped, room id negative or repeated: Den ${tag} (id -5)`,
+      `Rooms dropped, room id negative or repeated: Loft ${tag} (id 20)`,
+    ]);
+  });
+});
+
 // Behaviour-parity guard: dispatchRoomClean is the pure helper extracted from
 // the RvcRunMode start handler. Both the start path and the #355 room switches
 // route through it, so these lock the exact HA action produced per integration.
@@ -475,5 +527,47 @@ describe("dispatchRoomClean", () => {
       [999],
     );
     expect(action).toEqual({ action: "vacuum.start" });
+  });
+});
+
+describe("run mode config start", () => {
+  const { start } = (
+    createVacuumRvcRunModeServer({} as VacuumDeviceAttributes)
+      .defaults as unknown as {
+      config: { start: (value: undefined, agent: Agent) => unknown };
+    }
+  ).config;
+
+  function agentWith(serviceArea: unknown, attributes: object) {
+    const homeAssistant = {
+      entityId: "vacuum.murre",
+      endpoint: {},
+      entity: { state: { attributes } },
+      state: { mapping: {} },
+      callAction: () => {},
+    };
+    return {
+      get: (type: unknown) => {
+        if (type !== ServiceAreaBehavior) return homeAssistant;
+        if (!serviceArea) throw new Error("no ServiceArea");
+        return serviceArea;
+      },
+    } as unknown as Agent;
+  }
+
+  it("lets a throw in the room dispatch through", () => {
+    const attributes = {
+      get rooms(): never {
+        throw new Error("dispatch failed");
+      },
+    };
+    const agent = agentWith({ state: { selectedAreas: [4] } }, attributes);
+    expect(() => start(undefined, agent)).toThrow("dispatch failed");
+  });
+
+  it("starts a plain clean without a ServiceArea behavior", () => {
+    expect(start(undefined, agentWith(undefined, {}))).toEqual({
+      action: "vacuum.start",
+    });
   });
 });

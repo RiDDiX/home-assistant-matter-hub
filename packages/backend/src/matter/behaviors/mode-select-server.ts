@@ -5,6 +5,7 @@ import type { HomeAssistantAction } from "../../services/home-assistant/home-ass
 import { applyPatchState } from "../../utils/apply-patch-state.js";
 import { trimToLength } from "../../utils/trim-to-length.js";
 import { HomeAssistantEntityBehavior } from "./home-assistant-entity-behavior.js";
+import { clampCurrentMode } from "./utils/clamp-current-mode.js";
 
 const logger = Logger.get("ModeSelectServer");
 
@@ -39,6 +40,7 @@ class ModeSelectServerBase extends Base {
   declare state: ModeSelectServerBase.State;
 
   override async initialize() {
+    clampCurrentMode(this.state, this.state.supportedModes[0]?.mode ?? 0);
     await super.initialize();
     const homeAssistant = await this.agent.load(HomeAssistantEntityBehavior);
     this.update(homeAssistant.entity);

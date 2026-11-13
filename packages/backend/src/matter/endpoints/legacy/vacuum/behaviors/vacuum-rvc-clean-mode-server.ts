@@ -12,6 +12,7 @@ import {
   isDreameVacuum,
   isEcovacsVacuum,
 } from "../utils/parse-vacuum-rooms.js";
+import { customAreaModeLabels } from "./vacuum-rvc-run-mode-server.js";
 
 const logger = Logger.get("VacuumRvcCleanModeServer");
 
@@ -35,6 +36,9 @@ const FAN_SPEED_MODE_BASE = 10;
 
 /** Base mode value for dynamically generated mop intensity modes */
 const MOP_INTENSITY_MODE_BASE = 50;
+
+/** Fan speed ids must stay below the mop intensity ids */
+const MAX_FAN_SPEED_MODES = MOP_INTENSITY_MODE_BASE - FAN_SPEED_MODE_BASE;
 
 /** Check if a mode value represents a fan speed mode */
 function isFanSpeedMode(mode: number): boolean {
@@ -66,6 +70,15 @@ function resolveCleanTypes(cleaningModeOptions?: string[]): Set<CleanType> {
     types.add(parseCleanType(option));
   }
   return types;
+}
+
+// Mop intensity modes belong to Mop when the vacuum has it, else to Vacuum & Mop.
+function mopIntensityCleanType(types: Set<CleanType>): CleanType | undefined {
+  if (types.has(CleanType.Mopping)) return CleanType.Mopping;
+  if (types.has(CleanType.SweepingAndMopping)) {
+    return CleanType.SweepingAndMopping;
+  }
+  return undefined;
 }
 
 export function buildSupportedModes(
@@ -106,18 +119,25 @@ export function buildSupportedModes(
   // Apple Home shows them as "extra features" when the Vacuum cleaning
   // type is active (they share the Vacuum tag with an intensity tag).
   if (fanSpeedList && fanSpeedList.length > 0) {
-    modes.push(...buildFanSpeedModes(fanSpeedList, customFanSpeedTags));
+    modes.push(
+      ...buildFanSpeedModes(
+        fanSpeedList.slice(0, MAX_FAN_SPEED_MODES),
+        customFanSpeedTags,
+      ),
+    );
   }
 
   // Mop-intensity modes: included when any mopping mode is available
-  const hasMopping =
-    cleanTypes.has(CleanType.Mopping) ||
-    cleanTypes.has(CleanType.SweepingAndMopping);
-  if (hasMopping && mopIntensityList && mopIntensityList.length > 0) {
+  const mopType = mopIntensityCleanType(cleanTypes);
+  if (
+    mopType !== undefined &&
+    mopIntensityList &&
+    mopIntensityList.length > 0
+  ) {
     modes.push(
       ...buildMopIntensityModes(
         mopIntensityList,
-        !cleanTypes.has(CleanType.Mopping),
+        mopType === CleanType.SweepingAndMopping,
       ),
     );
   }
@@ -135,7 +155,12 @@ export function buildSupportedModes(
     });
   }
 
-  return modes;
+  // Vendor speed names can format to a label already taken or past 64 bytes.
+  const labels = customAreaModeLabels(
+    modes.map((m) => ({ name: m.label })),
+    [],
+  );
+  return modes.map((mode, i) => ({ ...mode, label: labels[i] }));
 }
 
 // Cleaning mode tokens. Classify any vendor phrasing by the words it
@@ -345,36 +370,6 @@ function mopIntensityToModeId(
   return undefined;
 }
 
-function matchMopIntensityOption(
-  name: string,
-  availableOptions: string[] | undefined,
-): string | undefined {
-  if (!availableOptions || availableOptions.length === 0) return undefined;
-  const s = name.toLowerCase();
-  const exact = availableOptions.find((o) => o.toLowerCase() === s);
-  if (exact) return exact;
-  const contains = availableOptions.find(
-    (o) => o.toLowerCase().includes(s) || s.includes(o.toLowerCase()),
-  );
-  if (contains) return contains;
-  const tag = getMopIntensityTag(name);
-  if (tag !== undefined) {
-    const group = MOP_TAG_PATTERNS.find((p) => p.tag === tag);
-    if (group) {
-      const aliases = group.pattern.source
-        .replace(/^\^\(|\)\$$/g, "")
-        .split("|");
-      for (const a of aliases) {
-        const m = availableOptions.find(
-          (o) => o.toLowerCase() === a || o.toLowerCase().includes(a),
-        );
-        if (m) return m;
-      }
-    }
-  }
-  return undefined;
-}
-
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -438,7 +433,7 @@ const CLEAN_TYPE_FALLBACK: Partial<Record<CleanType, CleanType>> = {
 function findMatchingCleanOption(
   ct: CleanType,
   availableOptions: string[] | undefined,
-): string {
+): string | undefined {
   if (!availableOptions || availableOptions.length === 0) {
     return CLEAN_TYPE_LABELS[ct];
   }
@@ -455,21 +450,34 @@ function findMatchingCleanOption(
   logger.warn(
     `No match for ${CLEAN_TYPE_LABELS[ct]} in [${availableOptions.join(", ")}]`,
   );
-  return availableOptions[0];
+  return undefined;
+}
+
+// The builder always advertises Vacuum, so Sweeping is the last resort.
+function registeredCleanType(
+  ct: CleanType,
+  registered: Set<CleanType>,
+): CleanType {
+  if (registered.has(ct)) return ct;
+  const fallback = CLEAN_TYPE_FALLBACK[ct];
+  return fallback !== undefined && registered.has(fallback)
+    ? fallback
+    : CleanType.Sweeping;
 }
 
 /**
  * Build a cleaning mode action for the target type.
- * Always returns an action, the debounce layer ensures rapid switches
- * resolve to the last requested type.
+ * Returns undefined when no select option matches. The debounce layer
+ * ensures rapid switches resolve to the last requested type.
  */
 function buildCleaningModeAction(
   targetCleanType: CleanType,
   agent: Agent,
-): { action: string; data: { option: string }; target: string } {
+): { action: string; data: { option: string }; target: string } | undefined {
   const selectEntityId = getCleaningModeSelectEntity(agent);
   const { options } = readSelectEntity(selectEntityId, agent);
   const optionToUse = findMatchingCleanOption(targetCleanType, options);
+  if (optionToUse === undefined) return undefined;
   logger.info(
     `Switching cleaning mode to: ${optionToUse} via ${selectEntityId}`,
   );
@@ -480,10 +488,11 @@ function buildCleaningModeAction(
   };
 }
 
-function matchFanSpeedOption(
+export function matchTaggedOption(
   name: string,
   availableOptions: string[] | undefined,
-  customTags?: Record<string, number>,
+  tag: number | undefined,
+  patterns: Array<{ pattern: RegExp; tag: number }>,
 ): string | undefined {
   if (!availableOptions || availableOptions.length === 0) return undefined;
   const s = name.toLowerCase();
@@ -496,12 +505,12 @@ function matchFanSpeedOption(
   );
   if (contains) return contains;
   // Alias match via tag category, find sibling names in the same group
-  const tag = getFanSpeedTag(name, customTags);
   if (tag !== undefined) {
-    const group = FAN_TAG_PATTERNS.find((p) => p.tag === tag);
+    const group = patterns.find((p) => p.tag === tag);
     if (group) {
       const aliases = group.pattern.source
         .replace(/^\^\(|\)\$$/g, "")
+        .replace(/\\/g, "")
         .split("|");
       for (const a of aliases) {
         const m = availableOptions.find(
@@ -554,8 +563,12 @@ export function createCleanModeConfig(
   customFanSpeedTags?: Record<string, number>,
 ) {
   const hasCleanTypes = !!cleaningModeOptions && cleaningModeOptions.length > 0;
+  const registered = resolveCleanTypes(cleaningModeOptions);
   return {
-    getCurrentMode: (entity: { attributes: unknown }, agent: Agent): number => {
+    getCurrentMode: (
+      entity: { attributes: unknown },
+      agent: Agent,
+    ): number | undefined => {
       const attributes = entity.attributes as VacuumDeviceAttributes & {
         cleaning_mode?: string;
       };
@@ -569,8 +582,11 @@ export function createCleanModeConfig(
         } else {
           const selectEntityId = getCleaningModeSelectEntity(agent);
           const { state } = readSelectEntity(selectEntityId, agent);
+          // Clean type unknown, so the base keeps the current mode.
+          if (state === "unavailable" || state === "unknown") return undefined;
           cleanType = parseCleanType(state);
         }
+        cleanType = registeredCleanType(cleanType, registered);
       }
 
       const mapping = agent.get(HomeAssistantEntityBehavior).state.mapping;
@@ -602,7 +618,7 @@ export function createCleanModeConfig(
             speedMode = FAN_SPEED_MODE_BASE + idx;
           }
         }
-        if (speedMode !== undefined) {
+        if (speedMode !== undefined && isFanSpeedMode(speedMode)) {
           logger.debug(
             `Current mode: Vacuum + fan_speed="${speedState}" -> mode ${speedMode}`,
           );
@@ -612,9 +628,7 @@ export function createCleanModeConfig(
 
       // Mop intensity: when mopping, check mop intensity entity
       if (
-        (cleanType === CleanType.Mopping ||
-          (cleanType === CleanType.SweepingAndMopping &&
-            !resolveCleanTypes(cleaningModeOptions).has(CleanType.Mopping))) &&
+        cleanType === mopIntensityCleanType(registered) &&
         mopIntensityList &&
         mopIntensityList.length > 0 &&
         mapping?.mopIntensityEntity
@@ -684,14 +698,11 @@ export function createCleanModeConfig(
         // Dreame makes the mop entity unavailable while in vacuum mode,
         // so the cleaning mode must change first.
         if (hasCleanTypes) {
-          homeAssistant.callAction(
-            buildCleaningModeAction(
-              resolveCleanTypes(cleaningModeOptions).has(CleanType.Mopping)
-                ? CleanType.Mopping
-                : CleanType.SweepingAndMopping,
-              agent,
-            ),
+          const cleanAction = buildCleaningModeAction(
+            mopIntensityCleanType(registered) ?? CleanType.SweepingAndMopping,
+            agent,
           );
+          if (cleanAction) homeAssistant.callAction(cleanAction);
         }
 
         if (mapping?.mopIntensityEntity) {
@@ -703,7 +714,12 @@ export function createCleanModeConfig(
             `Mop intensity entity ${mapping.mopIntensityEntity}: ` +
               `current="${state}", options=${JSON.stringify(options ?? [])}`,
           );
-          let option = matchMopIntensityOption(mopName, options);
+          let option = matchTaggedOption(
+            mopName,
+            options,
+            getMopIntensityTag(mopName),
+            MOP_TAG_PATTERNS,
+          );
           // Positional fallback: generic names (low/medium/high) may not
           // match entity options (slightly_dry/moist/wet). Use same index.
           if (!option && options && mopIndex < options.length) {
@@ -748,9 +764,11 @@ export function createCleanModeConfig(
           // Ensure cleaning mode is sweeping before setting suction.
           // Dreame makes the suction entity unavailable while in mop mode.
           if (hasCleanTypes) {
-            homeAssistant.callAction(
-              buildCleaningModeAction(CleanType.Sweeping, agent),
+            const cleanAction = buildCleaningModeAction(
+              CleanType.Sweeping,
+              agent,
             );
+            if (cleanAction) homeAssistant.callAction(cleanAction);
           }
 
           const { state, options } = readSelectEntity(
@@ -761,10 +779,11 @@ export function createCleanModeConfig(
             `Suction entity ${mapping.suctionLevelEntity}: ` +
               `current="${state}", options=${JSON.stringify(options ?? [])}`,
           );
-          let option = matchFanSpeedOption(
+          let option = matchTaggedOption(
             fanSpeedName,
             options,
-            customFanSpeedTags,
+            getFanSpeedTag(fanSpeedName, customFanSpeedTags),
+            FAN_TAG_PATTERNS,
           );
           // Positional fallback: fan_speed_list names (Silent/Strong) may
           // differ from suction entity options (quiet/strong). Use same index.
@@ -793,9 +812,11 @@ export function createCleanModeConfig(
 
         // Otherwise use vacuum.set_fan_speed with the original name
         if (hasCleanTypes) {
-          homeAssistant.callAction(
-            buildCleaningModeAction(CleanType.Sweeping, agent),
+          const cleanAction = buildCleaningModeAction(
+            CleanType.Sweeping,
+            agent,
           );
+          if (cleanAction) homeAssistant.callAction(cleanAction);
         }
         logger.info(
           `Setting fan speed to: ${fanSpeedName} via vacuum.set_fan_speed`,
@@ -822,6 +843,7 @@ export function createCleanModeConfig(
         agent,
       );
       const optionToUse = findMatchingCleanOption(cleanType, availableOptions);
+      if (optionToUse === undefined) return undefined;
 
       logger.info(
         `Setting cleaning mode to: ${optionToUse} (mode=${mode}) via ${selectEntityId}`,
@@ -927,17 +949,6 @@ export function supportsCleaningModes(
   attributes: VacuumDeviceAttributes,
 ): boolean {
   return isDreameVacuum(attributes) || isEcovacsVacuum(attributes);
-}
-
-/**
- * Check if vacuum has fan speed options available.
- * Used to auto-detect fan speed support without requiring manual
- * suctionLevelEntity configuration.
- */
-export function hasFanSpeedSupport(
-  attributes: VacuumDeviceAttributes,
-): boolean {
-  return !!attributes.fan_speed_list && attributes.fan_speed_list.length > 1;
 }
 
 /**

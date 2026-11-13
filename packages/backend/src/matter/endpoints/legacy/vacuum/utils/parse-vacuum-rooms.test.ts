@@ -4,15 +4,17 @@ import type {
 } from "@home-assistant-matter-hub/common";
 import { describe, expect, it } from "vitest";
 import {
+  isRoomMode,
+  ROOM_MODE_BASE,
+} from "../../../../behaviors/rvc-run-mode-server.js";
+import {
   getRoomIdFromMode,
   getRoomModeValue,
   isDreameVacuum,
   isEcovacsVacuum,
-  isRoomMode,
   isUnnamedRoom,
   isXiaomiMiotVacuum,
   parseVacuumRooms,
-  ROOM_MODE_BASE,
 } from "./parse-vacuum-rooms.js";
 
 describe("parseVacuumRooms", () => {
@@ -285,6 +287,19 @@ describe("parseVacuumRooms", () => {
       { id: 2, name: "Guest Bathroom" },
       { id: 3, name: "Home Office" },
     ]);
+  });
+
+  it("keeps the same room for a repeated id with and without unnamed rooms", () => {
+    const attributes: VacuumDeviceAttributes = {
+      rooms: [
+        { id: 5, name: "Room 7" },
+        { id: 5, name: "Kitchen" },
+      ],
+    };
+    const withUnnamed = parseVacuumRooms(attributes, true);
+    const withoutUnnamed = parseVacuumRooms(attributes, false);
+    expect(withUnnamed).toEqual([{ id: 5, name: "Room 7" }]);
+    expect(withoutUnnamed.filter((r) => r.id === 5)).toEqual([]);
   });
 });
 
