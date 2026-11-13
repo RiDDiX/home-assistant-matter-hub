@@ -7,6 +7,8 @@ import { ElectricalPowerMeasurement } from "@matter/main/clusters";
 import { BatteryStorageDevice } from "@matter/main/devices";
 import { EntityStateProvider } from "../../../../../services/bridges/entity-state-provider.js";
 import { applyPatchState } from "../../../../../utils/apply-patch-state.js";
+import { mappedMilli } from "../../../../../utils/converters/electrical-unit.js";
+import { numericState } from "../../../../../utils/numeric-state.js";
 import { BasicInformationServer } from "../../../../behaviors/basic-information-server.js";
 import { HomeAssistantEntityBehavior } from "../../../../behaviors/home-assistant-entity-behavior.js";
 import { IdentifyServer } from "../../../../behaviors/identify-server.js";
@@ -15,7 +17,7 @@ import { HaPowerTopologyServer } from "../../../../behaviors/power-topology-serv
 
 const PowerFeaturedBase = PowerBase.with("DirectCurrent");
 
-// The mapped batteryPowerEntity reports W, positive on discharge. Matter wants
+// The mapped batteryPowerEntity reports power, positive on discharge. Matter wants
 // imported power positive and exported negative, so the sign flips on the wire.
 // biome-ignore lint/correctness/noUnusedVariables: Used via namespace
 class EssPowerServer extends PowerFeaturedBase {
@@ -37,10 +39,16 @@ class EssPowerServer extends PowerFeaturedBase {
     if (!powerEntity) return;
 
     const stateProvider = this.agent.env.get(EntityStateProvider);
-    const watts = stateProvider.getNumericState(powerEntity);
-    if (watts == null) return;
+    const mw = mappedMilli(stateProvider, powerEntity, "power");
+    if (mw == null) {
+      // unavailable or unknown clears the reading instead of freezing the last one
+      if (stateProvider.getState(powerEntity) != null) {
+        applyPatchState(this.state, { activePower: null });
+      }
+      return;
+    }
 
-    applyPatchState(this.state, { activePower: Math.round(watts * -1000) });
+    applyPatchState(this.state, { activePower: -mw });
   }
 }
 
@@ -76,7 +84,7 @@ const EnergyFeaturedBase = EnergyBase.with(
   "ImportedEnergy",
 );
 
-// Lifetime battery throughput from the mapped batteryEnergyEntity (kWh -> mWh).
+// Lifetime battery throughput from the mapped batteryEnergyEntity, in mWh.
 // biome-ignore lint/correctness/noUnusedVariables: Used via namespace
 class EssEnergyServer extends EnergyFeaturedBase {
   declare state: EssEnergyServer.State;
@@ -97,10 +105,10 @@ class EssEnergyServer extends EnergyFeaturedBase {
     if (!energyEntity) return;
 
     const stateProvider = this.agent.env.get(EntityStateProvider);
-    const kwh = stateProvider.getNumericState(energyEntity);
-    if (kwh == null) return;
+    const mwh = mappedMilli(stateProvider, energyEntity, "energy");
+    if (mwh == null) return;
 
-    const energyImported = { energy: Math.round(kwh * 1_000_000) };
+    const energyImported = { energy: mwh };
     const changed = applyPatchState(this.state, {
       cumulativeEnergyImported: energyImported,
     });
@@ -144,11 +152,7 @@ const BatteryStorageEssBase = BatteryStorageDevice.with(
   HaPowerTopologyServer,
   PowerSourceServer({
     getBatteryPercent(entity) {
-      const state = entity.state;
-      if (state == null || Number.isNaN(+state)) {
-        return null;
-      }
-      return +state;
+      return numericState(entity.state);
     },
   }),
 );

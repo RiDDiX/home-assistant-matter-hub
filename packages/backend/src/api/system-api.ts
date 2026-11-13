@@ -1,4 +1,5 @@
-import { exec } from "node:child_process";
+import { exec, execFile } from "node:child_process";
+import fs from "node:fs";
 import os from "node:os";
 import { promisify } from "node:util";
 import v8 from "node:v8";
@@ -6,6 +7,7 @@ import { Logger } from "@matter/general";
 import express from "express";
 
 const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
 const logger = Logger.get("SystemApi");
 
 export interface NetworkInterface {
@@ -64,13 +66,8 @@ function detectEnvironment(): string {
     return "Docker";
   }
   // Check for common Docker indicators
-  try {
-    const fs = require("node:fs");
-    if (fs.existsSync("/.dockerenv")) {
-      return "Docker";
-    }
-  } catch {
-    // ignore
+  if (fs.existsSync("/.dockerenv")) {
+    return "Docker";
   }
   return "Standalone";
 }
@@ -82,6 +79,15 @@ export interface GithubLatestRelease {
   body?: string;
 }
 
+// releases/latest is the newest stable, an alpha ahead of it is not behind
+function isNewer(latest: string, current: string) {
+  const [a, b] = [latest, current].map((v) =>
+    v.split("-")[0].split(".").map(Number),
+  );
+  for (let i = 0; i < 3; i++) if (a[i] !== b[i]) return a[i] > b[i];
+  return current.includes("-") && !latest.includes("-");
+}
+
 export function toUpdateCheckResponse(
   version: string,
   data: GithubLatestRelease,
@@ -91,7 +97,7 @@ export function toUpdateCheckResponse(
   return {
     currentVersion: version,
     latestVersion,
-    updateAvailable: version !== "0.0.0-dev" && latestVersion !== version,
+    updateAvailable: version !== "0.0.0-dev" && isNewer(latestVersion, version),
     releaseUrl: data.html_url,
     publishedAt: data.published_at,
     releaseNotes: data.body || undefined,
@@ -99,7 +105,10 @@ export function toUpdateCheckResponse(
   };
 }
 
-export function systemApi(version: string): express.Router {
+export function systemApi(
+  version: string,
+  storageLocation: string,
+): express.Router {
   const router = express.Router();
 
   router.get("/update-check", async (_req, res) => {
@@ -128,7 +137,7 @@ export function systemApi(version: string): express.Router {
       const totalMem = os.totalmem();
       const freeMem = os.freemem();
       const usedMem = totalMem - freeMem;
-      const storageInfo = await getStorageInfo();
+      const storageInfo = await getStorageInfo(storageLocation);
 
       const cpus = os.cpus();
       const memUsage = process.memoryUsage();
@@ -221,15 +230,12 @@ function getNetworkInterfaces(): NetworkInterface[] {
   return interfaces;
 }
 
-async function getStorageInfo(): Promise<{
+async function getStorageInfo(pathToCheck: string): Promise<{
   total: number;
   used: number;
   free: number;
 }> {
   try {
-    // Determine the path to check - use data directory if available
-    const pathToCheck = getDataPath();
-
     if (os.platform() === "win32") {
       return await getWindowsStorageInfo(pathToCheck);
     } else {
@@ -239,34 +245,6 @@ async function getStorageInfo(): Promise<{
     logger.error("Failed to get storage info:", error);
     return { total: 0, used: 0, free: 0 };
   }
-}
-
-/**
- * Get the data path to check storage for.
- * For Add-on: /data
- * For Docker: DATA_PATH env or /data
- * For Standalone: current working directory
- */
-function getDataPath(): string {
-  // Home Assistant Add-on uses /data
-  if (process.env.SUPERVISOR_TOKEN || process.env.HASSIO_TOKEN) {
-    return "/data";
-  }
-  // Docker might use DATA_PATH env
-  if (process.env.DATA_PATH) {
-    return process.env.DATA_PATH;
-  }
-  // Check if /data exists (common Docker mount point)
-  try {
-    const fsSync = require("node:fs");
-    if (fsSync.existsSync("/data")) {
-      return "/data";
-    }
-  } catch {
-    // ignore
-  }
-  // Fallback to current working directory
-  return process.cwd();
 }
 
 /**
@@ -315,7 +293,7 @@ async function getUnixStorageInfo(
 ): Promise<{ total: number; used: number; free: number }> {
   try {
     // Use df with 1K blocks for accuracy, -P for POSIX output
-    const { stdout } = await execAsync(`df -Pk "${path}" 2>/dev/null`);
+    const { stdout } = await execFileAsync("df", ["-Pk", path]);
     const lines = stdout.trim().split("\n");
 
     if (lines.length >= 2) {

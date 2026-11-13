@@ -45,12 +45,8 @@ export interface RvcCleanModeServerInitialState {
 // biome-ignore lint/correctness/noUnusedVariables: Used by RvcCleanModeServer function
 class RvcCleanModeServerBase extends Base {
   declare state: RvcCleanModeServerBase.State;
+  declare internal: RvcCleanModeServerBase.Internal;
 
-  // Pending mode from a recent changeToMode command.
-  // Prevents stale HA state (from a different entity like select.xxx)
-  // from overwriting the mode before HA has confirmed the change.
-  private pendingMode?: number;
-  private pendingModeTimestamp = 0;
   private static readonly PENDING_MODE_TIMEOUT_MS = 10000;
 
   override async initialize() {
@@ -75,15 +71,16 @@ class RvcCleanModeServerBase extends Base {
     );
 
     let currentMode = reportedMode;
-    if (this.pendingMode !== undefined) {
-      const elapsed = Date.now() - this.pendingModeTimestamp;
+    const internal = this.internal;
+    if (internal.pendingMode !== undefined) {
+      const elapsed = Date.now() - internal.pendingModeTimestamp;
       if (
-        reportedMode === this.pendingMode ||
+        reportedMode === internal.pendingMode ||
         elapsed > RvcCleanModeServerBase.PENDING_MODE_TIMEOUT_MS
       ) {
-        this.pendingMode = undefined;
+        internal.pendingMode = undefined;
       } else {
-        currentMode = this.pendingMode;
+        currentMode = internal.pendingMode;
       }
     }
 
@@ -130,8 +127,8 @@ class RvcCleanModeServerBase extends Base {
         `for ${homeAssistant.entityId}`,
     );
 
-    this.pendingMode = newMode;
-    this.pendingModeTimestamp = Date.now();
+    this.internal.pendingMode = newMode;
+    this.internal.pendingModeTimestamp = Date.now();
     this.state.currentMode = newMode;
 
     const action = this.state.config.setCleanMode(newMode, this.agent);
@@ -150,6 +147,13 @@ class RvcCleanModeServerBase extends Base {
 }
 
 namespace RvcCleanModeServerBase {
+  // Behavior instances are per transaction, so the pending mode lives in
+  // internal state. It keeps stale HA state (for example from a select
+  // entity) from overwriting the mode before HA confirms the change.
+  export class Internal extends Base.Internal {
+    pendingMode?: number;
+    pendingModeTimestamp = 0;
+  }
   export class State extends Base.State {
     config!: RvcCleanModeServerConfig;
   }

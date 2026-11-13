@@ -5,11 +5,18 @@ import {
   type EntityMappingConfig,
   HomeAssistantMatcherType,
 } from "@home-assistant-matter-hub/common";
-import { Environment, type Logger, VariableService } from "@matter/general";
+import {
+  Environment,
+  type Logger,
+  Time,
+  VariableService,
+} from "@matter/general";
 import { VendorId } from "@matter/main";
 import { ServerNode } from "@matter/main/node";
+import { FabricManager, SessionManager } from "@matter/main/protocol";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { EntityEndpoint } from "../../matter/endpoints/entity-endpoint.js";
+import { LegacyEndpoint } from "../../matter/endpoints/legacy/legacy-endpoint.js";
 import { VacuumAreaSwitchEndpoint } from "../../matter/endpoints/legacy/vacuum/vacuum-area-switch.js";
 import {
   type HomeAssistantAction,
@@ -18,7 +25,12 @@ import {
 import type { EntityIdentityStorage } from "../storage/entity-identity-storage.js";
 import type { EntityMappingStorage } from "../storage/entity-mapping-storage.js";
 import { BridgeDataProvider } from "./bridge-data-provider.js";
-import { BridgeEndpointManager } from "./bridge-endpoint-manager.js";
+import {
+  BridgeEndpointManager,
+  ENDPOINT_REMOVAL_GRACE_MS,
+  removalDue,
+  selectsPartsList,
+} from "./bridge-endpoint-manager.js";
 import { BridgeRegistry } from "./bridge-registry.js";
 import { EntityStateProvider } from "./entity-state-provider.js";
 
@@ -94,6 +106,7 @@ interface FakeHa {
   areas: Map<string, string>;
   labels: unknown[];
   snapshotGeneration: number;
+  markRefreshIncomplete: ReturnType<typeof vi.fn>;
 }
 
 function makeHa(): FakeHa {
@@ -104,6 +117,7 @@ function makeHa(): FakeHa {
     areas: new Map(),
     labels: [],
     snapshotGeneration: 1,
+    markRefreshIncomplete: vi.fn(),
   };
   for (const id of [VACUUM, OTHER]) {
     ha.entities[id] = { entity_id: id };
@@ -117,6 +131,13 @@ function makeHa(): FakeHa {
     };
   }
   return ha;
+}
+
+function waitingLines(log: Logger): string[] {
+  return vi
+    .mocked(log.info)
+    .mock.calls.map((c) => String(c[0]))
+    .filter((line) => line.startsWith("No state in Home Assistant yet"));
 }
 
 function fakeLogger(): Logger {
@@ -216,7 +237,7 @@ async function buildManager(ha: FakeHa, patterns: string[] = ["vacuum.*"]) {
   );
   managers.push(manager);
   await server.add(manager.root);
-  return { manager, provider, mapping, log };
+  return { manager, provider, mapping, log, registry };
 }
 
 function switchNumbers(manager: BridgeEndpointManager): Record<string, number> {
@@ -296,6 +317,333 @@ describe("filter edits reconcile without the grace window (#468)", () => {
     ]);
   });
 
+  it("logs each controller fabric's subscriptions when a live device list moves", async () => {
+    const ha = makeHa();
+    const { manager, provider, log } = await buildManager(ha, ["vacuum.other"]);
+    const env = manager.root.env;
+    const maybeGet = env.maybeGet.bind(env);
+    vi.spyOn(env, "maybeGet").mockImplementation(((type: unknown) => {
+      if (type === FabricManager) {
+        return {
+          fabrics: [
+            { fabricIndex: 2, rootVendorId: 0x6006 },
+            { fabricIndex: 3, rootVendorId: 0x1349 },
+            { fabricIndex: 4, rootVendorId: 0xfff1 },
+          ],
+        };
+      }
+      if (type === SessionManager) {
+        const wildcard = {
+          subscriptionId: 0x10,
+          maxInterval: 60_000,
+          request: { attributeRequests: [{}] },
+        };
+        // one attribute on a bridged endpoint, PartsList changes miss it
+        const narrow = {
+          subscriptionId: 0xabcdef01,
+          maxInterval: 60_000,
+          request: {
+            attributeRequests: [
+              { endpointId: 5, clusterId: 6, attributeId: 0 },
+            ],
+          },
+        };
+        return {
+          sessions: [
+            {
+              fabric: { fabricIndex: 2 },
+              activeTimestamp: Time.nowUs - 3_000,
+              subscriptions: new Set([
+                wildcard,
+                { ...wildcard, subscriptionId: 0x11 },
+              ]),
+            },
+            { fabric: undefined, subscriptions: new Set() },
+            {
+              fabric: { fabricIndex: 4 },
+              activeTimestamp: Time.nowUs - 600_000,
+              subscriptions: new Set([narrow]),
+            },
+          ],
+        };
+      }
+      return maybeGet(type as Parameters<typeof maybeGet>[0]);
+    }) as typeof env.maybeGet);
+    const fabricLines = () =>
+      vi
+        .mocked(log.info)
+        .mock.calls.map((c) => String(c[0]))
+        .filter((m) => m.startsWith("Controller fabric"));
+
+    await manager.refreshDevices();
+    expect(mountedEntityIds(manager)).toEqual([OTHER]);
+    expect(fabricLines()).toEqual([]);
+
+    setFilter(provider, ["vacuum.*"]);
+    await manager.refreshDevices();
+    expect(fabricLines()).toEqual([
+      // a stalled run may read 4 s or more
+      expect.stringMatching(
+        /^Controller fabric 2 \(google 0x6006\): 1 session, 2 subscriptions \(sub# 00000010, 00000011\), last heard \d+ s ago$/,
+      ),
+      "Controller fabric 3 (apple 0x1349): 0 sessions, 0 subscriptions, not subscribed, it sees the new device list when it subscribes again",
+      "Controller fabric 4 (vendor 0xfff1): 1 session, 1 subscription (sub# abcdef01), last heard 10 min ago, silent past its report interval, device list not in its subscription",
+    ]);
+  });
+
+  it("selects the device list only through a PartsList path on the root or the aggregator", () => {
+    const parts = { clusterId: 0x1d, attributeId: 3 };
+    expect(selectsPartsList([{}], 1)).toBe(true);
+    expect(selectsPartsList([{ endpointId: 0, ...parts }], 1)).toBe(true);
+    expect(selectsPartsList([{ endpointId: 1, clusterId: 0x1d }], 1)).toBe(
+      true,
+    );
+    expect(selectsPartsList([{ attributeId: 3 }], 1)).toBe(true);
+    expect(selectsPartsList([{ endpointId: 2, ...parts }], 1)).toBe(false);
+    expect(selectsPartsList([{ endpointId: 0, clusterId: 6 }], 1)).toBe(false);
+    expect(
+      selectsPartsList([{ endpointId: 0, clusterId: 0x1d, attributeId: 0 }], 1),
+    ).toBe(false);
+    expect(selectsPartsList(undefined, 1)).toBe(false);
+  });
+
+  it("removes only after the grace, HA uptime and a newer snapshot", () => {
+    const grace = ENDPOINT_REMOVAL_GRACE_MS;
+    const now = 10 * grace;
+    const entry = { since: now - grace, generation: 4 };
+    expect(removalDue(entry, now, now - grace, 5)).toBe(true);
+    expect(removalDue({ ...entry, since: now - grace + 1 }, now, 0, 5)).toBe(
+      false,
+    );
+    expect(removalDue(entry, now, now - grace + 1, 5)).toBe(false);
+    expect(removalDue(entry, now, 0, 4)).toBe(false);
+  });
+
+  it("logs the entities newly waiting for a state in one line per pass", async () => {
+    const ha = makeHa();
+    delete ha.states[VACUUM];
+    for (let i = 1; i <= 6; i++) {
+      ha.entities[`vacuum.n${i}`] = { entity_id: `vacuum.n${i}` };
+    }
+    const { manager, log } = await buildManager(ha);
+
+    await manager.refreshDevices();
+    expect(waitingLines(log)).toEqual([
+      `No state in Home Assistant yet for 7 matched entities, they are added once they have one: ${VACUUM}, vacuum.n1, vacuum.n2, vacuum.n3, vacuum.n4 and 2 more`,
+    ]);
+
+    ha.entities["vacuum.late"] = { entity_id: "vacuum.late" };
+    await manager.refreshDevices();
+    expect(waitingLines(log)).toHaveLength(2);
+    expect(waitingLines(log)[1]).toBe(
+      "No state in Home Assistant yet for 1 matched entity, it is added once it has one: vacuum.late",
+    );
+    expect(manager.failedEntities).toHaveLength(8);
+  });
+
+  it("lists a matched entity without an HA state once and mounts it when the state lands", async () => {
+    const ha = makeHa();
+    const state = ha.states[VACUUM];
+    delete ha.states[VACUUM];
+    const { manager, log } = await buildManager(ha);
+
+    await expect(manager.refreshDevices()).resolves.toBe(true);
+    await expect(manager.refreshDevices()).resolves.toBe(true);
+    expect(mountedEntityIds(manager)).toEqual([OTHER]);
+    expect(manager.failedEntities.map((f) => [f.entityId, f.reason])).toEqual([
+      [VACUUM, "No state in Home Assistant yet"],
+    ]);
+    expect(waitingLines(log)).toEqual([
+      `No state in Home Assistant yet for 1 matched entity, it is added once it has one: ${VACUUM}`,
+    ]);
+
+    ha.states[VACUUM] = state;
+    await expect(manager.refreshDevices()).resolves.toBe(true);
+    expect(mountedEntityIds(manager)).toEqual([OTHER, VACUUM].sort());
+    expect(manager.failedEntities).toEqual([]);
+  });
+
+  it("reports a refresh with a failed add as incomplete and arms the registry retry until a later one mounts it", async () => {
+    const ha = makeHa();
+    const { manager } = await buildManager(ha);
+    const add = manager.root.add.bind(manager.root);
+    vi.spyOn(manager.root, "add")
+      .mockRejectedValueOnce(new Error("add failed"))
+      .mockImplementation(add);
+
+    await expect(manager.refreshDevices()).resolves.toBe(false);
+    expect(mountedEntityIds(manager)).toHaveLength(1);
+    expect(ha.markRefreshIncomplete).toHaveBeenCalledTimes(1);
+
+    await expect(manager.refreshDevices()).resolves.toBe(true);
+    expect(mountedEntityIds(manager)).toEqual([OTHER, VACUUM].sort());
+    expect(ha.markRefreshIncomplete).toHaveBeenCalledTimes(1);
+  });
+
+  it("arms the registry retry when the refresh itself throws", async () => {
+    const ha = makeHa();
+    const { manager, registry } = await buildManager(ha);
+    vi.spyOn(registry, "refresh").mockImplementationOnce(() => {
+      throw new Error("boom");
+    });
+
+    await expect(manager.refreshDevices()).rejects.toThrow("boom");
+    expect(ha.markRefreshIncomplete).toHaveBeenCalledTimes(1);
+
+    await expect(manager.refreshDevices()).resolves.toBe(true);
+    expect(ha.markRefreshIncomplete).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports a refresh with a failed create as incomplete until a later one mounts it", async () => {
+    const ha = makeHa();
+    const { manager } = await buildManager(ha);
+    vi.spyOn(LegacyEndpoint, "create").mockRejectedValueOnce(
+      new Error("create failed"),
+    );
+
+    await expect(manager.refreshDevices()).resolves.toBe(false);
+    expect(mountedEntityIds(manager)).toHaveLength(1);
+
+    await expect(manager.refreshDevices()).resolves.toBe(true);
+    expect(mountedEntityIds(manager)).toEqual([OTHER, VACUUM].sort());
+  });
+
+  it("warns once for a create that keeps failing", async () => {
+    const ha = makeHa();
+    const { manager, log } = await buildManager(ha);
+    const create = LegacyEndpoint.create.bind(LegacyEndpoint);
+    vi.spyOn(LegacyEndpoint, "create").mockImplementation(
+      async (...args: Parameters<typeof LegacyEndpoint.create>) => {
+        if (args[1] === VACUUM) throw new Error("create failed");
+        return create(...args);
+      },
+    );
+    const lines = (level: "warn" | "debug") =>
+      vi
+        .mocked(log[level])
+        .mock.calls.filter((c) =>
+          String(c[0]).startsWith(`Failed to create device ${VACUUM}`),
+        );
+
+    for (let i = 0; i < 3; i++) {
+      await expect(manager.refreshDevices()).resolves.toBe(false);
+    }
+    expect(lines("warn")).toHaveLength(1);
+    expect(lines("debug")).toHaveLength(2);
+    expect(mountedEntityIds(manager)).toEqual([OTHER]);
+  });
+
+  it("stops marking a refresh incomplete after three failures with one reason", async () => {
+    const ha = makeHa();
+    const { manager, log } = await buildManager(ha);
+    const create = LegacyEndpoint.create.bind(LegacyEndpoint);
+    let reason: string | undefined = "create failed";
+    vi.spyOn(LegacyEndpoint, "create").mockImplementation(
+      async (...args: Parameters<typeof LegacyEndpoint.create>) => {
+        if (args[1] === VACUUM && reason) throw new Error(reason);
+        return create(...args);
+      },
+    );
+    const failed = () => manager.failedEntities.map((f) => f.entityId);
+    const warns = () =>
+      vi
+        .mocked(log.warn)
+        .mock.calls.filter((c) =>
+          String(c[0]).startsWith(`Failed to create device ${VACUUM}`),
+        );
+
+    for (let i = 0; i < 3; i++) {
+      await expect(manager.refreshDevices()).resolves.toBe(false);
+    }
+    for (let i = 0; i < 2; i++) {
+      await expect(manager.refreshDevices()).resolves.toBe(true);
+      expect(failed()).toEqual([VACUUM]);
+    }
+    expect(warns()).toHaveLength(1);
+
+    reason = "another reason";
+    await expect(manager.refreshDevices()).resolves.toBe(false);
+    expect(warns()).toHaveLength(2);
+
+    reason = undefined;
+    await expect(manager.refreshDevices()).resolves.toBe(true);
+    expect(mountedEntityIds(manager)).toEqual([OTHER, VACUUM].sort());
+
+    // a success starts the count over
+    reason = "create failed";
+    vi.mocked(log.warn).mockClear();
+    const robot = [...manager.root.parts].find(
+      (p) => (p as EntityEndpoint).entityId === VACUUM,
+    );
+    await robot?.close();
+    await expect(manager.refreshDevices()).resolves.toBe(false);
+    expect(warns()).toHaveLength(1);
+  });
+
+  it("logs an add that keeps failing in full once and stops marking it incomplete", async () => {
+    const ha = makeHa();
+    const { manager, log } = await buildManager(ha);
+    const add = manager.root.add.bind(manager.root);
+    vi.spyOn(manager.root, "add").mockImplementation(((ep: EntityEndpoint) => {
+      if (ep.entityId === VACUUM) throw new Error("add failed");
+      return add(ep);
+    }) as typeof manager.root.add);
+    const lines = (level: "warn" | "debug") =>
+      vi
+        .mocked(log[level])
+        .mock.calls.filter((c) =>
+          String(c[0]).startsWith(`Failed to add endpoint for ${VACUUM}`),
+        );
+
+    for (let i = 0; i < 3; i++) {
+      await expect(manager.refreshDevices()).resolves.toBe(false);
+    }
+    await expect(manager.refreshDevices()).resolves.toBe(true);
+    expect(manager.failedEntities.map((f) => f.entityId)).toEqual([VACUUM]);
+    expect(lines("warn")).toHaveLength(1);
+    expect(lines("debug")).toHaveLength(3);
+  });
+
+  it("logs a failure in full again after the entity left the bridge and came back", async () => {
+    const ha = makeHa();
+    const { manager, provider, log } = await buildManager(ha);
+    const create = LegacyEndpoint.create.bind(LegacyEndpoint);
+    vi.spyOn(LegacyEndpoint, "create").mockImplementation(
+      async (...args: Parameters<typeof LegacyEndpoint.create>) => {
+        if (args[1] === VACUUM) throw new Error("create failed");
+        return create(...args);
+      },
+    );
+    const warns = () =>
+      vi
+        .mocked(log.warn)
+        .mock.calls.filter((c) =>
+          String(c[0]).startsWith(`Failed to create device ${VACUUM}`),
+        );
+
+    await manager.refreshDevices();
+    setFilter(provider, ["vacuum.other"]);
+    await manager.refreshDevices();
+    setFilter(provider, ["vacuum.*"]);
+    await expect(manager.refreshDevices()).resolves.toBe(false);
+    expect(warns()).toHaveLength(2);
+  });
+
+  it("reports each queued refresh by its own outcome", async () => {
+    const ha = makeHa();
+    const { manager } = await buildManager(ha);
+    const add = manager.root.add.bind(manager.root);
+    vi.spyOn(manager.root, "add")
+      .mockRejectedValueOnce(new Error("add failed"))
+      .mockImplementation(add);
+
+    const first = manager.refreshDevices();
+    const second = manager.refreshDevices();
+    await expect(first).resolves.toBe(false);
+    await expect(second).resolves.toBe(true);
+    expect(mountedEntityIds(manager)).toEqual([OTHER, VACUUM].sort());
+  });
+
   it("keeps the grace window for an entity that vanished from HA itself", async () => {
     const ha = makeHa();
     const { manager } = await buildManager(ha);
@@ -347,5 +695,43 @@ describe("filter edits reconcile without the grace window (#468)", () => {
     setFilter(provider, ["vacuum.*"]);
     await manager.refreshDevices();
     expect(switchNumbers(manager)).toEqual(before);
+  });
+
+  it("an isolation during a refresh leaves no room switch behind", async () => {
+    const ha = makeHa();
+    ha.states[VACUUM].attributes.rooms = { "16": "Kitchen", "17": "Bedroom" };
+    const { manager, mapping } = await buildManager(ha);
+    mapping.put("bridge-468", { entityId: VACUUM, vacuumRoomSwitches: true });
+    const root = manager.root;
+    const add = root.add.bind(root);
+    let reached!: () => void;
+    const atSwitchAdd = new Promise<void>((r) => {
+      reached = r;
+    });
+    let release!: () => void;
+    const held = new Promise<void>((r) => {
+      release = r;
+    });
+    let first = true;
+    vi.spyOn(root, "add").mockImplementation((async (
+      ...args: Parameters<typeof add>
+    ) => {
+      if (first && args[0] instanceof VacuumAreaSwitchEndpoint) {
+        first = false;
+        reached();
+        await held;
+      }
+      return add(...args);
+    }) as typeof root.add);
+
+    const refresh = manager.refreshDevices();
+    await atSwitchAdd;
+    const isolation = manager.isolateEntity(VACUUM);
+    await new Promise((r) => setTimeout(r, 50));
+    release();
+    await Promise.all([refresh, isolation]);
+
+    expect(mountedEntityIds(manager)).toEqual([OTHER]);
+    expect(switchNumbers(manager)).toEqual({});
   });
 });

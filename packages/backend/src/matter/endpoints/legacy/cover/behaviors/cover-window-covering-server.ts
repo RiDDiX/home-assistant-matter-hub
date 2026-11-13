@@ -112,37 +112,12 @@ export const deviceClassMapping = (entity: HomeAssistantEntityState) => {
 };
 
 /**
- * Platforms known to use Matter-compatible position semantics (0=open, 100=closed).
- * These integrations report position as "% closed" which matches Matter's expectations.
- * NOTE: Overkiz/Somfy was removed - it uses standard HA semantics (0=closed, 100=open).
- * See GitHub Issue #90.
- */
-const MATTER_SEMANTIC_PLATFORMS: string[] = [
-  // Currently empty - no known platforms use Matter semantics by default
-  // Add platforms here only if confirmed to use 0=open, 100=closed
-];
-
-/**
- * Checks if the entity uses Matter-compatible position semantics (0=open, 100=closed).
- * Currently no platforms are known to use this by default.
- */
-const usesMatterSemantics = (agent: Agent): boolean => {
-  const homeAssistant = agent.get(HomeAssistantEntityBehavior);
-  const platform = homeAssistant.entity.registry?.platform?.toLowerCase();
-  if (platform && MATTER_SEMANTIC_PLATFORMS.includes(platform)) {
-    return true;
-  }
-  return false;
-};
-
-/**
  * Adjusts position when READING from HA to report to Matter controllers.
  * Delegates to the pure utility function for testability.
  */
 const adjustPositionForReading = (position: number, agent: Agent) => {
   const { featureFlags } = agent.env.get(BridgeDataProvider);
-  const matterSem = usesMatterSemantics(agent);
-  const result = adjustReading(position, featureFlags, matterSem);
+  const result = adjustReading(position, featureFlags);
   logger.debug(`adjustPositionForReading: HA=${position}%, result=${result}%`);
   return result;
 };
@@ -153,8 +128,7 @@ const adjustPositionForReading = (position: number, agent: Agent) => {
  */
 const adjustPositionForWriting = (position: number, agent: Agent) => {
   const { featureFlags } = agent.env.get(BridgeDataProvider);
-  const matterSem = usesMatterSemantics(agent);
-  return adjustWriting(position, featureFlags, matterSem);
+  return adjustWriting(position, featureFlags);
 };
 
 /**
@@ -194,8 +168,7 @@ const diagnosticFlags = (agent: Agent): string => {
   const useHaPercentage =
     featureFlags?.coverUseHomeAssistantPercentage === true;
   const doNotInvert = featureFlags?.coverDoNotInvertPercentage === true;
-  const skipInversion =
-    useHaPercentage || doNotInvert || usesMatterSemantics(agent);
+  const skipInversion = useHaPercentage || doNotInvert;
   const spaceInverted =
     !skipInversion && featureFlags?.coverSwapOpenClose !== true;
   return `useHaPercentage=${useHaPercentage} doNotInvert=${doNotInvert} swapDispatch=${shouldSwapOpenClose(agent)} spaceInverted=${spaceInverted}`;
@@ -328,6 +301,10 @@ const closeTiltAction = (agent: Agent) => {
 
 const config: WindowCoveringConfig = {
   getCurrentLiftPosition: (entity, agent) => {
+    // Lift writes go to tilt here (#350), so lift has to read tilt back
+    if (liftShouldUseTilt(attributes(entity).supported_features ?? 0)) {
+      return config.getCurrentTiltPosition(entity, agent);
+    }
     let position = attributes(entity).current_position;
     if (position == null) {
       const coverState = entity.state as CoverDeviceState;

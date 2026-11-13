@@ -6,6 +6,7 @@ import {
 import Add from "@mui/icons-material/Add";
 import DeleteOutline from "@mui/icons-material/DeleteOutline";
 import Launch from "@mui/icons-material/Launch";
+import RouterIcon from "@mui/icons-material/Router";
 import Alert from "@mui/material/Alert";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
@@ -73,7 +74,7 @@ export const StandaloneDevicesPage = () => {
   const { t } = useTranslation();
   const notifications = useNotifications();
   const dispatch = useAppDispatch();
-  const { content: bridges, isLoading } = useBridges();
+  const { content: bridges, isLoading, error } = useBridges();
   const createBridge = useCreateBridge();
   const deleteBridge = useDeleteBridge();
 
@@ -173,16 +174,18 @@ export const StandaloneDevicesPage = () => {
   );
 
   return (
-    <Box sx={{ p: 2 }}>
+    <Box>
       <Box
         sx={{
           display: "flex",
-          justifyContent: "space-between",
           alignItems: "center",
+          flexWrap: "wrap",
+          gap: 2,
           mb: 1,
         }}
       >
-        <Typography variant="h5" component="h1">
+        <RouterIcon color="primary" fontSize="large" />
+        <Typography variant="h5" component="h1" sx={{ flexGrow: 1 }}>
           {t("standaloneDevices.title", "Standalone Devices")}
         </Typography>
         <Button
@@ -201,8 +204,15 @@ export const StandaloneDevicesPage = () => {
         )}
       </Typography>
 
-      {isLoading && !bridges ? (
-        <CircularProgress />
+      {error && (
+        <Alert severity="error" sx={{ mb: 2 }}>
+          {t("bridge.couldNotLoad")}
+          {error.message ? `: ${error.message}` : ""}
+        </Alert>
+      )}
+
+      {!bridges ? (
+        isLoading && <CircularProgress />
       ) : devices.length === 0 ? (
         <Alert severity="info">
           {t(

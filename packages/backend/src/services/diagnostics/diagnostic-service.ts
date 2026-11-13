@@ -92,18 +92,17 @@ export class DiagnosticService {
           }
         }
 
-        const entities = bridge.aggregator
-          ? this.collectEntities(bridge.aggregator)
-          : [];
+        // a server mode bridge has no aggregator, its device sits on the node
+        const entities = this.collectEntities(
+          bridge.aggregator ?? bridge.server,
+        );
 
         return {
           bridgeId: data.id,
           bridgeName: data.name,
           status: data.status,
-          uptime: Math.floor((Date.now() - this.startTime) / 1000),
           entityCount: data.deviceCount,
           sessionCount: data.commissioning?.fabrics?.length ?? 0,
-          subscriptionCount: 0,
           featureFlags,
           entities,
         };

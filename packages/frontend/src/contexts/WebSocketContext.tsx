@@ -21,13 +21,26 @@ interface WebSocketMessage {
 
 interface WebSocketContextValue {
   isConnected: boolean;
+  // false until the first close, so the first handshake is not shown as lost
+  closedOnce: boolean;
   error: Error | null;
 }
 
 const WebSocketContext = createContext<WebSocketContextValue>({
   isConnected: false,
+  closedOnce: false,
   error: null,
 });
+
+export function wsUrl() {
+  const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+  // Use the base URL from the document to support Home Assistant ingress
+  const base = document.querySelector("base")?.href || window.location.origin;
+  const baseUrl = new URL(base);
+  return `${protocol}//${baseUrl.host}${baseUrl.pathname}api/ws`
+    .replace(/\/+/g, "/")
+    .replace(":/", "://");
+}
 
 export function useWebSocketStatus() {
   return useContext(WebSocketContext);
@@ -40,6 +53,7 @@ interface WebSocketProviderProps {
 export function WebSocketProvider({ children }: WebSocketProviderProps) {
   const dispatch = useAppDispatch();
   const [isConnected, setIsConnected] = useState(false);
+  const [closedOnce, setClosedOnce] = useState(false);
   const [error, setError] = useState<Error | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(
@@ -72,16 +86,8 @@ export function WebSocketProvider({ children }: WebSocketProviderProps) {
       return;
     }
 
-    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    // Use the base URL from the document to support Home Assistant ingress
-    const base = document.querySelector("base")?.href || window.location.origin;
-    const baseUrl = new URL(base);
-    const wsUrl = `${protocol}//${baseUrl.host}${baseUrl.pathname}api/ws`
-      .replace(/\/+/g, "/")
-      .replace(":/", "://");
-
     try {
-      const ws = new WebSocket(wsUrl);
+      const ws = new WebSocket(wsUrl());
       wsRef.current = ws;
 
       ws.onopen = () => {
@@ -99,7 +105,9 @@ export function WebSocketProvider({ children }: WebSocketProviderProps) {
       };
 
       ws.onclose = () => {
+        if (wsRef.current !== ws) return;
         setIsConnected(false);
+        setClosedOnce(true);
         wsRef.current = null;
         reconnectTimeoutRef.current = setTimeout(connect, 3000);
       };
@@ -120,12 +128,18 @@ export function WebSocketProvider({ children }: WebSocketProviderProps) {
       if (reconnectTimeoutRef.current) {
         clearTimeout(reconnectTimeoutRef.current);
       }
-      wsRef.current?.close();
+      const ws = wsRef.current;
+      wsRef.current = null;
+      if (ws) {
+        ws.onclose = null;
+        ws.onerror = null;
+        ws.close();
+      }
     };
   }, [connect]);
 
   return (
-    <WebSocketContext.Provider value={{ isConnected, error }}>
+    <WebSocketContext.Provider value={{ isConnected, closedOnce, error }}>
       {children}
     </WebSocketContext.Provider>
   );

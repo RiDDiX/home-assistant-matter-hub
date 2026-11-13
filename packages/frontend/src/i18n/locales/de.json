@@ -165,7 +165,9 @@
     "bridgeStatusRunning": "{{running}} läuft",
     "bridgeStatusFailed": "{{failed}} fehlgeschlagen",
     "devicesFailed": "{{count}} fehlgeschlagen",
-    "uptimeFormat": "{{time}}"
+    "uptimeFormat": "{{time}}",
+    "deviceCount": "{{count}} Geräte",
+    "fabricCount": "{{count}} Fabrics"
   },
   "bridge": {
     "name": "Bridge-Name",
@@ -448,7 +450,7 @@
     "autoBackupLabel": "Automatisches Backup",
     "autoBackupDesc": "Erstellt automatisch ein vollständiges Backup wenn die Anwendung heruntergefahren oder neu gestartet wird.",
     "retentionCount": "Backups behalten",
-    "retentionCountDesc": "Anzahl der aufzubewahrenden Backups (älteste werden automatisch gelöscht)"
+    "retentionCountDesc": "Anzahl der aufzubewahrenden automatischen Backups (älteste werden automatisch gelöscht, manuelle Backups bleiben erhalten)"
   },
   "notFound": {
     "title": "Seite nicht gefunden",
@@ -472,7 +474,8 @@
     "sortType": "Gerätetyp",
     "sortName": "Name",
     "deviceCount": "{{count}} Gerät(e)",
-    "filteredCount": "{{filtered}} von {{total}} Geräten"
+    "filteredCount": "{{filtered}} von {{total}} Geräten",
+    "fabricCount": "{{count}} Fabrics"
   },
   "diagnostics": {
     "title": "Live-Diagnose",
@@ -515,7 +518,8 @@
     "loadFailed": "Bereiche konnten nicht geladen werden",
     "creating": "Wird erstellt...",
     "created": "Erstellt",
-    "unknownError": "Unbekannter Fehler"
+    "unknownError": "Unbekannter Fehler",
+    "alreadyExists": "Hat schon eine Bridge, übersprungen"
   },
   "lockCredentials": {
     "title": "Schloss-Zugangsdaten",
@@ -528,7 +532,6 @@
     "namePlaceholder": "Haustür",
     "nameHelperText": "Anzeigename für diese Zugangsdaten",
     "entityRequired": "Entity-ID ist erforderlich",
-    "pinLength": "PIN muss 4-8 Ziffern lang sein",
     "pinDigitsOnly": "PIN darf nur Ziffern enthalten",
     "saveFailed": "Speichern fehlgeschlagen",
     "loadFailed": "Zugangsdaten konnten nicht geladen werden",
@@ -537,7 +540,8 @@
     "enable": "Aktivieren",
     "disable": "Deaktivieren",
     "confirmDeleteTitle": "Zugangsdaten löschen",
-    "confirmDeleteMessage": "Dies löscht die PIN-Zugangsdaten für {{entity}} dauerhaft. Dies kann nicht rückgängig gemacht werden."
+    "confirmDeleteMessage": "Dies löscht die PIN-Zugangsdaten für {{entity}} dauerhaft. Dies kann nicht rückgängig gemacht werden.",
+    "pinHelperText": "PIN-Code für dieses Schloss, die Länge folgt der PIN-Längen-Einstellung des Schlosses"
   },
   "labels": {
     "title": "Filterreferenz",

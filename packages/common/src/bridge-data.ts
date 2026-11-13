@@ -6,7 +6,6 @@ interface AllBridgeFeatureFlags {
   readonly coverUseHomeAssistantPercentage: boolean;
   readonly coverSwapOpenClose: boolean;
   readonly includeHiddenEntities: boolean;
-  readonly vacuumIncludeUnnamedRooms: boolean;
   /**
    * Server Mode: Expose devices directly as standalone Matter devices instead of bridged devices.
    * This is required for Apple Home to properly support Siri voice commands for Robot Vacuums (RVC).
@@ -60,6 +59,14 @@ interface AllBridgeFeatureFlags {
    */
   readonly productNameFromNodeLabel: boolean;
   /**
+   * Product Name from Model: Report the Home Assistant device model (e.g.
+   * "Smart Lock Pro") as the Matter productName instead of the model_id
+   * (e.g. "178"). Apple Home shows productName as the model.
+   * customProductName and productNameFromNodeLabel still take precedence.
+   * Default: false (disabled)
+   */
+  readonly productNameFromModel: boolean;
+  /**
    * Prefer Entity Registry Name: Use the entity registry name (or original_name)
    * as nodeLabel instead of the composed friendly_name. Since Home Assistant
    * 2026.4, friendly_name is prefixed with the device name, which breaks voice
@@ -76,14 +83,11 @@ interface AllBridgeFeatureFlags {
    * Amazon Alexa REQUIRES PowerController (mapped from OnOff) for robotic vacuums.
    * Without it, the vacuum commissions but never appears in the Alexa app.
    *
-   * In Server Mode: OnOff is included automatically when this flag is unset.
-   * Set to false explicitly to disable (e.g. Apple Home shows "Updating").
-   *
-   * In Bridge Mode: OnOff is excluded by default. Set to true to enable for Alexa.
+   * OnOff is off by default in both modes and only included when this flag is
+   * true (it is not part of RVC device type 0x74, and Alexa rejects it, #185/#183).
    *
    * NOTE: This field intentionally has no schema default so that RJSF does not
-   * write false into new bridge configs, which would override the server-mode
-   * default-to-true logic in isServerModeVacuumOnOffEnabled().
+   * write false into new bridge configs.
    */
   readonly vacuumOnOff: boolean;
   /**
@@ -143,6 +147,8 @@ interface AllBridgeFeatureFlags {
    * blind session rotation would. Targets the Apple "Updating" wedge where the
    * controller keeps acking pushed reports but stops consuming data. A false
    * positive costs only a transparent re-CASE, the same as blind rotation.
+   * Not for Google Home: Google hubs send no requests between subscriptions,
+   * so it rotates a healthy session about every 50min (#526).
    * Default: false (disabled)
    */
   readonly wedgeWatchdog: boolean;

@@ -18,6 +18,7 @@ import Stack from "@mui/material/Stack";
 import Tooltip from "@mui/material/Tooltip";
 import Typography from "@mui/material/Typography";
 import { useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { collectLeafEndpoints } from "../endpoints/collect-leaf-endpoints";
 import { getEndpointName } from "../endpoints/EndpointName";
 
@@ -118,6 +119,7 @@ export interface DiagnosticsCardProps {
 }
 
 export const DiagnosticsCard = ({ devices }: DiagnosticsCardProps) => {
+  const { t } = useTranslation();
   const [showUnavailable, setShowUnavailable] = useState(false);
   const [showBatteries, setShowBatteries] = useState(false);
   const [showMappings, setShowMappings] = useState(false);
@@ -154,7 +156,7 @@ export const DiagnosticsCard = ({ devices }: DiagnosticsCardProps) => {
             <MonitorHeartIcon />
           </Avatar>
           <Typography variant="h6" sx={{ flexGrow: 1 }}>
-            Diagnostics
+            {t("bridgeUi.diagnostics")}
           </Typography>
         </Box>
 
@@ -168,7 +170,7 @@ export const DiagnosticsCard = ({ devices }: DiagnosticsCardProps) => {
         >
           <Chip
             icon={<CheckCircleIcon />}
-            label={`${healthy} Healthy`}
+            label={t("bridgeUi.healthy", { count: healthy })}
             color="success"
             size="small"
             variant="outlined"
@@ -176,7 +178,7 @@ export const DiagnosticsCard = ({ devices }: DiagnosticsCardProps) => {
           {unavailable.length > 0 && (
             <Chip
               icon={<WarningAmberIcon />}
-              label={`${unavailable.length} Unavailable`}
+              label={t("bridgeUi.unavailable", { count: unavailable.length })}
               color="warning"
               size="small"
               variant="outlined"
@@ -187,7 +189,7 @@ export const DiagnosticsCard = ({ devices }: DiagnosticsCardProps) => {
           {withBattery.length > 0 && (
             <Chip
               icon={<BatteryFullIcon />}
-              label={`${withBattery.length} Battery`}
+              label={t("bridgeUi.battery", { count: withBattery.length })}
               color="info"
               size="small"
               variant="outlined"
@@ -198,7 +200,7 @@ export const DiagnosticsCard = ({ devices }: DiagnosticsCardProps) => {
           {withMappings.length > 0 && (
             <Chip
               icon={<LinkIcon />}
-              label={`${withMappings.length} Auto-Mapped`}
+              label={t("bridgeUi.autoMapped", { count: withMappings.length })}
               size="small"
               variant="outlined"
               onClick={() => setShowMappings(!showMappings)}
@@ -211,7 +213,7 @@ export const DiagnosticsCard = ({ devices }: DiagnosticsCardProps) => {
         <Collapse in={showUnavailable && unavailable.length > 0}>
           <Divider sx={{ mb: 1 }} />
           <Typography variant="subtitle2" color="warning.main" gutterBottom>
-            Unavailable Entities
+            {t("bridgeUi.unavailableEntities")}
           </Typography>
           <Stack spacing={0.5} sx={{ mb: 1 }}>
             {unavailable.map((d) => (
@@ -243,7 +245,7 @@ export const DiagnosticsCard = ({ devices }: DiagnosticsCardProps) => {
         <Collapse in={showBatteries && withBattery.length > 0}>
           <Divider sx={{ mb: 1 }} />
           <Typography variant="subtitle2" color="info.main" gutterBottom>
-            Battery Levels
+            {t("bridgeUi.batteryLevels")}
           </Typography>
           <Stack spacing={1} sx={{ mb: 1 }}>
             {withBattery
@@ -289,7 +291,7 @@ export const DiagnosticsCard = ({ devices }: DiagnosticsCardProps) => {
         <Collapse in={showMappings && withMappings.length > 0}>
           <Divider sx={{ mb: 1 }} />
           <Typography variant="subtitle2" gutterBottom>
-            Auto-Mapped Entities
+            {t("bridgeUi.autoMappedEntities")}
           </Typography>
           <Stack spacing={0.5} sx={{ mb: 1 }}>
             {withMappings.map((d) => (

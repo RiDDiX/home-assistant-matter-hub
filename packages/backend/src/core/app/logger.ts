@@ -24,7 +24,7 @@ export const MATTER_TRAFFIC_FACILITIES = new Set([
   "MessageExchange",
   "MessageChannel",
   "ServerSubscription",
-  "IncomingInteractionServerMessenger",
+  "InteractionMessenger",
   "ExchangeManager",
   // Rejected invokes (UnsupportedEndpoint and friends) log here at INFO; a
   // controller aiming at a stale endpoint number is invisible without it (#423).
@@ -34,6 +34,10 @@ export const MATTER_TRAFFIC_FACILITIES = new Set([
   "CaseServer",
   "PaseServer",
   "FailsafeContext",
+  // Camera plugin, so the export shows WebRTC offers and stream setup (#539).
+  "CameraPlugin",
+  "CameraWebRtc",
+  "CameraWebRtcRequestor",
 ]);
 
 export function categoryFor(facility: string): string | undefined {

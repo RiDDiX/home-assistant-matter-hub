@@ -141,7 +141,9 @@
     "bridgeStatusRunning": "{{running}} en ejecución",
     "bridgeStatusFailed": "{{failed}} fallidos",
     "devicesFailed": "{{count}} fallidos",
-    "uptimeFormat": "{{time}}"
+    "uptimeFormat": "{{time}}",
+    "deviceCount": "{{count}} Dispositivos",
+    "fabricCount": "{{count}} Fabrics"
   },
   "bridge": {
     "name": "Nombre del Bridge",
@@ -352,7 +354,8 @@
     "sortType": "Tipo de dispositivo",
     "sortName": "Nombre",
     "deviceCount": "{{count}} dispositivo(s)",
-    "filteredCount": "{{filtered}} de {{total}} dispositivos"
+    "filteredCount": "{{filtered}} de {{total}} dispositivos",
+    "fabricCount": "{{count}} Fabrics"
   },
   "diagnostics": {
     "title": "Diagnósticos en vivo",
@@ -408,7 +411,6 @@
     "namePlaceholder": "Puerta principal",
     "nameHelperText": "Nombre descriptivo para esta credencial",
     "entityRequired": "El ID de entidad es obligatorio",
-    "pinLength": "El PIN debe tener entre 4 y 8 dígitos",
     "pinDigitsOnly": "El PIN solo debe contener dígitos",
     "saveFailed": "Error al guardar",
     "loadFailed": "Error al cargar credenciales",
@@ -497,8 +499,7 @@
     "settings": "Configuración de copia de seguridad",
     "autoBackupLabel": "Copia de seguridad automática",
     "autoBackupDesc": "Crea automáticamente una copia de seguridad completa cuando la aplicación se apaga o reinicia.",
-    "retentionCount": "Conservar copias de seguridad",
-    "retentionCountDesc": "Número de copias de seguridad a conservar (las más antiguas se eliminan automáticamente)"
+    "retentionCount": "Conservar copias de seguridad"
   },
   "networkMap": {
     "title": "Mapa de red",

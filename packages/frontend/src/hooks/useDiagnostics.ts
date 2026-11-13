@@ -4,6 +4,7 @@ import type {
   WebSocketMessage,
 } from "@home-assistant-matter-hub/common";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { wsUrl } from "../contexts/WebSocketContext.tsx";
 
 const MAX_EVENTS = 200;
 
@@ -19,14 +20,7 @@ export function useDiagnostics() {
   const connect = useCallback(() => {
     if (wsRef.current?.readyState === WebSocket.OPEN) return;
 
-    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const base = document.querySelector("base")?.href || window.location.origin;
-    const baseUrl = new URL(base);
-    const wsUrl = `${protocol}//${baseUrl.host}${baseUrl.pathname}api/ws`
-      .replace(/\/+/g, "/")
-      .replace(":/", "://");
-
-    const ws = new WebSocket(wsUrl);
+    const ws = new WebSocket(wsUrl());
     wsRef.current = ws;
 
     ws.onopen = () => {
@@ -66,9 +60,15 @@ export function useDiagnostics() {
     connect();
     return () => {
       clearTimeout(reconnectRef.current);
-      if (wsRef.current) {
-        wsRef.current.send(JSON.stringify({ type: "unsubscribe_diagnostics" }));
-        wsRef.current.close();
+      const ws = wsRef.current;
+      if (ws) {
+        // no reconnect after unmount
+        ws.onclose = null;
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: "unsubscribe_diagnostics" }));
+        }
+        ws.close();
+        wsRef.current = null;
       }
     };
   }, [connect]);

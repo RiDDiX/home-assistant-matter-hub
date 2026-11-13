@@ -13,6 +13,7 @@ import ListItemText from "@mui/material/ListItemText";
 import Stack from "@mui/material/Stack";
 import Typography from "@mui/material/Typography";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 
 interface FilterPreviewProps {
   filter: {
@@ -20,10 +21,12 @@ interface FilterPreviewProps {
     exclude: Array<{ type: string; value: string }>;
     includeMode?: string;
   };
+  includeHiddenEntities?: boolean;
 }
 
 interface PreviewResult {
   total: number;
+  domains: Record<string, number>;
   entities: Array<{
     entity_id: string;
     friendly_name?: string;
@@ -44,6 +47,7 @@ const domainToMatterType: Record<string, string> = {
   media_player: "Speaker / Video Player",
   vacuum: "Robot Vacuum Cleaner",
   humidifier: "Humidifier",
+  lawn_mower: "Robotic Lawn Mower",
   valve: "Water Valve",
   alarm_control_panel: "On/Off Plug-in Unit",
   event: "Generic Switch",
@@ -69,32 +73,40 @@ const tryParseJson = (text: string): unknown => {
   }
 };
 
-export function FilterPreview({ filter }: FilterPreviewProps) {
+export function FilterPreview({
+  filter,
+  includeHiddenEntities,
+}: FilterPreviewProps) {
+  const { t } = useTranslation();
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<PreviewResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const filterJsonRef = useRef<string>("");
+  const requestRef = useRef(0);
 
   const fetchPreview = useCallback(async () => {
+    // a slow answer for an older filter must not replace the newer one
+    const request = ++requestRef.current;
     setLoading(true);
     setError(null);
     try {
       const response = await fetch("api/matter/filter-preview", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(filter),
+        body: JSON.stringify({ ...filter, includeHiddenEntities }),
       });
 
       const text = await response.text();
+      if (request !== requestRef.current) return;
       const parsed = tryParseJson(text);
 
       if (!response.ok) {
         const errorMessage =
           typeof parsed === "object" && parsed !== null && "error" in parsed
             ? String((parsed as { error?: unknown }).error)
-            : text || "Failed to fetch preview";
+            : text || t("filterPreview.fetchFailed");
         throw new Error(errorMessage);
       }
 
@@ -102,11 +114,13 @@ export function FilterPreview({ filter }: FilterPreviewProps) {
       setResult(data);
       setExpanded(true);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Unknown error");
+      if (request === requestRef.current) {
+        setError(e instanceof Error ? e.message : t("common.unknown"));
+      }
     } finally {
-      setLoading(false);
+      if (request === requestRef.current) setLoading(false);
     }
-  }, [filter]);
+  }, [filter, includeHiddenEntities, t]);
 
   // Auto-refresh when filter changes (debounced 800ms)
   useEffect(() => {
@@ -115,55 +129,52 @@ export function FilterPreview({ filter }: FilterPreviewProps) {
       filter.include.some((f) => f.type && f.value);
 
     if (!hasFilters) {
+      requestRef.current++;
+      setLoading(false);
       setResult(null);
       setExpanded(false);
+      filterJsonRef.current = "";
       return;
     }
 
-    const newJson = JSON.stringify(filter);
+    const newJson = JSON.stringify({ ...filter, includeHiddenEntities });
     if (newJson === filterJsonRef.current) return;
-    filterJsonRef.current = newJson;
 
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => {
+      // only mark it fetched once the request really goes out, another edit
+      // can cancel this timer
+      filterJsonRef.current = newJson;
       fetchPreview();
     }, 800);
 
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
     };
-  }, [filter, fetchPreview]);
+  }, [filter, includeHiddenEntities, fetchPreview]);
 
-  const domainCounts = result
-    ? result.entities.reduce(
-        (acc, e) => {
-          acc[e.domain] = (acc[e.domain] || 0) + 1;
-          return acc;
-        },
-        {} as Record<string, number>,
-      )
-    : {};
+  // counted server side, the entity list stops at 100
+  const domainCounts = result?.domains ?? {};
 
-  const warnings: string[] = [];
+  const warnings: { text: string; vacuum?: boolean }[] = [];
   if (result) {
-    const hasVacuum = result.entities.some((e) => e.domain === "vacuum");
-    if (hasVacuum) {
-      warnings.push(
-        "This filter includes a vacuum. Consider using Server Mode (standalone device node) for Apple Home/Alexa compatibility.",
-      );
+    if (domainCounts.vacuum) {
+      warnings.push({ text: t("filterPreview.vacuumHint"), vacuum: true });
     }
     if (result.total > 50) {
-      warnings.push(
-        `${result.total} entities is a large number. Consider splitting across multiple bridges for better stability.`,
-      );
+      warnings.push({
+        text: t("filterPreview.largeHint", { count: result.total }),
+      });
     }
     const unsupportedDomains = Object.keys(domainCounts).filter(
       (d) => !domainToMatterType[d],
     );
     if (unsupportedDomains.length > 0) {
-      warnings.push(
-        `Unsupported domains will be skipped: ${unsupportedDomains.join(", ")}`,
-      );
+      warnings.push({
+        text: t("filterPreview.unsupportedDomains", {
+          domains: unsupportedDomains.join(", "),
+        }),
+      });
     }
   }
 
@@ -176,7 +187,7 @@ export function FilterPreview({ filter }: FilterPreviewProps) {
         disabled={loading}
         size="small"
       >
-        {loading ? "Loading..." : "Preview Matching Entities"}
+        {loading ? t("filterPreview.loading") : t("filterPreview.preview")}
       </Button>
 
       {error && (
@@ -190,11 +201,13 @@ export function FilterPreview({ filter }: FilterPreviewProps) {
           <Box sx={{ mt: 2 }}>
             <Box display="flex" alignItems="center" gap={1} mb={1}>
               <Typography variant="subtitle1" fontWeight="bold">
-                {result.total} entities match
+                {t("filterPreview.matchCount", { count: result.total })}
               </Typography>
               {result.truncated && (
                 <Chip
-                  label="Showing first 100"
+                  label={t("bridge.showingFirst", {
+                    count: result.entities.length,
+                  })}
                   size="small"
                   color="warning"
                   variant="outlined"
@@ -206,11 +219,11 @@ export function FilterPreview({ filter }: FilterPreviewProps) {
               <Stack spacing={0.5} sx={{ mb: 1.5 }}>
                 {warnings.map((warning) => (
                   <Alert
-                    key={warning}
+                    key={warning.text}
                     severity="warning"
                     variant="outlined"
                     icon={
-                      warning.includes("vacuum") ? (
+                      warning.vacuum ? (
                         <RocketLaunchIcon fontSize="small" />
                       ) : (
                         <WarningAmberIcon fontSize="small" />
@@ -218,7 +231,7 @@ export function FilterPreview({ filter }: FilterPreviewProps) {
                     }
                     sx={{ py: 0 }}
                   >
-                    <Typography variant="caption">{warning}</Typography>
+                    <Typography variant="caption">{warning.text}</Typography>
                   </Alert>
                 ))}
               </Stack>
@@ -230,7 +243,7 @@ export function FilterPreview({ filter }: FilterPreviewProps) {
                 .map(([domain, count]) => (
                   <Chip
                     key={domain}
-                    label={`${domain}: ${count}${domainToMatterType[domain] ? ` → ${domainToMatterType[domain]}` : ""}`}
+                    label={`${domain}: ${count}${domainToMatterType[domain] ? ` (${domainToMatterType[domain]})` : ""}`}
                     size="small"
                     variant="outlined"
                     color={domainToMatterType[domain] ? "default" : "warning"}
@@ -253,7 +266,7 @@ export function FilterPreview({ filter }: FilterPreviewProps) {
                 <ListItem key={entity.entity_id} divider>
                   <ListItemText
                     primary={entity.friendly_name || entity.entity_id}
-                    secondary={`${entity.entity_id}${domainToMatterType[entity.domain] ? ` → ${domainToMatterType[entity.domain]}` : ""}`}
+                    secondary={`${entity.entity_id}${domainToMatterType[entity.domain] ? ` (${domainToMatterType[entity.domain]})` : ""}`}
                     primaryTypographyProps={{ variant: "body2" }}
                     secondaryTypographyProps={{
                       variant: "caption",
@@ -269,7 +282,7 @@ export function FilterPreview({ filter }: FilterPreviewProps) {
               onClick={() => setExpanded(false)}
               sx={{ mt: 1 }}
             >
-              Hide Preview
+              {t("filterPreview.hide")}
             </Button>
           </Box>
         )}

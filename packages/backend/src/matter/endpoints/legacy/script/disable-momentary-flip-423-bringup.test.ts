@@ -6,9 +6,9 @@ import type {
   HomeAssistantEntityInformation,
 } from "@home-assistant-matter-hub/common";
 import { Environment, VariableService } from "@matter/general";
-import { Endpoint, VendorId } from "@matter/main";
+import { Behavior, Endpoint, VendorId } from "@matter/main";
 import { ServerNode } from "@matter/main/node";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { BridgeDataProvider } from "../../../../services/bridges/bridge-data-provider.js";
 import {
   type HomeAssistantAction,
@@ -151,5 +151,109 @@ describe("disableMomentaryFlip (#423)", () => {
 
     expect(onOffLater).toBe(false);
     expect(calls.filter((c) => c.action === "script.turn_on")).toHaveLength(1);
+  });
+});
+
+// one auto-reset timer per endpoint, restarted on each press
+it("reuses one auto-reset timer across presses", async () => {
+  const { server, endpoint } = await mount("script.reused_reset");
+  // biome-ignore lint/suspicious/noExplicitAny: reactorTimer is protected
+  const spy = vi.spyOn(Behavior.prototype as any, "reactorTimer");
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+  // the reset commits over real file I/O, so wait for its lock
+  // biome-ignore lint/suspicious/noExplicitAny: drive the cluster
+  const locked = (fn: (onOff: any) => void) =>
+    // biome-ignore lint/suspicious/noExplicitAny: transaction access
+    endpoint.act(async (agent: any) => {
+      await agent.context.transaction.addResources(agent.onOff);
+      await agent.context.transaction.begin();
+      fn(agent.onOff);
+    });
+  const press = async () => {
+    await locked((onOff) => onOff.on());
+    await vi.advanceTimersByTimeAsync(1200);
+    let onOff: boolean | undefined;
+    await locked((o) => (onOff = o.state.onOff));
+    return onOff;
+  };
+  let created = 0;
+  try {
+    expect(await press()).toBe(false);
+    expect(await press()).toBe(false);
+    created = spy.mock.calls.length;
+  } finally {
+    spy.mockRestore();
+    vi.useRealTimers();
+  }
+  await server.close().catch(() => {});
+
+  expect(created).toBe(1);
+  expect(calls.filter((c) => c.action === "script.turn_on")).toHaveLength(2);
+});
+
+describe("momentary auto-reset (#543)", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  const readOnOff = async (endpoint: Endpoint) => {
+    let onOff: boolean | undefined;
+    // biome-ignore lint/suspicious/noExplicitAny: read state
+    await endpoint.act((agent) => (onOff = (agent as any).onOff.state.onOff));
+    return onOff;
+  };
+  const press = (endpoint: Endpoint) =>
+    // biome-ignore lint/suspicious/noExplicitAny: drive the cluster
+    endpoint.act((agent) => (agent as any).onOff.on());
+
+  it("a second press restarts the 1 s window", async () => {
+    const { server, endpoint } = await mount("script.double_press");
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    await press(endpoint);
+    await vi.advanceTimersByTimeAsync(500);
+    await press(endpoint);
+    await vi.advanceTimersByTimeAsync(600);
+    expect(await readOnOff(endpoint)).toBe(true);
+    await vi.advanceTimersByTimeAsync(500);
+    expect(await readOnOff(endpoint)).toBe(false);
+    vi.useRealTimers();
+    await server.close().catch(() => {});
+  });
+
+  it("a reset that fires while the lock is held applies once it frees", async () => {
+    const { server, endpoint } = await mount("script.held_lock");
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    await press(endpoint);
+    let release!: () => void;
+    // biome-ignore lint/suspicious/noExplicitAny: hold the onOff lock
+    const held = endpoint.act(async (agent: any) => {
+      agent.onOff.state.onOff = true;
+      await new Promise<void>((r) => {
+        release = r;
+      });
+    });
+    await vi.advanceTimersByTimeAsync(1500);
+    release();
+    await held;
+    await vi.advanceTimersByTimeAsync(10);
+    expect(await readOnOff(endpoint)).toBe(false);
+    vi.useRealTimers();
+    await server.close().catch(() => {});
+  });
+
+  it("no reset fires after close", async () => {
+    const { server, endpoint } = await mount("script.closed_reset");
+    const proto = endpoint.behaviors.supported.onOff.prototype;
+    // biome-ignore lint/suspicious/noExplicitAny: autoReset is private
+    const spy = vi.spyOn(proto as any, "autoReset");
+    try {
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+      await press(endpoint);
+      await server.close().catch(() => {});
+      await vi.advanceTimersByTimeAsync(1500);
+      expect(spy).not.toHaveBeenCalled();
+    } finally {
+      spy.mockRestore();
+    }
   });
 });

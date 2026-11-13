@@ -1,5 +1,6 @@
 import {
   type BridgeBasicInformation,
+  type BridgeConfig,
   type BridgeData,
   type BridgeFeatureFlags,
   type BridgeIconType,
@@ -18,6 +19,17 @@ export interface BridgeServerStatus {
   code: BridgeStatus;
   reason?: string;
 }
+
+// An update carries the full config, so an optional key it leaves out
+// (a cleared form field) must be cleared too.
+const clearedOptionalConfig: Partial<BridgeConfig> = {
+  countryCode: undefined,
+  icon: undefined,
+  priority: undefined,
+  serialNumberSuffix: undefined,
+  uniqueIdSuffix: undefined,
+  sessionMaxAgeHours: undefined,
+};
 
 export class BridgeDataProvider extends Service implements BridgeData {
   private readonly data: BridgeData;
@@ -74,7 +86,7 @@ export class BridgeDataProvider extends Service implements BridgeData {
     if (this.id !== data.id) {
       throw new Error("ID of update request does not match bridge data id.");
     }
-    Object.assign(this.data, data);
+    Object.assign(this.data, clearedOptionalConfig, data);
   }
 
   /**

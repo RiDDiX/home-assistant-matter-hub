@@ -25,6 +25,8 @@ import Tooltip from "@mui/material/Tooltip";
 import Typography from "@mui/material/Typography";
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
+import { copyText } from "../misc/copy-text.ts";
+import { useNotifications } from "../notifications/use-notifications.ts";
 
 export interface EndpointStateProps {
   endpoint: EndpointData;
@@ -35,12 +37,55 @@ interface HaEntityDiag {
   haState: string;
   haAttributes: Record<string, unknown>;
   isUnavailable: boolean;
-  mappings: { label: string; entity: string }[];
+  mappings: LinkedEntity[];
   customName?: string;
   matterDeviceType?: string;
 }
 
 const ignoredBehaviors = [ClusterId.homeAssistantEntity];
+
+// mapping fields that pull a second HA entity into this endpoint,
+// labels are endpoints.linked.<field>
+const LINKED_ENTITY_FIELDS = [
+  "batteryEntity",
+  "humidityEntity",
+  "pressureEntity",
+  "powerEntity",
+  "energyEntity",
+  "voltageEntity",
+  "currentEntity",
+  "batteryPowerEntity",
+  "batteryEnergyEntity",
+  "chargingSwitchEntity",
+  "currentLimitEntity",
+  "filterLifeEntity",
+  "cleaningModeEntity",
+  "suctionLevelEntity",
+  "currentRoomEntity",
+];
+
+export interface LinkedEntity {
+  field: string;
+  entity: string;
+}
+
+export function linkedEntities(
+  mapping: Record<string, unknown> | undefined,
+): LinkedEntity[] {
+  if (!mapping) return [];
+  const result: LinkedEntity[] = [];
+  for (const field of LINKED_ENTITY_FIELDS) {
+    const entity = mapping[field];
+    if (typeof entity === "string" && entity !== "") {
+      result.push({ field, entity });
+    }
+  }
+  const rooms = mapping.roomEntities;
+  if (Array.isArray(rooms) && rooms.length > 0) {
+    result.push({ field: "roomEntities", entity: rooms.join(", ") });
+  }
+  return result;
+}
 
 const extractHaDiagnostics = (
   state: Record<string, unknown>,
@@ -63,69 +108,8 @@ const extractHaDiagnostics = (
   const haAttributes = ha.entity.state?.attributes ?? {};
   const isUnavailable = haState === "unavailable" || haState === "unknown";
 
-  const mappings: { label: string; entity: string }[] = [];
   const mapping = ha.mapping;
-  if (mapping) {
-    if (typeof mapping.batteryEntity === "string")
-      mappings.push({ label: "Battery", entity: mapping.batteryEntity });
-    if (typeof mapping.humidityEntity === "string")
-      mappings.push({ label: "Humidity", entity: mapping.humidityEntity });
-    if (typeof mapping.pressureEntity === "string")
-      mappings.push({ label: "Pressure", entity: mapping.pressureEntity });
-    if (typeof mapping.powerEntity === "string")
-      mappings.push({ label: "Power", entity: mapping.powerEntity });
-    if (typeof mapping.energyEntity === "string")
-      mappings.push({ label: "Energy", entity: mapping.energyEntity });
-    if (typeof mapping.voltageEntity === "string")
-      mappings.push({ label: "Voltage", entity: mapping.voltageEntity });
-    if (typeof mapping.currentEntity === "string")
-      mappings.push({ label: "Current", entity: mapping.currentEntity });
-    if (typeof mapping.batteryPowerEntity === "string")
-      mappings.push({
-        label: "Battery Power",
-        entity: mapping.batteryPowerEntity,
-      });
-    if (typeof mapping.batteryEnergyEntity === "string")
-      mappings.push({
-        label: "Battery Energy",
-        entity: mapping.batteryEnergyEntity,
-      });
-    if (typeof mapping.chargingSwitchEntity === "string")
-      mappings.push({
-        label: "Charging Switch",
-        entity: mapping.chargingSwitchEntity,
-      });
-    if (typeof mapping.currentLimitEntity === "string")
-      mappings.push({
-        label: "Current Limit",
-        entity: mapping.currentLimitEntity,
-      });
-    if (typeof mapping.filterLifeEntity === "string")
-      mappings.push({
-        label: "Filter Life",
-        entity: mapping.filterLifeEntity,
-      });
-    if (typeof mapping.cleaningModeEntity === "string")
-      mappings.push({
-        label: "Cleaning Mode",
-        entity: mapping.cleaningModeEntity,
-      });
-    if (typeof mapping.suctionLevelEntity === "string")
-      mappings.push({
-        label: "Suction Level",
-        entity: mapping.suctionLevelEntity,
-      });
-    if (typeof mapping.currentRoomEntity === "string")
-      mappings.push({
-        label: "Current Room",
-        entity: mapping.currentRoomEntity,
-      });
-    if (Array.isArray(mapping.roomEntities) && mapping.roomEntities.length > 0)
-      mappings.push({
-        label: "Rooms",
-        entity: (mapping.roomEntities as string[]).join(", "),
-      });
-  }
+  const mappings = linkedEntities(mapping);
 
   return {
     entityId,
@@ -282,7 +266,11 @@ const EntityDiagnosticsPanel = ({ endpoint }: { endpoint: EndpointData }) => {
                         {key}
                       </TableCell>
                       <TableCell>
-                        <Typography fontFamily="monospace" fontSize="0.8em">
+                        <Typography
+                          fontFamily="monospace"
+                          fontSize="0.8em"
+                          sx={{ wordBreak: "break-all" }}
+                        >
                           {typeof value === "object"
                             ? JSON.stringify(value)
                             : String(value)}
@@ -308,10 +296,10 @@ const EntityDiagnosticsPanel = ({ endpoint }: { endpoint: EndpointData }) => {
             </Typography>
             <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
               {diag.mappings.map((m) => (
-                <Tooltip key={m.label} title={m.entity}>
+                <Tooltip key={m.field} title={m.entity}>
                   <Chip
                     icon={<LinkIcon />}
-                    label={`${m.label}: ${m.entity}`}
+                    label={`${t(`endpoints.linked.${m.field}`)}: ${m.entity}`}
                     size="small"
                     variant="outlined"
                     sx={{ fontSize: "0.75rem" }}
@@ -336,6 +324,7 @@ const autoMappedClusterNames: Record<string, string> = {
 
 export const EndpointState = (props: EndpointStateProps) => {
   const { t } = useTranslation();
+  const notifications = useNotifications();
   const allBehaviors = useMemo(
     () =>
       Object.keys(
@@ -356,7 +345,7 @@ export const EndpointState = (props: EndpointStateProps) => {
     const set = new Set<string>();
     for (const m of diag.mappings) {
       for (const [cluster, field] of Object.entries(autoMappedClusterNames)) {
-        if (field.toLowerCase().startsWith(m.label.toLowerCase())) {
+        if (field === m.field) {
           set.add(cluster);
         }
       }
@@ -366,12 +355,13 @@ export const EndpointState = (props: EndpointStateProps) => {
 
   const metadata = useMemo(
     () => ({
-      "Endpoint ID": props.endpoint.id.local,
-      "Endpoint Type": `${props.endpoint.type.name} (${props.endpoint.type.id})`,
-      "Endpoint Number": props.endpoint.endpoint,
-      "# of Child Endpoints": props.endpoint.parts.length,
+      [t("endpoints.endpointId")]: props.endpoint.id.local,
+      [t("endpoints.endpointType")]:
+        `${props.endpoint.type.name} (${props.endpoint.type.id})`,
+      [t("endpoints.endpointNumber")]: props.endpoint.endpoint,
+      [t("endpoints.childEndpoints")]: props.endpoint.parts.length,
     }),
-    [props.endpoint],
+    [props.endpoint, t],
   );
 
   return (
@@ -389,9 +379,14 @@ export const EndpointState = (props: EndpointStateProps) => {
               {t("endpoints.aboutEndpoint")}
             </Typography>
             <Button
-              onClick={() => {
-                navigator.clipboard.writeText(
+              onClick={async () => {
+                const ok = await copyText(
                   JSON.stringify(props.endpoint, null, 2),
+                );
+                notifications.show(
+                  ok
+                    ? { message: t("common.copied"), severity: "success" }
+                    : { message: t("common.copyFailed"), severity: "error" },
                 );
               }}
               variant="outlined"
@@ -419,7 +414,7 @@ export const EndpointState = (props: EndpointStateProps) => {
                 {isAutoMapped && (
                   <Chip
                     icon={<LinkIcon />}
-                    label="auto-mapped"
+                    label={t("endpoints.autoMapped")}
                     size="small"
                     color="info"
                     variant="outlined"

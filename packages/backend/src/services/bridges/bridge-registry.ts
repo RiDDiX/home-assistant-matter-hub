@@ -66,12 +66,29 @@ export class BridgeRegistry {
   private _usedHumidityEntities: Set<string> = new Set();
   // Track pressure entities that have been auto-assigned to temperature sensors
   private _usedPressureEntities: Set<string> = new Set();
-  // Track power entities that have been auto-assigned to switch/plug entities
-  private _usedPowerEntities: Set<string> = new Set();
-  // Track energy entities that have been auto-assigned to switch/plug entities
-  private _usedEnergyEntities: Set<string> = new Set();
   // Track entities consumed by composed devices (e.g., sensors/climate grouped under air purifier)
   private _usedComposedSubEntities: Set<string> = new Set();
+  // The find*ForDevice lookups scanned the whole HA registry per call. Index
+  // it once, and again whenever a reload swaps the map.
+  private _entitiesByDevice?: {
+    source: HomeAssistantEntities;
+    byDevice: Map<string, HomeAssistantEntityRegistry[]>;
+  };
+
+  /** Entities of one HA device from the full registry, in registry order. */
+  private entitiesOfDevice(deviceId: string): HomeAssistantEntityRegistry[] {
+    const source = this.registry.entities;
+    if (this._entitiesByDevice?.source !== source) {
+      const byDevice = new Map<string, HomeAssistantEntityRegistry[]>();
+      for (const entity of values(source)) {
+        const list = byDevice.get(entity.device_id);
+        if (list) list.push(entity);
+        else byDevice.set(entity.device_id, [entity]);
+      }
+      this._entitiesByDevice = { source, byDevice };
+    }
+    return this._entitiesByDevice.byDevice.get(deviceId) ?? [];
+  }
 
   deviceOf(entityId: string): HomeAssistantDeviceRegistry {
     const entity = this._entities[entityId];
@@ -93,6 +110,14 @@ export class BridgeRegistry {
   // Successful-reload counter, see HomeAssistantRegistry (#438).
   get snapshotGeneration(): number {
     return this.registry.snapshotGeneration;
+  }
+
+  markRefreshIncomplete() {
+    this.registry.markRefreshIncomplete();
+  }
+
+  grantRefreshRetries() {
+    this.registry.grantRefreshRetries();
   }
 
   // composed sub-entities may sit outside the bridge filter (#408), so these
@@ -160,8 +185,7 @@ export class BridgeRegistry {
     // Search the FULL HA registry, not the filtered bridge entities.
     // The battery sensor might not match the bridge filter (e.g., vacuum
     // server bridges only include vacuum.* entities, not sensor.*).
-    const entities = values(this.registry.entities);
-    const sameDevice = entities.filter((e) => e.device_id === deviceId);
+    const sameDevice = this.entitiesOfDevice(deviceId);
 
     // Prefer numeric sensor.* battery entities (percentage values).
     for (const entity of sameDevice) {
@@ -225,6 +249,27 @@ export class BridgeRegistry {
       }
     }
 
+    // Last: a battery with no value right now still decides the device shape,
+    // or a start with it unavailable builds the device without PowerSource
+    // and rebuilds it once the value arrives, so controllers see it leave
+    // and come back (#543). Known limit: with two such sensors the first one
+    // stays mapped when only the other comes back, until the next registry
+    // refresh clears the cache.
+    for (const prefix of ["sensor.", "binary_sensor."]) {
+      for (const entity of sameDevice) {
+        if (!entity.entity_id.startsWith(prefix)) continue;
+        const state = this.registry.states[entity.entity_id];
+        if (
+          (state?.attributes as SensorDeviceAttributes | undefined)
+            ?.device_class === SensorDeviceClass.battery &&
+          (state?.state === "unavailable" || state?.state === "unknown")
+        ) {
+          this._batteryEntityCache.set(deviceId, entity.entity_id);
+          return entity.entity_id;
+        }
+      }
+    }
+
     // Cache the negative result
     this._batteryEntityCache.set(deviceId, null);
     return undefined;
@@ -247,8 +292,7 @@ export class BridgeRegistry {
   // An enum with a running and a paused state: run (Home Connect, SmartThings),
   // in_use (Miele), running (LG) (#486).
   findOperationalStateEntityForDevice(deviceId: string): string | undefined {
-    for (const entity of values(this.registry.entities)) {
-      if (entity.device_id !== deviceId) continue;
+    for (const entity of this.entitiesOfDevice(deviceId)) {
       if (!entity.entity_id.startsWith("sensor.")) continue;
       const attrs = this.registry.states[entity.entity_id]?.attributes as
         | { device_class?: string; options?: unknown }
@@ -278,8 +322,7 @@ export class BridgeRegistry {
 
     // Search the FULL HA registry, not the filtered bridge entities, the
     // problem sensor may not match the bridge filter (same as battery).
-    const entities = values(this.registry.entities);
-    const sameDevice = entities.filter((e) => e.device_id === deviceId);
+    const sameDevice = this.entitiesOfDevice(deviceId);
 
     let safety: string | undefined;
     for (const entity of sameDevice) {
@@ -356,9 +399,7 @@ export class BridgeRegistry {
   findHumidityEntityForDevice(deviceId: string): string | undefined {
     // Search the FULL HA registry, not the filtered bridge entities.
     // Same reasoning as findBatteryEntityForDevice.
-    const entities = values(this.registry.entities);
-    for (const entity of entities) {
-      if (entity.device_id !== deviceId) continue;
+    for (const entity of this.entitiesOfDevice(deviceId)) {
       if (!entity.entity_id.startsWith("sensor.")) continue;
 
       const state = this.registry.states[entity.entity_id];
@@ -377,9 +418,7 @@ export class BridgeRegistry {
    * Returns the entity_id of the temperature sensor, or undefined if none found.
    */
   findTemperatureEntityForDevice(deviceId: string): string | undefined {
-    const entities = values(this.registry.entities);
-    for (const entity of entities) {
-      if (entity.device_id !== deviceId) continue;
+    for (const entity of this.entitiesOfDevice(deviceId)) {
       if (!entity.entity_id.startsWith("sensor.")) continue;
 
       const state = this.registry.states[entity.entity_id];
@@ -389,22 +428,6 @@ export class BridgeRegistry {
       if (attrs.device_class === SensorDeviceClass.temperature) {
         return entity.entity_id;
       }
-    }
-    return undefined;
-  }
-
-  /**
-   * Find a climate entity that belongs to the same HA device.
-   * Returns the entity_id of the climate entity, or undefined if none found.
-   */
-  findClimateEntityForDevice(deviceId: string): string | undefined {
-    const entities = values(this.registry.entities);
-    for (const entity of entities) {
-      if (entity.device_id !== deviceId) continue;
-      if (!entity.entity_id.startsWith("climate.")) continue;
-
-      const state = this.registry.states[entity.entity_id];
-      if (state) return entity.entity_id;
     }
     return undefined;
   }
@@ -467,18 +490,6 @@ export class BridgeRegistry {
   }
 
   /**
-   * Check if the vacuum OnOff cluster should be included for server-mode vacuums.
-   * Defaults to OFF. OnOff is NOT part of the RoboticVacuumCleaner (0x74) device
-   * type spec. Adding it makes the device non-conformant and causes Amazon Alexa
-   * to reject it entirely (#185, #183). Apple Home may also render the vacuum
-   * incorrectly (shows "Updating" or switch UI). Only enable via feature flag
-   * if a specific controller requires it.
-   */
-  isServerModeVacuumOnOffEnabled(): boolean {
-    return this.dataProvider.featureFlags?.vacuumOnOff === true;
-  }
-
-  /**
    * Auto-detect vacuum-related select entities on the same HA device.
    * HA integrations (Dreame, Roborock, Ecovacs, Valetudo, etc.) expose vacuum
    * features as select entities with well-known suffixes. This finds them
@@ -490,9 +501,9 @@ export class BridgeRegistry {
     mopIntensityEntity?: string;
     currentRoomEntity?: string;
   } {
-    const entities = values(this.registry.entities);
-    const sameDevice = entities.filter(
-      (e) => e.device_id === deviceId && e.entity_id.startsWith("select."),
+    const entities = this.entitiesOfDevice(deviceId);
+    const sameDevice = entities.filter((e) =>
+      e.entity_id.startsWith("select."),
     );
 
     let cleaningModeEntity: string | undefined;
@@ -551,8 +562,8 @@ export class BridgeRegistry {
     // Current room sensor: Dreame (Tasshack) exposes sensor.*_current_room
     // which reports the room name the vacuum is currently in.
     let currentRoomEntity: string | undefined;
-    const sameDeviceSensors = entities.filter(
-      (e) => e.device_id === deviceId && e.entity_id.startsWith("sensor."),
+    const sameDeviceSensors = entities.filter((e) =>
+      e.entity_id.startsWith("sensor."),
     );
     for (const entity of sameDeviceSensors) {
       if (entity.entity_id.toLowerCase().endsWith("_current_room")) {
@@ -581,10 +592,8 @@ export class BridgeRegistry {
    * - Named segments:   { "1": "Kitchen", "2": "Living Room" }
    */
   findValetudoMapSegments(deviceId: string): VacuumRoom[] {
-    const entities = values(this.registry.entities);
-    const mapSensor = entities.find(
+    const mapSensor = this.entitiesOfDevice(deviceId).find(
       (e) =>
-        e.device_id === deviceId &&
         e.entity_id.startsWith("sensor.") &&
         e.entity_id.endsWith("_map_segments"),
     );
@@ -720,24 +729,27 @@ export class BridgeRegistry {
       // Fetch the vacuum's current segments to detect stale area_mapping
       // entries whose segment IDs no longer exist on the device.
       let validSegmentIds: Set<string> | undefined;
-      try {
-        const segmentsResponse = await sendHaMessage<
-          { id: string; name: string; group?: string | null }[]
-        >(this.client.connection, {
-          type: "vacuum/get_segments",
-          entity_id: entityId,
-        });
-        if (Array.isArray(segmentsResponse)) {
-          validSegmentIds = new Set(segmentsResponse.map((s) => s.id));
+      // admin only in HA, a refusal would log an error there per call (#548)
+      if (this.client.isAdmin !== false) {
+        try {
+          const segmentsResponse = await sendHaMessage<
+            { id: string; name: string; group?: string | null }[]
+          >(this.client.connection, {
+            type: "vacuum/get_segments",
+            entity_id: entityId,
+          });
+          if (Array.isArray(segmentsResponse)) {
+            validSegmentIds = new Set(segmentsResponse.map((s) => s.id));
+            BridgeRegistry.cleanAreaLogger.debug(
+              `${entityId}: Current vacuum segments: ${[...validSegmentIds].join(", ")}`,
+            );
+          }
+        } catch {
+          // Older HA versions may not have the vacuum/get_segments endpoint.
           BridgeRegistry.cleanAreaLogger.debug(
-            `${entityId}: Current vacuum segments: ${[...validSegmentIds].join(", ")}`,
+            `${entityId}: vacuum/get_segments not available, skipping stale entry detection`,
           );
         }
-      } catch {
-        // Older HA versions may not have the vacuum/get_segments endpoint.
-        BridgeRegistry.cleanAreaLogger.debug(
-          `${entityId}: vacuum/get_segments not available, skipping stale entry detection`,
-        );
       }
 
       const rooms: CleanAreaRoom[] = [];
@@ -796,8 +808,7 @@ export class BridgeRegistry {
    * "docked and below full means charging" guess (#450).
    */
   findChargingEntityForDevice(deviceId: string): string | undefined {
-    const entities = values(this.registry.entities);
-    const sameDevice = entities.filter((e) => e.device_id === deviceId);
+    const sameDevice = this.entitiesOfDevice(deviceId);
 
     // Home Assistant's own charging class first.
     for (const entity of sameDevice) {
@@ -828,9 +839,7 @@ export class BridgeRegistry {
    * Returns the entity_id of the pressure sensor, or undefined if none found.
    */
   findPressureEntityForDevice(deviceId: string): string | undefined {
-    const entities = values(this.registry.entities);
-    for (const entity of entities) {
-      if (entity.device_id !== deviceId) continue;
+    for (const entity of this.entitiesOfDevice(deviceId)) {
       if (!entity.entity_id.startsWith("sensor.")) continue;
 
       const state = this.registry.states[entity.entity_id];
@@ -872,8 +881,7 @@ export class BridgeRegistry {
     forEntityId?: string,
   ): string | undefined {
     const candidates: string[] = [];
-    for (const entity of values(this.registry.entities)) {
-      if (entity.device_id !== deviceId) continue;
+    for (const entity of this.entitiesOfDevice(deviceId)) {
       if (!entity.entity_id.startsWith("sensor.")) continue;
 
       const state = this.registry.states[entity.entity_id];
@@ -926,22 +934,6 @@ export class BridgeRegistry {
     );
   }
 
-  markPowerEntityUsed(entityId: string): void {
-    this._usedPowerEntities.add(entityId);
-  }
-
-  isPowerEntityUsed(entityId: string): boolean {
-    return this._usedPowerEntities.has(entityId);
-  }
-
-  markEnergyEntityUsed(entityId: string): void {
-    this._usedEnergyEntities.add(entityId);
-  }
-
-  isEnergyEntityUsed(entityId: string): boolean {
-    return this._usedEnergyEntities.has(entityId);
-  }
-
   constructor(
     private readonly registry: HomeAssistantRegistry,
     private readonly dataProvider: BridgeDataProvider,
@@ -950,10 +942,15 @@ export class BridgeRegistry {
     this.refresh();
   }
 
-  mergeExternalStates(states: HomeAssistantStates): void {
+  mergeExternalStates(
+    states: HomeAssistantStates,
+    changed: ReadonlySet<string> | null = null,
+  ): void {
     const registryStates = this.registry.states;
-    for (const entityId of Object.keys(states)) {
-      registryStates[entityId] = states[entityId];
+    for (const entityId of changed ?? Object.keys(states)) {
+      // changed also names removed entities, those never were written here
+      const state = states[entityId];
+      if (state) registryStates[entityId] = state;
     }
   }
 
@@ -988,12 +985,12 @@ export class BridgeRegistry {
     this._usedBatteryEntities.clear();
     this._usedHumidityEntities.clear();
     this._usedPressureEntities.clear();
-    this._usedPowerEntities.clear();
-    this._usedEnergyEntities.clear();
     this._usedComposedSubEntities.clear();
     // Clear lookup caches
     this._batteryEntityCache.clear();
     this._problemEntityCache.clear();
+    // rebuilt per refresh too, an in-place edit keeps the map identity
+    this._entitiesByDevice = undefined;
 
     this._entities = pickBy(this.registry.entities, (entity) => {
       const device = this.registry.devices[entity.device_id];
@@ -1019,11 +1016,8 @@ export class BridgeRegistry {
       this.registry.states,
       (e) => !!this._entities[e.entity_id],
     );
-    this._devices = pickBy(this.registry.devices, (d) =>
-      values(this._entities)
-        .map((e) => e.device_id)
-        .some((id) => d.id === id),
-    );
+    const deviceIds = new Set(values(this._entities).map((e) => e.device_id));
+    this._devices = pickBy(this.registry.devices, (d) => deviceIds.has(d.id));
 
     // Pre-calculate auto-assignments before endpoint creation so entities
     // are marked "used" regardless of the order they're processed later.
@@ -1067,34 +1061,7 @@ export class BridgeRegistry {
       }
     }
 
-    // Second pass: Find power and energy entities for switch/light entities
-    for (const entity of entities) {
-      if (!entity.device_id) continue;
-      const domain = entity.entity_id.split(".")[0];
-      if (domain !== "switch" && domain !== "light") continue;
-
-      const powerEntityId = this.findPowerEntityForDevice(
-        entity.device_id,
-        entity.entity_id,
-      );
-      if (powerEntityId && powerEntityId !== entity.entity_id) {
-        if (!this._usedPowerEntities.has(powerEntityId)) {
-          this._usedPowerEntities.add(powerEntityId);
-        }
-      }
-
-      const energyEntityId = this.findEnergyEntityForDevice(
-        entity.device_id,
-        entity.entity_id,
-      );
-      if (energyEntityId && energyEntityId !== entity.entity_id) {
-        if (!this._usedEnergyEntities.has(energyEntityId)) {
-          this._usedEnergyEntities.add(energyEntityId);
-        }
-      }
-    }
-
-    // Third pass: Find all "main" entities and mark their battery entities
+    // Second pass: Find all "main" entities and mark their battery entities
     // A "main" entity is any entity that is NOT already marked as used
     if (this.isAutoBatteryMappingEnabled()) {
       for (const entity of entities) {

@@ -41,8 +41,10 @@ export class FlowMeasurementServerBase extends Base {
     if (value == null) {
       return undefined;
     }
-    // Matter expects flow in m³/h * 10 (0.1 m³/h resolution)
-    return Math.round(value * 10);
+    // Matter expects flow in m³/h * 10 (0.1 m³/h resolution). Clamp to the
+    // uint16 window, an idle sensor reading slightly below zero is otherwise
+    // rejected and the tile keeps the last running flow.
+    return Math.min(0xfffe, Math.max(0, Math.round(value * 10)));
   }
 }
 

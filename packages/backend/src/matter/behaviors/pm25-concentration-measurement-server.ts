@@ -3,6 +3,7 @@ import { Logger } from "@matter/general";
 import { Pm25ConcentrationMeasurementServer as Base } from "@matter/main/behaviors";
 import { ConcentrationMeasurement } from "@matter/main/clusters";
 import { applyPatchState } from "../../utils/apply-patch-state.js";
+import { numericState } from "../../utils/numeric-state.js";
 import { HomeAssistantEntityBehavior } from "./home-assistant-entity-behavior.js";
 
 const logger = Logger.get("Pm25ConcentrationMeasurementServer");
@@ -59,11 +60,7 @@ export class Pm25ConcentrationMeasurementServer extends Pm25ConcentrationMeasure
       return;
     }
     const state = entity.state.state;
-    let measuredValue: number | null = null;
-
-    if (state != null && !Number.isNaN(+state)) {
-      measuredValue = +state;
-    }
+    const measuredValue = numericState(state);
 
     applyPatchState(this.state, {
       measuredValue,

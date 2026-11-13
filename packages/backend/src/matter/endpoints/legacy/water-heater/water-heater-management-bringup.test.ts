@@ -248,6 +248,26 @@ describe("Matter 1.4 water heater bring-up", () => {
     ]);
     expect(state.heaterTypes.other).toBe(true);
   });
+
+  it("drops operation modes that repeat a label or name", async () => {
+    const endpoint = await bringUp(
+      waterHeater("on", {
+        operation_list: ["off", "on", "foo bar", "Foo_Bar", "baz"],
+        operation_mode: "on",
+        current_temperature: 50,
+        temperature: 55,
+      }),
+    );
+    const state = await snapshot(endpoint);
+
+    expect(state.supportedModes.map((m) => [m.mode, m.label])).toEqual([
+      [OFF_MODE, "Off"],
+      [7, "On"],
+      [8, "Foo bar"],
+      [9, "Baz"],
+    ]);
+    expect(state.currentMode).toBe(7);
+  });
 });
 
 describe("Matter 1.4 water heater boost", () => {
@@ -387,5 +407,66 @@ describe("Matter 1.4 water heater mode changes", () => {
       action: "water_heater.set_operation_mode",
       data: { operation_mode: "off" },
     });
+  });
+});
+
+describe("water heater thermostat Off", () => {
+  async function offAction(endpoint: Endpoint) {
+    let action: HomeAssistantAction | undefined;
+    await endpoint.act((agent) => {
+      // biome-ignore lint/suspicious/noExplicitAny: call the HA mapping directly
+      action = (agent as any).thermostat.state.config.setSystemMode(0, agent);
+    });
+    return action;
+  }
+
+  it("turns off through turn_off when operation_list has no off", async () => {
+    const endpoint = await bringUp(
+      waterHeater("eco", {
+        ...FULL_HEATER,
+        operation_list: ["eco", "electric"],
+      }),
+    );
+    expect(await offAction(endpoint)).toEqual({
+      action: "water_heater.turn_off",
+      data: {},
+    });
+  });
+
+  it("sends the entity's own Off spelling and reads it back as Off", async () => {
+    const endpoint = await bringUp(
+      waterHeater("Off", {
+        ...FULL_HEATER,
+        operation_list: ["Eco", "Off"],
+        operation_mode: "Off",
+      }),
+    );
+    expect(await offAction(endpoint)).toEqual({
+      action: "water_heater.set_operation_mode",
+      data: { operation_mode: "Off" },
+    });
+    // biome-ignore lint/suspicious/noExplicitAny: read cluster state
+    expect((endpoint.state as any).thermostat.systemMode).toBe(0);
+  });
+
+  it("setpointRaiseLower while Off resumes and steps from the clamped base", async () => {
+    const endpoint = await bringUp(
+      waterHeater("off", {
+        ...FULL_HEATER,
+        operation_mode: "off",
+        temperature: 20,
+      }),
+    );
+    calls.length = 0;
+    await endpoint.act((agent) => {
+      // biome-ignore lint/suspicious/noExplicitAny: invoke the cluster command
+      (agent as any).thermostat.setpointRaiseLower({ mode: 0, amount: 10 });
+    });
+    expect(calls).toEqual([
+      { action: "water_heater.turn_on", data: {} },
+      { action: "water_heater.set_temperature", data: { temperature: 31 } },
+    ]);
+    // biome-ignore lint/suspicious/noExplicitAny: read cluster state
+    expect((endpoint.state as any).thermostat.systemMode).toBe(4);
   });
 });

@@ -13,8 +13,14 @@ on:
 permissions:
   contents: read
 
+# Runs compute the next alpha number from the tags seen at checkout.
+concurrency:
+  group: release-alpha
+  cancel-in-progress: false
+
 jobs:
   release:
+    if: github.repository == 'RiDDiX/home-assistant-matter-hub'
     permissions:
       contents: write
       packages: write
@@ -74,6 +80,18 @@ jobs:
 
       - name: Package
         run: pnpm run release:pack
+
+      # The images ship Node 22 (arm/v7), so boot the package on that
+      - name: Use Node 22 for the smoke test
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+      - name: Smoke Test Package
+        run: bash .github/scripts/package-smoke.sh apps/home-assistant-matter-hub/package.tgz
+      - name: Back to the build Node
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: package.json
 
       - name: Create Git Tag
         run: |

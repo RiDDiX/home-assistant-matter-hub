@@ -9,9 +9,7 @@ import {
   registerRequestor,
   sendAnswer,
   sendEnd,
-  sendIceCandidates,
   setRequestorInvokeForTests,
-  unregisterAllRequestors,
   unregisterRequestor,
   unregisterRequestorsByOwner,
 } from "./requestor-client.js";
@@ -195,27 +193,6 @@ describe("deferred answer delivery", () => {
     expect(await sendAnswer(74, "sdp")).toBe(false);
     expect(await sendAnswer(75, "sdp")).toBe(true);
   });
-
-  it("unregisterAllRequestors clears registrations and pending deliveries", async () => {
-    const cap = capturing(true);
-    setRequestorInvokeForTests(cap.fn);
-    registerRequestor(71, {
-      session: session(false),
-      requestorEndpoint: EndpointNumber(1),
-      env,
-    });
-    registerRequestor(72, {
-      session: session(false),
-      requestorEndpoint: EndpointNumber(1),
-      env,
-    });
-    deliverAnswerDeferred(71, "sdp", async () => {});
-    unregisterAllRequestors();
-
-    await delay(60);
-    expect(cap.invocations).toHaveLength(0);
-    expect(await sendAnswer(72, "sdp")).toBe(false);
-  });
 });
 
 describe("requestor send helpers", () => {
@@ -235,28 +212,6 @@ describe("requestor send helpers", () => {
     expect(req.command).toBe("answer");
     expect(req.endpoint).toBe(EndpointNumber(2));
     expect(req.fields).toEqual({ webRtcSessionId: 20, sdp: "v=0 the-answer" });
-  });
-
-  it("sendIceCandidates builds the iceCandidates command", async () => {
-    const cap = capturing();
-    setRequestorInvokeForTests(cap.fn);
-    registerRequestor(track(21), {
-      session: session(false),
-      requestorEndpoint: EndpointNumber(2),
-      env,
-    });
-    const candidates = [
-      { candidate: "candidate:1 1 udp", sdpMid: "0", sdpmLineIndex: 0 },
-    ];
-
-    await sendIceCandidates(21, candidates);
-
-    const req = cap.invocations[0].request;
-    expect(req.command).toBe("iceCandidates");
-    expect(req.fields).toEqual({
-      webRtcSessionId: 21,
-      iceCandidates: candidates,
-    });
   });
 
   it("sendEnd builds the end command with the reason", async () => {

@@ -5,9 +5,24 @@ import { Logger } from "@matter/general";
 
 const logger = Logger.get("PluginInstaller");
 
-// Validate package name to prevent command injection
-const VALID_PACKAGE_RE =
-  /^(@[a-z0-9-~][a-z0-9-._~]*\/)?[a-z0-9-~][a-z0-9-._~]*(@[^@\s]+)?$/;
+// Validate package name to prevent command injection. The version part
+// takes no "/" or ":", or npm would install from a URL, git or file path.
+// No leading "-", or npm would read the name as a flag. A version starting
+// with "." or a spec ending in .tgz, .tar.gz or .tar is a local path to npm.
+export const VALID_PACKAGE_RE =
+  /^(?!.*\.(?:[tT][gG][zZ]|[tT][aA][rR](?:\.[gG][zZ])?)$)(@[a-z0-9~][a-z0-9-._~]*\/)?[a-z0-9~][a-z0-9-._~]*(@[^@\s/:.][^@\s/:]*)?$/;
+
+// npm and plugin install scripts get no HAMH secrets (HA token, supervisor token).
+const NPM_ENV = {
+  ...Object.fromEntries(
+    Object.entries(process.env).filter(([k]) =>
+      /^(https?_proxy|no_proxy|npm_config_)/i.test(k),
+    ),
+  ),
+  PATH: process.env.PATH,
+  HOME: process.env.HOME,
+  NODE_ENV: "production",
+};
 
 export interface InstallResult {
   success: boolean;
@@ -22,10 +37,18 @@ export interface InstallResult {
  */
 export class PluginInstaller {
   private readonly pluginDir: string;
+  // npm runs in one shared dir; overlapping runs drop each other's package.json entries.
+  private queue: Promise<unknown> = Promise.resolve();
 
   constructor(storageLocation: string) {
     this.pluginDir = path.join(storageLocation, "plugin-packages");
     this.ensurePluginDir();
+  }
+
+  private serial<T>(fn: () => Promise<T>): Promise<T> {
+    const run = this.queue.then(fn, fn);
+    this.queue = run.catch(() => {});
+    return run;
   }
 
   get installDir(): string {
@@ -66,40 +89,43 @@ export class PluginInstaller {
 
     logger.info(`Installing plugin: ${packageName}`);
 
-    return new Promise((resolve) => {
-      execFile(
-        "npm",
-        ["install", packageName, "--save"],
-        {
-          cwd: this.pluginDir,
-          timeout: 120_000,
-          env: { ...process.env, NODE_ENV: "production" },
-        },
-        (error, _stdout, stderr) => {
-          if (error) {
-            logger.error(
-              `Failed to install ${packageName}:`,
-              stderr || error.message,
-            );
-            resolve({
-              success: false,
-              packageName,
-              error: stderr || error.message,
-            });
-            return;
-          }
+    return this.serial(
+      () =>
+        new Promise<InstallResult>((resolve) => {
+          execFile(
+            "npm",
+            ["install", packageName, "--save"],
+            {
+              cwd: this.pluginDir,
+              timeout: 120_000,
+              env: NPM_ENV,
+            },
+            (error, _stdout, stderr) => {
+              if (error) {
+                logger.error(
+                  `Failed to install ${packageName}:`,
+                  stderr || error.message,
+                );
+                resolve({
+                  success: false,
+                  packageName,
+                  error: stderr || error.message,
+                });
+                return;
+              }
 
-          // Try to read the installed version
-          const version = this.getInstalledVersion(packageName);
-          logger.info(`Installed ${packageName}@${version || "unknown"}`);
-          resolve({
-            success: true,
-            packageName,
-            version: version ?? undefined,
-          });
-        },
-      );
-    });
+              // Try to read the installed version
+              const version = this.getInstalledVersion(packageName);
+              logger.info(`Installed ${packageName}@${version || "unknown"}`);
+              resolve({
+                success: true,
+                packageName,
+                version: version ?? undefined,
+              });
+            },
+          );
+        }),
+    );
   }
 
   async uninstall(packageName: string): Promise<InstallResult> {
@@ -113,32 +139,36 @@ export class PluginInstaller {
 
     logger.info(`Uninstalling plugin: ${packageName}`);
 
-    return new Promise((resolve) => {
-      execFile(
-        "npm",
-        ["uninstall", packageName, "--save"],
-        {
-          cwd: this.pluginDir,
-          timeout: 60_000,
-        },
-        (error, _stdout, stderr) => {
-          if (error) {
-            logger.error(
-              `Failed to uninstall ${packageName}:`,
-              stderr || error.message,
-            );
-            resolve({
-              success: false,
-              packageName,
-              error: stderr || error.message,
-            });
-            return;
-          }
-          logger.info(`Uninstalled ${packageName}`);
-          resolve({ success: true, packageName });
-        },
-      );
-    });
+    return this.serial(
+      () =>
+        new Promise<InstallResult>((resolve) => {
+          execFile(
+            "npm",
+            ["uninstall", packageName, "--save"],
+            {
+              cwd: this.pluginDir,
+              timeout: 60_000,
+              env: NPM_ENV,
+            },
+            (error, _stdout, stderr) => {
+              if (error) {
+                logger.error(
+                  `Failed to uninstall ${packageName}:`,
+                  stderr || error.message,
+                );
+                resolve({
+                  success: false,
+                  packageName,
+                  error: stderr || error.message,
+                });
+                return;
+              }
+              logger.info(`Uninstalled ${packageName}`);
+              resolve({ success: true, packageName });
+            },
+          );
+        }),
+    );
   }
 
   /**
@@ -167,30 +197,34 @@ export class PluginInstaller {
     }
   }
 
-  async installFromTgz(tgzBuffer: Buffer): Promise<InstallResult> {
+  installFromTgz(tgzBuffer: Buffer): Promise<InstallResult> {
+    return this.serial(() => this.installTgz(tgzBuffer));
+  }
+
+  private async installTgz(tgzBuffer: Buffer): Promise<InstallResult> {
     const tgzPath = path.join(this.pluginDir, `.upload-${Date.now()}.tgz`);
     try {
       fs.writeFileSync(tgzPath, tgzBuffer);
 
-      // Snapshot deps before install to detect what was added
-      const depsBefore = new Set(Object.keys(this.readDeps()));
-
       const result = await this.installFromNpm(tgzPath);
       if (!result.success) return result;
 
-      // Find the newly added package by diffing deps
-      const depsAfter = this.readDeps();
-      for (const name of Object.keys(depsAfter)) {
-        if (!depsBefore.has(name)) {
-          return {
-            success: true,
-            packageName: name,
-            version: this.getInstalledVersion(name) ?? String(depsAfter[name]),
-          };
-        }
+      // npm saves the upload as "file:<tgz>", also when it replaces an installed version.
+      const spec = `file:${path.basename(tgzPath)}`;
+      const deps = this.readDeps();
+      const name = Object.keys(deps).find((n) => deps[n] === spec);
+      if (!name) {
+        return {
+          success: false,
+          packageName: "unknown",
+          error: "Could not determine the package name of the upload",
+        };
       }
-
-      return result;
+      return {
+        success: true,
+        packageName: name,
+        version: this.getInstalledVersion(name) ?? undefined,
+      };
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       logger.error("Failed to install from tgz:", msg);
@@ -212,7 +246,7 @@ export class PluginInstaller {
         {
           cwd: this.pluginDir,
           timeout: 120_000,
-          env: { ...process.env, NODE_ENV: "production" },
+          env: NPM_ENV,
         },
         (error, _stdout, stderr) => {
           if (error) {
@@ -279,6 +313,14 @@ export class PluginInstaller {
         success: false,
         packageName: "unknown",
         error: "Invalid package.json: missing 'name' field",
+      };
+    }
+    // The name becomes a path under node_modules that gets rm -rf'd below.
+    if (!VALID_PACKAGE_RE.test(packageName)) {
+      return {
+        success: false,
+        packageName,
+        error: `Invalid package name: "${packageName}"`,
       };
     }
 

@@ -5,6 +5,7 @@ import { EntityStateProvider } from "../../../../../services/bridges/entity-stat
 import { HomeAssistantConfig } from "../../../../../services/home-assistant/home-assistant-config.js";
 import { convertPressureToHpa } from "../../../../../utils/converters/pressure.js";
 import { Temperature } from "../../../../../utils/converters/temperature.js";
+import { numericState } from "../../../../../utils/numeric-state.js";
 import { BasicInformationServer } from "../../../../behaviors/basic-information-server.js";
 import { HomeAssistantEntityBehavior } from "../../../../behaviors/home-assistant-entity-behavior.js";
 import {
@@ -28,7 +29,7 @@ const temperatureConfig: TemperatureMeasurementConfig = {
       agent.env.get(HomeAssistantConfig).unitSystem.temperature;
     const state = entity.state;
     const attributes = entity.attributes as SensorDeviceAttributes;
-    const temperature = state == null || Number.isNaN(+state) ? null : +state;
+    const temperature = numericState(state);
     if (temperature == null) {
       return undefined;
     }
@@ -64,10 +65,7 @@ const pressureConfig: PressureMeasurementConfig = {
       const stateProvider = agent.env.get(EntityStateProvider);
       const state = stateProvider.getState(pressureEntity);
       if (state) {
-        const pressure =
-          state.state == null || Number.isNaN(+state.state)
-            ? null
-            : +state.state;
+        const pressure = numericState(state.state);
         if (pressure != null) {
           const attributes = state.attributes as SensorDeviceAttributes;
           return convertPressureToHpa(pressure, attributes.unit_of_measurement);

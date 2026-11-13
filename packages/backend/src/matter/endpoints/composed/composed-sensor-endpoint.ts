@@ -20,6 +20,7 @@ import { HomeAssistantConfig } from "../../../services/home-assistant/home-assis
 import type { HomeAssistantStates } from "../../../services/home-assistant/home-assistant-registry.js";
 import { convertPressureToHpa } from "../../../utils/converters/pressure.js";
 import { Temperature } from "../../../utils/converters/temperature.js";
+import { numericState } from "../../../utils/numeric-state.js";
 import { trimToLength } from "../../../utils/trim-to-length.js";
 import { BasicInformationServer } from "../../behaviors/basic-information-server.js";
 import { HaElectricalEnergyMeasurementServer } from "../../behaviors/electrical-energy-measurement-server.js";
@@ -40,6 +41,10 @@ import {
   type TemperatureMeasurementConfig,
   TemperatureMeasurementServer,
 } from "../../behaviors/temperature-measurement-server.js";
+import {
+  createEndpointId,
+  mappedNonSubStateChanged,
+} from "../entity-endpoint.js";
 import { updateEntityState } from "../update-entity-state.js";
 
 const logger = Logger.get("ComposedSensorEndpoint");
@@ -52,7 +57,7 @@ const temperatureConfig: TemperatureMeasurementConfig = {
       agent.env.get(HomeAssistantConfig).unitSystem.temperature;
     const state = entity.state;
     const attributes = entity.attributes as SensorDeviceAttributes;
-    const temperature = state == null || Number.isNaN(+state) ? null : +state;
+    const temperature = numericState(state);
     if (temperature == null) return undefined;
     return Temperature.withUnit(
       temperature,
@@ -63,8 +68,7 @@ const temperatureConfig: TemperatureMeasurementConfig = {
 
 const humidityConfig: HumidityMeasurementConfig = {
   getValue({ state }: HomeAssistantEntityState) {
-    if (state == null || Number.isNaN(+state)) return null;
-    return +state;
+    return numericState(state);
   },
 };
 
@@ -72,7 +76,7 @@ const pressureConfig: PressureMeasurementConfig = {
   getValue(entity) {
     const state = entity.state;
     const attributes = entity.attributes as SensorDeviceAttributes;
-    const pressure = state == null || Number.isNaN(+state) ? null : +state;
+    const pressure = numericState(state);
     if (pressure == null) return undefined;
     return convertPressureToHpa(pressure, attributes.unit_of_measurement);
   },
@@ -113,13 +117,6 @@ const PressureSubType = PressureSensorDevice.with(
   HomeAssistantEntityBehavior,
   PressureMeasurementServer(pressureConfig),
 );
-
-// --- Helper ---
-
-function createEndpointId(entityId: string, customName?: string): string {
-  const baseName = customName || entityId;
-  return baseName.replace(/\./g, "_").replace(/\s+/g, "_");
-}
 
 // sub-entities may sit outside the bridge filter (#426, like #408); all three
 // accessors must be unfiltered together, the strict deviceOf throws otherwise.
@@ -178,6 +175,7 @@ export class ComposedSensorEndpoint extends Endpoint {
   readonly mappedEntityIds: string[];
   private subEndpoints = new Map<string, Endpoint>();
   private lastStates = new Map<string, string>();
+  private lastMappedStates = new Map<string, string>();
   private debouncedUpdates = new Map<
     string,
     ReturnType<
@@ -337,8 +335,17 @@ export class ComposedSensorEndpoint extends Endpoint {
   }
 
   async updateStates(states: HomeAssistantStates): Promise<void> {
+    // battery, power and energy live on the parent and only re-read when the
+    // primary writes
+    const mappedChanged = mappedNonSubStateChanged(
+      this.mappedEntityIds,
+      this.subEndpoints,
+      states,
+      this.lastMappedStates,
+    );
+
     // Update parent (BasicInformationServer reachable state, battery, etc.)
-    this.scheduleUpdate(this, this.entityId, states);
+    this.scheduleUpdate(this, this.entityId, states, mappedChanged);
 
     // Update sub-endpoints with their own entity states
     for (const [entityId, sub] of this.subEndpoints) {
@@ -350,6 +357,7 @@ export class ComposedSensorEndpoint extends Endpoint {
     endpoint: Endpoint,
     entityId: string,
     states: HomeAssistantStates,
+    force = false,
   ) {
     const state = states[entityId];
     if (!state) return;
@@ -363,8 +371,14 @@ export class ComposedSensorEndpoint extends Endpoint {
       s: state.state,
       a: state.attributes,
     });
-    if (this.lastStates.get(key) === stateJson) return;
+    if (!force && this.lastStates.get(key) === stateJson) return;
     this.lastStates.set(key, stateJson);
+
+    // The primary state is unchanged when only a mapped entity moved, so bump
+    // last_updated to force the entity$Changed its clusters react to.
+    const effectiveState = force
+      ? { ...state, last_updated: new Date().toISOString() }
+      : state;
 
     let debouncedFn = this.debouncedUpdates.get(key);
     if (!debouncedFn) {
@@ -374,7 +388,7 @@ export class ComposedSensorEndpoint extends Endpoint {
       );
       this.debouncedUpdates.set(key, debouncedFn);
     }
-    debouncedFn(endpoint, state);
+    debouncedFn(endpoint, effectiveState);
   }
 
   private async flushUpdate(

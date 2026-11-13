@@ -4,11 +4,13 @@ import {
   bridgeTemplates,
 } from "@home-assistant-matter-hub/common";
 import Alert from "@mui/material/Alert";
+import Box from "@mui/material/Box";
+import CircularProgress from "@mui/material/CircularProgress";
 import Link from "@mui/material/Link";
 import Stack from "@mui/material/Stack";
 import Typography from "@mui/material/Typography";
 import { useCallback, useMemo, useState } from "react";
-import { useTranslation } from "react-i18next";
+import { Trans, useTranslation } from "react-i18next";
 import { useNavigate } from "react-router";
 import { Breadcrumbs } from "../../components/breadcrumbs/Breadcrumbs.tsx";
 import { BridgeConfigEditor } from "../../components/bridge/BridgeConfigEditor.tsx";
@@ -77,44 +79,56 @@ export const CreateBridgePage = () => {
   const createBridge = useCreateBridge();
 
   const cancelAction = () => {
-    navigate(-1);
+    navigate(navigation.bridges);
   };
 
   const saveAction = async (config: BridgeConfig) => {
     await createBridge({ ...config })
-      .then(() =>
+      .then((bridge) => {
         notifications.show({
           message: t("bridge.saveSuccess"),
           severity: "success",
-        }),
-      )
-      .then(() => cancelAction())
+        });
+        navigate(navigation.bridge(bridge.id));
+      })
       .catch((err: Error) =>
         notifications.show({ message: err.message, severity: "error" }),
       );
   };
 
   if (!bridgeConfig || !usedPorts) {
-    return t("common.loading");
+    return (
+      <Box display="flex" justifyContent="center" p={4}>
+        <CircularProgress />
+      </Box>
+    );
   }
 
   return (
     <Stack spacing={4}>
-      <Breadcrumbs
-        items={[
-          { name: t("nav.bridges"), to: navigation.bridges },
-          { name: t("common.create"), to: navigation.createBridge },
-        ]}
-      />
+      <Stack spacing={1}>
+        <Breadcrumbs
+          items={[
+            { name: t("nav.bridges"), to: navigation.bridges },
+            { name: t("common.create"), to: navigation.createBridge },
+          ]}
+        />
+        <Typography variant="h5" component="h1">
+          {t("dashboard.createBridge")}
+        </Typography>
+      </Stack>
 
       {showReuseBridgeHint && (
         <Alert severity="info" variant="outlined">
           <Typography>
-            Did you know that you can connect the same bridge with multiple
-            assistants?{" "}
-            <Link href={navigation.faq.multiFabric} target="_blank">
-              Learn more.
-            </Link>
+            <Trans
+              i18nKey="bridge.multiFabricHint"
+              components={{
+                more: (
+                  <Link href={navigation.faq.multiFabric} target="_blank" />
+                ),
+              }}
+            />
           </Typography>
         </Alert>
       )}

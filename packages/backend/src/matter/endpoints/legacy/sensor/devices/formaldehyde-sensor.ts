@@ -3,6 +3,7 @@ import { AirQualityServer } from "@matter/main/behaviors";
 import { AirQuality } from "@matter/main/clusters";
 import { AirQualitySensorDevice } from "@matter/main/devices";
 import { applyPatchState } from "../../../../../utils/apply-patch-state.js";
+import { numericState } from "../../../../../utils/numeric-state.js";
 import { BasicInformationServer } from "../../../../behaviors/basic-information-server.js";
 import { FormaldehydeConcentrationMeasurementServer } from "../../../../behaviors/formaldehyde-concentration-measurement-server.js";
 import { HomeAssistantEntityBehavior } from "../../../../behaviors/home-assistant-entity-behavior.js";
@@ -35,8 +36,8 @@ class FormaldehydeAirQualityServer extends FormaldehydeAirQualityServerBase {
     let airQuality: AirQuality.AirQualityEnum =
       AirQuality.AirQualityEnum.Unknown;
 
-    if (state != null && !Number.isNaN(+state)) {
-      const ugm3 = +state;
+    const ugm3 = numericState(state);
+    if (ugm3 != null) {
       // HCHO in µg/m³, thresholds based on WHO indoor air quality guidelines.
       // WHO recommends 100 µg/m³ (30-min average).
       if (ugm3 <= 30) {

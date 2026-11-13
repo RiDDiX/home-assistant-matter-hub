@@ -5,6 +5,7 @@ import {
   getVacuumBatteryPercent,
   getVacuumChargingState,
 } from "./vacuum-battery.js";
+import { getVacuumJobActive } from "./vacuum-job-lifecycle.js";
 
 export const VacuumPowerSourceServer = PowerSourceServer({
   getBatteryPercent: getVacuumBatteryPercent,
@@ -14,6 +15,14 @@ export const VacuumPowerSourceServer = PowerSourceServer({
     return state === VacuumState.docked;
   },
   getChargeState(entity, agent) {
+    if (
+      entity.state === VacuumState.docked &&
+      getVacuumJobActive(agent) !== undefined
+    ) {
+      const percent = getVacuumBatteryPercent(entity, agent);
+      if (percent != null && percent >= 100)
+        return PowerSource.BatChargeState.IsAtFullCharge;
+    }
     const signal = getVacuumChargingState(agent);
     if (signal === "charging") return PowerSource.BatChargeState.IsCharging;
     if (signal === "full") return PowerSource.BatChargeState.IsAtFullCharge;

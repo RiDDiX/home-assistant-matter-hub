@@ -14,6 +14,7 @@ import { EntityStateProvider } from "../../../../../services/bridges/entity-stat
 import { HomeAssistantActions } from "../../../../../services/home-assistant/home-assistant-actions.js";
 import { HomeAssistantConfig } from "../../../../../services/home-assistant/home-assistant-config.js";
 import { AggregatorEndpoint } from "../../../aggregator-endpoint.js";
+import { updateEntityState } from "../../../update-entity-state.js";
 import { createLegacyEndpointType } from "../../create-legacy-endpoint-type.js";
 
 // A home battery (device_class battery) with a mapped power/energy sensor is a
@@ -44,6 +45,7 @@ let dir: string;
 let env: Environment;
 let counter = 0;
 let server: ServerNode | undefined;
+let powerUnavailable = false;
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "hamh-ess-"));
@@ -79,10 +81,14 @@ beforeEach(() => {
   // The ESS reads the mapped companion entities through the provider: watts for
   // activePower, kWh for cumulativeEnergyImported. Battery percent comes from the
   // sensor's own state, not the provider.
+  powerUnavailable = false;
   env.set(EntityStateProvider, {
-    getState: () => undefined,
+    getState: (id: string) =>
+      powerUnavailable && id === BATTERY_POWER
+        ? { entity_id: id, state: "unavailable", attributes: {} }
+        : undefined,
     getNumericState: (id: string) => {
-      if (id === BATTERY_POWER) return POWER_WATTS;
+      if (id === BATTERY_POWER) return powerUnavailable ? null : POWER_WATTS;
       if (id === BATTERY_ENERGY) return ENERGY_KWH;
       return null;
     },
@@ -97,10 +103,12 @@ afterEach(async () => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-function batteryEntity(): HomeAssistantEntityInformation {
+function batteryEntity(
+  batteryState = BATTERY_STATE,
+): HomeAssistantEntityInformation {
   const state = {
     entity_id: BATTERY,
-    state: BATTERY_STATE,
+    state: batteryState,
     attributes: {
       friendly_name: "Home Battery",
       device_class: "battery",
@@ -182,6 +190,40 @@ describe("battery storage ESS bring-up (#386)", () => {
     );
     // No mapped energy entity, so no energy cluster advertising a fake zero.
     expect("electricalEnergyMeasurement" in state).toBe(false);
+  });
+
+  it("clears activePower when the power sensor goes unavailable, energy keeps its total", async () => {
+    const endpoint = await mount({
+      entityId: BATTERY,
+      batteryPowerEntity: BATTERY_POWER,
+      batteryEnergyEntity: BATTERY_ENERGY,
+    });
+    powerUnavailable = true;
+    await updateEntityState(endpoint, batteryEntity("79").state);
+    await delay(50);
+
+    // biome-ignore lint/suspicious/noExplicitAny: read cluster state
+    const state = endpoint.state as any;
+    expect(state.electricalPowerMeasurement.activePower).toBeNull();
+    expect(
+      state.electricalEnergyMeasurement.cumulativeEnergyImported.energy,
+    ).toBe(EXPECTED_ENERGY);
+  });
+
+  it.each([
+    "",
+    " ",
+  ])("keeps the battery percent on a blank state %j", async (blank) => {
+    const endpoint = await mount({
+      entityId: BATTERY,
+      batteryPowerEntity: BATTERY_POWER,
+    });
+    await updateEntityState(endpoint, batteryEntity(blank).state);
+    await delay(50);
+
+    // biome-ignore lint/suspicious/noExplicitAny: read cluster state
+    const state = endpoint.state as any;
+    expect(state.powerSource.batPercentRemaining).toBe(EXPECTED_BAT_PERCENT);
   });
 
   it("keeps a plain battery as BatterySensorType without electrical clusters", async () => {

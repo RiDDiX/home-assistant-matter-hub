@@ -1,9 +1,10 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import express from "express";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { PluginManager } from "../plugins/plugin-manager.js";
 import type { BridgeService } from "../services/bridges/bridge-service.js";
 import { pluginApi } from "./plugin-api.js";
 
@@ -20,6 +21,9 @@ vi.mock("../plugins/plugin-installer.js", () => ({
     async install(packageName: string) {
       installCalls.push(packageName);
       return { success: true, packageName, version: "1.0.0" };
+    }
+    async uninstall(packageName: string) {
+      return { success: true, packageName };
     }
     // The tgz and local paths read the name out of the package itself, so the
     // stub echoes a name the caller plants via the payload or path.
@@ -201,6 +205,45 @@ describe("secret config values in the listing", () => {
       },
       [noToken],
     );
+  });
+
+  it("keeps registry config out of the installed listing", async () => {
+    await withRouter(async (base) => {
+      await fetch(`${base}/plugins/install`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          packageName: "hamh-plugin-secretive",
+          config: { apiKey: "very-secret" },
+        }),
+      });
+      const res = await fetch(`${base}/plugins/installed`);
+      const body = (await res.json()) as Array<Record<string, unknown>>;
+      const entry = body.find((p) => p.packageName === "hamh-plugin-secretive");
+      expect(entry).toBeDefined();
+      expect(entry).not.toHaveProperty("config");
+    });
+  });
+
+  it("drops the registry entry when uninstalled with a version spec", async () => {
+    await withRouter(async (base) => {
+      const post = (route: string) =>
+        fetch(`${base}/plugins/${route}`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ packageName: "hamh-plugin-gone@1.2.3" }),
+        });
+      const names = async () =>
+        (
+          (await (await fetch(`${base}/plugins/installed`)).json()) as Array<{
+            packageName: string;
+          }>
+        ).map((p) => p.packageName);
+      await post("install");
+      expect(await names()).toContain("hamh-plugin-gone");
+      expect((await post("uninstall")).status).toBe(200);
+      expect(await names()).not.toContain("hamh-plugin-gone");
+    });
   });
 });
 
@@ -413,5 +456,41 @@ describe("npm install of a built-in plugin name (#432)", () => {
       },
       [serverModeBridge],
     );
+  });
+});
+
+describe("upload of a plugin already loaded in this process", () => {
+  it("asks for an app restart, a bridge restart would run the old code", async () => {
+    const pkg = join(dir, "hamh-plugin-reupload");
+    mkdirSync(pkg, { recursive: true });
+    writeFileSync(
+      join(pkg, "package.json"),
+      JSON.stringify({
+        name: "hamh-plugin-reupload",
+        main: "index.js",
+        type: "module",
+      }),
+    );
+    writeFileSync(
+      join(pkg, "index.js"),
+      `export default class P { name = "hamh-plugin-reupload"; version = "1.0.0"; async onStart() {} }`,
+    );
+    await new PluginManager("b1", dir).loadExternal(pkg, {});
+
+    await withRouter(async (base) => {
+      const upload = (name: string) =>
+        fetch(`${base}/plugins/upload`, {
+          method: "POST",
+          headers: { "content-type": "application/octet-stream" },
+          body: name,
+        }).then((r) => r.json() as Promise<{ message: string }>);
+
+      expect((await upload("hamh-plugin-reupload")).message).toContain(
+        "restart the app",
+      );
+      expect((await upload("hamh-plugin-fresh")).message).toContain(
+        "Restart the bridge",
+      );
+    });
   });
 });

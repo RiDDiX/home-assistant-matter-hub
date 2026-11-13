@@ -5,7 +5,10 @@ import { Logger } from "@matter/general";
 import archiver from "archiver";
 import { pluginStateFilePath } from "../../plugins/plugin-storage.js";
 import type { AppSettingsStorage } from "../storage/app-settings-storage.js";
-import type { BridgeStorage } from "../storage/bridge-storage.js";
+import {
+  BRIDGE_SCHEMA_VERSION,
+  type BridgeStorage,
+} from "../storage/bridge-storage.js";
 import type { EntityMappingStorage } from "../storage/entity-mapping-storage.js";
 
 export interface BackupMetadata {
@@ -20,6 +23,42 @@ export interface BackupServiceProps {
   storageLocation: string;
   appVersion: string;
 }
+
+// The app namespace files that hold lock PINs, the login and the entity
+// identities. Bridges and mappings already travel in backup.json.
+export const APP_BACKUP_FILES = [
+  "settings.data",
+  "lock-credentials.data",
+  "entity-identities.data",
+];
+
+// Secrets that only go into a backup with identity data: the files above and
+// every plugin-<bridgeId>-<plugin>.json config of the given bridges.
+export function archiveSecretFiles(
+  archive: archiver.Archiver,
+  storageLocation: string,
+  bridgeIds: string[],
+): void {
+  for (const name of APP_BACKUP_FILES) {
+    const file = path.join(storageLocation, "app", name);
+    if (fs.existsSync(file)) {
+      archive.file(file, { name: `app/${name}` });
+    }
+  }
+  for (const file of fs.readdirSync(storageLocation)) {
+    if (
+      file.endsWith(".json") &&
+      bridgeIds.some((id) => file.startsWith(`plugin-${id}-`))
+    ) {
+      archive.file(path.join(storageLocation, file), {
+        name: `plugins/${file}`,
+      });
+    }
+  }
+}
+
+const isBackupFile = (file: string) =>
+  file.startsWith("hamh-") && file.endsWith(".zip");
 
 export class BackupService {
   private readonly log = Logger.get("BackupService");
@@ -80,6 +119,7 @@ export class BackupService {
 
     const backupData = {
       version: 2,
+      bridgeVersion: BRIDGE_SCHEMA_VERSION,
       createdAt: now.toISOString(),
       bridges,
       entityMappings,
@@ -135,6 +175,12 @@ export class BackupService {
           archive.file(pluginState, { name: `plugin-state/${bridge.id}.json` });
         }
       }
+
+      archiveSecretFiles(
+        archive,
+        this.props.storageLocation,
+        bridges.map((b) => b.id),
+      );
 
       if (includesIcons) {
         const iconFiles = fs.readdirSync(iconsDir);
@@ -193,9 +239,7 @@ export class BackupService {
       return [];
     }
 
-    const files = fs
-      .readdirSync(this.backupDir)
-      .filter((f) => f.startsWith("hamh-") && f.endsWith(".zip"));
+    const files = fs.readdirSync(this.backupDir).filter(isBackupFile);
 
     return files
       .map((filename) => {
@@ -221,7 +265,11 @@ export class BackupService {
   }
 
   getBackupPath(filename: string): string | null {
-    if (filename.includes("..") || filename.includes("/")) {
+    if (
+      filename.includes("..") ||
+      filename.includes("/") ||
+      !isBackupFile(filename)
+    ) {
       return null;
     }
     const filepath = path.join(this.backupDir, filename);
@@ -251,7 +299,8 @@ export class BackupService {
     // backup, so anything but a positive integer means "keep all".
     if (!Number.isInteger(maxCount) || maxCount <= 0) return;
 
-    const backups = this.listBackups();
+    // manual backups are deliberate recovery points, only the user deletes them
+    const backups = this.listBackups().filter((b) => b.auto);
     if (backups.length <= maxCount) return;
 
     const toDelete = backups.slice(maxCount);
@@ -261,7 +310,7 @@ export class BackupService {
 
     if (toDelete.length > 0) {
       this.log.info(
-        `Retention: deleted ${toDelete.length} old backup(s), keeping ${maxCount}`,
+        `Retention: deleted ${toDelete.length} old automatic backup(s), keeping ${maxCount}`,
       );
     }
   }

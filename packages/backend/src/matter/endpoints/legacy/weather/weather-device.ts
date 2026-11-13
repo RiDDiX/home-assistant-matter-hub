@@ -55,8 +55,7 @@ export const pressureConfig: PressureMeasurementConfig = {
     if (pressure == null || Number.isNaN(pressure)) {
       return undefined;
     }
-    // Convert to hPa before the server's 300-1100 clamp, otherwise an inHg
-    // entity (~29 to 31) falls below 300 and is silently dropped.
+    // The server expects hPa, an inHg entity (~29 to 31) would read as 29 hPa.
     return convertPressureToHpa(pressure, attributes.pressure_unit);
   },
 };

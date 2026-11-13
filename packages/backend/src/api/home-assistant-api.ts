@@ -133,8 +133,13 @@ export function homeAssistantApi(
 
   router.get("/entities/:entityId", (req, res) => {
     const { entityId } = req.params;
-    const entity = haRegistry.entities[entityId];
-    const state = haRegistry.states[entityId];
+    // own keys only, or "constructor" answers with an Object.prototype member
+    const entity = Object.hasOwn(haRegistry.entities, entityId)
+      ? haRegistry.entities[entityId]
+      : undefined;
+    const state = Object.hasOwn(haRegistry.states, entityId)
+      ? haRegistry.states[entityId]
+      : undefined;
 
     if (!entity && !state) {
       res.status(404).json({ error: "Entity not found" });
@@ -213,7 +218,9 @@ export function homeAssistantApi(
 
   router.get("/devices/:deviceId", (req, res) => {
     const { deviceId } = req.params;
-    const device = haRegistry.devices[deviceId];
+    const device = Object.hasOwn(haRegistry.devices, deviceId)
+      ? haRegistry.devices[deviceId]
+      : undefined;
 
     if (!device) {
       res.status(404).json({ error: "Device not found" });
@@ -291,7 +298,9 @@ export function homeAssistantApi(
    */
   router.get("/related-buttons/:entityId", (req, res) => {
     const { entityId } = req.params;
-    const entity = haRegistry.entities[entityId];
+    const entity = Object.hasOwn(haRegistry.entities, entityId)
+      ? haRegistry.entities[entityId]
+      : undefined;
 
     if (!entity) {
       res.status(404).json({ error: "Entity not found" });

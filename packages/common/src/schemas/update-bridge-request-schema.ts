@@ -7,6 +7,7 @@ export const updateBridgeRequestSchema: JSONSchema7 = {
     ...bridgeConfigSchema.properties,
     id: {
       type: "string",
+      pattern: "^[\\w-]+$",
     },
   },
   required: [...(bridgeConfigSchema?.required ?? []), "id"],

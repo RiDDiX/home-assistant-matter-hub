@@ -1,5 +1,6 @@
 import type { SensorDeviceAttributes } from "@home-assistant-matter-hub/common";
 import { FlowSensorDevice } from "@matter/main/devices";
+import { numericState } from "../../../../../utils/numeric-state.js";
 import { BasicInformationServer } from "../../../../behaviors/basic-information-server.js";
 import {
   type FlowMeasurementConfig,
@@ -10,9 +11,8 @@ import { IdentifyServer } from "../../../../behaviors/identify-server.js";
 
 const flowSensorConfig: FlowMeasurementConfig = {
   getValue(entity) {
-    const state = entity.state;
     const attributes = entity.attributes as SensorDeviceAttributes;
-    const flow = state == null || Number.isNaN(+state) ? null : +state;
+    const flow = numericState(entity.state);
     if (flow == null) {
       return undefined;
     }

@@ -189,6 +189,21 @@ describe("full-tilt cover keeps discrete tilt services (#405 regression)", () =>
   });
 });
 
+describe("tilt-only cover lift position", () => {
+  it("reads the lift position from the tilt it is routed to", async () => {
+    // SwitchBot Blind Tilt: tilt services only, no current_position
+    const { server, endpoint } = await mount(16 + 32 + 64 + 128, {
+      current_position: undefined,
+      current_tilt_position: 30,
+    });
+    // biome-ignore lint/suspicious/noExplicitAny: inspect cluster state
+    const wc = (endpoint.state as any).windowCovering;
+    expect(wc.currentPositionLiftPercent100ths).toBe(7000);
+    expect(wc.currentPositionTiltPercent100ths).toBe(7000);
+    await server.close().catch(() => {});
+  });
+});
+
 describe("tilting cover shape stays valid on Matter 1.6.1", () => {
   it("mounts a tilting shutter as an exterior venetian blind", async () => {
     // Shutter and RollerShutter are single axis now and failed the mount

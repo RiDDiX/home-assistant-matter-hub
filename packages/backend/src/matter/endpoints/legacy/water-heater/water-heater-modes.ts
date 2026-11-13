@@ -6,6 +6,7 @@ import {
   type WaterHeaterManagement,
   WaterHeaterMode,
 } from "@matter/main/clusters";
+import { trimToLength } from "../../../../utils/trim-to-length.js";
 
 /**
  * Matter mode values for the Home Assistant operation modes we know about.
@@ -105,7 +106,7 @@ export function normalizeOperationMode(operationMode: string): string {
   return operationMode.toLowerCase().replaceAll(" ", "_");
 }
 
-function isOffMode(operationMode: string): boolean {
+export function isOffMode(operationMode: string): boolean {
   return normalizeOperationMode(operationMode) === WaterHeaterOperationMode.off;
 }
 
@@ -130,8 +131,8 @@ function humanize(operationMode: string): string {
     .split("_")
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join(" ");
-  // ModeOptionStruct.Label is capped at 64 characters by the spec.
-  return label.slice(0, 64);
+  // ModeOptionStruct.Label is capped at 64 bytes by the spec.
+  return trimToLength(label, 64, "") ?? label;
 }
 
 /**
@@ -180,17 +181,23 @@ export function buildModeMapping(
     haOperationModes[SYNTHETIC_MANUAL_MODE] = null;
   }
 
+  // matter.js rejects a repeated label, e.g. HA "on" next to the synthetic On.
+  const usedLabels = new Set(supportedModes.map((m) => m.label));
+  const usedNames = new Set<string>();
   let nextUnknownMode = UNKNOWN_MODE_BASE;
   for (const operationMode of heatingModes) {
     const normalized = normalizeOperationMode(operationMode);
-    const mode = KNOWN_MODE_VALUES[normalized] ?? nextUnknownMode++;
-    if (haOperationModes[mode] !== undefined) {
+    const label = humanize(operationMode);
+    if (usedNames.has(normalized) || usedLabels.has(label)) {
       // Duplicate entry in operation_list, keep the first.
       continue;
     }
+    usedNames.add(normalized);
+    usedLabels.add(label);
+    const mode = KNOWN_MODE_VALUES[normalized] ?? nextUnknownMode++;
     haOperationModes[mode] = operationMode;
     supportedModes.push({
-      label: humanize(operationMode),
+      label,
       mode,
       modeTags: [
         {

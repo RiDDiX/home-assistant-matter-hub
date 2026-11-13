@@ -1,6 +1,7 @@
 import type { HomeAssistantEntityInformation } from "@home-assistant-matter-hub/common";
 import { MediaInputServer as Base } from "@matter/main/behaviors";
 import { MediaInput } from "@matter/main/clusters";
+import { StatusCode, StatusResponseError } from "@matter/main/types";
 import { applyPatchState } from "../../utils/apply-patch-state.js";
 import { HomeAssistantEntityBehavior } from "./home-assistant-entity-behavior.js";
 import type { ValueGetter, ValueSetter } from "./utils/cluster-config.js";
@@ -29,7 +30,10 @@ class MediaInputServerBase extends Base {
     }
     const config = this.state.config;
     let source_idx = 0;
-    const sourceList = config.getSourceList(entity.state, this.agent)?.sort();
+    const sourceList = config
+      .getSourceList(entity.state, this.agent)
+      ?.slice()
+      .sort();
     const inputList = sourceList?.map((source) => ({
       index: source_idx++,
       inputType: MediaInput.InputType.Other,
@@ -49,7 +53,16 @@ class MediaInputServerBase extends Base {
 
   override selectInput(request: MediaInput.SelectInputRequest) {
     const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);
-    const target = this.state.inputList[request.index];
+    // Out-of-range reads on the managed list throw UnsupportedRead.
+    const target = this.state.inputList.find(
+      (input) => input.index === request.index,
+    );
+    if (!target) {
+      throw new StatusResponseError(
+        `Unknown input index ${request.index}`,
+        StatusCode.ConstraintError,
+      );
+    }
     homeAssistant.callAction(
       this.state.config.selectSource(target.name, this.agent),
     );

@@ -47,7 +47,6 @@ export const devicesPerBridgeReducer = createReducer(
       .addCase(loadDevices.rejected, (state, action) => {
         state.isInitialized = true;
         state.isLoading = false;
-        state.content = undefined;
         state.error = action.error;
       })
       .addCase(loadDevices.fulfilled, (state, action) => {

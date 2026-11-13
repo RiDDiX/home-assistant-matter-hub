@@ -1,7 +1,37 @@
-import type { EntityMappingConfig } from "@home-assistant-matter-hub/common";
+import type {
+  EntityMappingConfig,
+  HomeAssistantEntityState,
+} from "@home-assistant-matter-hub/common";
 import type { Logger } from "@matter/general";
 import type { HomeAssistantStates } from "../home-assistant/home-assistant-registry.js";
 import { type BridgeRegistry, fingerprintBattery } from "./bridge-registry.js";
+
+// #515: a fan's device type and FanControl features are frozen at endpoint
+// creation. Speed or direction gained later (LocalTuya configured after the
+// bridge started) must change the fingerprint so the endpoint rebuilds.
+// null = capabilities unknown right now, the caller keeps the stored value.
+function fanCapabilities(
+  state: HomeAssistantEntityState | undefined,
+): string | null {
+  if (!state || state.state === "unavailable" || state.state === "unknown") {
+    return null;
+  }
+  const attributes = (state.attributes ?? {}) as Record<string, unknown>;
+  if (attributes.supported_features == null) return null;
+  const presets = Array.isArray(attributes.preset_modes)
+    ? [...attributes.preset_modes].sort()
+    : [];
+  return JSON.stringify([attributes.supported_features, presets]);
+}
+
+function parseTuple(fingerprint: string): unknown[] {
+  try {
+    const parsed = JSON.parse(fingerprint);
+    return Array.isArray(parsed) ? parsed : [parsed];
+  } catch {
+    return [fingerprint];
+  }
+}
 
 // Mapping fingerprints and the battery auto-map catch-up (#450), shared by
 // the aggregator and the server mode endpoint manager. Both carried this
@@ -12,6 +42,8 @@ export class EntityMappingSync {
   // deviceId -> primary entityId of endpoints that auto-map but carry no
   // battery, bounds the per-state-batch check to a map hit
   private readonly candidates = new Map<string, string>();
+  // fan entityId -> as-built capability element of its fingerprint (#515)
+  private readonly fanCaps = new Map<string, string | null>();
 
   constructor(
     private readonly registry: BridgeRegistry,
@@ -51,6 +83,12 @@ export class EntityMappingSync {
     const battery = entityId
       ? this.registry.batteryFingerprintFor(entityId, mapping)
       : "";
+    // fans carry a third capability element (#515); other domains keep the
+    // two-element tuple so their stored fingerprints stay valid
+    if (entityId?.startsWith("fan.")) {
+      const caps = fanCapabilities(this.registry.initialState(entityId));
+      return JSON.stringify([mapping ?? null, battery || null, caps]);
+    }
     return JSON.stringify([mapping ?? null, battery || null]);
   }
 
@@ -63,7 +101,17 @@ export class EntityMappingSync {
     entityId: string,
     storedFingerprint: string | undefined,
   ): string {
-    const fingerprint = this.computeFingerprint(mapping, entityId);
+    let fingerprint = this.computeFingerprint(mapping, entityId);
+    // #515: unknown live capabilities (unavailable snapshot, integrations
+    // stripping attributes) must not rebuild the fan, keep the stored element.
+    if (entityId.startsWith("fan.") && storedFingerprint) {
+      const live = parseTuple(fingerprint);
+      const stored = parseTuple(storedFingerprint);
+      if (live[2] == null && stored.length > 2 && stored[2] != null) {
+        live[2] = stored[2];
+        fingerprint = JSON.stringify(live);
+      }
+    }
     if (fingerprintBattery(fingerprint) != null || !storedFingerprint)
       return fingerprint;
     if (!this.eligible(entityId)) return fingerprint;
@@ -72,9 +120,10 @@ export class EntityMappingSync {
     const deviceId = this.registry.entity(entityId)?.device_id;
     const stillSameDevice =
       !!deviceId && this.registry.fullEntities[battery]?.device_id === deviceId;
-    return stillSameDevice
-      ? JSON.stringify([mapping ?? null, battery])
-      : fingerprint;
+    if (!stillSameDevice) return fingerprint;
+    const merged = parseTuple(fingerprint);
+    merged[1] = battery;
+    return JSON.stringify(merged);
   }
 
   // The stored fingerprint must reflect what the endpoint actually maps: a
@@ -88,14 +137,24 @@ export class EntityMappingSync {
     const fingerprint = this.computeFingerprint(mapping, entityId);
     const battery = fingerprintBattery(fingerprint);
     if (battery == null) return fingerprint;
-    return (mappedEntityIds ?? []).includes(battery)
-      ? fingerprint
-      : JSON.stringify([mapping ?? null, null]);
+    if ((mappedEntityIds ?? []).includes(battery)) return fingerprint;
+    const parsed = parseTuple(fingerprint);
+    parsed[1] = null;
+    return JSON.stringify(parsed);
   }
 
   rebuildCandidates(entries: Iterable<[string, string]>): void {
     this.candidates.clear();
+    this.fanCaps.clear();
     for (const [entityId, fingerprint] of entries) {
+      // track the as-built capability element of every fan endpoint (#515)
+      if (entityId.startsWith("fan.")) {
+        const tuple = parseTuple(fingerprint);
+        this.fanCaps.set(
+          entityId,
+          tuple.length > 2 && typeof tuple[2] === "string" ? tuple[2] : null,
+        );
+      }
       if (fingerprintBattery(fingerprint) != null) continue;
       if (!this.eligible(entityId)) continue;
       const deviceId = this.registry.entity(entityId)?.device_id;
@@ -142,10 +201,28 @@ export class EntityMappingSync {
   ): void {
     // a stop mid-flight leaves queued batches behind, never schedule on a
     // stopped manager
-    if (!observing || this.retryScheduled || this.candidates.size === 0) {
+    if (
+      !observing ||
+      this.retryScheduled ||
+      (this.candidates.size === 0 && this.fanCaps.size === 0)
+    ) {
       return;
     }
     for (const id of changed ?? Object.keys(states)) {
+      // #515: a fan that gained or changed speed/direction capabilities after
+      // the endpoint was built keeps its stale plug shape until a refresh.
+      if (id.startsWith("fan.")) {
+        const stored = this.fanCaps.get(id);
+        if (stored === undefined) continue;
+        const live = fanCapabilities(states[id]);
+        if (live == null || live === stored) continue;
+        this.fanCaps.set(id, live);
+        this.scheduleRefresh(
+          `Fan capabilities changed for ${id}, rebuilding`,
+          refresh,
+        );
+        return;
+      }
       if (!id.startsWith("sensor.") && !id.startsWith("binary_sensor."))
         continue;
       const deviceId = this.registry.fullEntities[id]?.device_id;
@@ -158,21 +235,26 @@ export class EntityMappingSync {
         this.getMapping(entityId),
       );
       if (!resolved) continue;
-      this.retryScheduled = true;
-      this.log.info(
+      this.scheduleRefresh(
         `Battery sensor ${resolved} appeared for ${entityId}, rebuilding`,
+        refresh,
       );
-      // flag stays set until the refresh completes, no concurrent reconcile
-      this.retryTimer = setTimeout(() => {
-        this.retryTimer = null;
-        refresh()
-          .catch((e) => this.log.warn("Battery retry refresh failed:", e))
-          .finally(() => {
-            this.retryScheduled = false;
-          });
-      }, 0);
       return;
     }
+  }
+
+  private scheduleRefresh(reason: string, refresh: () => Promise<void>): void {
+    this.retryScheduled = true;
+    this.log.info(reason);
+    // flag stays set until the refresh completes, no concurrent reconcile
+    this.retryTimer = setTimeout(() => {
+      this.retryTimer = null;
+      refresh()
+        .catch((e) => this.log.warn("Mapping retry refresh failed:", e))
+        .finally(() => {
+          this.retryScheduled = false;
+        });
+    }, 0);
   }
 
   cancelRetry(): void {

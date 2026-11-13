@@ -200,10 +200,6 @@ export class LockCredentialStorage extends Service {
     return this.credentials.get(entityId);
   }
 
-  getCredentialForEntity(entityId: string): LockCredential | undefined {
-    return this.getCredential(entityId);
-  }
-
   async setCredential(request: LockCredentialRequest): Promise<LockCredential> {
     const now = Date.now();
     const existing = this.credentials.get(request.entityId);
@@ -216,8 +212,15 @@ export class LockCredentialStorage extends Service {
       entityId: request.entityId,
       pinCodeHash: hash,
       pinCodeSalt: salt,
-      name: request.name?.trim() || existing?.name,
-      enabled: request.enabled ?? true,
+      // An empty name clears it, a missing one keeps the stored name.
+      name:
+        typeof request.name === "string"
+          ? request.name.trim() || undefined
+          : existing?.name,
+      // A slot made by Matter SetUser carries a placeholder false, its first
+      // PIN starts enabled.
+      enabled:
+        request.enabled ?? (existing?.pinCodeHash ? existing.enabled : true),
       createdAt: existing?.createdAt ?? now,
       updatedAt: now,
       userName: request.userName ?? existing?.userName,
@@ -274,15 +277,6 @@ export class LockCredentialStorage extends Service {
     this.credentials.delete(entityId);
     await this.persist();
     this.changed.emit(entityId);
-  }
-
-  async deleteAllCredentials(): Promise<void> {
-    const entityIds = [...this.credentials.keys()];
-    this.credentials.clear();
-    await this.persist();
-    for (const entityId of entityIds) {
-      this.changed.emit(entityId);
-    }
   }
 
   /**

@@ -71,17 +71,26 @@ export function testMatcher(
     case "platform":
       return entity?.platform === matcher.value;
     case "pattern":
-      return patternToRegex(matcher.value).test(entity.entity_id);
+      return patternToRegex(matcher.value)?.test(entity.entity_id) ?? false;
     case "regex":
       return testRegex(matcher.value, entity.entity_id);
     case "area":
       return (entity?.area_id ?? device?.area_id) === matcher.value;
     case "device_name":
-      return testDeviceName(matcher.value, device);
+      return testDeviceField(
+        matcher.value,
+        device?.name_by_user ?? device?.name ?? device?.default_name,
+      );
     case "product_name":
-      return testProductName(matcher.value, device);
+      return testDeviceField(
+        matcher.value,
+        device?.model ?? device?.default_model,
+      );
     case "manufacturer":
-      return testManufacturer(matcher.value, device);
+      return testDeviceField(
+        matcher.value,
+        device?.manufacturer ?? device?.default_manufacturer,
+      );
     case "device_class":
       return entityState?.attributes?.device_class === matcher.value;
   }
@@ -92,21 +101,48 @@ function escapeRegExp(text: string): string {
   return text.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, "\\$&");
 }
 
-function patternToRegex(pattern: string): RegExp {
-  const regex = pattern
-    .split("*")
-    .map((part) => escapeRegExp(part))
-    .join(".*");
-  return new RegExp(`^${regex}$`);
+const regexCache = new Map<string, RegExp | null>();
+
+// reconcile runs every matcher per entity, so compile each pattern once
+function cachedRegex(key: string, source: () => string): RegExp | null {
+  let regex = regexCache.get(key);
+  if (regex === undefined) {
+    try {
+      regex = new RegExp(source());
+    } catch {
+      regex = null;
+    }
+    if (regexCache.size >= 500) {
+      regexCache.clear();
+    }
+    regexCache.set(key, regex);
+  }
+  return regex;
+}
+
+function patternToRegex(pattern: string): RegExp | null {
+  return cachedRegex(`*${pattern}`, () => {
+    const regex = pattern
+      .split("*")
+      .map((part) => escapeRegExp(part))
+      .join(".*");
+    return `^${regex}$`;
+  });
+}
+
+function compileRegex(pattern: string): RegExp | null {
+  return cachedRegex(`/${pattern}`, () => pattern);
 }
 
 function testRegex(pattern: string, value: string): boolean {
-  try {
-    const regex = new RegExp(pattern);
-    return regex.test(value);
-  } catch {
-    return false;
-  }
+  return compileRegex(pattern)?.test(value) ?? false;
+}
+
+function labelName(
+  slug: string,
+  labels: HomeAssistantLabel[] | undefined,
+): string | undefined {
+  return labels?.find((l) => l.label_id === slug)?.name;
 }
 
 function testLabelRegex(
@@ -117,17 +153,15 @@ function testLabelRegex(
   if (!assigned?.length) {
     return false;
   }
-  let regex: RegExp;
-  try {
-    regex = new RegExp(pattern);
-  } catch {
+  const regex = compileRegex(pattern);
+  if (!regex) {
     return false;
   }
   for (const slug of assigned) {
     if (regex.test(slug)) {
       return true;
     }
-    const named = labels?.find((l) => l.label_id === slug)?.name;
+    const named = labelName(slug, labels);
     if (named && regex.test(named)) {
       return true;
     }
@@ -142,10 +176,8 @@ function testAnyFieldRegex(
   entityState: HomeAssistantEntityState | undefined,
   labels: HomeAssistantLabel[] | undefined,
 ): boolean {
-  let regex: RegExp;
-  try {
-    regex = new RegExp(pattern);
-  } catch {
+  const regex = compileRegex(pattern);
+  if (!regex) {
     return false;
   }
   return regex.test(buildEntityHaystack(entity, device, entityState, labels));
@@ -169,12 +201,10 @@ function buildEntityHaystack(
       : "";
   const entityLabelSlugs = entity.labels ?? [];
   const deviceLabelSlugs = device?.labels ?? [];
-  const entityLabelNames = entityLabelSlugs
-    .map((slug) => labels?.find((l) => l.label_id === slug)?.name ?? "")
-    .filter((name) => name.length > 0);
-  const deviceLabelNames = deviceLabelSlugs
-    .map((slug) => labels?.find((l) => l.label_id === slug)?.name ?? "")
-    .filter((name) => name.length > 0);
+  const namesOf = (slugs: string[]) =>
+    slugs.map((slug) => labelName(slug, labels) ?? "").filter(Boolean);
+  const entityLabelNames = namesOf(entityLabelSlugs);
+  const deviceLabelNames = namesOf(deviceLabelSlugs);
   const deviceName =
     device?.name_by_user ?? device?.name ?? device?.default_name ?? "";
   const productName = device?.model ?? device?.default_model ?? "";
@@ -195,61 +225,19 @@ function buildEntityHaystack(
   ].join(" ");
 }
 
-function testDeviceName(
+function testDeviceField(
   pattern: string,
-  device: HomeAssistantDeviceRegistry | undefined,
+  value: string | null | undefined,
 ): boolean {
-  if (!device) {
-    return false;
-  }
-  const deviceName = device.name_by_user ?? device.name ?? device.default_name;
-  if (!deviceName) {
+  if (!value) {
     return false;
   }
   const lowerPattern = pattern.toLowerCase();
-  const lowerDeviceName = deviceName.toLowerCase();
+  const lowerValue = value.toLowerCase();
   if (lowerPattern.includes("*")) {
-    return patternToRegex(lowerPattern).test(lowerDeviceName);
+    return patternToRegex(lowerPattern)?.test(lowerValue) ?? false;
   }
-  return lowerDeviceName.includes(lowerPattern);
-}
-
-function testProductName(
-  pattern: string,
-  device: HomeAssistantDeviceRegistry | undefined,
-): boolean {
-  if (!device) {
-    return false;
-  }
-  const productName = device.model ?? device.default_model;
-  if (!productName) {
-    return false;
-  }
-  const lowerPattern = pattern.toLowerCase();
-  const lowerProductName = productName.toLowerCase();
-  if (lowerPattern.includes("*")) {
-    return patternToRegex(lowerPattern).test(lowerProductName);
-  }
-  return lowerProductName.includes(lowerPattern);
-}
-
-function testManufacturer(
-  pattern: string,
-  device: HomeAssistantDeviceRegistry | undefined,
-): boolean {
-  if (!device) {
-    return false;
-  }
-  const manufacturer = device.manufacturer ?? device.default_manufacturer;
-  if (!manufacturer) {
-    return false;
-  }
-  const lowerPattern = pattern.toLowerCase();
-  const lowerManufacturer = manufacturer.toLowerCase();
-  if (lowerPattern.includes("*")) {
-    return patternToRegex(lowerPattern).test(lowerManufacturer);
-  }
-  return lowerManufacturer.includes(lowerPattern);
+  return lowerValue.includes(lowerPattern);
 }
 
 function resolveLabelValue(

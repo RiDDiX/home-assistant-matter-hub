@@ -125,7 +125,9 @@
     "filterReference": "过滤器参考",
     "successMessage": "你的 Bridge 已连接到 {{count}} 个控制器 Fabric。设备现在应该出现在你的控制器应用中。",
     "noBridgesHint": "尚未配置 Bridge。使用 Bridge 向导或手动创建一个。",
-    "customizeDashboard": "自定义仪表盘"
+    "customizeDashboard": "自定义仪表盘",
+    "deviceCount": "{{count}} 设备",
+    "fabricCount": "{{count}} Fabrics"
   },
   "bridge": {
     "name": "Bridge 名称",
@@ -325,5 +327,8 @@
   "footer": {
     "github": "GitHub",
     "documentation": "文档"
+  },
+  "devices": {
+    "fabricCount": "{{count}} Fabrics"
   }
 }

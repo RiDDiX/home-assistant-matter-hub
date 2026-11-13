@@ -5,11 +5,9 @@ import type {
   HomeAssistantEntityState,
   SensorDeviceAttributes,
 } from "@home-assistant-matter-hub/common";
-import { FanDeviceFeature } from "@home-assistant-matter-hub/common";
 import { Logger } from "@matter/general";
 import { Endpoint, type EndpointType } from "@matter/main";
 import { FixedLabelServer } from "@matter/main/behaviors";
-import type { FanControl } from "@matter/main/clusters";
 import {
   AirPurifierDevice,
   HumiditySensorDevice,
@@ -21,10 +19,8 @@ import type { BridgeRegistry } from "../../../services/bridges/bridge-registry.j
 import { EntityStateProvider } from "../../../services/bridges/entity-state-provider.js";
 import { HomeAssistantConfig } from "../../../services/home-assistant/home-assistant-config.js";
 import type { HomeAssistantStates } from "../../../services/home-assistant/home-assistant-registry.js";
-import { autoPresetName } from "../../../utils/converters/fan-mode.js";
 import { Temperature } from "../../../utils/converters/temperature.js";
-import type { FeatureSelection } from "../../../utils/feature-selection.js";
-import { testBit } from "../../../utils/test-bit.js";
+import { numericState } from "../../../utils/numeric-state.js";
 import { trimToLength } from "../../../utils/trim-to-length.js";
 import { BasicInformationServer } from "../../behaviors/basic-information-server.js";
 import { HaElectricalEnergyMeasurementServer } from "../../behaviors/electrical-energy-measurement-server.js";
@@ -42,9 +38,14 @@ import {
   type TemperatureMeasurementConfig,
   TemperatureMeasurementServer,
 } from "../../behaviors/temperature-measurement-server.js";
+import {
+  createEndpointId,
+  mappedNonSubStateChanged,
+} from "../entity-endpoint.js";
 import { AirPurifierHepaFilterMonitoringServer } from "../legacy/air-purifier/behaviors/air-purifier-hepa-filter-monitoring-server.js";
 import { FanFanControlServer } from "../legacy/fan/behaviors/fan-fan-control-server.js";
 import { FanOnOffServer } from "../legacy/fan/behaviors/fan-on-off-server.js";
+import { fanControlFeatures } from "../legacy/fan/index.js";
 import { updateEntityState } from "../update-entity-state.js";
 
 const logger = Logger.get("ComposedAirPurifierEndpoint");
@@ -57,7 +58,7 @@ const temperatureConfig: TemperatureMeasurementConfig = {
       agent.env.get(HomeAssistantConfig).unitSystem.temperature;
     const state = entity.state;
     const attributes = entity.attributes as SensorDeviceAttributes;
-    const temperature = state == null || Number.isNaN(+state) ? null : +state;
+    const temperature = numericState(state);
     if (temperature == null) return undefined;
     return Temperature.withUnit(
       temperature,
@@ -68,8 +69,7 @@ const temperatureConfig: TemperatureMeasurementConfig = {
 
 const humidityConfig: HumidityMeasurementConfig = {
   getValue({ state }: HomeAssistantEntityState) {
-    if (state == null || Number.isNaN(+state)) return null;
-    return +state;
+    return numericState(state);
   },
 };
 
@@ -102,13 +102,6 @@ const HumiditySubType = HumiditySensorDevice.with(
   HomeAssistantEntityBehavior,
   HumidityMeasurementServer(humidityConfig),
 );
-
-// --- Helper ---
-
-function createEndpointId(entityId: string, customName?: string): string {
-  const baseName = customName || entityId;
-  return baseName.replace(/\./g, "_").replace(/\s+/g, "_");
-}
 
 function buildEntityPayload(
   registry: BridgeRegistry,
@@ -175,6 +168,7 @@ export class ComposedAirPurifierEndpoint extends Endpoint {
   readonly mappedEntityIds: string[];
   private subEndpoints = new Map<string, Endpoint>();
   private lastStates = new Map<string, string>();
+  private lastMappedStates = new Map<string, string>();
   private debouncedUpdates = new Map<
     string,
     ReturnType<
@@ -193,36 +187,7 @@ export class ComposedAirPurifierEndpoint extends Endpoint {
     // Compute Air Purifier features from entity attributes
     const airPurifierAttributes = primaryPayload.state
       .attributes as AirPurifierAttributes;
-    const supportedFeatures = airPurifierAttributes.supported_features ?? 0;
-    const presetModes = airPurifierAttributes.preset_modes ?? [];
-    const features: FeatureSelection<typeof FanControl.Cluster> = new Set();
-
-    if (testBit(supportedFeatures, FanDeviceFeature.SET_SPEED)) {
-      features.add("MultiSpeed");
-      features.add("Step");
-    }
-    // Auto only if a preset really is "auto", else HA rejects the "auto" we send.
-    if (
-      testBit(supportedFeatures, FanDeviceFeature.PRESET_MODE) &&
-      autoPresetName(presetModes) !== undefined
-    ) {
-      features.add("Auto");
-    }
-    if (testBit(supportedFeatures, FanDeviceFeature.DIRECTION)) {
-      features.add("AirflowDirection");
-    }
-    if (testBit(supportedFeatures, FanDeviceFeature.OSCILLATE)) {
-      features.add("Rocking");
-    }
-    const hasWindModes = presetModes.some(
-      (m) =>
-        m.toLowerCase() === "natural" ||
-        m.toLowerCase() === "nature" ||
-        m.toLowerCase() === "sleep",
-    );
-    if (hasWindModes) {
-      features.add("Wind");
-    }
+    const features = fanControlFeatures(airPurifierAttributes, config.mapping);
 
     // Build AirPurifier sub-endpoint type (only spec-valid clusters)
     let airPurifierSubType = AirPurifierDevice.with(
@@ -245,11 +210,15 @@ export class ComposedAirPurifierEndpoint extends Endpoint {
       );
     }
 
-    // Mapping for the air purifier sub-endpoint (filter life sensor)
+    // Mapping for the air purifier sub-endpoint (filter life sensor, and the
+    // wind presets the Wind feature above was picked from)
     const airPurifierMapping: EntityMappingConfig = {
       entityId: primaryEntityId,
       ...(config.mapping?.filterLifeEntity
         ? { filterLifeEntity: config.mapping.filterLifeEntity }
+        : {}),
+      ...(config.mapping?.fanWindPresets
+        ? { fanWindPresets: config.mapping.fanWindPresets }
         : {}),
     };
 
@@ -416,12 +385,26 @@ export class ComposedAirPurifierEndpoint extends Endpoint {
   }
 
   async updateStates(states: HomeAssistantStates): Promise<void> {
+    // battery, power and energy live on the parent, filter life on the purifier
+    // sub, and both only re-read when the primary writes
+    const mappedChanged = mappedNonSubStateChanged(
+      this.mappedEntityIds,
+      this.subEndpoints,
+      states,
+      this.lastMappedStates,
+    );
+
     // Update parent (BasicInformationServer reachable state, battery, etc.)
-    this.scheduleUpdate(this, this.entityId, states);
+    this.scheduleUpdate(this, this.entityId, states, mappedChanged);
 
     // Update sub-endpoints with their own entity states
     for (const [entityId, sub] of this.subEndpoints) {
-      this.scheduleUpdate(sub, entityId, states);
+      this.scheduleUpdate(
+        sub,
+        entityId,
+        states,
+        mappedChanged && entityId === this.entityId,
+      );
     }
   }
 
@@ -429,6 +412,7 @@ export class ComposedAirPurifierEndpoint extends Endpoint {
     endpoint: Endpoint,
     entityId: string,
     states: HomeAssistantStates,
+    force = false,
   ) {
     const state = states[entityId];
     if (!state) return;
@@ -442,8 +426,14 @@ export class ComposedAirPurifierEndpoint extends Endpoint {
       s: state.state,
       a: state.attributes,
     });
-    if (this.lastStates.get(key) === stateJson) return;
+    if (!force && this.lastStates.get(key) === stateJson) return;
     this.lastStates.set(key, stateJson);
+
+    // The primary state is unchanged when only a mapped entity moved, so bump
+    // last_updated to force the entity$Changed its clusters react to.
+    const effectiveState = force
+      ? { ...state, last_updated: new Date().toISOString() }
+      : state;
 
     let debouncedFn = this.debouncedUpdates.get(key);
     if (!debouncedFn) {
@@ -453,7 +443,7 @@ export class ComposedAirPurifierEndpoint extends Endpoint {
       );
       this.debouncedUpdates.set(key, debouncedFn);
     }
-    debouncedFn(endpoint, state);
+    debouncedFn(endpoint, effectiveState);
   }
 
   private async flushUpdate(

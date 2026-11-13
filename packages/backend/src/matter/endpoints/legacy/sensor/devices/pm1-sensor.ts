@@ -3,6 +3,7 @@ import { AirQualityServer } from "@matter/main/behaviors";
 import { AirQuality } from "@matter/main/clusters";
 import { AirQualitySensorDevice } from "@matter/main/devices";
 import { applyPatchState } from "../../../../../utils/apply-patch-state.js";
+import { numericState } from "../../../../../utils/numeric-state.js";
 import { BasicInformationServer } from "../../../../behaviors/basic-information-server.js";
 import { HomeAssistantEntityBehavior } from "../../../../behaviors/home-assistant-entity-behavior.js";
 import { IdentifyServer } from "../../../../behaviors/identify-server.js";
@@ -35,8 +36,8 @@ class Pm1AirQualityServer extends Pm1AirQualityServerBase {
     let airQuality: AirQuality.AirQualityEnum =
       AirQuality.AirQualityEnum.Unknown;
 
-    if (state != null && !Number.isNaN(+state)) {
-      const ugm3 = +state;
+    const ugm3 = numericState(state);
+    if (ugm3 != null) {
       // PM1 in µg/m³, thresholds based on WHO air quality guidelines (2021).
       // WHO recommends annual mean ≤5 µg/m³ for PM2.5; PM1 has no separate
       // guideline, so we use slightly tighter thresholds than PM2.5.

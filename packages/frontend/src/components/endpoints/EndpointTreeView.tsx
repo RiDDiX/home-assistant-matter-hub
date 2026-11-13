@@ -132,7 +132,7 @@ function findEndpointsWithoutNeighbors(endpoint: EndpointData) {
   return result;
 }
 
-function findSelectedEndpoint(globalId: string, root: EndpointData) {
+export function findSelectedEndpoint(globalId: string, root: EndpointData) {
   const queue = [root];
   while (queue.length > 0) {
     const item = queue.shift()!;

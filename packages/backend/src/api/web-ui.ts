@@ -26,8 +26,21 @@ function replaceBase(
       .readFileSync(path.join(dist, "index.html"), "utf8")
       .replace(
         /<!-- BASE -->[\s\S]*<!-- \/BASE -->/,
-        `<base href='${baseUrl}' />`,
+        // The base comes from proxy headers, so it is escaped for the attribute.
+        () => `<base href='${escapeAttribute(baseUrl)}' />`,
       );
     res.status(200).contentType("text/html").send(content);
   };
+}
+
+const attributeEscapes: Record<string, string> = {
+  "&": "&amp;",
+  "'": "&#39;",
+  '"': "&quot;",
+  "<": "&lt;",
+  ">": "&gt;",
+};
+
+function escapeAttribute(value: string): string {
+  return value.replace(/[&'"<>]/g, (c) => attributeEscapes[c]);
 }

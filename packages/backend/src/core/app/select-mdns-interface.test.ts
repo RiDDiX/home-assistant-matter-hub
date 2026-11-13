@@ -89,6 +89,15 @@ describe("selectMdnsInterface", () => {
     expect(choice.suspicious).toBe(true);
   });
 
+  it("never suggests a VPN tunnel beside a 172.x LAN NIC", () => {
+    const choice = selectMdnsInterface({
+      lo: [v4("127.0.0.1", true)],
+      eth0: [v4("172.16.3.10")],
+      tailscale0: [v4("100.101.1.2")],
+    });
+    expect(choice.selected).toBe("eth0");
+  });
+
   it("ignores link-local-only interfaces when suggesting", () => {
     const choice = selectMdnsInterface({
       lo: [v4("127.0.0.1", true)],

@@ -25,8 +25,10 @@ export function mapLawnMowerOperationalState(entity: {
     case LawnMowerActivity.paused:
       return RvcOperationalState.OperationalState.Paused;
     case LawnMowerActivity.error:
-    case "unavailable":
       return RvcOperationalState.OperationalState.Error;
+    // Offline is no fault, Error would report the mower Stuck
+    case "unavailable":
+      return RvcOperationalState.OperationalState.Stopped;
     default:
       logger.info(`Unknown lawn_mower state "${state}", treating as Stopped`);
       return RvcOperationalState.OperationalState.Stopped;

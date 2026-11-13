@@ -39,7 +39,7 @@ describe("buildIncludeMatchers", () => {
     ).toEqual([{ type: HomeAssistantMatcherType.Area, value: "living_room" }]);
   });
 
-  it("maps selected labels to entity label matchers", () => {
+  it("maps selected labels to entity and device label matchers", () => {
     expect(
       buildIncludeMatchers({
         filterType: "label",
@@ -49,7 +49,9 @@ describe("buildIncludeMatchers", () => {
       }),
     ).toEqual([
       { type: HomeAssistantMatcherType.EntityLabel, value: "matter" },
+      { type: HomeAssistantMatcherType.DeviceLabel, value: "matter" },
       { type: HomeAssistantMatcherType.EntityLabel, value: "kitchen" },
+      { type: HomeAssistantMatcherType.DeviceLabel, value: "kitchen" },
     ]);
   });
 });

@@ -8,12 +8,18 @@ import type {
   HomeAssistantFilter,
   HomeAssistantMatcher,
 } from "@home-assistant-matter-hub/common";
-import { HomeAssistantMatcherType } from "@home-assistant-matter-hub/common";
+import {
+  HomeAssistantMatcherType,
+  updateBridgeRequestSchema,
+} from "@home-assistant-matter-hub/common";
 import { Logger } from "@matter/general";
+import { Ajv } from "ajv";
 import express from "express";
+import type { BridgeService } from "../services/bridges/bridge-service.js";
 import type { BridgeStorage } from "../services/storage/bridge-storage.js";
 
 const logger = Logger.get("BridgeExportApi");
+const ajv = new Ajv();
 
 type LegacyMatcher = string | HomeAssistantMatcher;
 
@@ -32,6 +38,9 @@ interface LegacyBridgeData {
   countryCode?: string;
   icon?: string;
   priority?: number;
+  serialNumberSuffix?: string;
+  uniqueIdSuffix?: string;
+  sessionMaxAgeHours?: number;
 }
 
 interface LegacyExportData {
@@ -68,6 +77,9 @@ function migrateBridge(legacy: LegacyBridgeData): BridgeData {
     countryCode: legacy.countryCode,
     icon: legacy.icon,
     priority: legacy.priority,
+    serialNumberSuffix: legacy.serialNumberSuffix,
+    uniqueIdSuffix: legacy.uniqueIdSuffix,
+    sessionMaxAgeHours: legacy.sessionMaxAgeHours,
     basicInformation: {
       vendorId: 0xfff1,
       vendorName: "Home Assistant Matter Hub",
@@ -111,7 +123,10 @@ function migrateExportData(data: LegacyExportData): {
   };
 }
 
-export function bridgeExportApi(bridgeStorage: BridgeStorage): express.Router {
+export function bridgeExportApi(
+  bridgeStorage: BridgeStorage,
+  bridgeService: BridgeService,
+): express.Router {
   const router = express.Router();
 
   router.get("/export", (_, res) => {
@@ -209,7 +224,15 @@ export function bridgeExportApi(bridgeStorage: BridgeStorage): express.Router {
             continue;
           }
 
-          await bridgeStorage.add(bridge);
+          const { basicInformation: _, ...config } = bridge;
+          if (!ajv.validate(updateBridgeRequestSchema, config)) {
+            // oneOf matchers repeat the same message once per branch
+            const messages = (ajv.errors ?? []).map(
+              (e) => `${e.instancePath || "/"}: ${e.message}`,
+            );
+            throw new Error([...new Set(messages)].join("; "));
+          }
+          await bridgeService.importBridge(bridge);
           imported++;
         } catch (e) {
           errors.push({

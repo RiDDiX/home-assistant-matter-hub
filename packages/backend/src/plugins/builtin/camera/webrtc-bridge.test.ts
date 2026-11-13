@@ -1,6 +1,6 @@
 import { createSocket } from "node:dgram";
 import type { Connection } from "home-assistant-js-websocket";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   MediaStreamTrack,
   RTCPeerConnection,
@@ -28,6 +28,7 @@ interface FakeHa {
   connect: () => Promise<Connection>;
   unsubscribeCalls: number[];
   unsubscribedIds: number[];
+  subscribeOptions: unknown[];
   cleanup: () => Promise<void>;
 }
 
@@ -40,6 +41,7 @@ function makeFakeHa(mode: FakeMode): FakeHa {
   const timers: ReturnType<typeof setInterval>[] = [];
   const unsubscribeCalls: number[] = [];
   const unsubscribedIds: number[] = [];
+  const subscribeOptions: unknown[] = [];
   let subscriptionSeq = 0;
 
   const connect = async (): Promise<Connection> => {
@@ -47,7 +49,9 @@ function makeFakeHa(mode: FakeMode): FakeHa {
       async subscribeMessage(
         callback: (msg: unknown) => void,
         message: { offer?: string },
+        options?: unknown,
       ): Promise<() => Promise<void>> {
+        subscribeOptions.push(options);
         if (mode === "silent") {
           return async () => {};
         }
@@ -132,7 +136,13 @@ function makeFakeHa(mode: FakeMode): FakeHa {
     for (const p of peers) await p.close().catch(() => {});
   };
 
-  return { connect, unsubscribeCalls, unsubscribedIds, cleanup };
+  return {
+    connect,
+    unsubscribeCalls,
+    unsubscribedIds,
+    subscribeOptions,
+    cleanup,
+  };
 }
 
 function sdpOf(peer: RTCPeerConnection): string {
@@ -173,6 +183,8 @@ afterEach(async () => {
   }
   cleanups = [];
   setHaWebRtcTimeoutMsForTests(DEFAULT_HA_WEBRTC_TIMEOUT_MS);
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 describe("WebRtcBridge media relay", () => {
@@ -248,6 +260,56 @@ describe("WebRtcBridge media relay", () => {
     expect(counts.audio).toBeGreaterThan(0);
   }, 40_000);
 
+  it("ends the session when the controller transport fails", async () => {
+    const fake = makeFakeHa("answer");
+    const bridge = new WebRtcBridge(
+      { haUrl: "http://ha", haToken: "t" },
+      { connect: fake.connect },
+    );
+    cleanups.push(() => bridge.close(), fake.cleanup);
+    const wired = vi.spyOn(
+      WebRtcBridge.prototype as unknown as {
+        wireStateLogging: (peer: RTCPeerConnection, label: string) => void;
+      },
+      "wireStateLogging",
+    );
+
+    const controller = h264Peer();
+    cleanups.push(() => controller.close());
+    const offerSdp = await makeControllerOffer(controller);
+    const onLost = vi.fn(() => bridge.endSession(5));
+    await bridge.acceptControllerOffer(
+      5,
+      "camera.front",
+      offerSdp,
+      undefined,
+      onLost,
+    );
+    const controllerPeer = wired.mock.calls.find(
+      ([, label]) => label === "controllerPeer",
+    )?.[0];
+
+    controllerPeer?.connectionStateChange.execute("failed");
+    await vi.waitFor(() => expect(fake.unsubscribedIds).toEqual([1]));
+    // the session is gone, a later state change ends nothing
+    controllerPeer?.connectionStateChange.execute("closed");
+    expect(onLost).toHaveBeenCalledTimes(1);
+  }, 20_000);
+
+  it("never resubscribes the offer after an HA reconnect", async () => {
+    const fake = makeFakeHa("reject");
+    const bridge = new WebRtcBridge(
+      { haUrl: "http://ha", haToken: "t" },
+      { connect: fake.connect },
+    );
+    cleanups.push(() => bridge.close(), fake.cleanup);
+
+    await expect(
+      bridge.acceptControllerOffer(6, "camera.front", "v=0\r\nm=video 9\r\n"),
+    ).rejects.toThrow();
+    expect(fake.subscribeOptions).toEqual([{ resubscribe: false }]);
+  }, 15_000);
+
   it("rejects when HA replies with an error instead of hanging", async () => {
     // An ignored error would end in the 10s timeout, whose message the regex
     // below does not match (old bug).
@@ -306,6 +368,43 @@ describe("WebRtcBridge media relay", () => {
     ).rejects.toThrow(/timed out/);
     expect(Date.now() - start).toBeGreaterThanOrEqual(300);
   }, 15_000);
+});
+
+describe("WebRtcBridge HA requests", () => {
+  it("dials HA once for concurrent sessions, again after a failed dial", async () => {
+    let dials = 0;
+    const conn = { close() {} } as unknown as Connection;
+    const bridge = new WebRtcBridge(
+      { haUrl: "http://ha", haToken: "t" },
+      {
+        connect: async () => {
+          if (++dials === 1) throw new Error("HA down");
+          return conn;
+        },
+      },
+    );
+    const ha = () => (bridge as unknown as { ha(): Promise<Connection> }).ha();
+
+    await expect(ha()).rejects.toThrow("HA down");
+    expect(await Promise.all([ha(), ha()])).toEqual([conn, conn]);
+    expect(dials).toBe(2);
+  });
+
+  it("gives up on a snapshot HA never answers", async () => {
+    setHaWebRtcTimeoutMsForTests(50);
+    vi.stubGlobal(
+      "fetch",
+      (_url: string, init?: RequestInit) =>
+        new Promise((_, reject) =>
+          init?.signal?.addEventListener("abort", () =>
+            reject(init.signal?.reason),
+          ),
+        ),
+    );
+    const bridge = new WebRtcBridge({ haUrl: "http://ha", haToken: "t" });
+
+    await expect(bridge.snapshot("camera.front")).rejects.toThrow(/timeout/);
+  });
 });
 
 describe("growRecvBuffers", () => {

@@ -33,4 +33,29 @@ describe("toUpdateCheckResponse", () => {
     const res = toUpdateCheckResponse("2.0.47", base, "Docker");
     expect(res.updateAvailable).toBe(false);
   });
+  it("does not offer an older stable to an alpha build", () => {
+    expect(
+      toUpdateCheckResponse(
+        "2.1.0-alpha.949",
+        { ...base, tag_name: "v2.0.59" },
+        "Docker",
+      ).updateAvailable,
+    ).toBe(false);
+  });
+
+  it("offers the stable release of the same version to its alpha", () => {
+    expect(
+      toUpdateCheckResponse(
+        "2.1.0-alpha.949",
+        { ...base, tag_name: "v2.1.0" },
+        "Docker",
+      ).updateAvailable,
+    ).toBe(true);
+  });
+
+  it("does not flag a downgrade", () => {
+    expect(
+      toUpdateCheckResponse("2.0.48", base, "Docker").updateAvailable,
+    ).toBe(false);
+  });
 });

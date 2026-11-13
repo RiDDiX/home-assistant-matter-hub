@@ -38,3 +38,37 @@ describe("fan setAutoMode preset casing (#436)", () => {
     });
   });
 });
+
+describe("fan setWindMode preset casing", () => {
+  it("sends the entity's own natural and sleep preset names", () => {
+    const agent = agentFor({ preset_modes: ["Nature", "Normal", "SLEEP"] });
+    expect(fanControlConfig.setWindMode("natural", agent)).toEqual({
+      action: "fan.set_preset_mode",
+      data: { preset_mode: "Nature" },
+    });
+    expect(fanControlConfig.setWindMode("sleep", agent)).toEqual({
+      action: "fan.set_preset_mode",
+      data: { preset_mode: "SLEEP" },
+    });
+  });
+
+  // Wind off picked the first non-wind preset, which left fans that list
+  // "Auto" first in auto mode instead of a normal speed.
+  it("skips the auto preset when wind turns off", () => {
+    const agent = agentFor({
+      preset_modes: ["Auto", "Low", "High", "Natural", "Sleep"],
+    });
+    expect(fanControlConfig.setWindMode("off", agent)).toEqual({
+      action: "fan.set_preset_mode",
+      data: { preset_mode: "Low" },
+    });
+  });
+
+  it("falls back to Auto when wind turns off and no other preset exists", () => {
+    const agent = agentFor({ preset_modes: ["Auto", "Natural", "Sleep"] });
+    expect(fanControlConfig.setWindMode("off", agent)).toEqual({
+      action: "fan.set_preset_mode",
+      data: { preset_mode: "Auto" },
+    });
+  });
+});

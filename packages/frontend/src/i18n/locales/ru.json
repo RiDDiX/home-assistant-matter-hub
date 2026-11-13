@@ -171,7 +171,9 @@
     "bridgeStatusRunning": "{{running}} работает",
     "bridgeStatusFailed": "{{failed}} с ошибками",
     "devicesFailed": "{{count}} с ошибками",
-    "uptimeFormat": "{{time}}"
+    "uptimeFormat": "{{time}}",
+    "deviceCount": "{{count}} Устройства",
+    "fabricCount": "{{count}} Fabric-соединения"
   },
   "bridge": {
     "name": "Имя моста",
@@ -385,7 +387,8 @@
     "sortType": "Тип устройства",
     "sortName": "Имя",
     "deviceCount": "{{count}} устройство(а)",
-    "filteredCount": "{{filtered}} из {{total}} устройств"
+    "filteredCount": "{{filtered}} из {{total}} устройств",
+    "fabricCount": "{{count}} Fabric-соединения"
   },
   "diagnostics": {
     "title": "Диагностика в реальном времени",
@@ -441,7 +444,6 @@
     "namePlaceholder": "Входная дверь",
     "nameHelperText": "Понятное имя для этих учётных данных",
     "entityRequired": "ID объекта обязателен",
-    "pinLength": "PIN должен содержать 4-8 цифр",
     "pinDigitsOnly": "PIN должен содержать только цифры",
     "saveFailed": "Не удалось сохранить",
     "loadFailed": "Не удалось загрузить учётные данные",
@@ -530,8 +532,7 @@
     "settings": "Настройки резервного копирования",
     "autoBackupLabel": "Автоматическое резервное копирование",
     "autoBackupDesc": "Автоматически создавать полную резервную копию при завершении или перезапуске приложения.",
-    "retentionCount": "Хранить копий",
-    "retentionCountDesc": "Количество резервных копий для хранения (старые удаляются автоматически)"
+    "retentionCount": "Хранить копий"
   },
   "networkMap": {
     "title": "Карта сети",

@@ -1,6 +1,6 @@
 import * as os from "node:os";
 import { alexaPairingPortProblem } from "@home-assistant-matter-hub/common";
-import type { Environment, Logger } from "@matter/general";
+import { type Environment, type Logger, Time } from "@matter/general";
 import { Network } from "@matter/main";
 import { InteractionServer } from "@matter/main/node";
 import {
@@ -14,6 +14,7 @@ import {
 import { FilteredNetwork } from "../../core/app/filtered-network.js";
 import {
   collectAdvertisedAddresses,
+  diffAdvertisedAddresses,
   runMdnsAddressWatchTick,
 } from "../../matter/mdns-address-watch.js";
 import { diagnosticEventBus } from "../diagnostics/diagnostic-event-bus.js";
@@ -26,7 +27,6 @@ import {
   replacedSessionTimeoutMs,
   SESSION_MAX_AGE_HOURS_RANGE,
   seedExistingSessionStarts,
-  selectSupersededSessions,
   staleSessionQuietWindowMs,
   staleSessionShouldClose,
 } from "./session-rotation.js";
@@ -39,6 +39,7 @@ import {
   decideWedgeRotation,
   decideWedgeRotationV2,
   WEDGE_GIVE_UP_QUIET_MS,
+  WEDGE_MIN_ROTATE_INTERVAL_MS,
   WEDGE_RING_SIZE,
 } from "./wedge-watchdog.js";
 
@@ -86,6 +87,22 @@ function closeGracefully(
     .catch(() => s.initiateForceClose({ cause: new Error(forceReason) }));
 }
 
+// Ids as matter.js logs them, so "Subscription N ..." notices map to a
+// session (#543).
+function subscriptionIds(s: {
+  subscriptions: Iterable<{ subscriptionId: number }>;
+}): string {
+  return Array.from(s.subscriptions, (x) => x.subscriptionId).join(",");
+}
+
+// The same peer and fabric identity newestPeerStamp compares.
+function peerKey(s: {
+  peerNodeId: unknown;
+  fabric?: { fabricIndex?: unknown };
+}): string {
+  return `${s.fabric?.fabricIndex}:${s.peerNodeId}`;
+}
+
 // Everything a bridge does to its controller sessions once the node runs:
 // diagnostics, stale and dead session cleanup, rotation, the wedge watchdog
 // and the mDNS address watch. Bridge and ServerModeBridge carried this twice,
@@ -100,11 +117,12 @@ export class SessionSupervisor {
   private rotationTimer: ReturnType<typeof setInterval> | null = null;
   private maxSessionAgeMs = 0;
 
-  // Wedge watchdog: last inbound Interaction Model request time per session and
-  // last time the watchdog rotated it, both keyed by the long-lived session
-  // object so they clear when the session goes away.
+  // Wedge watchdog: last inbound Interaction Model request time per session,
+  // keyed by the long-lived session object so it clears when the session goes
+  // away. The last rotation is kept per peer, the rotated session is gone and
+  // its replacement must still be throttled.
   private lastImRequestAt = new WeakMap<object, number>();
-  private wedgeLastRotatedAt = new WeakMap<object, number>();
+  private wedgeLastRotatedAt = new Map<string, number>();
   private wedgeWatchdogTimer: ReturnType<typeof setInterval> | null = null;
 
   // V2 shadow signals (#365): last command-class request per session, plus
@@ -123,6 +141,7 @@ export class SessionSupervisor {
   // refreshOperationalAdvertisement can't overlap and re-announce off a stale
   // snapshot.
   private mdnsCheckInFlight = false;
+  private mdnsFailedRetries = 0;
 
   // Session lifecycle diagnostic handlers (non-destructive, logging only).
   // biome-ignore lint/suspicious/noExplicitAny: matter.js internal types
@@ -135,6 +154,10 @@ export class SessionSupervisor {
   // Warns when Alexa pairs on a non-5540 port, the fabric rolls back later (#401).
   // biome-ignore lint/suspicious/noExplicitAny: matter.js internal types
   private fabricAddedHandler?: (fabric: any) => void;
+
+  // the onNewExchange wrapper outlives stop(), so it must not arm timers then;
+  // a supervisor that never started counts as stopped
+  private stopped = true;
 
   constructor(
     private readonly log: Logger,
@@ -149,6 +172,7 @@ export class SessionSupervisor {
 
   // after server.start(); rewiring is idempotent
   start(): void {
+    this.stopped = false;
     this.wireSessionDiagnostics();
     this.wireFabricWarnings();
     this.startSessionRotation();
@@ -158,12 +182,16 @@ export class SessionSupervisor {
 
   // before server.cancel(); unwireSessionDiagnostics also stops the timers
   stop(): void {
+    this.stopped = true;
     this.unwireSessionDiagnostics();
     this.unwireFabricWarnings();
+    this.wedgeLastRotatedAt.clear();
   }
 
   // bridge config changed while running
   reconfigure(): void {
+    // nothing would clear the intervals after stop()
+    if (this.stopped) return;
     this.startSessionRotation();
     this.startWedgeWatchdog();
   }
@@ -226,10 +254,10 @@ export class SessionSupervisor {
         const nowMs = Date.now();
         const lastActiveMsAgo =
           typeof s.activeTimestamp === "number" && s.activeTimestamp > 0
-            ? nowMs - s.activeTimestamp
+            ? Time.nowUs - s.activeTimestamp
             : null;
         const lastAnyActivityMsAgo =
-          typeof s.timestamp === "number" ? nowMs - s.timestamp : null;
+          typeof s.timestamp === "number" ? Time.nowUs - s.timestamp : null;
         const lastImAt = this.lastImRequestAt.get(s);
         const lastImRequestMsAgo = lastImAt != null ? nowMs - lastImAt : null;
         const startedAt = this.sessionStartedAt.get(s.id);
@@ -240,11 +268,16 @@ export class SessionSupervisor {
           lastCmdAt != null ? nowMs - lastCmdAt : null;
         const subscribeTimes = this.subscribeTimesMs.get(s) ?? [];
         const giveUpTimes = this.giveUpTimesMs.get(s) ?? [];
-        const lastRotatedAt = this.wedgeLastRotatedAt.get(s);
+        const lastRotatedAt = this.wedgeLastRotatedAt.get(peerKey(s));
+        const peerCmdAt = this.newestPeerStamp(
+          this.lastCommandImAt,
+          s,
+          sessions,
+        );
         const wedgeV2WouldRotate = decideWedgeRotationV2({
           subscriptionCount: subCount,
           sessionAgeMs: startedAt != null ? nowMs - startedAt : 0,
-          commandSilenceMs: lastCommandImRequestMsAgo,
+          commandSilenceMs: peerCmdAt != null ? nowMs - peerCmdAt : null,
           subscribeTimesMs: subscribeTimes,
           giveUpTimesMs: giveUpTimes,
           nowMs,
@@ -446,33 +479,9 @@ export class SessionSupervisor {
             );
           }
         }
-        // Sweep superseded sessions the #105 loop cannot: same peer+fabric
-        // sessions still holding a dead subscription escaped every cleanup
-        // path and piled up 160 deep for one flapping Echo (#400). The
-        // selector also returns the 0-sub ones the loop above just handled,
-        // so skip those here.
-        const quietWindowMs = staleSessionQuietWindowMs(
-          this.dataProvider.featureFlags,
-        );
-        const now = Date.now();
-        const supersededIds = new Set(
-          selectSupersededSessions(
-            [...sessionManager.sessions],
-            newSession,
-            quietWindowMs,
-            now,
-          ),
-        );
-        const closes: Promise<unknown>[] = [];
-        for (const s of [...sessionManager.sessions]) {
-          if (!supersededIds.has(s.id) || s.subscriptions.size === 0) continue;
-          const quietSec = Math.round((now - s.timestamp) / 1000);
-          this.log.info(
-            `Closing superseded session ${s.id} (peer ${s.peerNodeId}, ${s.subscriptions.size} subs, quiet ${quietSec}s), replaced by session ${newSession.id}`,
-          );
-          closes.push(closeGracefully(s, "superseded session, forcing"));
-        }
-        void Promise.allSettled(closes);
+        // Older sessions that still hold subscriptions stay open: matter.js
+        // reports on the peer's newest session and ends dead subscriptions
+        // itself, which hands the emptied session to the stale timer.
       };
       this.sessionDeletedHandler = (session: {
         id: number;
@@ -522,17 +531,22 @@ export class SessionSupervisor {
       }
       const original = is.onNewExchange.bind(is);
       is.onNewExchange = (exchange, message) => {
-        const session = exchange.session;
-        if (session) {
-          const now = Date.now();
-          this.lastImRequestAt.set(session, now);
-          const type = message?.payloadHeader?.messageType;
-          if (type === MessageType.SubscribeRequest) {
-            this.pushWedgeRing(this.subscribeTimesMs, session, now);
-            this.armSubscribeWatchdog(session);
-          } else if (type != null && commandMessageTypes.includes(type)) {
-            this.lastCommandImAt.set(session, now);
+        // bookkeeping must never swallow the request
+        try {
+          const session = exchange.session;
+          if (session) {
+            const now = Date.now();
+            this.lastImRequestAt.set(session, now);
+            const type = message?.payloadHeader?.messageType;
+            if (type === MessageType.SubscribeRequest) {
+              this.pushWedgeRing(this.subscribeTimesMs, session, now);
+              this.armSubscribeWatchdog(session);
+            } else if (type != null && commandMessageTypes.includes(type)) {
+              this.lastCommandImAt.set(session, now);
+            }
           }
+        } catch (e) {
+          this.log.debug(`IM request tracking failed: ${e}`);
         }
         return original(exchange, message);
       };
@@ -611,9 +625,12 @@ export class SessionSupervisor {
   // A subscription that dies before its first report never joins the session,
   // so no event fires to reap the session (#487).
   private armSubscribeWatchdog(session: { id?: unknown }) {
+    if (this.stopped) return;
     const sessionId = session.id;
     if (typeof sessionId !== "number") return;
-    if (this.staleSessionTimers.has(sessionId)) return;
+    // Replace any shorter timer armed earlier, it would fire mid priming.
+    const armed = this.staleSessionTimers.get(sessionId);
+    if (armed) clearTimeout(armed);
     this.staleSessionTimers.set(
       sessionId,
       setTimeout(() => {
@@ -630,7 +647,7 @@ export class SessionSupervisor {
         if (s.id !== sessionId || s.isClosing || s.subscriptions.size > 0) {
           continue;
         }
-        const idleSec = Math.round((Date.now() - s.timestamp) / 1000);
+        const idleSec = Math.round((Time.nowUs - s.timestamp) / 1000);
         if (
           !staleSessionShouldClose(
             s,
@@ -646,6 +663,8 @@ export class SessionSupervisor {
           this.log.info(
             `Keeping session ${s.id} (peer ${s.peerNodeId}, 0 subs, last traffic ${idleSec}s ago)`,
           );
+          const armed = this.staleSessionTimers.get(sessionId);
+          if (armed) clearTimeout(armed);
           this.staleSessionTimers.set(
             sessionId,
             setTimeout(() => {
@@ -669,8 +688,9 @@ export class SessionSupervisor {
           .catch(() => {});
         break;
       }
-    } catch {
+    } catch (e) {
       // SessionManager may be disposed
+      this.log.debug(`Stale session ${sessionId} close skipped: ${e}`);
     }
   }
 
@@ -689,7 +709,7 @@ export class SessionSupervisor {
         if (this.staleSessionTimers.has(s.id)) {
           continue;
         }
-        const idleSec = Math.round((Date.now() - s.timestamp) / 1000);
+        const idleSec = Math.round((Time.nowUs - s.timestamp) / 1000);
         if (
           !staleSessionShouldClose(
             s,
@@ -878,6 +898,27 @@ export class SessionSupervisor {
     }
   }
 
+  // A controller talks on its newest session while matter.js reports an older
+  // session's subscription there too, so silence counts per peer and fabric.
+  private newestPeerStamp(
+    stamps: WeakMap<object, number>,
+    s: { peerNodeId: unknown; fabric?: { fabricIndex?: unknown } },
+    sessions: (typeof s)[],
+  ): number | undefined {
+    let newest: number | undefined;
+    for (const p of sessions) {
+      if (
+        p.peerNodeId !== s.peerNodeId ||
+        p.fabric?.fabricIndex !== s.fabric?.fabricIndex
+      ) {
+        continue;
+      }
+      const at = stamps.get(p);
+      if (at != null && (newest == null || at > newest)) newest = at;
+    }
+    return newest;
+  }
+
   // Rotate exactly the sessions the pure rule flags as wedged. Closing is the
   // same graceful-then-force path age rotation uses, so a false positive just
   // re-CASEs the controller.
@@ -886,13 +927,26 @@ export class SessionSupervisor {
       const sessionManager = this.server.env.get(SessionManager);
       const now = Date.now();
       const closes: Promise<void>[] = [];
-      for (const s of [...sessionManager.sessions]) {
+      const sessions = [...sessionManager.sessions];
+      // past the interval a stamp no longer throttles, drop it
+      for (const [key, at] of this.wedgeLastRotatedAt) {
+        if (now - at > WEDGE_MIN_ROTATE_INTERVAL_MS) {
+          this.wedgeLastRotatedAt.delete(key);
+        }
+      }
+      // stamped after the loop, so wedged sessions of one peer all go together
+      const rotatedPeers: string[] = [];
+      for (const s of sessions) {
         if (s.isClosing) continue;
         const startedAt = this.sessionStartedAt.get(s.id);
         const sessionAgeMs = startedAt != null ? now - startedAt : 0;
-        const lastImAt = this.lastImRequestAt.get(s);
+        const lastImAt = this.newestPeerStamp(
+          this.lastImRequestAt,
+          s,
+          sessions,
+        );
         const lastImRequestMsAgo = lastImAt != null ? now - lastImAt : null;
-        const lastRotatedAt = this.wedgeLastRotatedAt.get(s);
+        const lastRotatedAt = this.wedgeLastRotatedAt.get(peerKey(s));
         const lastRotatedMsAgo =
           lastRotatedAt != null ? now - lastRotatedAt : null;
         const v1 = decideWedgeRotation({
@@ -903,7 +957,11 @@ export class SessionSupervisor {
         });
         // V2 shadow (#365): evaluate and log only, so the soak can compare
         // both rules before v2 is allowed to close anything.
-        const lastCmdAt = this.lastCommandImAt.get(s);
+        const lastCmdAt = this.newestPeerStamp(
+          this.lastCommandImAt,
+          s,
+          sessions,
+        );
         const commandSilenceMs = lastCmdAt != null ? now - lastCmdAt : null;
         const subscribeTimes = this.subscribeTimesMs.get(s) ?? [];
         const giveUpTimes = this.giveUpTimesMs.get(s) ?? [];
@@ -933,11 +991,12 @@ export class SessionSupervisor {
           (lastImRequestMsAgo ?? sessionAgeMs) / 60_000,
         );
         this.log.info(
-          `Wedge watchdog: rotating session ${s.id}, no inbound interaction for ${silenceMin}min`,
+          `Wedge watchdog: rotating session ${s.id} (subs [${subscriptionIds(s)}]), no inbound interaction for ${silenceMin}min`,
         );
-        this.wedgeLastRotatedAt.set(s, now);
+        rotatedPeers.push(peerKey(s));
         closes.push(closeGracefully(s, "wedge watchdog, forcing"));
       }
+      for (const key of rotatedPeers) this.wedgeLastRotatedAt.set(key, now);
       void Promise.allSettled(closes);
     } catch {
       // SessionManager may be disposed
@@ -958,6 +1017,7 @@ export class SessionSupervisor {
       stripGlobalIpv6,
       ipv4Enabled,
     );
+    this.mdnsFailedRetries = 0;
     this.mdnsAddressTimer = setInterval(() => {
       if (this.mdnsCheckInFlight) return;
       this.mdnsCheckInFlight = true;
@@ -1005,21 +1065,31 @@ export class SessionSupervisor {
       this.readMdnsWatchSettings();
     const advertiser = this.server.env.get(DeviceAdvertiser);
     const fabrics = this.server.env.get(FabricManager);
-    this.advertisedAddressSnapshot = await runMdnsAddressWatchTick({
+    const { snapshot, failedRetries } = await runMdnsAddressWatchTick({
       readInterfaces: () => os.networkInterfaces(),
       netInterface,
       stripGlobalIpv6,
       ipv4Enabled,
       currentSnapshot: this.advertisedAddressSnapshot,
+      failedRetries: this.mdnsFailedRetries,
       fabrics: () => fabrics.fabrics,
       refresh: (fabric) =>
         advertiser.refreshOperationalAdvertisement(fabric as Fabric),
       onChange: (prev, curr) => {
+        const { added, removed } = diffAdvertisedAddresses(prev, curr);
         this.log.warn(
-          `Advertised address set changed (${prev.length} -> ${curr.length} addresses), re-announcing operational mDNS (#415)`,
+          `Advertised address set changed (${prev.length} -> ${curr.length} addresses), re-announcing operational mDNS (#415), added: [${added.join(", ")}] removed: [${removed.join(", ")}]`,
+        );
+      },
+      onRefreshError: (fabric, e) => {
+        this.log.warn(
+          `mDNS re-announce failed for fabric ${(fabric as Fabric).fabricIndex}:`,
+          e,
         );
       },
     });
+    this.advertisedAddressSnapshot = snapshot;
+    this.mdnsFailedRetries = failedRetries;
   }
 
   // Env var unset or garbage falls back to defaultMaxAgeHours, 0 (rotation
@@ -1073,7 +1143,7 @@ export class SessionSupervisor {
         }
         const ageMin = Math.round(ageMs / 60_000);
         this.log.info(
-          `Rotating session ${s.id} (peer ${s.peerNodeId}, age ${ageMin}min, subs ${s.subscriptions.size})`,
+          `Rotating session ${s.id} (peer ${s.peerNodeId}, age ${ageMin}min, subs ${s.subscriptions.size} [${subscriptionIds(s)}])`,
         );
         closes.push(closeGracefully(s, "session rotation, forcing"));
       }

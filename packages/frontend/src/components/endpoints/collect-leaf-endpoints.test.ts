@@ -76,4 +76,13 @@ describe("collectLeafEndpoints", () => {
     expect(result[0]).toBe(a);
     expect(result[1]).toBe(b);
   });
+
+  it("returns nothing for an aggregator without devices", () => {
+    const aggregator: EndpointData = {
+      ...leaf("agg"),
+      type: { name: "Aggregator", id: "0x000e" },
+    };
+
+    expect(collectLeafEndpoints(parent({}, [aggregator]))).toEqual([]);
+  });
 });

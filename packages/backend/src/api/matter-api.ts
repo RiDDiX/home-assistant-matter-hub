@@ -7,6 +7,7 @@ import {
 } from "@home-assistant-matter-hub/common";
 import { Ajv } from "ajv";
 import express from "express";
+import { removePluginFiles } from "../plugins/plugin-storage.js";
 import type { BridgeService } from "../services/bridges/bridge-service.js";
 import { testMatchers } from "../services/bridges/matcher/matches-entity-filter.js";
 import type { HomeAssistantRegistry } from "../services/home-assistant/home-assistant-registry.js";
@@ -27,6 +28,7 @@ export function matterApi(
   haRegistry?: HomeAssistantRegistry,
   identityStorage?: EntityIdentityStorage,
   mappingStorage?: EntityMappingStorage,
+  storageLocation?: string,
 ): express.Router {
   const router = express.Router();
   router.get("/", (_, res) => {
@@ -121,10 +123,17 @@ export function matterApi(
     const bridgeId = req.params.bridgeId;
     try {
       await bridgeService.delete(bridgeId);
-      // Drop the bridge's frozen identities too, so a re-created bridge never
-      // inherits stale anchors. Mirrors the entity-mapping whole-bridge delete
-      // (#404).
+      // Drop the bridge's frozen identities and mappings too, so a re-created
+      // bridge never inherits stale anchors and backups carry no orphans (#404).
       await identityStorage?.deleteBridgeIdentities(bridgeId);
+      await mappingStorage?.deleteBridgeMappings(bridgeId);
+      if (storageLocation) {
+        removePluginFiles(
+          storageLocation,
+          bridgeId,
+          bridgeService.bridges.map((b) => b.id),
+        );
+      }
       res.status(204).send();
     } catch (e) {
       res.status(500).json({
@@ -142,11 +151,19 @@ export function matterApi(
     }
     try {
       // A factory reset erases the persisted endpoint numbers, so the frozen
-      // identities no longer map to anything. Drop them BEFORE factoryReset:
-      // it restarts the bridge and refreshes devices internally, and that
+      // identities no longer map to anything. Drop them BEFORE the erase: the
+      // reset restarts the bridge and refreshes devices internally, and that
       // rebuild would otherwise re-seed against the wiped matter.js store (#404).
-      await identityStorage?.deleteBridgeIdentities(bridgeId);
-      await bridge.factoryReset();
+      // factoryReset drops them only when it really runs.
+      const ran = await bridge.factoryReset(async () => {
+        await identityStorage?.deleteBridgeIdentities(bridgeId);
+      });
+      if (!ran) {
+        res
+          .status(409)
+          .json({ error: "Bridge must be running to factory reset" });
+        return;
+      }
       await bridge.start();
       res.status(200).json(bridge.data);
     } catch (e) {
@@ -582,7 +599,9 @@ export function matterApi(
       res.status(503).json({ error: "Home Assistant registry not available" });
       return;
     }
-    const filter = req.body as HomeAssistantFilter;
+    const filter = req.body as HomeAssistantFilter & {
+      includeHiddenEntities?: boolean;
+    };
     if (!filter?.include || !filter?.exclude) {
       res.status(400).json({ error: "Invalid filter configuration" });
       return;
@@ -600,6 +619,9 @@ export function matterApi(
     }> = [];
 
     for (const entity of entities) {
+      // same gates as BridgeRegistry before the filter runs
+      if (entity.disabled_by != null) continue;
+      if (entity.hidden_by != null && !filter.includeHiddenEntities) continue;
       const device = entity.device_id ? devices[entity.device_id] : undefined;
       const state = states[entity.entity_id];
 
@@ -628,8 +650,14 @@ export function matterApi(
 
     matchingEntities.sort((a, b) => a.entity_id.localeCompare(b.entity_id));
 
+    const domains: Record<string, number> = {};
+    for (const e of matchingEntities) {
+      domains[e.domain] = (domains[e.domain] ?? 0) + 1;
+    }
+
     res.status(200).json({
       total: matchingEntities.length,
+      domains,
       entities: matchingEntities.slice(0, 100),
       truncated: matchingEntities.length > 100,
     });

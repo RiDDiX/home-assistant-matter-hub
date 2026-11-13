@@ -1,5 +1,6 @@
 import type { HomeAssistantEntityInformation } from "@home-assistant-matter-hub/common";
 import { Logger } from "@matter/general";
+import type { Agent } from "@matter/main";
 import {
   RvcRunModeServer as Base,
   RvcOperationalStateBehavior,
@@ -11,6 +12,7 @@ import { RvcRunMode } from "@matter/main/clusters/rvc-run-mode";
 import { EntityStateProvider } from "../../services/bridges/entity-state-provider.js";
 import type { HomeAssistantAction } from "../../services/home-assistant/home-assistant-actions.js";
 import { applyPatchState } from "../../utils/apply-patch-state.js";
+import { trimToLength } from "../../utils/trim-to-length.js";
 import { HomeAssistantEntityBehavior } from "./home-assistant-entity-behavior.js";
 import { inferCleanedAreaProgress } from "./infer-cleaned-area-progress.js";
 import type { ValueGetter, ValueSetter } from "./utils/cluster-config.js";
@@ -25,6 +27,8 @@ export enum RvcSupportedRunMode {
 export interface RvcRunModeServerConfig {
   getCurrentMode: ValueGetter<RvcSupportedRunMode>;
   getSupportedModes: ValueGetter<RvcRunMode.ModeOption[]>;
+  /** Optional start precondition, evaluated before dispatch or optimistic state. */
+  getStartError?: ValueGetter<string | undefined>;
 
   start: ValueSetter<void>;
   returnToBase: ValueSetter<void>;
@@ -33,6 +37,8 @@ export interface RvcRunModeServerConfig {
   cleanRoom?: ValueSetter<number>;
   /** Optional: Current service area names, to follow renames */
   getAreaNames?: ValueGetter<{ areaId: number; name: string }[]>;
+  /** Optional: ServiceArea id for a room mode, when labels differ from area names */
+  getAreaIdForMode?: (mode: number, agent: Agent) => number | undefined;
 }
 
 export interface RvcRunModeServerInitialState {
@@ -92,6 +98,9 @@ export interface CleaningSession {
   /** HA reported cleaning last, or a controller start is on its way. A
    *  late cleaning update after a controller stop is not a new clean. */
   haCleaning: boolean;
+  /** Run mode before HA reported unavailable or unknown, so the update
+   *  after the blip compares against it instead of the offline Idle. */
+  modeBeforeOffline?: number;
 }
 
 const cleaningSessions = new WeakMap<object, CleaningSession>();
@@ -147,7 +156,7 @@ class RvcRunModeServerBase extends Base {
       return;
     }
     const s = getSession(this.endpoint);
-    const previousMode = this.state.currentMode;
+    const previousMode = s.modeBeforeOffline ?? this.state.currentMode;
     const newMode = this.state.config.getCurrentMode(entity.state, this.agent);
 
     applyPatchState(
@@ -161,10 +170,14 @@ class RvcRunModeServerBase extends Base {
       },
       { force: true },
     );
-    // unavailable drops the rooms, keep the last names
-    if (!["unavailable", "unknown"].includes(entity.state.state)) {
-      this.renameAreas(entity.state);
+    // An offline vacuum has not finished a room or the job, and unavailable
+    // drops the rooms, keep the last names
+    if (["unavailable", "unknown"].includes(entity.state.state)) {
+      s.modeBeforeOffline = previousMode;
+      return;
     }
+    s.modeBeforeOffline = undefined;
+    this.renameAreas(entity.state);
 
     // changeToMode already set currentMode=Cleaning, so the cleaning event
     // often arrives without a transition. Latch the flag here instead.
@@ -751,11 +764,13 @@ class RvcRunModeServerBase extends Base {
   }
 
   /**
-   * Find the ServiceArea area ID that corresponds to a run mode value
-   * by matching the mode label to the area location name.
+   * Find the ServiceArea area ID that corresponds to a run mode value,
+   * by default by matching the mode label to the area location name.
    */
   private findAreaIdForMode(mode: number): number | null {
     try {
+      const resolved = this.state.config.getAreaIdForMode?.(mode, this.agent);
+      if (resolved !== undefined) return resolved;
       const serviceArea = this.agent.get(ServiceAreaBehavior);
       const modeEntry = this.state.supportedModes.find((m) => m.mode === mode);
       if (!modeEntry) return null;
@@ -767,6 +782,21 @@ class RvcRunModeServerBase extends Base {
     } catch {
       return null;
     }
+  }
+
+  /** Explicit controller stop or dock: the job is over, queued rooms too. */
+  endSession() {
+    const s = getSession(this.endpoint);
+    this.finalizeProgressOnStop();
+    this.restoreParkedAreas();
+    s.completedAreas.clear();
+    s.lastCurrentArea = null;
+    s.activeAreas = [];
+    s.loggedShortCircuits.clear();
+    s.pendingDispatches = [];
+    s.observedCleaning = false;
+    s.cleanedAreaBaseline = null;
+    s.modeBeforeOffline = undefined;
   }
 
   override changeToMode(
@@ -785,6 +815,21 @@ class RvcRunModeServerBase extends Base {
         status: ModeBase.ModeChangeStatus.UnsupportedMode,
         statusText: `Unsupported mode: ${newMode}`,
       };
+    }
+
+    // A refused start leaves mode, session, progress and operational state alone.
+    // Read the current HA precondition, not a cached Matter state.
+    if (newMode !== RvcSupportedRunMode.Idle) {
+      const reason = this.state.config.getStartError?.(
+        homeAssistant.entity.state,
+        this.agent,
+      );
+      if (reason) {
+        return {
+          status: ModeBase.ModeChangeStatus.GenericFailure,
+          statusText: trimToLength(reason, 64, "...") ?? "Robot is not ready",
+        };
+      }
     }
 
     // Apple starts its unchanged selection without re-sending it (#317)
@@ -871,16 +916,7 @@ class RvcRunModeServerBase extends Base {
         break;
       }
       case RvcSupportedRunMode.Idle:
-        // Explicit user command to stop, clear session state
-        this.finalizeProgressOnStop();
-        this.restoreParkedAreas();
-        s.completedAreas.clear();
-        s.lastCurrentArea = null;
-        s.activeAreas = [];
-        s.loggedShortCircuits.clear();
-        s.pendingDispatches = [];
-        s.observedCleaning = false;
-        s.cleanedAreaBaseline = null;
+        this.endSession();
         homeAssistant.callAction(
           this.state.config.returnToBase(void 0, this.agent),
         );
@@ -900,6 +936,13 @@ class RvcRunModeServerBase extends Base {
 namespace RvcRunModeServerBase {
   export class State extends Base.State {
     config!: RvcRunModeServerConfig;
+  }
+}
+
+/** Matter GoHome ends the job like a stop to Idle does. */
+export function endCleaningSession(agent: Agent) {
+  if (agent.has(RvcRunModeServerBase)) {
+    agent.get(RvcRunModeServerBase).endSession();
   }
 }
 

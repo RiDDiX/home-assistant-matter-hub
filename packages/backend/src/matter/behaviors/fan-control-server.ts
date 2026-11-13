@@ -149,7 +149,10 @@ export interface FanControlServerConfig {
   setPresetMode: ValueSetter<string>;
   // Rocking (oscillation) control
   setOscillation: ValueSetter<boolean>;
-  setRockSetting?: ValueSetter<FanControlRockSetting>;
+  // undefined when the entity declares no mode for the setting, nothing is sent
+  setRockSetting?: (
+    ...args: Parameters<ValueSetter<FanControlRockSetting>>
+  ) => HomeAssistantAction | undefined;
   // Wind mode control - sets preset mode for wind
   setWindMode: ValueSetter<"natural" | "sleep" | "off">;
 }
@@ -213,24 +216,20 @@ export class FanControlServerBase extends FeaturedBase {
     await super.initialize();
 
     // Seed last non-zero values from persisted state so turn-on after
-    // a bridge restart can restore the previous speed.
-    const ps = this.state.percentSetting;
-    if (ps != null && ps > 0) {
-      this.lastNonZeroPercent = ps;
-    }
-    if (this.features.multiSpeed) {
-      const ss = this.state.speedSetting;
-      if (ss != null && ss > 0) {
-        this.lastNonZeroSpeed = ss;
-      }
-    }
-    // Migrate the percentSetting seed into the persisted memory once, so
-    // fans that were on at shutdown keep their speed known (#387).
+    // a bridge restart can restore the previous speed. Fans read the memory
+    // behavior only: a stored percentSetting may be the #546 stand-in.
     if (this.agent.has(FanSpeedMemoryBehavior)) {
-      const memory = await this.agent.load(FanSpeedMemoryBehavior);
-      if (memory.state.lastPercent === 0 && this.lastNonZeroPercent > 0) {
-        memory.state.lastPercent = this.lastNonZeroPercent;
-        memory.state.lastSpeed = this.lastNonZeroSpeed;
+      await this.agent.load(FanSpeedMemoryBehavior);
+    } else {
+      const ps = this.state.percentSetting;
+      if (ps != null && ps > 0) {
+        this.lastNonZeroPercent = ps;
+      }
+      if (this.features.multiSpeed) {
+        const ss = this.state.speedSetting;
+        if (ss != null && ss > 0) {
+          this.lastNonZeroSpeed = ss;
+        }
       }
     }
 
@@ -303,6 +302,7 @@ export class FanControlServerBase extends FeaturedBase {
     let percentage: number;
     let speedMax: number;
     let speed: number;
+    let fallback = false;
 
     if (supportsPercentage) {
       // Fan supports percentage control - use percentage-based logic
@@ -322,6 +322,20 @@ export class FanControlServerBase extends FeaturedBase {
         minSpeedMax,
         Math.min(maxSpeedMax, calculatedSpeedMax),
       );
+      // An on entity without a percentage (Dyson in preset Auto) must not
+      // read as off while OnOff says on (#546). The stand-in is not remembered.
+      // Fans only: a humidifier percentSetting is its target humidity.
+      if (
+        percentage === 0 &&
+        this.agent.has(FanSpeedMemoryBehavior) &&
+        this.agent.get(HomeAssistantEntityBehavior).isAvailable &&
+        entity.state.state !== "off"
+      ) {
+        fallback = true;
+        percentage =
+          this.remembered().percent ||
+          Math.floor((Math.ceil(speedMax / 2) / speedMax) * 100);
+      }
       speed =
         percentage === 0
           ? 0
@@ -373,7 +387,7 @@ export class FanControlServerBase extends FeaturedBase {
 
     // Save last non-zero values; restored on controller-initiated turn-on
     // to prevent Apple Home defaulting to 100% (#225).
-    if (percentage > 0) {
+    if (percentage > 0 && !fallback) {
       this.lastNonZeroPercent = percentage;
       this.lastNonZeroSpeed = speed;
       this.lastIsAutoMode = config.isInAutoMode(entity.state, this.agent);
@@ -434,33 +448,9 @@ export class FanControlServerBase extends FeaturedBase {
   override step(request: FanControl.StepRequest) {
     const fanSpeed = new FanSpeed(this.state.speedCurrent, this.state.speedMax);
     const newSpeed = fanSpeed.step(request).currentSpeed;
-    const percentSetting = Math.floor((newSpeed / this.state.speedMax) * 100);
-
-    const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);
-    if (!homeAssistant.isAvailable) {
-      return;
-    }
-    this.syncOnOffFromSpeed(percentSetting !== 0);
-    if (percentSetting === 0) {
-      homeAssistant.callAction(this.state.config.turnOff(void 0, this.agent));
-    } else {
-      const stepSize = this.state.config.getStepSize(
-        homeAssistant.entity.state,
-        this.agent,
-      );
-      const roundedPercentage =
-        stepSize && stepSize > 0
-          ? Math.round(percentSetting / stepSize) * stepSize
-          : percentSetting;
-      const clampedPercentage = Math.max(
-        stepSize ?? 1,
-        Math.min(100, roundedPercentage),
-      );
-      homeAssistant.callAction(
-        this.state.config.turnOn(clampedPercentage, this.agent),
-      );
-      this.rememberSpeed(clampedPercentage);
-    }
+    this.applyPercentageAction(
+      Math.floor((newSpeed / this.state.speedMax) * 100),
+    );
   }
 
   private targetSpeedSettingChanged(
@@ -639,23 +629,31 @@ export class FanControlServerBase extends FeaturedBase {
         // Transaction conflict, HA echo will set the correct values
       }
     }
-    const config = this.state.config;
-    const supportsPercentage = config.supportsPercentage(
-      homeAssistant.entity.state,
-      this.agent,
-    );
-
     this.syncOnOffFromSpeed(percentage !== 0);
     if (percentage === 0) {
       this.dispatchSpeedAction(
         homeAssistant,
-        config.turnOff(void 0, this.agent),
+        this.state.config.turnOff(void 0, this.agent),
       );
-    } else if (supportsPercentage) {
-      const stepSize = config.getStepSize(
-        homeAssistant.entity.state,
-        this.agent,
-      );
+      return;
+    }
+    const speed = this.speedAction(homeAssistant, percentage);
+    if (speed) {
+      this.dispatchSpeedAction(homeAssistant, speed.action);
+      this.rememberSpeed(speed.percent);
+    }
+  }
+
+  // The HA action for a non-zero speed: a stepped percentage when the entity
+  // takes one, else the matching speed preset (preset-only fans, climate).
+  private speedAction(
+    homeAssistant: HomeAssistantEntityBehavior,
+    percentage: number,
+  ): { action: HomeAssistantAction; percent: number } | undefined {
+    const config = this.state.config;
+    const entityState = homeAssistant.entity.state;
+    if (config.supportsPercentage(entityState, this.agent)) {
+      const stepSize = config.getStepSize(entityState, this.agent);
       const roundedPercentage =
         stepSize && stepSize > 0
           ? Math.round(percentage / stepSize) * stepSize
@@ -664,32 +662,25 @@ export class FanControlServerBase extends FeaturedBase {
         stepSize ?? 1,
         Math.min(100, roundedPercentage),
       );
-
-      this.dispatchSpeedAction(
-        homeAssistant,
-        config.turnOn(clampedPercentage, this.agent),
-      );
-      this.rememberSpeed(clampedPercentage);
-    } else {
-      const presetModes =
-        config.getPresetModes(homeAssistant.entity.state, this.agent) ?? [];
-      const speedPresets = toAscendingSpeedPresets(
-        presetModes.filter((m) => m.toLowerCase() !== "auto"),
-      );
-
-      if (speedPresets.length > 0) {
-        const presetIndex = percentToPresetIndex(
-          percentage,
-          speedPresets.length,
-        );
-        const targetPreset = speedPresets[presetIndex];
-        this.dispatchSpeedAction(
-          homeAssistant,
-          config.setPresetMode(targetPreset, this.agent),
-        );
-        this.rememberSpeed(percentage);
-      }
+      return {
+        action: config.turnOn(clampedPercentage, this.agent),
+        percent: clampedPercentage,
+      };
     }
+    const speedPresets = toAscendingSpeedPresets(
+      (config.getPresetModes(entityState, this.agent) ?? []).filter(
+        (m) => m.toLowerCase() !== "auto",
+      ),
+    );
+    if (speedPresets.length === 0) {
+      return undefined;
+    }
+    const targetPreset =
+      speedPresets[percentToPresetIndex(percentage, speedPresets.length)];
+    return {
+      action: config.setPresetMode(targetPreset, this.agent),
+      percent: percentage,
+    };
   }
 
   // Controller writes count as the last speed too. Some integrations
@@ -780,11 +771,12 @@ export class FanControlServerBase extends FeaturedBase {
         return;
       }
       const config = this.state.config;
-      homeAssistant.callAction(
-        config.setRockSetting
-          ? config.setRockSetting(rockSetting, this.agent)
-          : config.setOscillation(!!rockSetting.rockUpDown, this.agent),
-      );
+      const action = config.setRockSetting
+        ? config.setRockSetting(rockSetting, this.agent)
+        : config.setOscillation(!!rockSetting.rockUpDown, this.agent);
+      if (action) {
+        homeAssistant.callAction(action);
+      }
     });
   }
 
@@ -822,8 +814,16 @@ export class FanControlServerBase extends FeaturedBase {
     if (transactionIsOffline(context)) {
       return;
     }
+    if (!onOff) {
+      // A controller off must not be undone by a slider write still in the window
+      const st = fanDebounce.get(this.endpoint);
+      if (st) {
+        clearFanDebounce(st);
+      }
+      return;
+    }
     const remembered = this.remembered();
-    if (onOff && remembered.percent > 0) {
+    if (remembered.percent > 0) {
       // Use asLocalActor so the percentSetting change is treated as offline.
       // Without this, targetPercentSettingChanged fires and sends a second
       // fan.turn_on(percentage), overriding the no-param fan.turn_on from
@@ -849,9 +849,10 @@ export class FanControlServerBase extends FeaturedBase {
             this.state.config.setAutoMode(void 0, this.agent),
           );
         } else {
-          homeAssistant.callAction(
-            this.state.config.turnOn(remembered.percent, this.agent),
-          );
+          const speed = this.speedAction(homeAssistant, remembered.percent);
+          if (speed) {
+            homeAssistant.callAction(speed.action);
+          }
         }
       }
     }

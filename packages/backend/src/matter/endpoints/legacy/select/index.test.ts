@@ -112,6 +112,22 @@ describe("SelectDevice / InputSelectDevice ModeSelect labels (#296)", () => {
     expect(supportedModes[1].label).toBe("a".repeat(64));
   });
 
+  it("cuts a long name and caps the options so the endpoint can build", () => {
+    const options = Array.from({ length: 300 }, (_, i) => `Option ${i}`);
+    const entity = createEntity("select.many", "Option 299", {
+      friendly_name: "Wohnzimmer Deckenleuchte ".repeat(4),
+      options,
+    });
+
+    const { description, currentMode, supportedModes } = readSupportedModes(
+      SelectDevice({ entity } as never),
+    );
+    expect(Buffer.byteLength(description)).toBeLessThanOrEqual(64);
+    expect(description.endsWith("...")).toBe(true);
+    expect(supportedModes).toHaveLength(255);
+    expect(currentMode).toBe(0);
+  });
+
   it("returns undefined when options are missing", () => {
     const entity = createEntity("input_select.empty", "unknown", {});
     expect(InputSelectDevice({ entity } as never)).toBeUndefined();

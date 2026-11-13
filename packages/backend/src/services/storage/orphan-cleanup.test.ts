@@ -322,7 +322,7 @@ describe("executeOrphanCleanup", () => {
 describe("computeOrphanCandidates stray mappings", () => {
   const agedIso = new Date(NOW - 8 * DAY).toISOString();
 
-  // The Codex repro: with stableIdentity off, a rename moves the record's
+  // Repro: with stableIdentity off, a rename moves the record's
   // lastEntityId to light.new but leaves the mapping at light.old. The identity
   // row then reports no mapping (its lastEntityId is light.new), so the light.old
   // mapping is only reachable as its own stray-mapping row.

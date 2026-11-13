@@ -57,39 +57,4 @@ describe("composed endpoint type validation", () => {
       expect(result!.missingMandatory).toEqual([]);
     });
   });
-
-  describe("composed endpoint ID generation", () => {
-    it("replaces dots and spaces with underscores", () => {
-      const createEndpointId = (
-        entityId: string,
-        customName?: string,
-      ): string => {
-        const baseName = customName || entityId;
-        return baseName.replace(/\./g, "_").replace(/\s+/g, "_");
-      };
-
-      expect(createEndpointId("sensor.temperature")).toBe("sensor_temperature");
-      expect(createEndpointId("sensor.living_room", "Living Room Temp")).toBe(
-        "Living_Room_Temp",
-      );
-      expect(createEndpointId("sensor.test.nested")).toBe("sensor_test_nested");
-    });
-  });
-
-  describe("composed sub-endpoint parts structure", () => {
-    it("temperature-only sensor creates 1 sub-endpoint", () => {
-      const parts: string[] = ["temp"];
-      expect(parts).toHaveLength(1);
-    });
-
-    it("temperature + humidity creates 2 sub-endpoints", () => {
-      const parts: string[] = ["temp", "humidity"];
-      expect(parts).toHaveLength(2);
-    });
-
-    it("temperature + humidity + pressure creates 3 sub-endpoints", () => {
-      const parts: string[] = ["temp", "humidity", "pressure"];
-      expect(parts).toHaveLength(3);
-    });
-  });
 });

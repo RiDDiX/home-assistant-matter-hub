@@ -1,4 +1,4 @@
-import { Behavior, EventEmitter } from "@matter/main";
+import { Behavior } from "@matter/main";
 import type { PluginDevice } from "./types.js";
 
 /**
@@ -9,7 +9,6 @@ import type { PluginDevice } from "./types.js";
 export class PluginDeviceBehavior extends Behavior {
   static override readonly id = "pluginDevice";
   declare state: PluginDeviceBehavior.State;
-  declare events: PluginDeviceBehavior.Events;
 
   get device(): PluginDevice {
     return this.state.device;
@@ -24,9 +23,5 @@ export namespace PluginDeviceBehavior {
   export class State {
     device!: PluginDevice;
     pluginName!: string;
-  }
-
-  export class Events extends EventEmitter {
-    // Future: add events for device state changes
   }
 }

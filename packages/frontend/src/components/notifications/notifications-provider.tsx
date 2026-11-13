@@ -1,6 +1,6 @@
 import Alert from "@mui/material/Alert";
 import Snackbar from "@mui/material/Snackbar";
-import { type PropsWithChildren, useCallback, useState } from "react";
+import { type PropsWithChildren, useCallback, useMemo, useState } from "react";
 import type { NotificationOptions } from "./notification-options.ts";
 import { NotificationsContext } from "./notifications-context.ts";
 
@@ -29,13 +29,17 @@ export const NotificationsProvider = (props: PropsWithChildren) => {
     );
   };
 
+  const value = useMemo(() => ({ show }), [show]);
+
   return (
-    <NotificationsContext.Provider value={{ show }}>
+    <NotificationsContext.Provider value={value}>
       {props.children}
-      {notifications.map((notification) => (
+      {/* one at a time, the next shows when this one closes */}
+      {notifications.slice(0, 1).map((notification) => (
         <Snackbar
           key={notification.notificationId}
           open={true}
+          anchorOrigin={{ vertical: "bottom", horizontal: "center" }}
           autoHideDuration={notification.autoHideDuration}
           onClose={() => deleteNotification(notification.notificationId)}
         >

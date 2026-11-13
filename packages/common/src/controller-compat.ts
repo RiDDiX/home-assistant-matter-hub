@@ -133,6 +133,23 @@ const deviceTypeIdSupport: Record<number, DeviceTypeSupport> = {
     smartthings: "yes",
     note: "HA, Aqara and SmartThings render EnergyEvse (SmartThings sets the limit via EnableCharging and addresses modes by list position). Bridged EVSE can break Alexa device recognition, keep it off Alexa bridges.",
   },
+  // dimmable plug-in unit
+  267: {
+    apple: "yes",
+    google: "no",
+    alexa: "yes",
+    aqara: "yes",
+    smartthings: "yes",
+  },
+  // mounted on/off control
+  271: {
+    apple: "no",
+    google: "no",
+    alexa: "no",
+    aqara: "yes",
+    smartthings: "yes",
+    note: "Experimental Matter 1.4 type (0x010F). SmartThings and Aqara show it as a switch. Apple, Google and Alexa don't know it yet and are expected to fall back to the advertised plug subset, not verified on real devices (#380).",
+  },
   // water heater
   1295: {
     apple: "no",

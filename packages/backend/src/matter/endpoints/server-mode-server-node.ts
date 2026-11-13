@@ -10,11 +10,14 @@ import { RoboticVacuumCleanerDevice } from "@matter/main/devices";
 import { type Endpoint, ServerNode } from "@matter/main/node";
 import { DeviceTypeId, VendorId } from "@matter/main/types";
 import { CAMERA_TCP_CONFIG } from "../../plugins/builtin/camera/camera-tcp-requirement.js";
+import { countryCodeLocation } from "../../utils/json/create-bridge-server-config.js";
 import { sanitizeMatterString } from "../../utils/sanitize-matter-string.js";
+import { serialNumberWithSuffix } from "../../utils/serial-number.js";
 import { trimToLength } from "../../utils/trim-to-length.js";
 import { legacySpecBasicInformation } from "../legacy-spec-version.js";
 import { matterSubscriptionOptions } from "../subscription-options.js";
 import { rootEndpointType } from "../tc-general-commissioning.js";
+import { factoryResetNode } from "./bridge-server-node.js";
 
 const logger = Logger.get("ServerModeServerNode");
 
@@ -71,7 +74,7 @@ export class ServerModeServerNode extends ServerNode {
         softwareVersionString:
           bridgeData.basicInformation.softwareVersionString ??
           String(bridgeData.basicInformation.softwareVersion),
-        ...(bridgeData.countryCode ? { location: bridgeData.countryCode } : {}),
+        ...countryCodeLocation(bridgeData.id, bridgeData.countryCode),
       },
       subscriptions: {
         persistenceEnabled: false,
@@ -132,18 +135,14 @@ export class ServerModeServerNode extends ServerNode {
         ? (trimToLength(sanitizeMatterString(nodeLabel ?? ""), 32, "...") ??
           undefined)
         : undefined;
-    // Reserve room for the suffix so it survives the 32-byte cap (#330).
-    const maxRawLen = 32 - Buffer.byteLength(this.serialNumberSuffix ?? "");
-    const registrySerial = this.featureFlags?.useHaRegistrySerial
-      ? trimToLength(device?.serial_number, maxRawLen, "...")
-      : undefined;
-    const rawSerial =
-      trimToLength(mapping?.customSerialNumber, maxRawLen, "...") ??
-      registrySerial;
-    const serialNumber =
-      rawSerial && this.serialNumberSuffix
-        ? `${rawSerial}${this.serialNumberSuffix}`
-        : rawSerial;
+    const serialNumber = serialNumberWithSuffix(
+      this.serialNumberSuffix,
+      (maxRawLen) =>
+        trimToLength(mapping?.customSerialNumber, maxRawLen, "...") ??
+        (this.featureFlags?.useHaRegistrySerial
+          ? trimToLength(device?.serial_number, maxRawLen, "...")
+          : undefined),
+    );
     const basicInformation = dropUndefined({
       vendorName:
         trimToLength(mapping?.customVendorName, 32, "...") ??
@@ -151,6 +150,9 @@ export class ServerModeServerNode extends ServerNode {
       productName:
         trimToLength(mapping?.customProductName, 32, "...") ??
         productNameFromNodeLabel ??
+        (this.featureFlags?.productNameFromModel
+          ? trimToLength(device?.model, 32, "...")
+          : undefined) ??
         trimToLength(device?.model_id, 32, "...") ??
         trimToLength(device?.model, 32, "..."),
       productLabel: trimToLength(device?.model, 64, "..."),
@@ -189,8 +191,7 @@ export class ServerModeServerNode extends ServerNode {
   }
 
   async factoryReset(): Promise<void> {
-    await this.cancel();
-    await this.erase();
+    await factoryResetNode(this);
   }
 }
 

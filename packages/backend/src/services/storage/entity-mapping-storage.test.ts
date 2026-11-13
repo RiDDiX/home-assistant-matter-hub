@@ -1,9 +1,12 @@
+import { once } from "node:events";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Environment, VariableService } from "@matter/general";
 import { StorageService } from "@matter/main";
+import express from "express";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { entityMappingApi } from "../../api/entity-mapping-api.js";
 import { AppStorage } from "./app-storage.js";
 import { EntityMappingStorage } from "./entity-mapping-storage.js";
 
@@ -29,6 +32,23 @@ function missingSince(m: unknown): string | undefined {
 }
 
 describe("EntityMappingStorage orphan tombstone", () => {
+  it("persists a readiness-only mapping through normalization and reload", async () => {
+    const storage = new EntityMappingStorage(appStorage);
+    await storage.construction;
+    await storage.setMapping({
+      bridgeId: "b",
+      entityId: "vacuum.robot",
+      readinessEntity: "sensor.ready",
+    });
+    await storage.flush();
+    const reloaded = new EntityMappingStorage(appStorage);
+    await reloaded.construction;
+    expect(reloaded.getMapping("b", "vacuum.robot")?.readinessEntity).toBe(
+      "sensor.ready",
+    );
+    await reloaded.dispose();
+    await storage.dispose();
+  });
   it("marks once keeping first-seen, and round-trips missingSince through a flushed reload", async () => {
     const storage = new EntityMappingStorage(appStorage);
     await storage.construction;
@@ -149,4 +169,74 @@ describe("EntityMappingStorage orphan tombstone", () => {
     expect(loaded?.customName).toBe("Old");
     expect(missingSince(loaded)).toBeUndefined();
   });
+});
+
+describe("vacuum fault mapping persistence", () => {
+  it("keeps a fault-only mapping through a flushed reload and permits clearing it", async () => {
+    const storage = new EntityMappingStorage(appStorage);
+    await storage.construction;
+    await storage.setMapping({
+      bridgeId: "b",
+      entityId: "vacuum.robot",
+      faultEntity: " sensor.custom_error ",
+    });
+    await storage.flush();
+    const reloaded = new EntityMappingStorage(appStorage);
+    await reloaded.construction;
+    expect(reloaded.getMapping("b", "vacuum.robot")?.faultEntity).toBe(
+      "sensor.custom_error",
+    );
+    await reloaded.setMapping({
+      bridgeId: "b",
+      entityId: "vacuum.robot",
+      faultEntity: " ",
+    });
+    expect(reloaded.getMapping("b", "vacuum.robot")).toBeUndefined();
+  });
+});
+
+it("accepts an explicit vacuum fault source through the actual mapping API", async () => {
+  const storage = new EntityMappingStorage(appStorage);
+  await storage.construction;
+  const app = express();
+  app.use(express.json());
+  app.use(entityMappingApi(storage, {} as never));
+  const listener = app.listen(0, "127.0.0.1");
+  await once(listener, "listening");
+  try {
+    const address = listener.address();
+    if (!address || typeof address === "string")
+      throw new Error("No HTTP address");
+    const url = `http://127.0.0.1:${address.port}/b/vacuum.robot`;
+    const response = await fetch(url, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ faultEntity: "sensor.manual_error" }),
+    });
+    expect(response.status).toBe(200);
+    expect((await response.json()).faultEntity).toBe("sensor.manual_error");
+    const saved = await fetch(url);
+    expect((await saved.json()).faultEntity).toBe("sensor.manual_error");
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      listener.close((error) => (error ? reject(error) : resolve())),
+    );
+  }
+});
+
+it("leaves a file from a newer build alone until a mapping changes", async () => {
+  const ctx = appStorage.createContext("entity-mappings");
+  const newer = {
+    version: 2,
+    mappings: { b: [{ entityId: "light.a", customName: "A" }] },
+  };
+  // biome-ignore lint/suspicious/noExplicitAny: raw stored shape
+  await ctx.set("data", newer as any);
+
+  const storage = new EntityMappingStorage(appStorage);
+  await storage.construction;
+  expect(storage.getMapping("b", "light.a")?.customName).toBe("A");
+  await storage.dispose();
+
+  expect(await ctx.get("data")).toEqual(newer);
 });

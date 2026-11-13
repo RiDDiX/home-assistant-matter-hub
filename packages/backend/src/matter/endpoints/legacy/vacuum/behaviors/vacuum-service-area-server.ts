@@ -8,6 +8,7 @@ import type {
 } from "@home-assistant-matter-hub/common";
 import { Logger } from "@matter/general";
 import type { ServiceArea } from "@matter/main/clusters";
+import { trimToLength } from "../../../../../utils/trim-to-length.js";
 import {
   ServiceAreaServer,
   ServiceAreaServerWithMaps,
@@ -246,9 +247,11 @@ function toFloorNumber(floor: unknown): number | null {
 export function createCustomServiceAreaServer(
   customAreas: CustomServiceArea[],
 ) {
-  // Matter: map on every area or none, names at most 64 chars (#506).
+  // Matter: map on every area or none, names at most 64 bytes (#506).
   const mapNames = customAreas.map((a) =>
-    typeof a.mapName === "string" ? a.mapName.trim().slice(0, 64) : "",
+    typeof a.mapName === "string"
+      ? (trimToLength(a.mapName.trim(), 64, "") ?? "")
+      : "",
   );
   const mapped = mapNames.every((name) => name.length > 0);
   if (!mapped && mapNames.some((name) => name.length > 0)) {

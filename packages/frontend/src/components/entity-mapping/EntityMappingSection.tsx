@@ -31,7 +31,7 @@ import TableHead from "@mui/material/TableHead";
 import TableRow from "@mui/material/TableRow";
 import TextField from "@mui/material/TextField";
 import Typography from "@mui/material/Typography";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   deleteEntityMapping,
@@ -43,6 +43,10 @@ import {
   exportMappingProfile,
   previewMappingProfileImport,
 } from "../../api/mapping-profiles.js";
+import { useDevices } from "../../hooks/data/devices.js";
+import { collectLeafEndpoints } from "../endpoints/collect-leaf-endpoints.js";
+import { ConfirmDialog } from "../misc/ConfirmDialog.js";
+import { useNotifications } from "../notifications/use-notifications.js";
 import { EntityMappingDialog } from "./EntityMappingDialog.js";
 
 interface EntityMappingSectionProps {
@@ -51,6 +55,8 @@ interface EntityMappingSectionProps {
 
 export function EntityMappingSection({ bridgeId }: EntityMappingSectionProps) {
   const { t } = useTranslation();
+  const notifications = useNotifications();
+  const { content: devices } = useDevices(bridgeId);
   const [mappings, setMappings] = useState<EntityMappingResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -70,8 +76,22 @@ export function EntityMappingSection({ bridgeId }: EntityMappingSectionProps) {
   const [importing, setImporting] = useState(false);
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
   const [exportSelected, setExportSelected] = useState<Set<string>>(new Set());
-  const [exportProfileName, setExportProfileName] = useState("Bridge Mappings");
+  const [exportProfileName, setExportProfileName] = useState("");
+  const [pendingDelete, setPendingDelete] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // profile entries can only match entities that are on this bridge
+  const bridgeEntityIds = useMemo(() => {
+    if (!devices) return [];
+    return collectLeafEndpoints(devices).flatMap((ep) => {
+      const id = (
+        ep.state as {
+          homeAssistantEntity?: { entity?: { entity_id?: string } };
+        }
+      ).homeAssistantEntity?.entity?.entity_id;
+      return id ? [id] : [];
+    });
+  }, [devices]);
 
   const loadMappings = useCallback(async () => {
     try {
@@ -105,8 +125,10 @@ export function EntityMappingSection({ bridgeId }: EntityMappingSectionProps) {
 
   const handleDeleteMapping = useCallback(
     async (entityId: string) => {
+      setPendingDelete(null);
       try {
         await deleteEntityMapping(bridgeId, entityId);
+        setSuccessMsg(t("mapping.deleted", { entityId }));
         await loadMappings();
       } catch {
         setError(t("mapping.deleteFailed"));
@@ -123,11 +145,17 @@ export function EntityMappingSection({ bridgeId }: EntityMappingSectionProps) {
         setDialogOpen(false);
         setEditingEntity(null);
         await loadMappings();
-      } catch {
-        setError(t("mapping.saveFailed", { error: "" }));
+      } catch (e) {
+        // a toast, the inline alert sits behind the open dialog
+        notifications.show({
+          message: t("mapping.saveFailed", {
+            error: e instanceof Error ? e.message : String(e),
+          }),
+          severity: "error",
+        });
       }
     },
-    [bridgeId, loadMappings, t],
+    [bridgeId, loadMappings, notifications, t],
   );
 
   const handleClose = useCallback(() => {
@@ -141,13 +169,17 @@ export function EntityMappingSection({ bridgeId }: EntityMappingSectionProps) {
   const handleExportClick = useCallback(() => {
     const allIds = new Set(mappingsList.map((m) => m.entityId));
     setExportSelected(allIds);
-    setExportProfileName("Bridge Mappings");
+    setExportProfileName(t("mapping.defaultProfileName"));
     setExportDialogOpen(true);
-  }, [mappingsList]);
+  }, [mappingsList, t]);
 
   const handleExportConfirm = useCallback(async () => {
     try {
-      const entityIds = [...exportSelected];
+      // no ids = every mapping; hundreds of ids overflow the request line
+      const entityIds =
+        exportSelected.size === mappingsList.length
+          ? undefined
+          : [...exportSelected];
       const profile = await exportMappingProfile(
         bridgeId,
         exportProfileName,
@@ -164,9 +196,9 @@ export function EntityMappingSection({ bridgeId }: EntityMappingSectionProps) {
       URL.revokeObjectURL(url);
       setExportDialogOpen(false);
     } catch {
-      setError("Failed to export mapping profile");
+      setError(t("mapping.exportFailed"));
     }
-  }, [bridgeId, exportSelected, exportProfileName]);
+  }, [bridgeId, exportSelected, exportProfileName, mappingsList.length, t]);
 
   const handleExportCancel = useCallback(() => {
     setExportDialogOpen(false);
@@ -208,11 +240,16 @@ export function EntityMappingSection({ bridgeId }: EntityMappingSectionProps) {
         const profile = JSON.parse(text) as MappingProfile;
 
         if (!profile.version || !profile.entries) {
-          setError("Invalid mapping profile file");
+          setError(t("mapping.invalidProfile"));
           return;
         }
 
-        const entityIds = (mappings?.mappings ?? []).map((m) => m.entityId);
+        const entityIds = [
+          ...new Set([
+            ...bridgeEntityIds,
+            ...(mappings?.mappings ?? []).map((m) => m.entityId),
+          ]),
+        ];
         const preview = await previewMappingProfileImport(
           bridgeId,
           profile,
@@ -225,10 +262,10 @@ export function EntityMappingSection({ bridgeId }: EntityMappingSectionProps) {
           new Set(preview.matches.map((m) => m.matchedEntityId)),
         );
       } catch {
-        setError("Failed to parse mapping profile file");
+        setError(t("mapping.parseProfileFailed"));
       }
     },
-    [bridgeId, mappings],
+    [bridgeId, bridgeEntityIds, mappings, t],
   );
 
   const handleImportApply = useCallback(async () => {
@@ -242,15 +279,23 @@ export function EntityMappingSection({ bridgeId }: EntityMappingSectionProps) {
       setImportProfile(null);
       setImportSelected(new Set());
       setSuccessMsg(
-        `Imported ${result.applied} mapping(s)${result.skipped > 0 ? `, ${result.skipped} skipped` : ""}${result.errors.length > 0 ? `, ${result.errors.length} error(s)` : ""}`,
+        [
+          t("mapping.imported", { count: result.applied }),
+          result.skipped > 0 &&
+            t("mapping.importSkipped", { count: result.skipped }),
+          result.errors.length > 0 &&
+            t("mapping.importErrors", { count: result.errors.length }),
+        ]
+          .filter(Boolean)
+          .join(", "),
       );
       await loadMappings();
     } catch {
-      setError("Failed to apply mapping profile");
+      setError(t("mapping.applyProfileFailed"));
     } finally {
       setImporting(false);
     }
-  }, [bridgeId, importProfile, importSelected, loadMappings]);
+  }, [bridgeId, importProfile, importSelected, loadMappings, t]);
 
   const handleImportCancel = useCallback(() => {
     setImportPreview(null);
@@ -367,7 +412,7 @@ export function EntityMappingSection({ bridgeId }: EntityMappingSectionProps) {
                     <TableCell>
                       {config.matterDeviceType || (
                         <Typography color="text.secondary" variant="body2">
-                          Auto
+                          {t("mapping.auto")}
                         </Typography>
                       )}
                     </TableCell>
@@ -399,14 +444,14 @@ export function EntityMappingSection({ bridgeId }: EntityMappingSectionProps) {
                         onClick={() =>
                           handleEditMapping(config.entityId, config)
                         }
-                        aria-label={`Edit mapping for ${config.entityId}`}
+                        aria-label={`${t("mapping.editMapping")}: ${config.entityId}`}
                       >
                         <EditIcon fontSize="small" />
                       </IconButton>
                       <IconButton
                         size="small"
-                        onClick={() => handleDeleteMapping(config.entityId)}
-                        aria-label={`Delete mapping for ${config.entityId}`}
+                        onClick={() => setPendingDelete(config.entityId)}
+                        aria-label={`${t("mapping.deleteMapping")}: ${config.entityId}`}
                       >
                         <DeleteIcon fontSize="small" />
                       </IconButton>
@@ -418,6 +463,20 @@ export function EntityMappingSection({ bridgeId }: EntityMappingSectionProps) {
           </TableContainer>
         )}
       </CardContent>
+
+      <ConfirmDialog
+        open={pendingDelete !== null}
+        title={t("mapping.deleteMapping")}
+        message={t("mapping.confirmDeleteMessage", {
+          entityId: pendingDelete ?? "",
+        })}
+        confirmLabel={t("common.delete")}
+        cancelLabel={t("common.cancel")}
+        onConfirm={() => {
+          if (pendingDelete) handleDeleteMapping(pendingDelete);
+        }}
+        onCancel={() => setPendingDelete(null)}
+      />
 
       {editingEntity && (
         <EntityMappingDialog
@@ -486,7 +545,7 @@ export function EntityMappingSection({ bridgeId }: EntityMappingSectionProps) {
                       <TableCell>
                         {config.matterDeviceType || (
                           <Typography color="text.secondary" variant="body2">
-                            Auto
+                            {t("mapping.auto")}
                           </Typography>
                         )}
                       </TableCell>
@@ -528,9 +587,11 @@ export function EntityMappingSection({ bridgeId }: EntityMappingSectionProps) {
           {importPreview && (
             <Stack spacing={2} sx={{ mt: 1 }}>
               <Typography variant="body2" color="text.secondary">
-                Profile: <strong>{importPreview.profileName}</strong>,{" "}
-                {importPreview.totalEntries} entries,{" "}
-                {importPreview.matches.length} matched
+                {t("mapping.importSummary", {
+                  name: importPreview.profileName,
+                  count: importPreview.totalEntries,
+                  matched: importPreview.matches.length,
+                })}
               </Typography>
 
               {importPreview.matches.length > 0 && (
@@ -577,7 +638,7 @@ export function EntityMappingSection({ bridgeId }: EntityMappingSectionProps) {
                             />
                           </TableCell>
                           <TableCell>
-                            {match.entry.matterDeviceType || "Auto"}
+                            {match.entry.matterDeviceType || t("mapping.auto")}
                           </TableCell>
                           <TableCell>
                             {match.existingMapping ? (
@@ -605,8 +666,9 @@ export function EntityMappingSection({ bridgeId }: EntityMappingSectionProps) {
 
               {importPreview.unmatchedEntries.length > 0 && (
                 <Alert severity="info">
-                  {importPreview.unmatchedEntries.length} entries could not be
-                  matched to entities on this bridge.
+                  {t("mapping.unmatchedEntries", {
+                    count: importPreview.unmatchedEntries.length,
+                  })}
                 </Alert>
               )}
             </Stack>

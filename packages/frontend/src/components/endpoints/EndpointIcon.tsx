@@ -1,6 +1,7 @@
 import type { EndpointData } from "@home-assistant-matter-hub/common";
 import AcUnitIcon from "@mui/icons-material/AcUnit";
 import BlindsIcon from "@mui/icons-material/Blinds";
+import BoltIcon from "@mui/icons-material/Bolt";
 import CheckBoxIcon from "@mui/icons-material/CheckBox";
 import DeviceHubIcon from "@mui/icons-material/DeviceHub";
 import GroupWorkIcon from "@mui/icons-material/GroupWork";
@@ -13,6 +14,7 @@ import SmartToyIcon from "@mui/icons-material/SmartToy";
 import SpeakerIcon from "@mui/icons-material/Speaker";
 import ThermostatIcon from "@mui/icons-material/Thermostat";
 import ToggleOnIcon from "@mui/icons-material/ToggleOn";
+import TvIcon from "@mui/icons-material/Tv";
 import WaterDamageIcon from "@mui/icons-material/WaterDamage";
 import WaterDropIcon from "@mui/icons-material/WaterDrop";
 import WindPowerIcon from "@mui/icons-material/WindPower";
@@ -61,6 +63,10 @@ export const EndpointIcon = ({ endpoint }: EndpointIconProps) => {
         return <SpeakerIcon />;
       case "RoboticVacuumCleaner":
         return <SmartToyIcon />;
+      case "BasicVideoPlayer":
+        return <TvIcon />;
+      case "BatteryStorage":
+        return <BoltIcon />;
       default:
         return <UnknownIcon />;
     }

@@ -2,6 +2,7 @@ import type {
   EntityMappingConfig,
   HomeAssistantEntityRegistry,
 } from "@home-assistant-matter-hub/common";
+import type { Logger } from "@matter/general";
 import { createEndpointId } from "../../matter/endpoints/entity-endpoint.js";
 import type {
   EntityIdentityStorage,
@@ -27,8 +28,12 @@ export interface ResolvedIdentity {
 export interface ResolveOptions {
   stableIdentity: boolean;
   // true when a DIFFERENT identity already claims this endpoint id in the
-  // current build pass or on a live endpoint.
-  isEndpointIdTaken(endpointId: string, key: string): boolean;
+  // current build pass. A keyless entity (key null) only yields to a keyed
+  // one.
+  isEndpointIdTaken(endpointId: string, key: string | null): boolean;
+  // resolveIdentities re-keyed the whole pass already, a second move per
+  // entity would carry a mapping on into a slot the batch just freed
+  mappingsRekeyed?: boolean;
 }
 
 // NUL separates the parts so an entity_id or platform value can never forge
@@ -64,6 +69,74 @@ export class IdentityResolver {
     private readonly mappingStorage: EntityMappingStorage,
   ) {}
 
+  // Resolves one build pass in the given order. With the flag on, every id
+  // frozen for an entity of this pass is reserved up front (the entity mounted
+  // at it wins, else the first record in order), so neither a new key nor a
+  // keyless entity takes it whatever the order. mounted maps entity_id to the
+  // endpoint id it is mounted at now.
+  async resolveIdentities(
+    bridgeId: string,
+    entities: IdentityEntity[],
+    getMapping: (entityId: string) => EntityMappingConfig | undefined,
+    stableIdentity: boolean,
+    log: Logger,
+    mounted?: ReadonlyMap<string, string>,
+  ): Promise<Map<string, ResolvedIdentity>> {
+    const owners = new Map<string, { key: string | null; entityId: string }>();
+    const frozenIds = new Map<string, string>();
+    const renames: [string, string][] = [];
+    if (stableIdentity) {
+      for (const entity of entities) {
+        const key = identityKey(entity);
+        const existing =
+          key == null
+            ? undefined
+            : this.identityStorage.getIdentity(bridgeId, key);
+        if (key == null || !existing) continue;
+        frozenIds.set(entity.entity_id, existing.endpointId);
+        // The mounted entity keeps a shared id, else the file and the node
+        // disagree and the two swap numbers on the next restart (#543).
+        if (
+          !owners.has(existing.endpointId) ||
+          mounted?.get(entity.entity_id) === existing.endpointId
+        ) {
+          owners.set(existing.endpointId, { key, entityId: entity.entity_id });
+        }
+        const from = existing.lastEntityId ?? existing.anchorEntityId;
+        if (from !== entity.entity_id) renames.push([from, entity.entity_id]);
+      }
+      await this.rekeyMappings(bridgeId, renames);
+    }
+    const resolved = new Map<string, ResolvedIdentity>();
+    for (const entity of entities) {
+      const res = await this.resolveIdentity(
+        bridgeId,
+        entity,
+        getMapping(entity.entity_id),
+        {
+          stableIdentity,
+          isEndpointIdTaken: (id, key) =>
+            owners.has(id) && owners.get(id)?.key !== key,
+          mappingsRekeyed: true,
+        },
+      );
+      resolved.set(entity.entity_id, res);
+      const frozen = frozenIds.get(entity.entity_id);
+      if (frozen != null && res.endpointId !== frozen) {
+        log.warn(
+          `${entity.entity_id} shares endpoint id ${frozen} with ${owners.get(frozen)?.entityId}, moved it to ${res.endpointId}`,
+        );
+      }
+      if (!owners.has(res.endpointId)) {
+        owners.set(res.endpointId, {
+          key: identityKey(entity),
+          entityId: entity.entity_id,
+        });
+      }
+    }
+    return resolved;
+  }
+
   async resolveIdentity(
     bridgeId: string,
     entity: IdentityEntity,
@@ -74,9 +147,16 @@ export class IdentityResolver {
     const key = identityKey(entity);
 
     // FLOW 3: no stable key, keep today's entity_id derivation, no record.
+    // With the flag on it still steps aside from an id a keyed entity holds.
     if (key == null) {
+      const desired = createEndpointId(entityId, mapping?.customName);
+      let endpointId = desired;
+      let n = 2;
+      while (opts.stableIdentity && opts.isEndpointIdTaken(endpointId, null)) {
+        endpointId = `${desired}_${n++}`;
+      }
       return {
-        endpointId: createEndpointId(entityId, mapping?.customName),
+        endpointId,
         anchorEntityId: entityId,
         protected: false,
       };
@@ -94,17 +174,28 @@ export class IdentityResolver {
           : undefined;
 
       if (opts.stableIdentity) {
+        // Another record can already hold the same frozen id; this one then
+        // moves to the next free suffix so both devices mount.
+        let endpointId = existing.endpointId;
+        let n = 2;
+        while (opts.isEndpointIdTaken(endpointId, key)) {
+          endpointId = `${existing.endpointId}_${n++}`;
+        }
         // A rename records the new entity_id and carries the mapping across; the
-        // endpoint id and anchor stay frozen.
-        if (renamedFrom) {
+        // endpoint id and anchor stay frozen. Re-key first: a failed write then
+        // leaves the record on the old entity_id and the next pass retries.
+        if (renamedFrom && !opts.mappingsRekeyed) {
+          await this.rekeyMappings(bridgeId, [[renamedFrom, entityId]]);
+        }
+        if (renamedFrom || endpointId !== existing.endpointId) {
           this.identityStorage.setIdentity(bridgeId, key, {
             ...existing,
+            endpointId,
             lastEntityId: entityId,
           });
-          await this.rekeyMapping(bridgeId, renamedFrom, entityId);
         }
         return {
-          endpointId: existing.endpointId,
+          endpointId,
           anchorEntityId: existing.anchorEntityId,
           protected: true,
           renamedFrom,
@@ -171,29 +262,59 @@ export class IdentityResolver {
     };
   }
 
-  // Carry a mapping from the old entity_id to the new one on rename. anchorEntityId
+  // Carry mappings from the old entity_ids to the new ones on rename. anchorEntityId
   // never changes, only the mapping key. Skips when no old mapping exists or a new
-  // one already does, so a manual mapping under the new id is never clobbered.
-  private async rekeyMapping(
+  // one already does, so a manual mapping under the new id is never clobbered,
+  // unless that mapping itself moves away in the same batch. All old mappings are
+  // read before any write, so two entities swapping entity_ids keep their own.
+  private async rekeyMappings(
     bridgeId: string,
-    oldEntityId: string,
-    newEntityId: string,
+    renames: [string, string][],
   ): Promise<void> {
-    if (oldEntityId === newEntityId) {
-      return;
-    }
-    const old = this.mappingStorage.getMapping(bridgeId, oldEntityId);
-    if (!old) {
-      return;
-    }
-    if (this.mappingStorage.getMapping(bridgeId, newEntityId)) {
-      return;
-    }
-    await this.mappingStorage.setMapping({
-      ...old,
-      bridgeId,
-      entityId: newEntityId,
+    let moves = renames.flatMap(([from, to]) => {
+      const old =
+        from === to
+          ? undefined
+          : this.mappingStorage.getMapping(bridgeId, from);
+      return old ? [{ from, to, old }] : [];
     });
-    await this.mappingStorage.deleteMapping(bridgeId, oldEntityId);
+    for (let changed = true; changed; ) {
+      const freed = new Set(moves.map((m) => m.from));
+      const kept = moves.filter(
+        (m) =>
+          freed.has(m.to) || !this.mappingStorage.getMapping(bridgeId, m.to),
+      );
+      changed = kept.length !== moves.length;
+      moves = kept;
+    }
+    const written = new Set(moves.map((m) => m.to));
+    const before = [...new Set(moves.flatMap((m) => [m.from, m.to]))].map(
+      (entityId) =>
+        [entityId, this.mappingStorage.getMapping(bridgeId, entityId)] as const,
+    );
+    try {
+      for (const { to, old } of moves) {
+        await this.mappingStorage.setMapping({
+          ...old,
+          bridgeId,
+          entityId: to,
+        });
+      }
+      for (const { from } of moves) {
+        if (!written.has(from)) {
+          await this.mappingStorage.deleteMapping(bridgeId, from);
+        }
+      }
+    } catch (e) {
+      // The storage changes its memory before the file write that failed, so a
+      // half done swap would be swapped back by the retry. Put every slot back.
+      for (const [entityId, mapping] of before) {
+        await (mapping
+          ? this.mappingStorage.setMapping({ ...mapping, bridgeId, entityId })
+          : this.mappingStorage.deleteMapping(bridgeId, entityId)
+        ).catch(() => {});
+      }
+      throw e;
+    }
   }
 }

@@ -1,9 +1,9 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Environment, VariableService } from "@matter/general";
+import { Environment, Logger, VariableService } from "@matter/general";
 import { StorageService } from "@matter/main";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AppStorage } from "./app-storage.js";
 import {
   EntityIdentityStorage,
@@ -23,6 +23,8 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  vi.useRealTimers();
+  vi.restoreAllMocks();
   await appStorage.dispose().catch(() => {});
   rmSync(dir, { recursive: true, force: true });
 });
@@ -46,6 +48,99 @@ describe("EntityIdentityStorage", () => {
     const reloaded = new EntityIdentityStorage(appStorage);
     await reloaded.construction;
     expect(reloaded.getIdentity("bridge1", key)).toEqual(record);
+  });
+
+  it("retries a failed write without a further change and warns once", async () => {
+    const storage = new EntityIdentityStorage(appStorage);
+    await storage.construction;
+    const warn = vi
+      .spyOn(Logger.prototype, "warn")
+      .mockImplementation(() => {});
+    const set = vi
+      .spyOn(
+        (storage as unknown as { storage: { set: () => Promise<void> } })
+          .storage,
+        "set",
+      )
+      .mockRejectedValueOnce(new Error("disk full"))
+      .mockRejectedValueOnce(new Error("disk full"))
+      .mockResolvedValue(undefined);
+    vi.useFakeTimers();
+
+    storage.setIdentity("bridge1", "k1", record);
+    await vi.advanceTimersByTimeAsync(500);
+    expect(set).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(set).toHaveBeenCalledTimes(2);
+    expect(warn).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(set).toHaveBeenCalledTimes(3);
+    expect(set).toHaveBeenLastCalledWith("data", {
+      version: 1,
+      identities: { bridge1: { k1: record } },
+    });
+
+    // clean now: no further retry and nothing left to flush
+    await vi.advanceTimersByTimeAsync(60_000);
+    await storage.flush();
+    expect(set).toHaveBeenCalledTimes(3);
+    expect(warn).toHaveBeenCalledTimes(1);
+  });
+
+  it("warns again for a failure after a flush that landed", async () => {
+    const storage = new EntityIdentityStorage(appStorage);
+    await storage.construction;
+    const warn = vi
+      .spyOn(Logger.prototype, "warn")
+      .mockImplementation(() => {});
+    vi.spyOn(
+      (storage as unknown as { storage: { set: () => Promise<void> } }).storage,
+      "set",
+    )
+      .mockRejectedValueOnce(new Error("disk full"))
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error("disk full"))
+      .mockResolvedValue(undefined);
+    vi.useFakeTimers();
+
+    storage.setIdentity("bridge1", "k1", record);
+    await vi.advanceTimersByTimeAsync(500);
+    expect(warn).toHaveBeenCalledTimes(1);
+    await storage.flush();
+
+    storage.setIdentity("bridge1", "k2", record);
+    await vi.advanceTimersByTimeAsync(500);
+    expect(warn).toHaveBeenCalledTimes(2);
+  });
+
+  it("a write in flight at dispose that fails arms no retry", async () => {
+    const storage = new EntityIdentityStorage(appStorage);
+    await storage.construction;
+    vi.spyOn(Logger.prototype, "warn").mockImplementation(() => {});
+    let fail!: (e: Error) => void;
+    const set = vi
+      .spyOn(
+        (storage as unknown as { storage: { set: () => Promise<void> } })
+          .storage,
+        "set",
+      )
+      .mockImplementationOnce(
+        () => new Promise<void>((_, reject) => (fail = reject)),
+      )
+      .mockResolvedValue(undefined);
+    vi.useFakeTimers();
+
+    storage.setIdentity("bridge1", "k1", record);
+    await vi.advanceTimersByTimeAsync(500);
+    expect(set).toHaveBeenCalledTimes(1);
+    await storage.dispose();
+    fail(new Error("disk full"));
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(vi.getTimerCount()).toBe(0);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(set).toHaveBeenCalledTimes(1);
   });
 
   it("keeps records scoped per bridge and deletes only the asked bridge", async () => {
@@ -160,5 +255,155 @@ describe("EntityIdentityStorage", () => {
     const reloaded = new EntityIdentityStorage(appStorage);
     await reloaded.construction;
     expect(reloaded.getIdentity("bridge1", "hue light abc")).toEqual(record);
+  });
+
+  it("skips a bridge that is not a record object", async () => {
+    const ctx = appStorage.createContext("entity-identities");
+    await ctx.set("data", {
+      version: 1,
+      identities: { bridge1: null, bridge2: { k1: record } },
+      // biome-ignore lint/suspicious/noExplicitAny: raw stored shape
+    } as any);
+
+    const storage = new EntityIdentityStorage(appStorage);
+    await storage.construction;
+    expect(storage.getBridgeIdentities("bridge1").size).toBe(0);
+    expect(storage.getIdentity("bridge2", "k1")).toEqual(record);
+  });
+
+  it("skips records without a string endpointId", async () => {
+    const ctx = appStorage.createContext("entity-identities");
+    await ctx.set("data", {
+      version: 1,
+      identities: {
+        bridge1: {
+          k1: record,
+          k2: { anchorEntityId: "light.other" },
+          k3: { ...record, endpointId: 7 },
+          k4: null,
+        },
+      },
+      // biome-ignore lint/suspicious/noExplicitAny: raw stored shape
+    } as any);
+
+    const storage = new EntityIdentityStorage(appStorage);
+    await storage.construction;
+    expect(storage.getIdentity("bridge1", "k1")).toEqual(record);
+    expect(storage.getIdentity("bridge1", "k2")).toBeUndefined();
+    expect(storage.getIdentity("bridge1", "k3")).toBeUndefined();
+    expect(storage.getIdentity("bridge1", "k4")).toBeUndefined();
+  });
+
+  it("leaves a file from a newer build alone", async () => {
+    const ctx = appStorage.createContext("entity-identities");
+    const newer = { version: 2, identities: { bridge1: { k1: record } } };
+    // biome-ignore lint/suspicious/noExplicitAny: raw stored shape
+    await ctx.set("data", newer as any);
+
+    const storage = new EntityIdentityStorage(appStorage);
+    await storage.construction;
+    expect(storage.getIdentity("bridge1", "k1")).toEqual(record);
+    await storage.dispose();
+
+    expect(await ctx.get("data")).toEqual(newer);
+  });
+
+  it("never overwrites a file from a newer build when a record changes", async () => {
+    const ctx = appStorage.createContext("entity-identities");
+    const newer = {
+      version: 2,
+      identities: {
+        b1: { k1: record, k2: { anchorEntityId: "light.other" } },
+        b2: { k: record },
+      },
+    };
+    // biome-ignore lint/suspicious/noExplicitAny: raw stored shape
+    await ctx.set("data", newer as any);
+
+    const storage = new EntityIdentityStorage(appStorage);
+    await storage.construction;
+    storage.setIdentity("b2", "k9", record);
+    await storage.flush();
+    expect(storage.getIdentity("b2", "k9")).toEqual(record);
+    storage.markIdentityMissing("b1", "k1", "2026-07-01T00:00:00.000Z");
+    storage.clearIdentityMissing("b1", "k1");
+    await storage.deleteIdentity("b1", "k1");
+    await storage.deleteBridgeIdentities("b2");
+    await storage.dispose();
+
+    expect(await ctx.get("data")).toEqual(newer);
+  });
+
+  it("writes unreadable entries back unchanged when a record changes", async () => {
+    const ctx = appStorage.createContext("entity-identities");
+    const unreadable = { anchorEntityId: "light.other" };
+    await ctx.set("data", {
+      version: 1,
+      identities: { b1: { k1: record, k2: unreadable }, b2: null },
+      // biome-ignore lint/suspicious/noExplicitAny: raw stored shape
+    } as any);
+
+    const storage = new EntityIdentityStorage(appStorage);
+    await storage.construction;
+    storage.setIdentity("b1", "k9", record);
+    await storage.flush();
+
+    expect(await ctx.get("data")).toEqual({
+      version: 1,
+      identities: { b1: { k1: record, k2: unreadable, k9: record }, b2: null },
+    });
+  });
+
+  it("deletes a bridge's unreadable entries with the bridge", async () => {
+    const ctx = appStorage.createContext("entity-identities");
+    await ctx.set("data", {
+      version: 1,
+      identities: {
+        b1: { k1: record, k2: { anchorEntityId: "light.other" } },
+        b2: null,
+        b3: { k1: record },
+      },
+      // biome-ignore lint/suspicious/noExplicitAny: raw stored shape
+    } as any);
+
+    const storage = new EntityIdentityStorage(appStorage);
+    await storage.construction;
+    await storage.deleteBridgeIdentities("b2");
+    expect(await ctx.get("data")).toEqual({
+      version: 1,
+      identities: {
+        b1: { k1: record, k2: { anchorEntityId: "light.other" } },
+        b3: { k1: record },
+      },
+    });
+
+    await storage.deleteBridgeIdentities("b1");
+    storage.setIdentity("b1", "k9", record);
+    await storage.flush();
+
+    expect(await ctx.get("data")).toEqual({
+      version: 1,
+      identities: { b1: { k9: record }, b3: { k1: record } },
+    });
+  });
+
+  it("drops the raw copy once a readable record takes its key", async () => {
+    const ctx = appStorage.createContext("entity-identities");
+    await ctx.set("data", {
+      version: 1,
+      identities: { b1: { k1: record, k2: { anchorEntityId: "light.other" } } },
+      // biome-ignore lint/suspicious/noExplicitAny: raw stored shape
+    } as any);
+
+    const storage = new EntityIdentityStorage(appStorage);
+    await storage.construction;
+    storage.setIdentity("b1", "k2", record);
+    await storage.flush();
+    await storage.deleteIdentity("b1", "k2");
+
+    expect(await ctx.get("data")).toEqual({
+      version: 1,
+      identities: { b1: { k1: record } },
+    });
   });
 });

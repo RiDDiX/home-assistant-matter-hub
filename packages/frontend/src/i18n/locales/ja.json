@@ -141,7 +141,9 @@
     "bridgeStatusRunning": "{{running}} 動作中",
     "bridgeStatusFailed": "{{failed}} 失敗",
     "devicesFailed": "{{count}} 失敗",
-    "uptimeFormat": "稼働時間 {{time}}"
+    "uptimeFormat": "稼働時間 {{time}}",
+    "deviceCount": "{{count}} デバイス",
+    "fabricCount": "{{count}} ファブリック"
   },
   "bridge": {
     "name": "ブリッジ名",
@@ -352,7 +354,8 @@
     "sortType": "デバイスタイプ",
     "sortName": "名前",
     "deviceCount": "{{count}} デバイス",
-    "filteredCount": "{{total}} 中 {{filtered}} のデバイス"
+    "filteredCount": "{{total}} 中 {{filtered}} のデバイス",
+    "fabricCount": "{{count}} ファブリック"
   },
   "diagnostics": {
     "title": "ライブ診断",
@@ -408,7 +411,6 @@
     "namePlaceholder": "玄関",
     "nameHelperText": "この認証情報の名前",
     "entityRequired": "エンティティIDが必要です",
-    "pinLength": "暗証番号は4-8桁である必要があります",
     "pinDigitsOnly": "暗証番号は数字のみでなければいけません",
     "saveFailed": "保存に失敗しました",
     "loadFailed": "認証情報の読み込みに失敗しました",
@@ -497,8 +499,7 @@
     "settings": "バックアップの設定",
     "autoBackupLabel": "自動バックアップ",
     "autoBackupDesc": "アプリがシャットダウンまたは再起動した際に、自動的に完全バックアップを作成します。",
-    "retentionCount": "バックアップの保持数",
-    "retentionCountDesc": "バックアップの保持数(古い物から自動的に削除されます)"
+    "retentionCount": "バックアップの保持数"
   },
   "networkMap": {
     "title": "ネットワークマップ",

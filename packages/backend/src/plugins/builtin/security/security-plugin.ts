@@ -1,7 +1,6 @@
 import { Logger } from "@matter/general";
 import {
   type Connection,
-  callService,
   createConnection,
   createLongLivedTokenAuth,
   type HassEntity,
@@ -239,7 +238,9 @@ export class SecurityPlugin implements MatterHubPlugin {
   }
 
   private async tearDown(): Promise<void> {
-    this.machine?.shutdown();
+    // Never brought up (unconfigured): no devices and no connection to drop.
+    if (!this.machine) return;
+    this.machine.shutdown();
     this.machine = undefined;
     // Queued effects belong to the closed connection and its config; the
     // next bring-up must not replay them (#439 review).
@@ -452,14 +453,23 @@ export class SecurityPlugin implements MatterHubPlugin {
   }
 
   private machineConfig(): SecurityMachineConfig {
-    const seconds = (value: unknown, fallback: number): number =>
+    // setTimeout fires after 1 ms for delays above 2^31-1 ms
+    const max = Math.floor(0x7fffffff / 1000);
+    const seconds = (
+      value: unknown,
+      fallback: number,
+      overMax = max,
+    ): number =>
       typeof value === "number" && Number.isFinite(value) && value >= 0
-        ? Math.floor(value)
+        ? value > max
+          ? overMax
+          : Math.floor(value)
         : fallback;
     return {
       exitDelaySeconds: seconds(this.config.exitDelaySeconds, 60),
       entryDelaySeconds: seconds(this.config.entryDelaySeconds, 60),
-      triggerTimeSeconds: seconds(this.config.triggerTimeSeconds, 120),
+      // Longer than a timer can wait means stay triggered, same as 0.
+      triggerTimeSeconds: seconds(this.config.triggerTimeSeconds, 120, 0),
       triggers: this.lists.triggers,
       triggers24h: this.lists.triggers24h,
     };
@@ -806,28 +816,16 @@ export class SecurityPlugin implements MatterHubPlugin {
     service: string,
     entityId: string,
   ): Promise<void> {
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    try {
-      await Promise.race([
-        callService(connection, domain, service, undefined, {
-          entity_id: entityId,
-        }),
-        new Promise<never>((_, reject) => {
-          timer = setTimeout(
-            () =>
-              reject(
-                new Error(
-                  `${domain}.${service} for ${entityId} timed out after ${CALL_DEADLINE_MS}ms`,
-                ),
-              ),
-            CALL_DEADLINE_MS,
-          );
-          timer.unref?.();
-        }),
-      ]);
-    } finally {
-      if (timer) clearTimeout(timer);
-    }
+    await sendHaMessage(
+      connection,
+      {
+        type: "call_service",
+        domain,
+        service,
+        target: { entity_id: entityId },
+      },
+      CALL_DEADLINE_MS,
+    );
   }
 
   private startConnection(): void {

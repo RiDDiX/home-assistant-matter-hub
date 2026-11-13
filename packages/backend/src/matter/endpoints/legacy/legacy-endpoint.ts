@@ -26,12 +26,17 @@ import { ComposedSensorEndpoint } from "../composed/composed-sensor-endpoint.js"
 import { UserComposedEndpoint } from "../composed/user-composed-endpoint.js";
 import { asStandaloneEndpointType } from "../standalone-endpoint-type.js";
 import { updateEntityState } from "../update-entity-state.js";
-import { createLegacyEndpointType } from "./create-legacy-endpoint-type.js";
-import { supportsCleaningModes } from "./vacuum/behaviors/vacuum-rvc-clean-mode-server.js";
+import {
+  createLegacyEndpointType,
+  resolveCleaningModeOptions,
+} from "./create-legacy-endpoint-type.js";
 import {
   type VacuumEffectiveConfig,
   withResolvedRooms,
 } from "./vacuum/behaviors/vacuum-service-area-server.js";
+import { resolveVacuumFaultMapping } from "./vacuum/utils/resolve-vacuum-fault-mapping.js";
+
+import { resolveVacuumJobMapping } from "./vacuum/utils/resolve-vacuum-job-mapping.js";
 
 const logger = Logger.get("LegacyEndpoint");
 
@@ -268,7 +273,6 @@ export class LegacyEndpoint extends EntityEndpoint {
               entityId: effectiveMapping?.entityId ?? entityId,
               powerEntity: powerEntityId,
             };
-            registry.markPowerEntityUsed(powerEntityId);
             logger.debug(`Auto-assigned power ${powerEntityId} to ${entityId}`);
           }
         }
@@ -289,7 +293,6 @@ export class LegacyEndpoint extends EntityEndpoint {
               entityId: effectiveMapping?.entityId ?? entityId,
               energyEntity: energyEntityId,
             };
-            registry.markEnergyEntityUsed(energyEntityId);
             logger.debug(
               `Auto-assigned energy ${energyEntityId} to ${entityId}`,
             );
@@ -574,6 +577,14 @@ export class LegacyEndpoint extends EntityEndpoint {
       }
     }
 
+    if (entityId.startsWith("vacuum.")) {
+      effectiveMapping = resolveVacuumFaultMapping(
+        registry,
+        entityId,
+        effectiveMapping,
+      );
+    }
+
     const payload = {
       entity_id: entityId,
       state,
@@ -581,33 +592,19 @@ export class LegacyEndpoint extends EntityEndpoint {
       deviceRegistry,
     };
 
-    // Resolve cleaning mode options for vacuum entities
-    let cleaningModeOptions: string[] | undefined;
     if (entityId.startsWith("vacuum.")) {
-      if (effectiveMapping?.cleaningModeEntity) {
-        const cmState = registry.initialState(
-          effectiveMapping.cleaningModeEntity,
-        );
-        cleaningModeOptions = (
-          cmState?.attributes as { options?: string[] } | undefined
-        )?.options;
-      }
-      // Fallback: if no options from entity (unavailable / not loaded),
-      // use hardcoded defaults so mop modes are still generated.
-      // The runtime getCurrentMode/setCleanMode reads the entity live.
-      if (
-        !cleaningModeOptions &&
-        (effectiveMapping?.cleaningModeEntity ||
-          supportsCleaningModes(state.attributes as VacuumDeviceAttributes))
-      ) {
-        cleaningModeOptions = [
-          "vacuum",
-          "mop",
-          "vacuum_and_mop",
-          "vacuum_then_mop",
-        ];
-      }
+      effectiveMapping = resolveVacuumJobMapping(
+        registry,
+        entityId,
+        effectiveMapping,
+      );
     }
+
+    const cleaningModeOptions = resolveCleaningModeOptions(
+      registry,
+      payload,
+      effectiveMapping,
+    );
 
     const areaName = registry.getAreaName(entityId);
     let type = createLegacyEndpointType(
@@ -675,8 +672,15 @@ export class LegacyEndpoint extends EntityEndpoint {
     clear(): void;
   };
 
+  // delete() ends in close(), and a rebuild or bridge stop only closes, so
+  // the queued flush must not outlive either (#461)
+  override async close() {
+    this.flushUpdate.clear();
+    await super.close();
+  }
+
+  // delete() erases storage before it reaches close(), so clear first here too.
   override async delete() {
-    // Clear any pending debounce timers to prevent callbacks firing after deletion
     this.flushUpdate.clear();
     await super.delete();
   }
@@ -737,6 +741,12 @@ export class LegacyEndpoint extends EntityEndpoint {
         last_updated: new Date().toISOString(),
       };
     }
-    await updateEntityState(this, effectiveState);
+    // debounce and the event path drop this promise, a rejection would
+    // otherwise surface as an unhandled rejection without the entity id
+    try {
+      await updateEntityState(this, effectiveState);
+    } catch (e) {
+      logger.warn(`State update failed for ${this.entityId}:`, e);
+    }
   }
 }

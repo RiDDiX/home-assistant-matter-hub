@@ -246,6 +246,48 @@ describe("boost vs the async HA mode confirmation", () => {
     expect(await boostState(endpoint)).toBe(0); // external cancel still works
   });
 
+  it("survives an unavailable event without touching HA", async () => {
+    const endpoint = await bringUp(
+      waterHeater("eco", FULL_HEATER),
+      "wh437-unavailable-node",
+    );
+    await boost(endpoint, { duration: 3600, temporarySetpoint: 7000 });
+    await drive(endpoint, "high_demand", {
+      ...FULL_HEATER,
+      operation_mode: "high_demand",
+      temperature: 70,
+    });
+
+    calls.length = 0;
+    // HA drops the state attributes while the entity is unavailable.
+    await drive(endpoint, "unavailable", {
+      operation_list: FULL_HEATER.operation_list,
+      min_temp: 30,
+      max_temp: 75,
+    });
+    expect(await boostState(endpoint)).toBe(1); // still Active
+    expect(calls).toEqual([]);
+
+    // The session is intact, so CancelBoost still gives everything back.
+    await drive(endpoint, "high_demand", {
+      ...FULL_HEATER,
+      operation_mode: "high_demand",
+      temperature: 70,
+    });
+    await endpoint.act((agent) => {
+      // biome-ignore lint/suspicious/noExplicitAny: invoke the cluster command
+      (agent as any).waterHeaterManagement.cancelBoost();
+    });
+    expect(calls).toContainEqual({
+      action: "water_heater.set_operation_mode",
+      data: { operation_mode: "eco" },
+    });
+    expect(calls).toContainEqual({
+      action: "water_heater.set_temperature",
+      data: { temperature: 60 },
+    });
+  });
+
   it("gives the temporary setpoint back on an external cancel", async () => {
     const endpoint = await bringUp(
       waterHeater("eco", FULL_HEATER),

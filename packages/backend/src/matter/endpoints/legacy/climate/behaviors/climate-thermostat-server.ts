@@ -137,6 +137,25 @@ function isHeatCoolOnly(modes: ClimateHvacMode[]): boolean {
   );
 }
 
+function hvacModeFor(
+  systemMode: Thermostat.SystemMode,
+  hvacModes: ClimateHvacMode[],
+): ClimateHvacMode {
+  // heat_cool-only zones: map any non-Off mode back to heat_cool
+  // since the zone can't independently switch between heat and cool.
+  if (isHeatCoolOnly(hvacModes) && systemMode !== Thermostat.SystemMode.Off) {
+    return ClimateHvacMode.heat_cool;
+  }
+  // Handle Auto mode: prefer 'auto' if explicitly available, otherwise use 'heat_cool' (default)
+  if (
+    systemMode === Thermostat.SystemMode.Auto &&
+    hvacModes.includes(ClimateHvacMode.auto)
+  ) {
+    return ClimateHvacMode.auto;
+  }
+  return systemModeToHvacMode[systemMode] ?? ClimateHvacMode.off;
+}
+
 /**
  * Track last known active HVAC direction for heat_cool-only zones.
  * When idle, hvac_action doesn't reveal the main system's mode,
@@ -146,11 +165,13 @@ const lastHvacDirection = new Map<string, "heating" | "cooling">();
 
 // climateKeepModeOnIdle (#340): arm on non-Off, clear only after two consecutive
 // hvac_action=off events so the brief off+off HA emits before off+idle (internal
-// cleaning) doesn't drop the freeze on the cool->off+idle path.
+// cleaning) doesn't drop the freeze on the cool->off+idle path. update() runs
+// several times per event, so only a new last_updated counts as an event.
 interface ClimateFreezeState {
   lastNonOffMode: Thermostat.SystemMode;
   pending: boolean;
   confirmedOff: boolean;
+  lastOffEvent?: string;
 }
 export const climateFreezeState = new Map<string, ClimateFreezeState>();
 
@@ -300,7 +321,8 @@ export function applyClimateFreezeForKeepModeOnIdle(
   const action = attributes(entity).hvac_action;
   const existing = climateFreezeState.get(entityId);
   if (action === ClimateHvacAction.off) {
-    if (existing) {
+    if (existing && existing.lastOffEvent !== entity.last_updated) {
+      existing.lastOffEvent = entity.last_updated;
       if (existing.confirmedOff) {
         existing.pending = false;
         existing.confirmedOff = false;
@@ -390,36 +412,10 @@ const config: ThermostatServerConfig = {
       (m) => m === ClimateHvacMode.heat || m === ClimateHvacMode.heat_cool,
     );
     if (hasCooling && hasHeating) {
-      // CoolingAndHeating only for devices with AutoMode (heat_cool + explicit
-      // heat or cool). Devices like SmartIR ACs with auto+cool but no explicit
-      // heat get dynamic CoolingOnly/HeatingOnly to avoid conformance errors
-      // and match the Matter spec for non-independent-switching devices (#28).
-      const hasAutoMode =
-        modes.includes(ClimateHvacMode.heat_cool) &&
-        (modes.includes(ClimateHvacMode.heat) ||
-          modes.includes(ClimateHvacMode.cool));
-      if (hasAutoMode) {
-        return Thermostat.ControlSequenceOfOperation.CoolingAndHeating;
-      }
-      // Explicit heat+cool without heat_cool: also safe for CoolingAndHeating
-      if (
-        modes.includes(ClimateHvacMode.heat) &&
-        modes.includes(ClimateHvacMode.cool)
-      ) {
-        return Thermostat.ControlSequenceOfOperation.CoolingAndHeating;
-      }
-      // Non-explicit: determine from current mode/action
-      const hvacMode = entity.state as ClimateHvacMode;
-      if (hvacMode === ClimateHvacMode.cool) {
-        return Thermostat.ControlSequenceOfOperation.CoolingOnly;
-      }
-      if (hvacMode === ClimateHvacMode.heat) {
-        return Thermostat.ControlSequenceOfOperation.HeatingOnly;
-      }
-      const direction = getHeatCoolOnlyDirection(entity, agent);
-      return direction === "cooling"
-        ? Thermostat.ControlSequenceOfOperation.CoolingOnly
-        : Thermostat.ControlSequenceOfOperation.HeatingOnly;
+      // heat_cool-only zones returned above, so this is heat_cool with heat or
+      // cool, or explicit heat+cool. SmartIR auto+cool has no heat and lands
+      // on CoolingOnly below (#28).
+      return Thermostat.ControlSequenceOfOperation.CoolingAndHeating;
     }
     if (hasCooling) {
       return Thermostat.ControlSequenceOfOperation.CoolingOnly;
@@ -429,26 +425,12 @@ const config: ThermostatServerConfig = {
   setSystemMode: (systemMode, agent) => {
     const homeAssistant = agent.get(HomeAssistantEntityBehavior);
     const hvacModes = attributes(homeAssistant.entity.state).hvac_modes ?? [];
-    let targetMode = systemModeToHvacMode[systemMode] ?? ClimateHvacMode.off;
-
-    // heat_cool-only zones: map any non-Off mode back to heat_cool
-    // since the zone can't independently switch between heat and cool.
-    if (isHeatCoolOnly(hvacModes) && systemMode !== Thermostat.SystemMode.Off) {
-      targetMode = ClimateHvacMode.heat_cool;
-    } else if (systemMode === Thermostat.SystemMode.Auto) {
-      // Handle Auto mode: prefer 'auto' if explicitly available, otherwise use 'heat_cool' (default)
-      if (hvacModes.includes(ClimateHvacMode.auto)) {
-        targetMode = ClimateHvacMode.auto;
-      }
-      // Otherwise keep heat_cool from the static mapping
-    }
-
     return {
       action: "climate.set_hvac_mode",
-      data: { hvac_mode: targetMode },
+      data: { hvac_mode: hvacModeFor(systemMode, hvacModes) },
     };
   },
-  setTargetTemperature: (value, agent) => {
+  setTargetTemperature: (value, agent, resumeMode) => {
     const homeAssistant = agent.get(HomeAssistantEntityBehavior);
     const entity = homeAssistant.entity.state;
     const unit = getUnit(agent);
@@ -457,10 +439,17 @@ const config: ThermostatServerConfig = {
     const current =
       getRefTemp(entity, "temperature") ??
       getRefTemp(entity, "target_temperature");
+    const hvacModes = attributes(entity).hvac_modes ?? [];
+    const hvacMode =
+      resumeMode != null ? hvacModeFor(resumeMode, hvacModes) : undefined;
     return {
       action: "climate.set_temperature",
       data: {
         temperature: snapToStep(target, current, step),
+        // ZHA drops a setpoint that lands before the resumed mode (#547).
+        ...(hvacMode && hvacModes.includes(hvacMode)
+          ? { hvac_mode: hvacMode }
+          : {}),
       },
     };
   },

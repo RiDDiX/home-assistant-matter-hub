@@ -11,18 +11,40 @@ import {
 import { HomeAssistantEntityBehavior } from "../../../../behaviors/home-assistant-entity-behavior.js";
 
 function getHumidityPercent(state: HomeAssistantEntityState): number {
-  // The humidity attribute is the TARGET humidity (e.g., 60 means 60%)
-  // This is already a percentage value, no scaling needed
+  // The humidity attribute is the TARGET humidity (e.g., 60 means 60%).
+  // HA keeps it while off, but a speed with OnOff false leaves Apple on
+  // "Turning off..." (#219), so off reads 0.
+  if (state.state === "off") {
+    return 0;
+  }
   const { humidity } = state.attributes as HumidiferDeviceAttributes;
   return humidity ?? 0;
 }
 
-function setHumidityFromPercent(percent: number, _agent: Agent) {
-  // The percent from Matter FanControl is directly the target humidity percentage
-  // No scaling needed - 60% means 60% humidity
+function setHumidityFromPercent(percent: number, agent: Agent) {
+  const homeAssistant = agent.get(HomeAssistantEntityBehavior);
+  const entityState = homeAssistant.state.entity.state;
+  if (entityState.state === "off") {
+    // Off reads 0, so Apple's power-on injects 100. Turn on and let HA keep
+    // the stored target instead of jumping it to max (#387).
+    if (Math.round(percent) >= 100) {
+      return { action: "humidifier.turn_on" };
+    }
+    // set_humidity alone leaves HA off and the tile flips back.
+    homeAssistant.callAction({ action: "humidifier.turn_on" });
+  }
+  // The percent is the target humidity, kept inside the entity's range so HA
+  // accepts it.
+  const { min_humidity, max_humidity } =
+    entityState.attributes as HumidiferDeviceAttributes;
   return {
     action: "humidifier.set_humidity",
-    data: { humidity: Math.round(percent) },
+    data: {
+      humidity: Math.min(
+        max_humidity ?? 100,
+        Math.max(min_humidity ?? 0, Math.round(percent)),
+      ),
+    },
   };
 }
 

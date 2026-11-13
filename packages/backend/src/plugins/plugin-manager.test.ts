@@ -2,7 +2,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { OnOffLightDevice } from "@matter/main/devices";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import {
   PLUGIN_API_VERSION,
   PluginManager,
@@ -25,7 +25,10 @@ function createMockPlugin(
 }
 
 describe("PluginManager", () => {
-  const storageDir = `/tmp/hamh-test-plugins-${Date.now()}`;
+  const storageDir = fs.mkdtempSync(
+    path.join(os.tmpdir(), "hamh-test-plugins-"),
+  );
+  afterAll(() => fs.rmSync(storageDir, { recursive: true, force: true }));
 
   describe("registerBuiltIn", () => {
     it("should register a built-in plugin", async () => {
@@ -273,6 +276,37 @@ describe("PluginManager", () => {
       await pm.startAll();
       expect(registeredDevices).toHaveLength(0);
     });
+
+    it("drops a device whose first mount failed, keeps one that is mounted", async () => {
+      const pm = new PluginManager("bridge-1", storageDir);
+      let mount = false;
+      pm.onDeviceRegistered = async () => mount;
+      let ctx: PluginContext | undefined;
+      await pm.registerBuiltIn(
+        createMockPlugin({
+          name: "mount-plugin",
+          onStart: async (c) => {
+            ctx = c;
+          },
+        }),
+      );
+      await pm.startAll();
+      const device = {
+        id: "dev-1",
+        name: "Device",
+        deviceType: "on_off_light",
+        clusters: [],
+      };
+
+      await ctx!.registerDevice(device);
+      expect(pm.getDevices("mount-plugin")).toHaveLength(0);
+
+      mount = true;
+      await ctx!.registerDevice(device);
+      mount = false;
+      await ctx!.registerDevice({ ...device, name: "Renamed" });
+      expect(pm.getDevices("mount-plugin")).toHaveLength(1);
+    });
   });
 
   describe("state updates", () => {
@@ -359,6 +393,32 @@ describe("PluginManager", () => {
 
       await pm.enablePlugin("test-plugin");
       expect(pm.getMetadata()[0].enabled).toBe(true);
+    });
+
+    it("starts the plugin when its open circuit breaker is reset", async () => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), "hamh-test-reset-"));
+      try {
+        let fail = true;
+        const onStart = vi.fn(async () => {
+          if (fail) throw new Error("boom");
+        });
+        const pm = new PluginManager("bridge-r", dir);
+        await pm.registerBuiltIn(createMockPlugin({ onStart }));
+        for (let i = 0; i < 3; i++) await pm.startAll();
+        expect(pm.getCircuitBreakerStates().get("test-plugin")?.disabled).toBe(
+          true,
+        );
+        expect(pm.getMetadata()[0].enabled).toBe(false);
+
+        fail = false;
+        onStart.mockClear();
+        const metadata = await pm.resetPlugin("test-plugin");
+
+        expect(onStart).toHaveBeenCalledTimes(1);
+        expect(metadata?.enabled).toBe(true);
+      } finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+      }
     });
   });
 
@@ -475,6 +535,28 @@ describe("PluginManager", () => {
           interval: 7,
         });
         expect(pm.getMetadata()[0].config).toEqual({ interval: 7 });
+      } finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it("keeps a config saved while disabled across a restart", async () => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), "hamh-test-parked-"));
+      try {
+        const makePlugin = () =>
+          createMockPlugin({
+            name: "persist-plugin",
+            onConfigChanged: async () => {},
+          });
+        const pm1 = new PluginManager("bridge-p", dir);
+        await pm1.registerBuiltIn(makePlugin());
+        await pm1.startAll();
+        await pm1.disablePlugin("persist-plugin");
+        await pm1.updateConfig("persist-plugin", { interval: 7 });
+
+        const pm2 = new PluginManager("bridge-p", dir);
+        await pm2.registerBuiltIn(makePlugin());
+        expect(pm2.getMetadata()[0].config).toEqual({ interval: 7 });
       } finally {
         fs.rmSync(dir, { recursive: true, force: true });
       }
@@ -995,7 +1077,8 @@ export default class TestPlugin {
   });
 
   describe("shutdown safety", () => {
-    it("should not call onShutdown on plugins that failed to start", async () => {
+    // A crashed onStart may have opened timers or sockets before it threw.
+    it("calls onShutdown on a plugin whose onStart threw", async () => {
       const pm = new PluginManager("bridge-1", storageDir);
       const onShutdown = vi.fn(async () => {});
 
@@ -1011,7 +1094,84 @@ export default class TestPlugin {
       await pm.startAll();
       await pm.shutdownAll("test");
 
-      expect(onShutdown).not.toHaveBeenCalled();
+      expect(onShutdown).toHaveBeenCalledTimes(1);
+    });
+
+    it("calls onShutdown on a plugin whose onStart never settled", async () => {
+      vi.useFakeTimers();
+      try {
+        const pm = new PluginManager("bridge-1", storageDir);
+        const onShutdown = vi.fn(async () => {});
+        await pm.registerBuiltIn(
+          createMockPlugin({
+            onStart: () => new Promise(() => {}),
+            onShutdown,
+          }),
+        );
+
+        const start = pm.startAll();
+        await vi.advanceTimersByTimeAsync(10_000);
+        await start;
+        await pm.shutdownAll("test");
+
+        expect(onShutdown).toHaveBeenCalledWith("test");
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("shuts a failed start down before enable starts it again", async () => {
+      const pm = new PluginManager("bridge-1", storageDir);
+      const calls: string[] = [];
+      await pm.registerBuiltIn(
+        createMockPlugin({
+          name: "restart-plugin",
+          onStart: async () => {
+            calls.push("start");
+            if (calls.length === 1) throw new Error("startup crash");
+          },
+          onShutdown: async () => {
+            calls.push("shutdown");
+          },
+        }),
+      );
+
+      await pm.startAll();
+      await pm.enablePlugin("restart-plugin");
+      await pm.shutdownAll("test");
+
+      expect(calls).toEqual(["start", "shutdown", "start", "shutdown"]);
+    });
+
+    it("unmounts what a failed start registered before enable starts it again", async () => {
+      const pm = new PluginManager("bridge-1", storageDir);
+      const events: string[] = [];
+      pm.onDeviceUnregistered = async (_name, deviceId) => {
+        events.push(`unregister ${deviceId}`);
+      };
+      let starts = 0;
+      await pm.registerBuiltIn(
+        createMockPlugin({
+          name: "restart-plugin",
+          onStart: async (ctx: PluginContext) => {
+            await ctx.registerDevice({
+              id: "dev-1",
+              name: "Device",
+              deviceType: "on_off_light",
+              clusters: [{ clusterId: "onOff", attributes: { onOff: false } }],
+            });
+            events.push("start");
+            if (++starts === 1) throw new Error("startup crash");
+          },
+          onShutdown: async () => {},
+        }),
+      );
+
+      await pm.startAll();
+      await pm.enablePlugin("restart-plugin");
+
+      expect(events).toEqual(["start", "unregister dev-1", "start"]);
+      expect(pm.getDevices("restart-plugin")).toHaveLength(1);
     });
   });
 
@@ -1202,6 +1362,28 @@ export default class TestPlugin {
       await pm.startAll();
 
       expect(startOrder).toEqual(["first", "crashing", "third"]);
+    });
+
+    it("survives a plugin whose getCurrentConfig or getConfigSchema throws", async () => {
+      const pm = new PluginManager("bridge-1", storageDir);
+      const onConfigChanged = vi.fn(async () => {});
+      await pm.registerBuiltIn({
+        ...createMockPlugin({ name: "bad-config", onConfigChanged }),
+        getCurrentConfig: () => {
+          throw new Error("boom");
+        },
+        getConfigSchema: () => {
+          throw new Error("boom");
+        },
+      });
+      const onStart = vi.fn(async () => {});
+      await pm.registerBuiltIn(createMockPlugin({ name: "after", onStart }));
+
+      await pm.startAll();
+      expect(onStart).toHaveBeenCalledTimes(1);
+      expect(pm.getConfigSchema("bad-config")).toBeUndefined();
+      await expect(pm.updateConfig("bad-config", { a: 1 })).resolves.toBe(true);
+      expect(onConfigChanged).toHaveBeenCalledWith({ a: 1 });
     });
   });
 });

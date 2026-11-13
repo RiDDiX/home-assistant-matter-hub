@@ -6,16 +6,27 @@ import type { Agent } from "@matter/main";
 import { Thermostat } from "@matter/main/clusters";
 import { HomeAssistantConfig } from "../../../../../services/home-assistant/home-assistant-config.js";
 import { Temperature } from "../../../../../utils/converters/temperature.js";
+import { HomeAssistantEntityBehavior } from "../../../../behaviors/home-assistant-entity-behavior.js";
 import {
   ThermostatServer,
   type ThermostatServerConfig,
 } from "../../../../behaviors/thermostat-server.js";
+import {
+  buildModeMapping,
+  isOffMode,
+  OFF_MODE,
+} from "../water-heater-modes.js";
 
 const getUnit = (agent: Agent) =>
   agent.env.get(HomeAssistantConfig).unitSystem.temperature;
 
 const attributes = (entity: HomeAssistantEntityState) =>
   entity.attributes as WaterHeaterDeviceAttributes;
+
+// Same Off reading as the WaterHeaterMode cluster: HA state or operation_mode,
+// in any casing.
+const isOff = (entity: HomeAssistantEntityState) =>
+  isOffMode(entity.state) || isOffMode(attributes(entity).operation_mode ?? "");
 
 const getTemp = (
   agent: Agent,
@@ -43,27 +54,25 @@ const config: ThermostatServerConfig = {
     getTemp(agent, entity, "temperature"),
   getTargetCoolingTemperature: (entity, agent) =>
     getTemp(agent, entity, "temperature"),
-  getSystemMode: (entity) => {
-    const operationMode = attributes(entity).operation_mode;
-    if (operationMode === "off") {
-      return Thermostat.SystemMode.Off;
-    }
-    return Thermostat.SystemMode.Heat;
-  },
-  getRunningMode: (entity) => {
-    const operationMode = attributes(entity).operation_mode;
-    if (operationMode === "off") {
-      return Thermostat.ThermostatRunningMode.Off;
-    }
-    return Thermostat.ThermostatRunningMode.Heat;
-  },
+  getSystemMode: (entity) =>
+    isOff(entity) ? Thermostat.SystemMode.Off : Thermostat.SystemMode.Heat,
+  getRunningMode: (entity) =>
+    isOff(entity)
+      ? Thermostat.ThermostatRunningMode.Off
+      : Thermostat.ThermostatRunningMode.Heat,
   getControlSequence: () => Thermostat.ControlSequenceOfOperation.HeatingOnly,
-  setSystemMode: (systemMode) => {
+  setSystemMode: (systemMode, agent) => {
     if (systemMode === Thermostat.SystemMode.Off) {
-      return {
-        action: "water_heater.set_operation_mode",
-        data: { operation_mode: "off" },
-      };
+      // HA rejects an operation_mode that is not in operation_list.
+      const off = buildModeMapping(
+        attributes(agent.get(HomeAssistantEntityBehavior).entity.state),
+      ).haOperationModes[OFF_MODE];
+      return off != null
+        ? {
+            action: "water_heater.set_operation_mode",
+            data: { operation_mode: off },
+          }
+        : { action: "water_heater.turn_off", data: {} };
     }
     return {
       action: "water_heater.turn_on",

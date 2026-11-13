@@ -125,7 +125,9 @@
     "filterReference": "Riferimento filtri",
     "successMessage": "I tuoi bridge sono connessi a {{count}} fabric controller. I dispositivi dovrebbero ora apparire nella tua app.",
     "noBridgesHint": "Nessun bridge configurato. Usa la procedura guidata o creane uno manualmente.",
-    "customizeDashboard": "Personalizza dashboard"
+    "customizeDashboard": "Personalizza dashboard",
+    "deviceCount": "{{count}} Dispositivi",
+    "fabricCount": "{{count}} Fabrics"
   },
   "bridge": {
     "name": "Nome Bridge",
@@ -325,5 +327,8 @@
   "footer": {
     "github": "GitHub",
     "documentation": "Documentazione"
+  },
+  "devices": {
+    "fabricCount": "{{count}} Fabrics"
   }
 }

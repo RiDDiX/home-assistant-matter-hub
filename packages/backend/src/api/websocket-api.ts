@@ -1,10 +1,12 @@
 import type * as http from "node:http";
 import type { WebSocketMessage } from "@home-assistant-matter-hub/common";
+import AccessControl from "express-ip-access-control";
 import { type WebSocket, WebSocketServer } from "ws";
 import type { BetterLogger } from "../core/app/logger.js";
 import type { BridgeService } from "../services/bridges/bridge-service.js";
 import { diagnosticEventBus } from "../services/diagnostics/diagnostic-event-bus.js";
 import type { DiagnosticService } from "../services/diagnostics/diagnostic-service.js";
+import { crossSiteMessage, crossSiteReason } from "./host-guard.js";
 
 export class WebSocketApi {
   private wss?: WebSocketServer;
@@ -23,9 +25,57 @@ export class WebSocketApi {
     this.diagnosticService = service;
   }
 
-  attach(server: http.Server, basePath = "/") {
+  attach(
+    server: http.Server,
+    basePath = "/",
+    whitelist?: string[],
+    allowedHosts: string[] = [],
+    verifyAuthorization: (
+      header: string | undefined,
+    ) => Promise<boolean> | boolean = () => true,
+  ) {
     const wsPath = `${basePath === "/" ? "" : basePath}/api/ws`;
-    this.wss = new WebSocketServer({ server, path: wsPath });
+    this.wss = new WebSocketServer({
+      server,
+      path: wsPath,
+      // Clients only send small control messages.
+      maxPayload: 64 * 1024,
+      // Upgrades skip the Express middlewares, so apply the same checks here.
+      verifyClient: ({ req }, cb) => {
+        if (
+          whitelist?.length &&
+          !AccessControl.ipMatch(req.socket.remoteAddress ?? "", whitelist)
+        ) {
+          return cb(false, 403);
+        }
+        const reason = crossSiteReason(
+          req.headers,
+          allowedHosts,
+          req.socket.remoteAddress,
+        );
+        if (reason) {
+          // ws defaults the body to text/html.
+          return cb(false, 403, crossSiteMessage(reason, req.headers), {
+            "Content-Type": "text/plain; charset=utf-8",
+          });
+        }
+        Promise.resolve()
+          .then(() => verifyAuthorization(req.headers.authorization))
+          .then(
+            (ok) =>
+              ok
+                ? cb(true)
+                : cb(false, 401, "Unauthorized", {
+                    "WWW-Authenticate":
+                      'Basic realm="Home Assistant Matter Hub"',
+                  }),
+            () => cb(false, 401),
+          );
+      },
+    });
+    // A proxy that keeps its x-forwarded-prefix in the URL sends /<prefix>/api/ws.
+    this.wss.shouldHandle = (req) =>
+      (req.url ?? "").split("?")[0].endsWith(wsPath);
 
     this.wss.on("connection", (ws) => {
       this.clients.add(ws);
@@ -126,6 +176,9 @@ export class WebSocketApi {
         bridgeId,
         data: bridge.data,
       });
+    } else {
+      // Deleted bridges are gone from the service, so send the whole list.
+      this.broadcastBridgesUpdate();
     }
   }
 
@@ -138,11 +191,20 @@ export class WebSocketApi {
     }
   }
 
+  // Auth runs only at the upgrade, so clients must reconnect to be checked again.
+  disconnectAll() {
+    for (const client of this.wss?.clients ?? []) {
+      client.terminate();
+    }
+  }
+
   close() {
     this.unsubscribeDiagnostics?.();
     if (this.pingInterval) {
       clearInterval(this.pingInterval);
     }
+    // ws 8 leaves open clients running, which keeps the http server open.
+    this.disconnectAll();
     this.wss?.close();
     this.clients.clear();
     this.diagnosticSubscribers.clear();

@@ -350,4 +350,55 @@ describe("generic switch long press", () => {
     expect(log).toEqual(["initialPress", "longPress", "longRelease"]);
     expect(position()).toBe(0);
   });
+
+  const HUE = [
+    "initial_press",
+    "repeat",
+    "short_release",
+    "long_press",
+    "long_release",
+  ];
+  const actions = () =>
+    firedEvents
+      .filter((e) => e.type === "hamh_action")
+      .map((e) => e.data?.event_type);
+
+  // Hue reports one tap as initial_press then short_release, and a hold as
+  // initial_press, long_press, repeat... and long_release. Each phase used to
+  // fire its own press, so a toggle on single press toggled twice.
+  it("a Hue tap is one press and a Hue hold one long press", async () => {
+    const { log, send } = await mountRecording(HUE);
+
+    await send("initial_press");
+    await send("short_release");
+    expect(log).toEqual(["initialPress", "shortRelease"]);
+    expect(actions()).toEqual(["short_release"]);
+
+    log.length = 0;
+    await send("initial_press");
+    await send("long_press");
+    await send("repeat");
+    await send("repeat");
+    await send("long_release");
+    expect(log).toEqual(["initialPress", "longPress", "longRelease"]);
+    expect(actions()).toEqual(["short_release", "long_press", "long_release"]);
+  });
+
+  it("the Hue Tap switch, which only sends initial_press, still presses", async () => {
+    const { log, send } = await mountRecording(["initial_press"]);
+
+    await send("initial_press");
+    expect(log).toEqual(["initialPress", "shortRelease"]);
+    expect(actions()).toEqual(["initial_press"]);
+  });
+
+  it("a double press on the multi variant reports its count", async () => {
+    const { log, send } = await mountRecording(["press", "double_press"]);
+
+    await send("double_press");
+    expect(log).toEqual(["initialPress", "shortRelease", "multiPressComplete"]);
+    expect(
+      firedEvents.find((e) => e.type === "hamh_action")?.data,
+    ).toMatchObject({ event_type: "double_press", press_count: 2 });
+  });
 });

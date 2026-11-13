@@ -2,6 +2,7 @@ import type { HomeAssistantEntityInformation } from "@home-assistant-matter-hub/
 import { FormaldehydeConcentrationMeasurementServer as Base } from "@matter/main/behaviors";
 import { ConcentrationMeasurement } from "@matter/main/clusters";
 import { applyPatchState } from "../../utils/apply-patch-state.js";
+import { numericState } from "../../utils/numeric-state.js";
 import { HomeAssistantEntityBehavior } from "./home-assistant-entity-behavior.js";
 
 const FormaldehydeConcentrationMeasurementServerBase = Base.with(
@@ -45,11 +46,7 @@ export class FormaldehydeConcentrationMeasurementServer extends FormaldehydeConc
       return;
     }
     const state = entity.state.state;
-    let measuredValue: number | null = null;
-
-    if (state != null && !Number.isNaN(+state)) {
-      measuredValue = +state;
-    }
+    const measuredValue = numericState(state);
 
     applyPatchState(this.state, { measuredValue });
   }

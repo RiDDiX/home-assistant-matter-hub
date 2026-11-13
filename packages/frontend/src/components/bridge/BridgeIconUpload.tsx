@@ -6,41 +6,24 @@ import Button from "@mui/material/Button";
 import FormControl from "@mui/material/FormControl";
 import FormHelperText from "@mui/material/FormHelperText";
 import InputLabel from "@mui/material/InputLabel";
+import ListItemIcon from "@mui/material/ListItemIcon";
+import ListItemText from "@mui/material/ListItemText";
 import MenuItem from "@mui/material/MenuItem";
 import Select from "@mui/material/Select";
 import Stack from "@mui/material/Stack";
 import Typography from "@mui/material/Typography";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import {
   checkBridgeIconExists,
   deleteBridgeIcon,
   getBridgeIconUrl,
   uploadBridgeIcon,
 } from "../../api/bridge-icons";
+import { ConfirmDialog } from "../misc/ConfirmDialog.tsx";
+import { iconTypeMap } from "./bridgeIconUtils.ts";
 
-const ICON_OPTIONS: { value: BridgeIconType | ""; label: string }[] = [
-  { value: "", label: "Auto (based on domain/name)" },
-  { value: "light", label: "💡 Light" },
-  { value: "switch", label: "🔌 Switch" },
-  { value: "climate", label: "🌡️ Climate" },
-  { value: "cover", label: "🪟 Cover" },
-  { value: "fan", label: "🌀 Fan" },
-  { value: "lock", label: "🔒 Lock" },
-  { value: "sensor", label: "📊 Sensor" },
-  { value: "media_player", label: "📺 Media Player" },
-  { value: "vacuum", label: "🧹 Vacuum" },
-  { value: "remote", label: "🎮 Remote" },
-  { value: "humidifier", label: "💧 Humidifier" },
-  { value: "speaker", label: "🔊 Speaker" },
-  { value: "garage", label: "🚗 Garage" },
-  { value: "door", label: "🚪 Door" },
-  { value: "window", label: "🪟 Window" },
-  { value: "motion", label: "🏃 Motion" },
-  { value: "battery", label: "🔋 Battery" },
-  { value: "power", label: "⚡ Power" },
-  { value: "camera", label: "📷 Camera" },
-  { value: "default", label: "🔗 Default" },
-];
+const ICON_TYPES = Object.keys(iconTypeMap) as BridgeIconType[];
 
 export interface BridgeIconUploadProps {
   bridgeId?: string;
@@ -53,7 +36,9 @@ export const BridgeIconUpload = ({
   selectedIcon,
   onIconChange,
 }: BridgeIconUploadProps) => {
+  const { t } = useTranslation();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const [hasCustomIcon, setHasCustomIcon] = useState(false);
   const [customIconUrl, setCustomIconUrl] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
@@ -89,7 +74,9 @@ export const BridgeIconUpload = ({
         setCustomIconUrl(`${getBridgeIconUrl(bridgeId)}?t=${Date.now()}`);
         onIconChange(undefined);
       } catch (err) {
-        setError(err instanceof Error ? err.message : "Upload failed");
+        setError(
+          err instanceof Error ? err.message : t("bridgeIcon.uploadFailed"),
+        );
       } finally {
         setUploading(false);
         if (fileInputRef.current) {
@@ -97,10 +84,11 @@ export const BridgeIconUpload = ({
         }
       }
     },
-    [bridgeId, onIconChange],
+    [bridgeId, onIconChange, t],
   );
 
   const handleDeleteCustomIcon = useCallback(async () => {
+    setConfirmDelete(false);
     if (!bridgeId) return;
 
     setError(null);
@@ -109,9 +97,11 @@ export const BridgeIconUpload = ({
       setHasCustomIcon(false);
       setCustomIconUrl(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Delete failed");
+      setError(
+        err instanceof Error ? err.message : t("bridgeIcon.deleteFailed"),
+      );
     }
-  }, [bridgeId]);
+  }, [bridgeId, t]);
 
   const handleIconSelectChange = useCallback(
     (value: string) => {
@@ -123,31 +113,43 @@ export const BridgeIconUpload = ({
   return (
     <Stack spacing={2}>
       <FormControl fullWidth size="small">
-        <InputLabel id="icon-select-label">Bridge Icon</InputLabel>
+        <InputLabel id="icon-select-label">{t("bridge.iconLabel")}</InputLabel>
         <Select
           labelId="icon-select-label"
           value={selectedIcon ?? ""}
-          label="Bridge Icon"
+          label={t("bridge.iconLabel")}
           onChange={(e) => handleIconSelectChange(e.target.value)}
           disabled={hasCustomIcon}
+          sx={{
+            "& .MuiSelect-select": { display: "flex", alignItems: "center" },
+          }}
         >
-          {ICON_OPTIONS.map((option) => (
-            <MenuItem key={option.value} value={option.value}>
-              {option.label}
-            </MenuItem>
-          ))}
+          <MenuItem value="">
+            <ListItemText>{t("bridgeIcon.auto")}</ListItemText>
+          </MenuItem>
+          {ICON_TYPES.map((type) => {
+            const Icon = iconTypeMap[type];
+            return (
+              <MenuItem key={type} value={type}>
+                <ListItemIcon>
+                  <Icon fontSize="small" />
+                </ListItemIcon>
+                <ListItemText>{t(`bridgeIcon.types.${type}`)}</ListItemText>
+              </MenuItem>
+            );
+          })}
         </Select>
         <FormHelperText>
           {hasCustomIcon
-            ? "Custom icon is set. Delete it to use preset icons."
-            : "Select a preset icon or upload a custom image"}
+            ? t("bridgeIcon.customSetHint")
+            : t("bridgeIcon.selectHint")}
         </FormHelperText>
       </FormControl>
 
       {bridgeId && (
         <Box>
           <Typography variant="subtitle2" color="text.secondary" gutterBottom>
-            Custom Icon
+            {t("bridgeIcon.customIcon")}
           </Typography>
 
           <Stack direction="row" spacing={2} alignItems="center">
@@ -155,7 +157,7 @@ export const BridgeIconUpload = ({
               <Box
                 component="img"
                 src={customIconUrl}
-                alt="Custom bridge icon"
+                alt={t("bridgeIcon.customIcon")}
                 sx={{
                   width: 48,
                   height: 48,
@@ -182,7 +184,7 @@ export const BridgeIconUpload = ({
               onClick={() => fileInputRef.current?.click()}
               disabled={uploading}
             >
-              {uploading ? "Uploading..." : "Upload Image"}
+              {uploading ? t("bridgeIcon.uploading") : t("bridgeIcon.upload")}
             </Button>
 
             {hasCustomIcon && (
@@ -191,9 +193,9 @@ export const BridgeIconUpload = ({
                 size="small"
                 color="error"
                 startIcon={<Delete />}
-                onClick={handleDeleteCustomIcon}
+                onClick={() => setConfirmDelete(true)}
               >
-                Delete
+                {t("common.delete")}
               </Button>
             )}
           </Stack>
@@ -209,16 +211,26 @@ export const BridgeIconUpload = ({
             color="text.secondary"
             sx={{ mt: 1, display: "block" }}
           >
-            Supported formats: PNG, JPG, GIF, WebP, SVG (max 5MB)
+            {t("bridgeIcon.formats")} {t("bridgeIcon.appliesImmediately")}
           </Typography>
         </Box>
       )}
 
       {!bridgeId && (
         <Typography variant="body2" color="text.secondary">
-          Save the bridge first to upload a custom icon.
+          {t("bridgeIcon.saveFirst")}
         </Typography>
       )}
+
+      <ConfirmDialog
+        open={confirmDelete}
+        title={t("bridgeIcon.deleteTitle")}
+        message={t("bridgeIcon.deleteMessage")}
+        confirmLabel={t("common.delete")}
+        cancelLabel={t("common.cancel")}
+        onConfirm={handleDeleteCustomIcon}
+        onCancel={() => setConfirmDelete(false)}
+      />
     </Stack>
   );
 };

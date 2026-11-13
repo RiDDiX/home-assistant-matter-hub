@@ -2,6 +2,7 @@ import {
   type SensorDeviceAttributes,
   SensorDeviceClass,
 } from "@home-assistant-matter-hub/common";
+import { Logger } from "@matter/general";
 import type { EndpointType } from "@matter/main";
 import { DeviceTypeId } from "@matter/main/types";
 import { diagnosticEventBus } from "../../../../services/diagnostics/diagnostic-event-bus.js";
@@ -44,6 +45,22 @@ import { TvocSensorType } from "./devices/tvoc-sensor.js";
 const tempDt = { deviceType: DeviceTypeId(0x0302), revision: 2 };
 const humidityDt = { deviceType: DeviceTypeId(0x0307), revision: 2 };
 const pressureDt = { deviceType: DeviceTypeId(0x0305), revision: 2 };
+
+const logger = Logger.get("SensorDevice");
+
+// Every refresh retries a skipped entity, so say why only once per process.
+const reportedSkips = new Set<string>();
+
+function reportSkipped(
+  entityId: string,
+  message: string,
+  details: Record<string, unknown>,
+) {
+  if (reportedSkips.has(entityId)) return;
+  reportedSkips.add(entityId);
+  logger.debug(message);
+  diagnosticEventBus.emit("entity_warning", message, { entityId, details });
+}
 
 export function SensorDevice(
   homeAssistantEntity: HomeAssistantEntityBehavior.State,
@@ -173,14 +190,19 @@ export function SensorDevice(
     }
     return BatterySensorType.set({ homeAssistantEntity });
   }
+  const entityId = homeAssistantEntity.entity.entity_id;
   if (deviceClass) {
-    diagnosticEventBus.emit(
-      "entity_warning",
-      `Sensor "${homeAssistantEntity.entity.entity_id}" has unsupported device_class "${deviceClass}", skipped`,
-      {
-        entityId: homeAssistantEntity.entity.entity_id,
-        details: { device_class: deviceClass },
-      },
+    reportSkipped(
+      entityId,
+      `Sensor "${entityId}" has unsupported device_class "${deviceClass}", skipped`,
+      { device_class: deviceClass },
+    );
+  } else {
+    const unit = attributes.unit_of_measurement;
+    reportSkipped(
+      entityId,
+      `Sensor "${entityId}" has no device_class${unit ? ` (unit "${unit}")` : ""}, skipped. Set a device class in Home Assistant or pick a Matter device type for it in the bridge's entity mapping`,
+      { unit_of_measurement: unit },
     );
   }
   return undefined;

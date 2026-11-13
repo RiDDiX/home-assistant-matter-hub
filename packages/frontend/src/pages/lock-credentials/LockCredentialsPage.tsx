@@ -15,9 +15,10 @@ import DialogTitle from "@mui/material/DialogTitle";
 import IconButton from "@mui/material/IconButton";
 import List from "@mui/material/List";
 import ListItem from "@mui/material/ListItem";
+import ListItemButton from "@mui/material/ListItemButton";
 import ListItemIcon from "@mui/material/ListItemIcon";
-import ListItemSecondaryAction from "@mui/material/ListItemSecondaryAction";
 import ListItemText from "@mui/material/ListItemText";
+import Stack from "@mui/material/Stack";
 import Switch from "@mui/material/Switch";
 import TextField from "@mui/material/TextField";
 import Tooltip from "@mui/material/Tooltip";
@@ -31,6 +32,7 @@ import {
   toggleLockCredentialEnabled,
   updateLockCredential,
 } from "../../api/lock-credentials.ts";
+import { EntityAutocomplete } from "../../components/entity-mapping/EntityAutocomplete.tsx";
 import { ConfirmDialog } from "../../components/misc/ConfirmDialog.tsx";
 
 interface CredentialDialogProps {
@@ -71,10 +73,11 @@ const CredentialDialog = ({
       setError(t("lockCredentials.entityRequired"));
       return;
     }
-    if (!pinCode || pinCode.length < 4 || pinCode.length > 8) {
-      setError(t("lockCredentials.pinLength"));
+    if (!pinCode) {
+      setError(t("lockCredentials.pinRequired"));
       return;
     }
+    // The length bounds follow the lock's mapping, the API checks them.
     if (!/^\d+$/.test(pinCode)) {
       setError(t("lockCredentials.pinDigitsOnly"));
       return;
@@ -103,25 +106,35 @@ const CredentialDialog = ({
       <DialogContent>
         <Box sx={{ display: "flex", flexDirection: "column", gap: 2, mt: 1 }}>
           {error && <Alert severity="error">{error}</Alert>}
-          <TextField
-            label={t("lockCredentials.lockEntityId")}
-            placeholder="lock.front_door"
-            value={entityId}
-            onChange={(e) => setEntityId(e.target.value)}
-            disabled={isEdit}
-            fullWidth
-            helperText={t("lockCredentials.lockEntityHelperText")}
-          />
+          {isEdit ? (
+            <TextField
+              label={t("lockCredentials.lockEntityId")}
+              value={entityId}
+              disabled
+              fullWidth
+              helperText={t("lockCredentials.lockEntityHelperText")}
+            />
+          ) : (
+            <EntityAutocomplete
+              value={entityId}
+              onChange={setEntityId}
+              label={t("lockCredentials.lockEntityId")}
+              placeholder="lock.front_door"
+              helperText={t("lockCredentials.lockEntityHelperText")}
+              domain="lock"
+              margin="none"
+            />
+          )}
           <TextField
             label={t("lockCredentials.pinCode")}
             type="password"
             placeholder="1234"
             value={pinCode}
             onChange={(e) =>
-              setPinCode(e.target.value.replace(/\D/g, "").slice(0, 8))
+              setPinCode(e.target.value.replace(/\D/g, "").slice(0, 20))
             }
             fullWidth
-            helperText="4-8 digit PIN code for this lock"
+            helperText={t("lockCredentials.pinHelperText")}
             inputProps={{ inputMode: "numeric", pattern: "[0-9]*" }}
           />
           <TextField
@@ -184,11 +197,14 @@ export const LockCredentialsPage = () => {
     pinCode: string,
     name: string,
   ) => {
+    const existing = credentials.find((c) => c.entityId === entityId);
     await updateLockCredential(entityId, {
       entityId,
       pinCode,
-      name: name || undefined,
-      enabled: true,
+      // an empty name clears it, a PIN change keeps the enabled switch, a
+      // slot without a PIN yet (Matter SetUser) starts enabled
+      name,
+      enabled: existing?.hasPinCode ? existing.enabled : true,
     });
     await loadCredentials();
   };
@@ -253,9 +269,7 @@ export const LockCredentialsPage = () => {
       </Box>
 
       <Alert severity="info" sx={{ mb: 3 }}>
-        Configure PIN codes for locks that require authentication for remote
-        lock/unlock operations. The PIN will be sent with lock/unlock commands
-        to Matter locks.
+        {t("lockCredentials.info")}
       </Alert>
 
       {error && (
@@ -273,17 +287,17 @@ export const LockCredentialsPage = () => {
           <CardContent sx={{ textAlign: "center", py: 4 }}>
             <LockIcon sx={{ fontSize: 48, color: "text.secondary", mb: 2 }} />
             <Typography variant="h6" color="text.secondary">
-              No lock credentials configured
+              {t("lockCredentials.empty")}
             </Typography>
             <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-              Add a PIN code for your Matter locks to enable remote lock/unlock
+              {t("lockCredentials.emptyHint")}
             </Typography>
             <Button
               variant="outlined"
               startIcon={<AddIcon />}
               onClick={handleAdd}
             >
-              Add Your First Credential
+              {t("lockCredentials.addFirst")}
             </Button>
           </CardContent>
         </Card>
@@ -294,71 +308,74 @@ export const LockCredentialsPage = () => {
               <ListItem
                 key={credential.entityId}
                 divider={index < credentials.length - 1}
-                onClick={() => handleEdit(credential)}
-                sx={{
-                  cursor: "pointer",
-                  "&:hover": { bgcolor: "action.hover" },
-                }}
-              >
-                <ListItemIcon>
-                  <LockIcon
-                    color={credential.enabled ? "primary" : "disabled"}
-                  />
-                </ListItemIcon>
-                <ListItemText
-                  primary={credential.name || credential.entityId}
-                  secondary={
-                    <>
-                      {credential.name && (
-                        <Typography
-                          component="span"
-                          variant="body2"
-                          color="text.secondary"
-                        >
-                          {credential.entityId}
-                        </Typography>
-                      )}
-                      <Typography
-                        component="span"
-                        variant="body2"
-                        color="text.secondary"
-                        sx={{ ml: credential.name ? 2 : 0 }}
-                      >
-                        PIN: ****
-                      </Typography>
-                    </>
-                  }
-                />
-                <ListItemSecondaryAction>
-                  <Tooltip
-                    title={
-                      credential.enabled
-                        ? t("lockCredentials.disable")
-                        : t("lockCredentials.enable")
-                    }
-                  >
-                    <Switch
-                      edge="end"
-                      checked={credential.enabled}
-                      onChange={(e) => {
-                        e.stopPropagation();
-                        handleToggleEnabled(credential);
-                      }}
-                    />
-                  </Tooltip>
-                  <Tooltip title={t("common.delete")}>
-                    <IconButton
-                      edge="end"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setPendingDeleteEntity(credential.entityId);
-                      }}
-                      sx={{ ml: 1 }}
+                disablePadding
+                sx={{ "& > .MuiListItemButton-root": { pr: 15 } }}
+                secondaryAction={
+                  <Stack direction="row" alignItems="center" spacing={1}>
+                    <Tooltip
+                      title={
+                        credential.enabled
+                          ? t("lockCredentials.disable")
+                          : t("lockCredentials.enable")
+                      }
                     >
-                      <DeleteIcon />
-                    </IconButton>
-                  </Tooltip>
-                </ListItemSecondaryAction>
+                      <Switch
+                        checked={credential.enabled}
+                        onChange={() => handleToggleEnabled(credential)}
+                        slotProps={{
+                          input: {
+                            "aria-label": `${t("common.enabled")}: ${credential.name || credential.entityId}`,
+                          },
+                        }}
+                      />
+                    </Tooltip>
+                    <Tooltip title={t("common.delete")}>
+                      <IconButton
+                        edge="end"
+                        onClick={() =>
+                          setPendingDeleteEntity(credential.entityId)
+                        }
+                        aria-label={`${t("common.delete")}: ${credential.name || credential.entityId}`}
+                      >
+                        <DeleteIcon />
+                      </IconButton>
+                    </Tooltip>
+                  </Stack>
+                }
+              >
+                <ListItemButton onClick={() => handleEdit(credential)}>
+                  <ListItemIcon>
+                    <LockIcon
+                      color={credential.enabled ? "primary" : "disabled"}
+                    />
+                  </ListItemIcon>
+                  <ListItemText
+                    primary={credential.name || credential.entityId}
+                    secondary={
+                      <>
+                        {credential.name && (
+                          <Typography
+                            component="span"
+                            variant="body2"
+                            color="text.secondary"
+                          >
+                            {credential.entityId}
+                          </Typography>
+                        )}
+                        {credential.hasPinCode && (
+                          <Typography
+                            component="span"
+                            variant="body2"
+                            color="text.secondary"
+                            sx={{ ml: credential.name ? 2 : 0 }}
+                          >
+                            {t("lockCredentials.pinMasked")}
+                          </Typography>
+                        )}
+                      </>
+                    }
+                  />
+                </ListItemButton>
               </ListItem>
             ))}
           </List>

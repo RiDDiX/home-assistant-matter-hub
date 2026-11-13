@@ -1,3 +1,4 @@
+import { Logger } from "@matter/general";
 import type { StorageContext, SupportedStorageTypes } from "@matter/main";
 import { Service } from "../../core/ioc/service.js";
 import type { AppStorage } from "./app-storage.js";
@@ -33,11 +34,27 @@ const CURRENT_VERSION = 1;
 // Records are written on every seeding pass, so persist is debounced to coalesce
 // the initial burst into a single write. dispose flushes any pending write.
 const PERSIST_DEBOUNCE_MS = 500;
+const PERSIST_RETRY_MS = 30_000;
+
+const logger = Logger.get("EntityIdentityStorage");
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
 
 export class EntityIdentityStorage extends Service {
   private storage!: StorageContext;
   private identities: Map<string, Map<string, IdentityRecord>> = new Map();
   private persistTimer: ReturnType<typeof setTimeout> | null = null;
+  // Only a change writes. A newer build's file is never written, and entries
+  // this build could not read are written back as they were.
+  private dirty = false;
+  private newerFile = false;
+  private persistFailing = false;
+  private disposed = false;
+  // Raw entries load skipped, written back as they were.
+  private unreadableBridges = new Map<string, unknown>();
+  private unreadableRecords = new Map<string, Map<string, unknown>>();
 
   constructor(private readonly appStorage: AppStorage) {
     super("EntityIdentityStorage");
@@ -49,6 +66,7 @@ export class EntityIdentityStorage extends Service {
   }
 
   override async dispose(): Promise<void> {
+    this.disposed = true;
     await this.flush();
   }
 
@@ -63,56 +81,92 @@ export class EntityIdentityStorage extends Service {
     }
 
     const data = stored as unknown as StoredIdentities;
-    if (data.version !== CURRENT_VERSION) {
-      await this.migrate(data);
-      return;
+    if (data.version > CURRENT_VERSION) {
+      // A file written by a newer build. Starting empty would let the next
+      // write persist an empty set over it.
+      this.newerFile = true;
+      logger.warn(
+        `Identity file has unsupported version ${data.version}, reading the records that look readable and not saving changes until the newer build runs again`,
+      );
     }
 
-    for (const [bridgeId, records] of Object.entries(data.identities)) {
+    // Valid JSON of the wrong shape must not stop every bridge from starting.
+    let skipped = 0;
+    for (const [bridgeId, records] of Object.entries(data.identities ?? {})) {
+      if (!isPlainObject(records)) {
+        this.unreadableBridges.set(bridgeId, records);
+        skipped++;
+        continue;
+      }
       const bridgeMap = new Map<string, IdentityRecord>();
+      const raw = new Map<string, unknown>();
       for (const [key, record] of Object.entries(records)) {
-        bridgeMap.set(key, record);
+        if (!isPlainObject(record) || typeof record.endpointId !== "string") {
+          raw.set(key, record);
+          skipped++;
+          continue;
+        }
+        bridgeMap.set(key, record as unknown as IdentityRecord);
       }
       this.identities.set(bridgeId, bridgeMap);
+      if (raw.size > 0) this.unreadableRecords.set(bridgeId, raw);
     }
-  }
-
-  private async migrate(data: StoredIdentities): Promise<void> {
-    if (data.version < CURRENT_VERSION) {
-      for (const [bridgeId, records] of Object.entries(data.identities)) {
-        const bridgeMap = new Map<string, IdentityRecord>();
-        for (const [key, record] of Object.entries(records)) {
-          bridgeMap.set(key, record);
-        }
-        this.identities.set(bridgeId, bridgeMap);
-      }
-      await this.persist();
+    if (skipped > 0) {
+      logger.warn(`Skipped ${skipped} unreadable identity entries`);
     }
   }
 
   private async persist(): Promise<void> {
+    if (this.newerFile) return;
     const data: StoredIdentities = {
       version: CURRENT_VERSION,
       identities: {},
     };
 
+    for (const [bridgeId, raw] of this.unreadableBridges) {
+      data.identities[bridgeId] = raw as Record<string, IdentityRecord>;
+    }
     for (const [bridgeId, bridgeMap] of this.identities) {
-      const records: Record<string, IdentityRecord> = {};
+      const records = Object.fromEntries(
+        this.unreadableRecords.get(bridgeId) ?? [],
+      ) as Record<string, IdentityRecord>;
       for (const [key, record] of bridgeMap) {
         records[key] = record;
       }
       data.identities[bridgeId] = records;
     }
 
-    await this.storage.set("data", data as unknown as StorageObjectType);
+    this.dirty = false;
+    try {
+      await this.storage.set("data", data as unknown as StorageObjectType);
+      // any write that lands ends the run, a flush too
+      this.persistFailing = false;
+    } catch (e) {
+      this.dirty = true;
+      throw e;
+    }
   }
 
   private schedulePersist(): void {
+    this.dirty = true;
+    this.armPersist(PERSIST_DEBOUNCE_MS);
+  }
+
+  private armPersist(delay: number): void {
     if (this.persistTimer) return;
     this.persistTimer = setTimeout(() => {
       this.persistTimer = null;
-      void this.persist();
-    }, PERSIST_DEBOUNCE_MS);
+      this.persist().catch((e) => {
+        // Still dirty on failure, retry until a write lands. Warn once per
+        // run of failures, not every retry. A write in flight at dispose
+        // must not re-arm on a torn down storage.
+        if (!this.persistFailing) {
+          logger.warn("Failed to persist entity identities:", e);
+        }
+        this.persistFailing = true;
+        if (this.dirty && !this.disposed) this.armPersist(PERSIST_RETRY_MS);
+      });
+    }, delay);
   }
 
   // Flush any pending debounced write, used on dispose and by tests.
@@ -121,7 +175,7 @@ export class EntityIdentityStorage extends Service {
       clearTimeout(this.persistTimer);
       this.persistTimer = null;
     }
-    await this.persist();
+    if (this.dirty) await this.persist();
   }
 
   getIdentity(bridgeId: string, key: string): IdentityRecord | undefined {
@@ -137,14 +191,20 @@ export class EntityIdentityStorage extends Service {
     if (!bridgeMap) {
       bridgeMap = new Map();
       this.identities.set(bridgeId, bridgeMap);
+      this.unreadableBridges.delete(bridgeId);
     }
     bridgeMap.set(key, record);
+    this.unreadableRecords.get(bridgeId)?.delete(key);
     this.schedulePersist();
   }
 
   async deleteBridgeIdentities(bridgeId: string): Promise<void> {
-    this.identities.delete(bridgeId);
-    await this.flush();
+    this.unreadableRecords.delete(bridgeId);
+    const hadRaw = this.unreadableBridges.delete(bridgeId);
+    if (this.identities.delete(bridgeId) || hadRaw) {
+      this.dirty = true;
+      await this.flush();
+    }
   }
 
   // Drop a single identity record. Used by the manual orphan cleanup after the
@@ -152,6 +212,7 @@ export class EntityIdentityStorage extends Service {
   async deleteIdentity(bridgeId: string, key: string): Promise<void> {
     const bridgeMap = this.identities.get(bridgeId);
     if (bridgeMap?.delete(key)) {
+      this.dirty = true;
       await this.flush();
     }
   }

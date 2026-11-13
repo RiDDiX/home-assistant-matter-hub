@@ -28,6 +28,12 @@ describe("convertPressureToHpa", () => {
     expect(result).toBeCloseTo(1013.2, 0);
   });
 
+  it("should convert bar, cbar and psi to hPa", () => {
+    expect(convertPressureToHpa(2.4, "bar")).toBe(2400);
+    expect(convertPressureToHpa(240, "cbar")).toBe(2400);
+    expect(convertPressureToHpa(14.5038, "psi")).toBeCloseTo(1000, 0);
+  });
+
   it("should be case-insensitive", () => {
     expect(convertPressureToHpa(101300, "PA")).toBe(1013);
     expect(convertPressureToHpa(101.3, "KPA")).toBe(1013);

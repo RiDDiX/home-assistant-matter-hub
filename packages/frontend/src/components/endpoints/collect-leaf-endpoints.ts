@@ -5,7 +5,8 @@ export const collectLeafEndpoints = (
 ): EndpointData[] => {
   const parts = endpoint.parts ?? [];
   if (parts.length === 0) {
-    return [endpoint];
+    // an empty bridge is just the aggregator, it is not a device
+    return endpoint.type.name === "Aggregator" ? [] : [endpoint];
   }
   const leaves = parts.flatMap((part) => collectLeafEndpoints(part));
 

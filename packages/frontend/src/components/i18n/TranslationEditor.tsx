@@ -4,7 +4,6 @@ import DeleteOutlineIcon from "@mui/icons-material/DeleteOutline";
 import DownloadIcon from "@mui/icons-material/Download";
 import RestoreIcon from "@mui/icons-material/Restore";
 import SearchIcon from "@mui/icons-material/Search";
-import TranslateIcon from "@mui/icons-material/Translate";
 import UploadFileIcon from "@mui/icons-material/UploadFile";
 import Alert from "@mui/material/Alert";
 import Box from "@mui/material/Box";
@@ -21,7 +20,6 @@ import ListItemIcon from "@mui/material/ListItemIcon";
 import ListItemText from "@mui/material/ListItemText";
 import MenuItem from "@mui/material/MenuItem";
 import Select from "@mui/material/Select";
-import Snackbar from "@mui/material/Snackbar";
 import TextField from "@mui/material/TextField";
 import Tooltip from "@mui/material/Tooltip";
 import Typography from "@mui/material/Typography";
@@ -30,12 +28,24 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import { useTranslation } from "react-i18next";
+import {
+  applyTranslationOverrides,
+  bundledResources,
+  CUSTOM_LANGS_KEY,
+  flattenObject,
+  LANGUAGES,
+  STORAGE_KEY,
+  unflattenObject,
+} from "../../i18n/index.ts";
 import en from "../../i18n/locales/en.json";
-
-const STORAGE_KEY = "hamh-translation-overrides";
+import { safeStorage } from "../../safe-storage.ts";
+import { ConfirmDialog } from "../misc/ConfirmDialog.tsx";
+import { copyText } from "../misc/copy-text.ts";
+import { useNotifications } from "../notifications/use-notifications.ts";
 
 interface FlatEntry {
   key: string;
@@ -43,40 +53,6 @@ interface FlatEntry {
   enValue: string;
   currentValue: string;
   isOverridden: boolean;
-}
-
-function flattenObject(
-  obj: Record<string, unknown>,
-  prefix = "",
-): Record<string, string> {
-  const result: Record<string, string> = {};
-  for (const [k, v] of Object.entries(obj)) {
-    const full = prefix ? `${prefix}.${k}` : k;
-    if (typeof v === "object" && v !== null && !Array.isArray(v)) {
-      Object.assign(result, flattenObject(v as Record<string, unknown>, full));
-    } else {
-      result[full] = String(v ?? "");
-    }
-  }
-  return result;
-}
-
-function unflattenObject(
-  flat: Record<string, string>,
-): Record<string, unknown> {
-  const result: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(flat)) {
-    const parts = key.split(".");
-    let current = result;
-    for (let i = 0; i < parts.length - 1; i++) {
-      if (!(parts[i] in current)) {
-        current[parts[i]] = {};
-      }
-      current = current[parts[i]] as Record<string, unknown>;
-    }
-    current[parts[parts.length - 1]] = value;
-  }
-  return result;
 }
 
 function loadOverrides(lang: string): Record<string, string> {
@@ -107,8 +83,6 @@ function saveOverrides(lang: string, overrides: Record<string, string>) {
   }
 }
 
-const CUSTOM_LANGS_KEY = "hamh-custom-languages";
-
 interface CustomLang {
   code: string;
   name: string;
@@ -124,56 +98,40 @@ function loadCustomLanguages(): CustomLang[] {
 }
 
 function saveCustomLanguages(langs: CustomLang[]) {
-  localStorage.setItem(CUSTOM_LANGS_KEY, JSON.stringify(langs));
+  safeStorage.set(CUSTOM_LANGS_KEY, JSON.stringify(langs));
 }
 
-const BUILT_IN_LANGUAGES = [
-  { code: "de", name: "Deutsch" },
-  { code: "fr", name: "Français" },
-  { code: "es", name: "Español" },
-  { code: "it", name: "Italiano" },
-  { code: "zh", name: "中文" },
-  { code: "zh-TW", name: "繁體中文" },
-  { code: "ja", name: "日本語" },
-  { code: "ko", name: "한국어" },
-  { code: "th", name: "ไทย" },
-  { code: "nl", name: "Nederlands" },
-  { code: "sv", name: "Svenska" },
-  { code: "tr", name: "Türkçe" },
-  { code: "ru", name: "Русский" },
-  { code: "pt-BR", name: "Português (Brasil)" },
-];
+const EDITABLE_LANGUAGES = LANGUAGES.filter((l) => l.code !== "en");
 
 export function TranslationEditor() {
   const { t, i18n } = useTranslation();
-  const rawLang = i18n.language ?? "en";
-  const currentLang = BUILT_IN_LANGUAGES.some((l) => l.code === rawLang)
-    ? rawLang
-    : (rawLang.split("-")[0] ?? "en");
-
-  const [editLang, setEditLang] = useState(() =>
-    currentLang === "en" ? "de" : currentLang,
+  const notifications = useNotifications();
+  const [customLangs, setCustomLangs] =
+    useState<CustomLang[]>(loadCustomLanguages);
+  const allLanguages = useMemo(
+    () => [...EDITABLE_LANGUAGES, ...customLangs],
+    [customLangs],
   );
+  const [editLang, setEditLang] = useState(() => {
+    const codes = allLanguages.map((l) => l.code);
+    const lang = i18n.language ?? "en";
+    const base = lang.split("-")[0];
+    if (codes.includes(lang)) return lang;
+    return codes.includes(base) ? base : "de";
+  });
   const [search, setSearch] = useState("");
   const [overrides, setOverrides] = useState<Record<string, string>>(() =>
     loadOverrides(editLang),
   );
-  const [copied, setCopied] = useState(false);
   const [filterMode, setFilterMode] = useState<"all" | "missing" | "edited">(
     "all",
   );
-  const [customLangs, setCustomLangs] =
-    useState<CustomLang[]>(loadCustomLanguages);
   const [showAddLang, setShowAddLang] = useState(false);
   const [newLangCode, setNewLangCode] = useState("");
   const [newLangName, setNewLangName] = useState("");
   const [addLangError, setAddLangError] = useState("");
-  const [snackMsg, setSnackMsg] = useState("");
-
-  const allLanguages = useMemo(
-    () => [...BUILT_IN_LANGUAGES, ...customLangs],
-    [customLangs],
-  );
+  const [confirmRemove, setConfirmRemove] = useState(false);
+  const syncTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   const isCustomLang = useCallback(
     (code: string) => customLangs.some((l) => l.code === code),
@@ -185,12 +143,11 @@ export function TranslationEditor() {
     [],
   );
 
-  const currentTranslations = useMemo(() => {
-    const bundle = i18n.getResourceBundle(editLang, "translation") as
-      | Record<string, unknown>
-      | undefined;
-    return bundle ? flattenObject(bundle) : {};
-  }, [editLang, i18n]);
+  // the live bundle already holds the local edits, compare against the shipped one
+  const currentTranslations = useMemo(
+    () => flattenObject(bundledResources[editLang]?.translation ?? {}),
+    [editLang],
+  );
 
   const entries: FlatEntry[] = useMemo(() => {
     const keys = Object.keys(enFlat);
@@ -241,24 +198,14 @@ export function TranslationEditor() {
       setOverrides(newOverrides);
       saveOverrides(editLang, newOverrides);
 
-      const base = i18n.getResourceBundle(editLang, "translation") as
-        | Record<string, unknown>
-        | undefined;
-      const baseFlat = base ? flattenObject(base) : {};
-
-      const clean: Record<string, string> = {};
-      for (const [k, v] of Object.entries(newOverrides)) {
-        if (v && v !== baseFlat[k]) {
-          clean[k] = v;
-        }
-      }
-
-      if (Object.keys(clean).length > 0) {
-        const nested = unflattenObject({ ...baseFlat, ...clean });
-        i18n.addResourceBundle(editLang, "translation", nested, true, true);
-      }
+      // every bundle swap re-renders the whole app, so wait for a typing pause
+      clearTimeout(syncTimer.current);
+      syncTimer.current = setTimeout(
+        () => applyTranslationOverrides(editLang, newOverrides),
+        300,
+      );
     },
-    [editLang, i18n],
+    [editLang],
   );
 
   const handleChange = useCallback(
@@ -285,13 +232,18 @@ export function TranslationEditor() {
     applyOverrides({});
   }, [applyOverrides]);
 
-  const handleExport = useCallback(() => {
+  const buildJson = useCallback(() => {
     const merged: Record<string, string> = {};
     for (const key of Object.keys(enFlat)) {
-      merged[key] = overrides[key] ?? currentTranslations[key] ?? "";
+      const value = overrides[key] ?? currentTranslations[key];
+      // an empty string would replace the English fallback
+      if (value) merged[key] = value;
     }
-    const nested = unflattenObject(merged);
-    const json = JSON.stringify(nested, null, 2);
+    return JSON.stringify(unflattenObject(merged), null, 2);
+  }, [enFlat, currentTranslations, overrides]);
+
+  const handleExport = useCallback(() => {
+    const json = buildJson();
     const blob = new Blob([json], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -301,18 +253,16 @@ export function TranslationEditor() {
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
-  }, [enFlat, currentTranslations, overrides, editLang]);
+  }, [buildJson, editLang]);
 
-  const handleCopyJson = useCallback(() => {
-    const merged: Record<string, string> = {};
-    for (const key of Object.keys(enFlat)) {
-      merged[key] = overrides[key] ?? currentTranslations[key] ?? "";
-    }
-    const nested = unflattenObject(merged);
-    navigator.clipboard.writeText(JSON.stringify(nested, null, 2));
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  }, [enFlat, currentTranslations, overrides]);
+  const handleCopyJson = useCallback(async () => {
+    const ok = await copyText(buildJson());
+    notifications.show(
+      ok
+        ? { message: t("translationEditor.copied"), severity: "success" }
+        : { message: t("common.copyFailed"), severity: "error" },
+    );
+  }, [buildJson, notifications, t]);
 
   const handleAddLanguage = useCallback(() => {
     const code = newLangCode.trim().toLowerCase();
@@ -326,9 +276,8 @@ export function TranslationEditor() {
       return;
     }
     if (
-      BUILT_IN_LANGUAGES.some((l) => l.code === code) ||
-      customLangs.some((l) => l.code === code) ||
-      code === "en"
+      LANGUAGES.some((l) => l.code === code) ||
+      customLangs.some((l) => l.code === code)
     ) {
       setAddLangError(t("translationEditor.languageExists"));
       return;
@@ -345,13 +294,15 @@ export function TranslationEditor() {
   }, [newLangCode, newLangName, customLangs, i18n, t]);
 
   const handleRemoveLanguage = useCallback(() => {
+    setConfirmRemove(false);
     if (!isCustomLang(editLang)) return;
     const updated = customLangs.filter((l) => l.code !== editLang);
     setCustomLangs(updated);
     saveCustomLanguages(updated);
     saveOverrides(editLang, {});
-    setEditLang(BUILT_IN_LANGUAGES[0].code);
-  }, [editLang, customLangs, isCustomLang]);
+    if (i18n.language === editLang) i18n.changeLanguage("en");
+    setEditLang(EDITABLE_LANGUAGES[0].code);
+  }, [editLang, customLangs, isCustomLang, i18n]);
 
   const handleImportJson = useCallback(() => {
     const input = document.createElement("input");
@@ -376,69 +327,71 @@ export function TranslationEditor() {
             }
           }
           applyOverrides({ ...overrides, ...imported });
-          setSnackMsg(t("translationEditor.importSuccess", { count }));
+          notifications.show({
+            message: t("translationEditor.importSuccess", { count }),
+            severity: "success",
+          });
         } catch {
-          setSnackMsg(t("translationEditor.importFailed"));
+          notifications.show({
+            message: t("translationEditor.importFailed"),
+            severity: "error",
+          });
         }
       };
       reader.readAsText(file);
     };
     input.click();
-  }, [enFlat, overrides, applyOverrides, t]);
+  }, [enFlat, overrides, applyOverrides, notifications, t]);
 
   return (
-    <Box sx={{ p: 2 }}>
-      <Box
-        display="flex"
-        alignItems="center"
-        justifyContent="space-between"
-        mb={2}
-        flexWrap="wrap"
-        gap={1}
-      >
-        <Box display="flex" alignItems="center" gap={1}>
-          <TranslateIcon />
-          <Typography variant="h5">{t("translationEditor.title")}</Typography>
-        </Box>
-        <Box display="flex" alignItems="center" gap={1}>
-          <FormControl size="small" sx={{ minWidth: 140 }}>
-            <InputLabel>{t("translationEditor.editLanguage")}</InputLabel>
-            <Select
-              value={editLang}
-              label={t("translationEditor.editLanguage")}
-              onChange={(_e: { target: { value: string } }) =>
-                setEditLang(_e.target.value)
-              }
+    <Box>
+      <Box display="flex" alignItems="center" mb={2} gap={1}>
+        <FormControl size="small" sx={{ minWidth: 140 }}>
+          <InputLabel id="translation-edit-lang">
+            {t("translationEditor.editLanguage")}
+          </InputLabel>
+          <Select
+            labelId="translation-edit-lang"
+            value={editLang}
+            label={t("translationEditor.editLanguage")}
+            onChange={(_e: { target: { value: string } }) =>
+              setEditLang(_e.target.value)
+            }
+          >
+            {allLanguages.map((l) => (
+              <MenuItem key={l.code} value={l.code}>
+                <ListItemText primary={l.name} />
+                {isCustomLang(l.code) && (
+                  <ListItemIcon sx={{ minWidth: "auto", ml: 1 }}>
+                    <DeleteOutlineIcon fontSize="small" color="disabled" />
+                  </ListItemIcon>
+                )}
+              </MenuItem>
+            ))}
+          </Select>
+        </FormControl>
+        <Tooltip title={t("translationEditor.addLanguage")}>
+          <IconButton
+            size="small"
+            aria-label={t("translationEditor.addLanguage")}
+            aria-expanded={showAddLang}
+            onClick={() => setShowAddLang((v) => !v)}
+          >
+            <AddIcon fontSize="small" />
+          </IconButton>
+        </Tooltip>
+        {isCustomLang(editLang) && (
+          <Tooltip title={t("translationEditor.removeLanguage")}>
+            <IconButton
+              size="small"
+              color="error"
+              aria-label={t("translationEditor.removeLanguage")}
+              onClick={() => setConfirmRemove(true)}
             >
-              {allLanguages.map((l) => (
-                <MenuItem key={l.code} value={l.code}>
-                  <ListItemText primary={l.name} />
-                  {isCustomLang(l.code) && (
-                    <ListItemIcon sx={{ minWidth: "auto", ml: 1 }}>
-                      <DeleteOutlineIcon fontSize="small" color="disabled" />
-                    </ListItemIcon>
-                  )}
-                </MenuItem>
-              ))}
-            </Select>
-          </FormControl>
-          <Tooltip title={t("translationEditor.addLanguage")}>
-            <IconButton size="small" onClick={() => setShowAddLang((v) => !v)}>
-              <AddIcon fontSize="small" />
+              <DeleteOutlineIcon fontSize="small" />
             </IconButton>
           </Tooltip>
-          {isCustomLang(editLang) && (
-            <Tooltip title={t("translationEditor.removeLanguage")}>
-              <IconButton
-                size="small"
-                color="error"
-                onClick={handleRemoveLanguage}
-              >
-                <DeleteOutlineIcon fontSize="small" />
-              </IconButton>
-            </Tooltip>
-          )}
-        </Box>
+        )}
       </Box>
 
       <Collapse in={showAddLang}>
@@ -559,7 +512,7 @@ export function TranslationEditor() {
         <Button
           variant="outlined"
           size="small"
-          startIcon={<UploadFileIcon />}
+          startIcon={<DownloadIcon />}
           onClick={handleExport}
         >
           {t("translationEditor.exportJson")}
@@ -567,21 +520,19 @@ export function TranslationEditor() {
         <Button
           variant="outlined"
           size="small"
-          startIcon={<DownloadIcon />}
+          startIcon={<UploadFileIcon />}
           onClick={handleImportJson}
         >
           {t("translationEditor.importJson")}
         </Button>
-        <Tooltip title={copied ? t("translationEditor.copied") : ""}>
-          <Button
-            variant="outlined"
-            size="small"
-            startIcon={<ContentCopyIcon />}
-            onClick={handleCopyJson}
-          >
-            {t("translationEditor.copyJson")}
-          </Button>
-        </Tooltip>
+        <Button
+          variant="outlined"
+          size="small"
+          startIcon={<ContentCopyIcon />}
+          onClick={handleCopyJson}
+        >
+          {t("translationEditor.copyJson")}
+        </Button>
         {overriddenKeys > 0 && (
           <Button
             variant="outlined"
@@ -657,6 +608,7 @@ export function TranslationEditor() {
                   <Tooltip title={t("translationEditor.resetKey")}>
                     <IconButton
                       size="small"
+                      aria-label={t("translationEditor.resetKey")}
                       onClick={() => handleResetKey(entry.key)}
                     >
                       <RestoreIcon fontSize="small" />
@@ -674,11 +626,15 @@ export function TranslationEditor() {
         </Typography>
       )}
 
-      <Snackbar
-        open={!!snackMsg}
-        autoHideDuration={3000}
-        onClose={() => setSnackMsg("")}
-        message={snackMsg}
+      <ConfirmDialog
+        open={confirmRemove}
+        title={t("translationEditor.removeLanguage")}
+        message={t("translationEditor.removeLanguageConfirm", {
+          name: customLangs.find((l) => l.code === editLang)?.name ?? editLang,
+        })}
+        confirmLabel={t("translationEditor.removeLanguage")}
+        onConfirm={handleRemoveLanguage}
+        onCancel={() => setConfirmRemove(false)}
       />
     </Box>
   );

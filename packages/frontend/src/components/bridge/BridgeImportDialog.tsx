@@ -1,9 +1,11 @@
 import type {
   BridgeExportData,
+  BridgeImportError,
   BridgeImportPreview,
   BridgeImportPreviewItem,
 } from "@home-assistant-matter-hub/common";
 import Alert from "@mui/material/Alert";
+import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
 import Checkbox from "@mui/material/Checkbox";
 import Dialog from "@mui/material/Dialog";
@@ -45,6 +47,7 @@ export function BridgeImportDialog({
   const [error, setError] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
   const [result, setResult] = useState<string | null>(null);
+  const [importErrors, setImportErrors] = useState<BridgeImportError[]>([]);
 
   useEffect(() => {
     if (!open || !file) {
@@ -53,6 +56,7 @@ export function BridgeImportDialog({
       setImportData(null);
       setError(null);
       setResult(null);
+      setImportErrors([]);
       return;
     }
 
@@ -68,8 +72,13 @@ export function BridgeImportDialog({
             previewResult.bridges.map((b: BridgeImportPreviewItem) => b.id),
           ),
         );
-      } catch {
-        setError(t("bridge.importParseFailed"));
+      } catch (e) {
+        // keep the friendly text for a broken file, show what the server said otherwise
+        setError(
+          e instanceof SyntaxError || !(e instanceof Error)
+            ? t("bridge.importParseFailed")
+            : e.message,
+        );
       }
     };
     reader.readAsText(file);
@@ -111,23 +120,30 @@ export function BridgeImportDialog({
 
       const messages: string[] = [];
       if (importResult.imported > 0) {
-        messages.push(`${importResult.imported} bridge(s) imported`);
+        messages.push(
+          t("bridge.importedCount", { count: importResult.imported }),
+        );
       }
       if (importResult.skipped > 0) {
-        messages.push(`${importResult.skipped} skipped (already exist)`);
+        messages.push(
+          t("bridge.importSkipped", { count: importResult.skipped }),
+        );
       }
       if (importResult.errors.length > 0) {
-        messages.push(`${importResult.errors.length} failed`);
+        messages.push(
+          t("bridge.importFailedCount", { count: importResult.errors.length }),
+        );
       }
 
       setResult(messages.join(", "));
+      setImportErrors(importResult.errors);
       onImported();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Import failed");
+      setError(e instanceof Error ? e.message : t("bridge.importFailed"));
     } finally {
       setImporting(false);
     }
-  }, [importData, selectedIds, overwriteExisting, onImported]);
+  }, [importData, selectedIds, overwriteExisting, onImported, t]);
 
   return (
     <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
@@ -140,8 +156,16 @@ export function BridgeImportDialog({
         )}
 
         {result && (
-          <Alert severity="success" sx={{ mb: 2 }}>
+          <Alert
+            severity={importErrors.length > 0 ? "warning" : "success"}
+            sx={{ mb: 2 }}
+          >
             {result}
+            {importErrors.map((e) => (
+              <Typography key={e.bridgeId} variant="body2">
+                {e.bridgeName}: {e.reason}
+              </Typography>
+            ))}
           </Alert>
         )}
 
@@ -149,15 +173,19 @@ export function BridgeImportDialog({
           <>
             {preview.migrated && (
               <Alert severity="info" sx={{ mb: 2 }}>
-                This export is from an older version ({preview.sourceVersion}).
-                Bridges will be migrated to the current format during import.
+                {t("bridge.importMigrated", { version: preview.sourceVersion })}
               </Alert>
             )}
 
             <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-              Exported on {new Date(preview.exportedAt).toLocaleString()}
+              {t("bridge.importExportedOn", {
+                date: new Date(preview.exportedAt).toLocaleString(),
+              })}
               {preview.sourceVersion && !preview.migrated && (
-                <> • Format: {preview.sourceVersion}</>
+                <>
+                  {" • "}
+                  {t("bridge.importFormat", { version: preview.sourceVersion })}
+                </>
               )}
             </Typography>
 
@@ -184,12 +212,16 @@ export function BridgeImportDialog({
                     primary={bridge.name}
                     secondary={
                       <>
-                        Port {bridge.port} • {bridge.entityCount} filter rules
+                        {t("common.port")} {bridge.port}
+                        {" • "}
+                        {t("bridge.importFilterRules", {
+                          count: bridge.entityCount,
+                        })}
                         {bridge.exists && (
-                          <span style={{ color: "orange" }}>
-                            {" "}
-                            • Already exists
-                          </span>
+                          <Box component="span" sx={{ color: "warning.main" }}>
+                            {" • "}
+                            {t("bridge.importExists")}
+                          </Box>
                         )}
                       </>
                     }

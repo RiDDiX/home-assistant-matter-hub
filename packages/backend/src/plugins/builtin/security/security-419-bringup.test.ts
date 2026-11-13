@@ -62,6 +62,35 @@ afterEach(async () => {
   rmSync(dir, { recursive: true, force: true });
 });
 
+// Runs the armed settle compare now instead of after TOPOLOGY_SETTLE_MS.
+async function settle(bem: BridgeEndpointManager) {
+  const t = bem as unknown as {
+    topologyTimer?: ReturnType<typeof setTimeout>;
+    enqueueTopology(run: () => Promise<unknown>): Promise<void>;
+    compareTopology(): Promise<void>;
+  };
+  if (t.topologyTimer === undefined) return;
+  clearTimeout(t.topologyTimer);
+  t.topologyTimer = undefined;
+  await t.enqueueTopology(() => t.compareTopology());
+}
+
+// What startPlugins and the first HA reconcile leave behind: the endpoint set
+// is complete, so the topology is compared once with the stored one.
+async function asStart(bem: BridgeEndpointManager, run: () => Promise<void>) {
+  const live = bem as unknown as {
+    pluginsStarted: boolean;
+    entitiesReconciled: boolean;
+    settleTopology(): void;
+  };
+  live.pluginsStarted = false;
+  await run();
+  live.pluginsStarted = true;
+  live.entitiesReconciled = true;
+  live.settleTopology();
+  await settle(bem);
+}
+
 async function bringUp() {
   server = await ServerNode.create({
     // biome-ignore lint/suspicious/noExplicitAny: env valid at runtime
@@ -85,7 +114,7 @@ async function bringUp() {
   );
   await server.add(bem.root);
   bem.setTopologyChangeHandler(async (change) => {
-    await server!.act("plugin topology change", (agent) =>
+    await server!.act("topology change", (agent) =>
       agent.get(BasicInformationServer).increaseConfigurationVersion(change),
     );
   });
@@ -102,6 +131,7 @@ async function bringUp() {
   });
   await manager.registerBuiltIn(plugin);
   await manager.startAll();
+  await asStart(bem, async () => undefined);
 
   const endpoints = new Map<string, Endpoint>();
   for (const part of bem.root.parts) {
@@ -217,13 +247,16 @@ describe("security plugin bring-up (#419)", () => {
   it("increments the root configuration version when plugin endpoints change", async () => {
     const { manager, bem } = await bringUp();
 
+    // the first start only records the set
     expect(server!.stateOf(BasicInformationServer).configurationVersion).toBe(
-      6,
+      1,
     );
 
+    // a runtime disable unmounts five devices inside one settle window
     await bem.disablePlugin("security");
+    await settle(bem);
     expect(server!.stateOf(BasicInformationServer).configurationVersion).toBe(
-      11,
+      2,
     );
 
     await manager.shutdownAll();
@@ -249,19 +282,11 @@ describe("security plugin bring-up (#419)", () => {
         onDeviceRegistered?: (plugin: string, device: unknown) => Promise<void>;
       }
     ).onDeviceRegistered;
-    const batch = (
-      bem as unknown as {
-        duringPluginBatch(
-          run: () => Promise<void>,
-          announce: boolean,
-        ): Promise<void>;
-      }
-    ).duringPluginBatch.bind(bem);
 
     await bem.stopPlugins();
-    await batch(async () => {
+    await asStart(bem, async () => {
       for (const device of devices) await registered?.("security", device);
-    }, true);
+    });
 
     // Same devices, same numbers: controllers must not be told to re-discover.
     expect(server!.stateOf(BasicInformationServer).configurationVersion).toBe(
@@ -280,18 +305,10 @@ describe("security plugin bring-up (#419)", () => {
         onDeviceRegistered?: (plugin: string, device: unknown) => Promise<void>;
       }
     ).onDeviceRegistered;
-    const batch = (
-      bem as unknown as {
-        duringPluginBatch(
-          run: () => Promise<void>,
-          announce: boolean,
-        ): Promise<void>;
-      }
-    ).duringPluginBatch.bind(bem);
 
     // A plugin installed while the bridge was down shows up in the next start
     // batch; controllers have to hear about it exactly once, not once a device.
-    await batch(async () => {
+    await asStart(bem, async () => {
       for (const id of ["late_one", "late_two"]) {
         await registered?.("security", {
           id,
@@ -300,55 +317,11 @@ describe("security plugin bring-up (#419)", () => {
           clusters: [],
         });
       }
-    }, true);
+    });
 
     expect(server!.stateOf(BasicInformationServer).configurationVersion).toBe(
       afterStart + 1,
     );
-    await manager.shutdownAll();
-  });
-
-  it("announces a finished batch while another batch is still open", async () => {
-    const { manager, bem } = await bringUp();
-    const afterStart = server!.stateOf(
-      BasicInformationServer,
-    ).configurationVersion;
-    const registered = (
-      manager as unknown as {
-        onDeviceRegistered?: (plugin: string, device: unknown) => Promise<void>;
-      }
-    ).onDeviceRegistered;
-    const batch = (
-      bem as unknown as {
-        duringPluginBatch(
-          run: () => Promise<void>,
-          announce: boolean,
-        ): Promise<void>;
-      }
-    ).duringPluginBatch.bind(bem);
-
-    let releaseSilent: () => void = () => {};
-    const silent = batch(
-      () =>
-        new Promise<void>((resolve) => {
-          releaseSilent = resolve;
-        }),
-      false,
-    );
-    await batch(async () => {
-      await registered?.("security", {
-        id: "overlap_device",
-        name: "Overlap Device",
-        deviceType: "on_off_plugin_unit",
-        clusters: [],
-      });
-    }, true);
-
-    expect(server!.stateOf(BasicInformationServer).configurationVersion).toBe(
-      afterStart + 1,
-    );
-    releaseSilent();
-    await silent;
     await manager.shutdownAll();
   });
 
@@ -415,8 +388,8 @@ describe("security plugin bring-up (#419)", () => {
     // erase the entry held below.
     await new Promise((r) => setTimeout(r, 50));
     // biome-ignore lint/suspicious/noExplicitAny: reach the private echo guard
-    const guard = (bem as any).pluginStateUpdating as Set<string>;
-    guard.add("mode_home");
+    const guard = (bem as any).pluginStateUpdating as Map<string, number>;
+    guard.set("mode_home", 1);
     await endpoints.get("mode_away")!.set({ onOff: { onOff: true } } as never);
 
     // The Away write must reach the machine even while the Home update is in

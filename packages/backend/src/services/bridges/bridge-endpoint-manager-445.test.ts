@@ -11,6 +11,7 @@ import { OnOffPlugInUnitDevice } from "@matter/main/devices";
 import { ServerNode } from "@matter/main/node";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { EntityEndpoint } from "../../matter/endpoints/entity-endpoint.js";
+import { LegacyEndpoint } from "../../matter/endpoints/legacy/legacy-endpoint.js";
 import { VacuumAreaSwitchEndpoint } from "../../matter/endpoints/legacy/vacuum/vacuum-area-switch.js";
 import {
   type HomeAssistantAction,
@@ -22,6 +23,7 @@ import type { EntityMappingStorage } from "../storage/entity-mapping-storage.js"
 import { BridgeDataProvider } from "./bridge-data-provider.js";
 import { BridgeEndpointManager } from "./bridge-endpoint-manager.js";
 import { BridgeRegistry } from "./bridge-registry.js";
+import { EntityIsolationService } from "./entity-isolation-service.js";
 import { EntityStateProvider } from "./entity-state-provider.js";
 
 // #445: plugin devices mount as bare Endpoints in root.parts. The entity flows
@@ -97,6 +99,7 @@ interface FakeHa {
   areas: Map<string, string>;
   labels: unknown[];
   snapshotGeneration: number;
+  markRefreshIncomplete: ReturnType<typeof vi.fn>;
 }
 
 function makeHa(): FakeHa {
@@ -107,6 +110,7 @@ function makeHa(): FakeHa {
     areas: new Map(),
     labels: [],
     snapshotGeneration: 1,
+    markRefreshIncomplete: vi.fn(),
   };
   ha.entities[VACUUM] = { entity_id: VACUUM };
   ha.states[VACUUM] = {
@@ -510,6 +514,47 @@ describe("reconcile keeps working when a refresh goes wrong (#438)", () => {
     expect(manager.failedEntities).toHaveLength(1);
   });
 
+  it("flags only a refresh deferred for HA as deferred", async () => {
+    const ha = makeHa();
+    const { manager, client } = await buildManager(ha);
+    vi.spyOn(LegacyEndpoint, "create").mockRejectedValueOnce(
+      new Error("create failed"),
+    );
+    await expect(manager.refreshDevices()).resolves.toBe(false);
+    expect(manager.refreshDeferred).toBe(false);
+
+    client.haRunning = false;
+    await expect(manager.refreshDevices()).resolves.toBe(false);
+    expect(manager.refreshDeferred).toBe(true);
+
+    client.haRunning = true;
+    await expect(manager.refreshDevices()).resolves.toBe(true);
+    expect(manager.refreshDeferred).toBe(false);
+  });
+
+  it("warns about a deferred refresh once per HA outage", async () => {
+    const ha = makeHa();
+    const { manager, client } = await buildManager(ha);
+    const deferWarns = () =>
+      lastLogger.warn.mock.calls.filter((c) =>
+        String(c[0]).includes("deferring reconcile"),
+      );
+
+    client.haRunning = false;
+    await manager.refreshDevices();
+    await manager.refreshDevices();
+    expect(deferWarns()).toHaveLength(1);
+    expect(lastLogger.debug).toHaveBeenCalledWith(
+      expect.stringContaining("deferring reconcile"),
+    );
+
+    client.haRunning = true;
+    await manager.refreshDevices();
+    client.haRunning = false;
+    await manager.refreshDevices();
+    expect(deferWarns()).toHaveLength(2);
+  });
+
   it("stopObserving kills the recheck timer, bridges never call dispose", async () => {
     const ha = makeHa();
     const { manager } = await buildManager(ha);
@@ -599,6 +644,24 @@ describe("identity survives isolation and plugin stops (#438)", () => {
     expect(vacuumEndpoint(manager).number).toBe(before);
   });
 
+  it("a recreated entity no longer lists as failed", async () => {
+    const ha = makeHa();
+    const { manager } = await buildManager(ha);
+    await manager.refreshDevices();
+    // The record isolateFromError leaves; it needs a 32-hex bridge id to parse.
+    // biome-ignore lint/suspicious/noExplicitAny: seed the private record map
+    (EntityIsolationService as any).isolatedEntities.set(
+      `bridge-445:${vacuumEndpoint(manager).id}`,
+      { entityId: vacuumEndpoint(manager).id, reason: "test", failedAt: "" },
+    );
+    await manager.isolateEntity(VACUUM);
+    expect(manager.failedEntities).toHaveLength(1);
+
+    await manager.refreshDevices();
+    expect(vacuumEndpoint(manager)).toBeDefined();
+    expect(manager.failedEntities).toHaveLength(0);
+  });
+
   it("plugin endpoints keep their number across stopPlugins", async () => {
     const ha = makeHa();
     const { manager } = await buildManager(ha);
@@ -631,6 +694,10 @@ async function until(cond: () => boolean, ms = 5000) {
   }
 }
 
+// An unavailable or unknown battery maps at once (#543), so the catch-up
+// below starts from a value the resolver cannot read.
+const UNREADABLE = "Unknown";
+
 // #450: a battery sensor that was unavailable when the endpoint was built
 // never got picked up later. The resolved battery is part of the mapping
 // fingerprint now, so the endpoint rebuilds once the sensor appears.
@@ -654,7 +721,7 @@ describe("battery sensor appearing after endpoint creation (#450)", () => {
   }
 
   it("rebuilds the endpoint with the battery once the sensor resolves", async () => {
-    const ha = haWithBattery("unavailable");
+    const ha = haWithBattery(UNREADABLE);
     const { manager, registry } = await buildManager(ha);
     await manager.refreshDevices();
     const first = vacuumEndpoint(manager);
@@ -676,7 +743,7 @@ describe("battery sensor appearing after endpoint creation (#450)", () => {
   it("an exposed battery sensor endpoint does not displace the vacuum candidate", async () => {
     // sensor.* inside the filter: the battery sensor mounts as its own
     // endpoint on the same device and must not steal the retry slot
-    const ha = haWithBattery("unavailable");
+    const ha = haWithBattery(UNREADABLE);
     const { manager } = await buildManager(ha, ["vacuum.*", "sensor.*"]);
     await manager.refreshDevices();
     // biome-ignore lint/suspicious/noExplicitAny: the retry only runs while observing
@@ -715,7 +782,7 @@ describe("battery sensor appearing after endpoint creation (#450)", () => {
   });
 
   it("no retry schedule after stopObserving, queued batches included", async () => {
-    const ha = haWithBattery("unavailable");
+    const ha = haWithBattery(UNREADABLE);
     const { manager } = await buildManager(ha);
     await manager.refreshDevices();
 
@@ -760,7 +827,7 @@ describe("battery sensor appearing after endpoint creation (#450)", () => {
   });
 
   it("subscribes the device sensors while the battery is unresolved", async () => {
-    const ha = haWithBattery("unavailable");
+    const ha = haWithBattery(UNREADABLE);
     const { manager } = await buildManager(ha);
     await manager.refreshDevices();
     // biome-ignore lint/suspicious/noExplicitAny: pin the subscription list
@@ -768,7 +835,7 @@ describe("battery sensor appearing after endpoint creation (#450)", () => {
   });
 
   it("a state update alone triggers the rebuild, registry ticks skip state-only changes", async () => {
-    const ha = haWithBattery("unavailable");
+    const ha = haWithBattery(UNREADABLE);
     const { manager } = await buildManager(ha);
     await manager.refreshDevices();
     // biome-ignore lint/suspicious/noExplicitAny: the retry only runs while observing
@@ -849,7 +916,7 @@ describe("battery sensor of a composed temperature sensor (#498)", () => {
     await manager.refreshDevices();
     expect(mounted(manager)).toEqual([TEMP]);
 
-    ha.states[BATTERY].state = "unavailable";
+    ha.states[BATTERY].state = UNREADABLE;
     await manager.refreshDevices();
     expect(mounted(manager)).toEqual([BATTERY, TEMP]);
 
@@ -860,7 +927,7 @@ describe("battery sensor of a composed temperature sensor (#498)", () => {
   });
 
   it("rebuilds a sensor built without its battery and closes the standalone", async () => {
-    const ha = sensorHa("unavailable");
+    const ha = sensorHa(UNREADABLE);
     const { manager } = await build(ha);
     await manager.refreshDevices();
     expect(mounted(manager)).toEqual([BATTERY, TEMP]);
@@ -880,7 +947,7 @@ describe("battery sensor of a composed temperature sensor (#498)", () => {
   });
 
   it("a state update alone triggers that rebuild", async () => {
-    const ha = sensorHa("unavailable");
+    const ha = sensorHa(UNREADABLE);
     const { manager } = await build(ha);
     await manager.refreshDevices();
     // biome-ignore lint/suspicious/noExplicitAny: the retry only runs while observing
@@ -902,7 +969,7 @@ describe("battery sensor of a composed temperature sensor (#498)", () => {
     ha.entities[VACUUM].device_id = "dev498";
     ha.devices.dev498 = { id: "dev498", name: "Robot" };
     for (const [id, state, attrs] of [
-      ["sensor.robot_battery", "unavailable", { device_class: "battery" }],
+      ["sensor.robot_battery", UNREADABLE, { device_class: "battery" }],
       [
         "sensor.robot_temp",
         "30",
@@ -929,5 +996,19 @@ describe("battery sensor of a composed temperature sensor (#498)", () => {
       string
     >;
     expect(candidates.get("dev498")).toBe(VACUUM);
+  });
+});
+
+describe("overlapping refreshes", () => {
+  it("a second refresh waits for the first, the endpoint is built once", async () => {
+    const ha = makeHa();
+    const { manager } = await buildManager(ha);
+    // HA restart: the recovery start and a registry tick refresh at once
+    await Promise.all([manager.refreshDevices(), manager.refreshDevices()]);
+    expect(manager.failedEntities).toEqual([]);
+    const vacuums = [...manager.root.parts].filter(
+      (p) => (p as EntityEndpoint).entityId === VACUUM,
+    );
+    expect(vacuums).toHaveLength(1);
   });
 });

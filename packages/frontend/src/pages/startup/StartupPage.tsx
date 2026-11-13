@@ -50,6 +50,7 @@ interface SortableBridgeCardProps {
 }
 
 const SortableBridgeCard = ({ bridge, index }: SortableBridgeCardProps) => {
+  const { t } = useTranslation();
   const {
     attributes,
     listeners,
@@ -77,8 +78,6 @@ const SortableBridgeCard = ({ bridge, index }: SortableBridgeCardProps) => {
       style={style}
       variant="outlined"
       sx={{
-        cursor: "grab",
-        "&:active": { cursor: "grabbing" },
         bgcolor: isDragging ? "action.selected" : "background.paper",
         width: "fit-content",
       }}
@@ -92,13 +91,20 @@ const SortableBridgeCard = ({ bridge, index }: SortableBridgeCardProps) => {
           "&:last-child": { pb: 1 },
         }}
       >
+        {/* only the handle drags, so touch scrolling still works on the card */}
         <Box
           {...attributes}
           {...listeners}
+          aria-label={t("startup.dragHandle", { name: bridge.name })}
           sx={{
             display: "flex",
             alignItems: "center",
             color: "text.secondary",
+            cursor: "grab",
+            "&:active": { cursor: "grabbing" },
+            touchAction: "none",
+            p: 1.25,
+            m: -1.25,
           }}
         >
           <DragIndicator />
@@ -145,7 +151,10 @@ const SortableBridgeCard = ({ bridge, index }: SortableBridgeCardProps) => {
             {bridge.name}
           </Typography>
           <Typography variant="caption" color="text.secondary">
-            Port: {bridge.port} • Priority: {bridge.priority ?? 100}
+            {t("startup.bridgeMeta", {
+              port: bridge.port,
+              priority: bridge.priority ?? 100,
+            })}
           </Typography>
         </Box>
       </CardContent>
@@ -164,18 +173,18 @@ export const StartupPage = () => {
   >([]);
   const [hasChanges, setHasChanges] = useState(false);
 
-  // Initialize ordered bridges sorted by priority
+  // Initialize ordered bridges sorted by priority. Websocket updates must not
+  // throw away an order the user has not saved yet.
   useEffect(() => {
-    if (bridges) {
+    if (bridges && !hasChanges) {
       const sorted = [...bridges].sort((a, b) => {
         const priorityA = a.priority ?? 100;
         const priorityB = b.priority ?? 100;
         return priorityA - priorityB;
       });
       setOrderedBridges(sorted);
-      setHasChanges(false);
     }
-  }, [bridges]);
+  }, [bridges, hasChanges]);
 
   const sensors = useSensors(
     useSensor(PointerSensor),
@@ -240,7 +249,7 @@ export const StartupPage = () => {
       <Box display="flex" alignItems="center" gap={2}>
         <RocketLaunch color="primary" fontSize="large" />
         <Box>
-          <Typography variant="h5" fontWeight={600}>
+          <Typography variant="h5" component="h1">
             {t("startup.title")}
           </Typography>
           <Typography variant="body2" color="text.secondary">

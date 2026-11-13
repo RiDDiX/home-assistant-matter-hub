@@ -7,8 +7,9 @@ import { HomeAssistantEntityBehavior } from "../../../behaviors/home-assistant-e
 import { IdentifyServer } from "../../../behaviors/identify-server.js";
 
 /**
- * Button-specific OnOffServer that auto-resets to OFF after press.
- * This prevents buttons from appearing "stuck on" in controllers like Google Home.
+ * Button-specific OnOffServer that never turns on, so buttons do not appear
+ * "stuck on" in controllers like Google Home. Every on path (toggle, timed,
+ * scene) goes through on(), which only presses the button.
  * Lighting is mandatory on OnOffPlugInUnit. A timed off only lands in off(),
  * which never calls HA here.
  */
@@ -20,25 +21,13 @@ class ButtonOnOffServerBase extends Base.with("Lighting") {
   }
 
   override on() {
-    const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);
-    homeAssistant.callAction({ action: "button.press" });
-    // disableMomentaryFlip (#423): the reset never toggles onOff (this class
-    // never sets it true), so skipping it just avoids a dead timer.
-    if (homeAssistant.state.mapping?.disableMomentaryFlip) {
-      return;
-    }
-    // Auto-reset to OFF after 1 second so button doesn't stay "on"
-    setTimeout(this.callback(this.resetToOff), 1000);
+    this.agent
+      .get(HomeAssistantEntityBehavior)
+      .callAction({ action: "button.press" });
   }
 
-  override off() {
-    // Buttons don't have an "off" action, just reset state
-    setTimeout(this.callback(this.resetToOff), 100);
-  }
-
-  private resetToOff() {
-    applyPatchState(this.state, { onOff: false });
-  }
+  // Buttons have no "off" action and onOff never leaves false.
+  override off() {}
 }
 
 const ButtonEndpointType = OnOffPlugInUnitDevice.with(

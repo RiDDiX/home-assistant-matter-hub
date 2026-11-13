@@ -24,6 +24,7 @@ import Tooltip from "@mui/material/Tooltip";
 import Typography from "@mui/material/Typography";
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useBridges } from "../../hooks/data/bridges.ts";
 import { useDiagnostics } from "../../hooks/useDiagnostics.ts";
 
 function contrastText(hex: string): string {
@@ -74,7 +75,7 @@ function formatTime(ts: number): string {
 const allEventTypes = Object.keys(eventTypeColors) as DiagnosticEventType[];
 
 export interface LiveEventLogProps {
-  sortField?: "name" | "created";
+  sortField?: "name" | "priority";
   sortDirection?: "asc" | "desc";
 }
 
@@ -85,6 +86,7 @@ export function LiveEventLog({
   const { t } = useTranslation();
   const theme = useTheme();
   const { events, snapshot, connected, clearEvents } = useDiagnostics();
+  const { content: liveBridges } = useBridges();
   const [enabledTypes, setEnabledTypes] = useState<Set<string>>(
     new Set(allEventTypes),
   );
@@ -102,21 +104,30 @@ export function LiveEventLog({
     });
   };
 
-  const filteredEvents = events.filter((e) => enabledTypes.has(e.type));
+  // newest first, the box is only 400 px tall
+  const filteredEvents = events
+    .filter((e) => enabledTypes.has(e.type))
+    .reverse();
 
+  // the snapshot only arrives on subscribe, the store stays live
   const sortedBridges = useMemo(() => {
-    const bridges = snapshot?.bridges ?? [];
+    const live = new Map(liveBridges?.map((b) => [b.id, b]));
+    const bridges = (snapshot?.bridges ?? []).map((b) => ({
+      ...b,
+      status: live.get(b.bridgeId)?.status ?? b.status,
+      priority: live.get(b.bridgeId)?.priority ?? 100,
+    }));
     if (!sortField) return bridges;
-    return [...bridges].sort((a, b) => {
+    return bridges.sort((a, b) => {
       let cmp = 0;
       if (sortField === "name") {
         cmp = a.bridgeName.localeCompare(b.bridgeName);
       } else {
-        cmp = a.bridgeId.localeCompare(b.bridgeId);
+        cmp = a.priority - b.priority;
       }
       return sortDirection === "desc" ? -cmp : cmp;
     });
-  }, [snapshot?.bridges, sortField, sortDirection]);
+  }, [snapshot?.bridges, liveBridges, sortField, sortDirection]);
 
   const typeCounts: Record<string, number> = {};
   for (const e of events) {
@@ -155,6 +166,8 @@ export function LiveEventLog({
             <Tooltip title={t("diagnostics.filterEvents")}>
               <IconButton
                 size="small"
+                aria-label={t("diagnostics.filterEvents")}
+                aria-expanded={showFilters}
                 onClick={() => setShowFilters((v) => !v)}
                 color={showFilters ? "primary" : "default"}
               >
@@ -162,7 +175,11 @@ export function LiveEventLog({
               </IconButton>
             </Tooltip>
             <Tooltip title={t("diagnostics.clearEvents")}>
-              <IconButton size="small" onClick={clearEvents}>
+              <IconButton
+                size="small"
+                aria-label={t("diagnostics.clearEvents")}
+                onClick={clearEvents}
+              >
                 <ClearAllIcon />
               </IconButton>
             </Tooltip>
@@ -203,7 +220,9 @@ export function LiveEventLog({
           })}
           {snapshot?.system && (
             <Chip
-              label={`Total: ${snapshot.system.eventCount}`}
+              label={t("diagnostics.total", {
+                count: snapshot.system.eventCount,
+              })}
               size="small"
               variant="outlined"
               sx={{ fontSize: "0.7rem", height: 22 }}
@@ -273,7 +292,7 @@ export function LiveEventLog({
               sx={{ textAlign: "center", py: 4 }}
             >
               {events.length === 0
-                ? "Waiting for diagnostic events…"
+                ? t("diagnostics.waiting")
                 : t("diagnostics.noEvents")}
             </Typography>
           ) : (
@@ -380,6 +399,7 @@ export function LiveEventLog({
 }
 
 function BridgeSnapshotCard({ bridge }: { bridge: DiagnosticBridgeInfo }) {
+  const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
   return (
     <Grid size={{ xs: 12, sm: 6 }}>
@@ -398,8 +418,10 @@ function BridgeSnapshotCard({ bridge }: { bridge: DiagnosticBridgeInfo }) {
             <Typography variant="body2" fontWeight={500} noWrap>
               {bridge.bridgeName}
             </Typography>
+            {/* sessionCount is the fabric count, see diagnostic-service */}
             <Typography variant="caption" color="text.secondary" noWrap>
-              {bridge.entityCount} devices · {bridge.sessionCount} sessions
+              {t("dashboard.deviceCount", { count: bridge.entityCount })} ·{" "}
+              {t("dashboard.fabricCount", { count: bridge.sessionCount })}
             </Typography>
           </Box>
           <Stack
@@ -425,7 +447,9 @@ function BridgeSnapshotCard({ bridge }: { bridge: DiagnosticBridgeInfo }) {
                 />
               ))}
             <Chip
-              label={bridge.status}
+              label={t(`common.${bridge.status}`, {
+                defaultValue: bridge.status,
+              })}
               size="small"
               color={
                 bridge.status === "running"

@@ -24,11 +24,12 @@ export function buildIncludeMatchers(args: {
 }): HomeAssistantMatcher[] {
   const { filterType, useWildcard, entityPattern, labelValues } = args;
   switch (filterType) {
+    // labels sit on the entity or its device, include mode is "any"
     case "label":
-      return labelValues.map((value) => ({
-        type: HomeAssistantMatcherType.EntityLabel,
-        value,
-      }));
+      return labelValues.flatMap((value) => [
+        { type: HomeAssistantMatcherType.EntityLabel, value },
+        { type: HomeAssistantMatcherType.DeviceLabel, value },
+      ]);
     case "area":
       return splitList(entityPattern).map((value) => ({
         type: HomeAssistantMatcherType.Area,

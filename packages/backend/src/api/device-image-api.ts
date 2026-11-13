@@ -6,7 +6,10 @@ import type { HomeAssistantRegistry } from "../services/home-assistant/home-assi
 
 const ALLOWED_EXTENSIONS = [".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"];
 const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
+const INVALID_TYPE = `Invalid file type. Allowed: ${ALLOWED_EXTENSIONS.join(", ")}`;
 const Z2M_IMAGE_BASE = "https://www.zigbee2mqtt.io/images/devices";
+// Home Assistant entity id, bounded so name plus extension fits a file name
+const ENTITY_ID = /^\w{1,64}\.\w{1,180}$/;
 
 function sanitizeEntityId(entityId: string): string {
   return entityId.replace(/[^a-z0-9._-]/gi, "_");
@@ -64,11 +67,7 @@ export function deviceImageApi(
     if (ALLOWED_EXTENSIONS.includes(ext)) {
       cb(null, true);
     } else {
-      cb(
-        new Error(
-          `Invalid file type. Allowed: ${ALLOWED_EXTENSIONS.join(", ")}`,
-        ),
-      );
+      cb(new Error(INVALID_TYPE));
     }
   };
 
@@ -78,7 +77,30 @@ export function deviceImageApi(
     limits: { fileSize: MAX_FILE_SIZE },
   });
 
+  // multer and fileFilter report through next(err), Express would answer 500
+  const uploadError = (
+    err: unknown,
+    _req: express.Request,
+    res: express.Response,
+    _next: express.NextFunction,
+  ) => {
+    if (err instanceof multer.MulterError) {
+      const tooLarge = err.code === "LIMIT_FILE_SIZE";
+      res.status(tooLarge ? 413 : 400).json({ error: err.message });
+    } else if (err instanceof Error && err.message === INVALID_TYPE) {
+      res.status(400).json({ error: err.message });
+    } else {
+      // disk errors are ours and their message carries absolute paths
+      res.status(500).json({ error: "Upload failed" });
+    }
+  };
+
   const router = express.Router();
+
+  router.param("entityId", (_req, res, next, entityId: string) => {
+    if (ENTITY_ID.test(entityId)) next();
+    else res.status(400).json({ error: "Invalid entity id" });
+  });
 
   // Batch resolve image availability for multiple entities.
   // Returns { [entityId]: { source: "custom" | "z2m" | "none", z2mUrl?: string } }
@@ -95,6 +117,10 @@ export function deviceImageApi(
     > = {};
 
     for (const entityId of entityIds) {
+      if (!ENTITY_ID.test(entityId)) {
+        result[entityId] = { source: "none" };
+        continue;
+      }
       const custom = findCustomImage(imagesDir, entityId);
       if (custom) {
         result[entityId] = { source: "custom" };
@@ -130,6 +156,7 @@ export function deviceImageApi(
       }
       res.json({ success: true });
     },
+    uploadError,
   );
 
   // Get image for an entity (custom file or z2m redirect)
@@ -138,7 +165,12 @@ export function deviceImageApi(
 
     const customImage = findCustomImage(imagesDir, entityId);
     if (customImage) {
-      res.sendFile(customImage);
+      res.sendFile(customImage, {
+        headers: {
+          "Content-Security-Policy": "sandbox",
+          "X-Content-Type-Options": "nosniff",
+        },
+      });
       return;
     }
 

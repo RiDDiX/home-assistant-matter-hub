@@ -151,21 +151,26 @@ export function metricsApi(
       "",
     ];
 
-    for (const bridge of bridges) {
-      const data = bridge.data;
-      const status = data.status === "running" ? 1 : 0;
-      const safeName = data.name.replace(/[^a-zA-Z0-9_]/g, "_");
-      lines.push(
-        `# HELP hamh_bridge_status Bridge status (1=running, 0=not running)`,
-        `# TYPE hamh_bridge_status gauge`,
-        `hamh_bridge_status{bridge_id="${bridge.id}",bridge_name="${safeName}"} ${status}`,
-        "",
-        `# HELP hamh_bridge_devices Number of devices on bridge`,
-        `# TYPE hamh_bridge_devices gauge`,
-        `hamh_bridge_devices{bridge_id="${bridge.id}",bridge_name="${safeName}"} ${data.deviceCount}`,
-        "",
-      );
-    }
+    // The exposition format wants one HELP/TYPE per metric, samples grouped.
+    const labels = bridges.map(
+      (b) =>
+        `{bridge_id="${b.id}",bridge_name="${b.data.name.replace(/[^a-zA-Z0-9_]/g, "_")}"}`,
+    );
+    lines.push(
+      `# HELP hamh_bridge_status Bridge status (1=running, 0=not running)`,
+      `# TYPE hamh_bridge_status gauge`,
+      ...bridges.map(
+        (b, i) =>
+          `hamh_bridge_status${labels[i]} ${b.data.status === "running" ? 1 : 0}`,
+      ),
+      "",
+      `# HELP hamh_bridge_devices Number of devices on bridge`,
+      `# TYPE hamh_bridge_devices gauge`,
+      ...bridges.map(
+        (b, i) => `hamh_bridge_devices${labels[i]} ${b.data.deviceCount}`,
+      ),
+      "",
+    );
 
     res.setHeader("Content-Type", "text/plain; version=0.0.4; charset=utf-8");
     res.send(lines.join("\n"));

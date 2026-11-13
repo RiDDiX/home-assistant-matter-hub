@@ -253,6 +253,16 @@ const featureFlagSchema: JSONSchema7 = {
       default: false,
     },
 
+    productNameFromModel: {
+      title: "Product Name from Model",
+      description:
+        "Report the Home Assistant device model (e.g. Smart Lock Pro) as the Matter productName " +
+        "instead of the model_id (e.g. 178). Apple Home shows productName as the model. " +
+        "A per-entity customProductName and productNameFromNodeLabel still take precedence.",
+      type: "boolean",
+      default: false,
+    },
+
     preferEntityRegistryName: {
       title: "Prefer Entity Registry Name (HA 2026.4 workaround)",
       description:
@@ -408,7 +418,9 @@ const featureFlagSchema: JSONSchema7 = {
         "stuck on 'Updating' and Alexa bridges whose devices all go " +
         "unresponsive while the session keeps acking. A false positive only " +
         "triggers a transparent reconnect, the same as normal rotation. " +
-        "Default off.",
+        "Not meant for Google Home: Google hubs only subscribe and send no " +
+        "requests in between, so the rule would rotate a healthy session " +
+        "about every 50 minutes. Default off.",
       type: "boolean",
       default: false,
     },
@@ -447,8 +459,9 @@ export const bridgeConfigSchema: JSONSchema7 = {
     },
     port: {
       title: "Port",
-      type: "number",
+      type: "integer",
       minimum: 1,
+      maximum: 65535,
     },
     icon: {
       title: "Icon",
@@ -483,7 +496,8 @@ export const bridgeConfigSchema: JSONSchema7 = {
       description:
         "An ISO 3166-1 alpha-2 code to represent the country in which the Node is located. Only needed if the commissioning fails due to missing country code.",
       minLength: 2,
-      maxLength: 3,
+      maxLength: 2,
+      pattern: "^[A-Za-z]{2}$",
     },
     priority: {
       title: "Startup Priority",
@@ -510,8 +524,10 @@ export const bridgeConfigSchema: JSONSchema7 = {
         "Mixed into the unique ID of every bridged device on this bridge " +
         "(standard bridge mode). Controllers like Alexa cache device records " +
         "keyed on the unique ID, so setting or changing this can help mint " +
-        "fresh identities. Applies after a bridge restart, then re-discover " +
-        "in the controller. Leave empty for default behavior.",
+        "fresh identities. Applies after a restart of the whole app " +
+        "(add-on), a bridge restart is not enough; a new bridge uses it " +
+        "right away. Then re-discover in the controller. Leave empty for " +
+        "default behavior.",
       maxLength: 16,
     },
     sessionMaxAgeHours: {

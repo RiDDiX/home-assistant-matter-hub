@@ -4,6 +4,7 @@ import {
 } from "@home-assistant-matter-hub/common";
 import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { NotificationsContext } from "../../components/notifications/notifications-context.ts";
 import { setBridgesFromWebSocket } from "../../state/bridges/bridge-actions.ts";
 import { store } from "../../state/store.ts";
 import { renderWithProviders } from "../../test/render.tsx";
@@ -564,5 +565,55 @@ describe("PluginsPage config dialog hardening", () => {
     fireEvent.click(await screen.findByText("camera"));
     const token = await screen.findByLabelText("HA token");
     expect((token as HTMLInputElement).type).toBe("password");
+  });
+});
+
+// The install hints say a bridge restart loads the plugin, but a package
+// already loaded in this process needs an app restart. The backend says which.
+describe("PluginsPage install notification", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    store.dispatch(setBridgesFromWebSocket([]));
+  });
+
+  async function install(body: unknown) {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) =>
+        String(input) === "api/plugins/install"
+          ? { ok: true, json: async () => body }
+          : { ok: true, json: async () => [] },
+      ),
+    );
+    const show = vi.fn();
+    renderWithProviders(
+      <NotificationsContext.Provider value={{ show }}>
+        <PluginsPage />
+      </NotificationsContext.Provider>,
+    );
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Install Plugin" }),
+    );
+    fireEvent.change(screen.getByLabelText("npm package name"), {
+      target: { value: "hamh-plugin-x" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Install" }));
+    await waitFor(() => expect(show).toHaveBeenCalled());
+    return show.mock.calls[0][0];
+  }
+
+  it("shows the backend message", async () => {
+    const message =
+      "Plugin installed. hamh-plugin-x is already loaded, restart the app (add-on or container) to run the new version.";
+    expect(await install({ success: true, message })).toEqual({
+      message,
+      severity: "success",
+    });
+  });
+
+  it("falls back to the npm hint without a message", async () => {
+    expect((await install({ success: true })).message).toMatch(
+      /restart the bridge to load the plugin/,
+    );
   });
 });

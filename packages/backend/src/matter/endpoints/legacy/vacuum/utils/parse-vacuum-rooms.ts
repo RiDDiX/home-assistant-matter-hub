@@ -305,9 +305,14 @@ export function isDreameVacuum(attributes: VacuumDeviceAttributes): boolean {
     return false;
   }
 
-  // Check if any value is an array (Dreame nested format)
+  // An array of room objects; Ecovacs uses arrays of numeric ids
   for (const value of Object.values(roomsData)) {
-    if (Array.isArray(value)) {
+    if (
+      Array.isArray(value) &&
+      typeof value[0] === "object" &&
+      value[0] !== null &&
+      "id" in value[0]
+    ) {
       return true;
     }
   }
@@ -351,12 +356,17 @@ export function isEcovacsVacuum(attributes: VacuumDeviceAttributes): boolean {
     return false;
   }
 
-  // Ecovacs format: all values are plain numbers (room IDs), keys are room names
-  // This excludes Dreame (values are arrays) and simple id:name objects (keys are numeric)
+  // Ecovacs format: values are room IDs or arrays of them, keys are room names
+  // This excludes Dreame (arrays of room objects) and simple id:name objects (keys are numeric)
   const entries = Object.entries(roomsData);
   if (entries.length === 0) return false;
 
   return entries.every(
-    ([key, value]) => typeof value === "number" && !/^\d+$/.test(key),
+    ([key, value]) =>
+      (typeof value === "number" ||
+        (Array.isArray(value) &&
+          value.length > 0 &&
+          value.every((id) => typeof id === "number"))) &&
+      !/^\d+$/.test(key),
   );
 }

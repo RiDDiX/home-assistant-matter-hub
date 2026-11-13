@@ -225,6 +225,32 @@ describe("#461 air purifier rebuild loop", () => {
     expect(updateEntityState).toHaveBeenCalled();
   });
 
+  // PowerSource sits on the parent and HEPA on the purifier sub, both only
+  // re-read when the fan entity writes
+  it("pushes a battery-only change through the fan endpoints", async () => {
+    const endpoint = await mountedPurifier();
+    const states: HomeAssistantStates = {
+      [FAN]: state(FAN, "on", { supported_features: 56, percentage: 40 }),
+      [TEMPERATURE]: state(TEMPERATURE, "21.5", {}),
+      [BATTERY]: state(BATTERY, "80", {}),
+    };
+    await endpoint.updateStates(states);
+    await delay(200);
+    vi.mocked(updateEntityState).mockClear();
+
+    await endpoint.updateStates({
+      ...states,
+      [BATTERY]: state(BATTERY, "55", {}),
+    });
+    await delay(200);
+
+    const flushed = vi
+      .mocked(updateEntityState)
+      .mock.calls.map(([ep]) => ep.id)
+      .sort();
+    expect(flushed).toEqual([endpoint.id, `${endpoint.id}_air_purifier`]);
+  });
+
   it("drops a queued update when the endpoint is closed", async () => {
     const endpoint = await mountedPurifier();
     await endpoint.updateStates({

@@ -45,6 +45,28 @@ export function createEndpointId(
   return baseName.replace(/\./g, "_").replace(/\s+/g, "_");
 }
 
+// A mapped entity without its own endpoint (battery, power, energy, filter
+// life) is only re-read when the primary entity writes, so a composed endpoint
+// has to force the primary through when one of them moved.
+export function mappedNonSubStateChanged(
+  mappedEntityIds: readonly string[],
+  subEntityIds: ReadonlyMap<string, unknown>,
+  states: HomeAssistantStates,
+  lastMappedStates: Map<string, string>,
+): boolean {
+  let changed = false;
+  for (const mappedId of mappedEntityIds) {
+    if (subEntityIds.has(mappedId)) continue;
+    const mappedState = states[mappedId];
+    if (!mappedState) continue;
+    if (mappedState.state !== lastMappedStates.get(mappedId)) {
+      lastMappedStates.set(mappedId, mappedState.state);
+      changed = true;
+    }
+  }
+  return changed;
+}
+
 export function getMappedEntityIds(mapping?: EntityMappingConfig): string[] {
   if (!mapping) return [];
   const ids: string[] = [];
@@ -52,7 +74,9 @@ export function getMappedEntityIds(mapping?: EntityMappingConfig): string[] {
     ids.push(mapping.batteryEntity);
   }
   if (mapping.faultEntity) ids.push(mapping.faultEntity);
+  if (mapping.cleaningJobEntity) ids.push(mapping.cleaningJobEntity);
   if (mapping.chargingStateEntity) ids.push(mapping.chargingStateEntity);
+  if (mapping.readinessEntity) ids.push(mapping.readinessEntity);
   if (mapping.temperatureEntity) ids.push(mapping.temperatureEntity);
   if (mapping.humidityEntity) ids.push(mapping.humidityEntity);
   if (mapping.pressureEntity) ids.push(mapping.pressureEntity);

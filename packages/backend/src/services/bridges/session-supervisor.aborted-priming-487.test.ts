@@ -1,7 +1,11 @@
+import { Time } from "@matter/general";
 import { MessageType } from "@matter/main/protocol";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ServerModeBridge } from "./server-mode-bridge.js";
 import {
+  DEAD_SESSION_TIMEOUT_MS,
+  deadSessionTimeoutMs,
+  FAST_DEAD_SESSION_TIMEOUT_MS,
   PRIMING_GRACE_MS,
   STALE_SESSION_QUIET_WINDOW_MS,
 } from "./session-rotation.js";
@@ -75,8 +79,15 @@ function makeBridge(sessions: FakeSession[], featureFlags: object = {}) {
     server as never,
   );
   const supervisor = (bridge as unknown as { sessions: unknown })
-    .sessions as unknown as { wireSessionDiagnostics(): void };
+    .sessions as unknown as {
+    wireSessionDiagnostics(): void;
+    stop(): void;
+    stopped: boolean;
+    staleSessionTimers: Map<number, unknown>;
+  };
   const before = interactionServer.onNewExchange;
+  // stands in for start() without its rotation and watchdog intervals
+  supervisor.stopped = false;
   supervisor.wireSessionDiagnostics();
   const wrapped = interactionServer.onNewExchange;
   onNewExchange = () => {};
@@ -90,7 +101,7 @@ function makeBridge(sessions: FakeSession[], featureFlags: object = {}) {
       } as never,
     );
 
-  return { handlers, subscribeRequest };
+  return { handlers, subscribeRequest, supervisor };
 }
 
 // past the 5 min quiet window plus a 60s re-arm
@@ -171,6 +182,17 @@ describe("subscription aborted during initial data reports (#487)", () => {
     expect(session.initiateClose).not.toHaveBeenCalled();
   });
 
+  it("arms no watchdog for a SubscribeRequest that lands after stop()", () => {
+    const session = fakeSession(50000);
+    const { subscribeRequest, supervisor } = makeBridge([session]);
+
+    supervisor.stop();
+    subscribeRequest(session);
+
+    expect(supervisor.staleSessionTimers.size).toBe(0);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
   it("still reaps a wedged session under fastSessionRecovery", async () => {
     const session = fakeSession(40001);
     const { subscribeRequest } = makeBridge([session], {
@@ -180,6 +202,83 @@ describe("subscription aborted during initial data reports (#487)", () => {
     subscribeRequest(session);
     await vi.advanceTimersByTimeAsync(PAST_QUIET_MS);
 
+    expect(session.initiateClose).toHaveBeenCalled();
+  });
+});
+
+// matter.js reports on the peer's newest session, so an older session that
+// owns a live subscription goes quiet. A new CASE must not kill it.
+describe("older session holding a subscription on a new session", () => {
+  for (const fastSessionRecovery of [false, true]) {
+    it(`keeps it until matter.js drops the sub (fastSessionRecovery=${fastSessionRecovery})`, async () => {
+      const older = fakeSession(1);
+      older.subscriptions.size = 1;
+      older.timestamp = Time.nowUs - STALE_SESSION_QUIET_WINDOW_MS - 60_000;
+      const current = fakeSession(2);
+      current.subscriptions.size = 1;
+      const fresh = fakeSession(3);
+      fresh.subscriptions.size = 1;
+      const { handlers } = makeBridge([older, current, fresh], {
+        fastSessionRecovery,
+      });
+
+      handlers.added?.(fresh as never);
+      await vi.advanceTimersByTimeAsync(PAST_QUIET_MS);
+      expect(older.initiateClose).not.toHaveBeenCalled();
+
+      older.subscriptions.size = 0;
+      handlers.subscriptionsChanged?.(older as never);
+      const timeoutMs = deadSessionTimeoutMs({ fastSessionRecovery });
+      await vi.advanceTimersByTimeAsync(timeoutMs - 1);
+      expect(older.initiateClose).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(older.initiateClose).toHaveBeenCalled();
+      expect(current.initiateClose).not.toHaveBeenCalled();
+      expect(fresh.initiateClose).not.toHaveBeenCalled();
+    });
+  }
+});
+
+// A 5s fastSessionRecovery stale timer must not cut a SubscribeRequest short.
+describe("SubscribeRequest on a session with a stale timer armed", () => {
+  it("applies the priming floor under fastSessionRecovery", async () => {
+    const session = fakeSession(60000);
+    session.timestamp = Time.nowUs;
+    const { handlers, subscribeRequest } = makeBridge([session], {
+      fastSessionRecovery: true,
+    });
+
+    handlers.subscriptionsChanged?.(session as never);
+    await vi.advanceTimersByTimeAsync(1_000);
+    session.timestamp = Time.nowUs;
+    subscribeRequest(session);
+
+    await vi.advanceTimersByTimeAsync(FAST_DEAD_SESSION_TIMEOUT_MS);
+    expect(session.initiateClose).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(
+      PRIMING_GRACE_MS - FAST_DEAD_SESSION_TIMEOUT_MS - 1,
+    );
+    expect(session.initiateClose).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(session.initiateClose).toHaveBeenCalled();
+  });
+
+  it("replaces the armed timer and lets the quiet window decide by default", async () => {
+    const session = fakeSession(60001);
+    session.timestamp = Time.nowUs;
+    const { handlers, subscribeRequest, supervisor } = makeBridge([session]);
+
+    handlers.subscriptionsChanged?.(session as never);
+    const armed = supervisor.staleSessionTimers.get(session.id);
+    expect(armed).toBeDefined();
+    await vi.advanceTimersByTimeAsync(1_000);
+    subscribeRequest(session);
+    expect(supervisor.staleSessionTimers.get(session.id)).toBeDefined();
+    expect(supervisor.staleSessionTimers.get(session.id)).not.toBe(armed);
+
+    await vi.advanceTimersByTimeAsync(STALE_SESSION_QUIET_WINDOW_MS - 10_000);
+    expect(session.initiateClose).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(DEAD_SESSION_TIMEOUT_MS + 10_000);
     expect(session.initiateClose).toHaveBeenCalled();
   });
 });

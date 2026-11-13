@@ -5,7 +5,22 @@ import type {
   SanitizedLockCredential,
 } from "@home-assistant-matter-hub/common";
 import { type Request, type Response, Router } from "express";
+import { effectivePinCodeLengths } from "../matter/behaviors/lock-server.js";
 import type { LockCredentialStorage } from "../services/storage/lock-credential-storage.js";
+
+type PinLengthMapping = Parameters<typeof effectivePinCodeLengths>[0];
+
+// The PIN is stored once per entity, so it has to fit the bounds every bridge
+// mapping of that entity advertises (#418).
+function pinLengthsOf(mappings: PinLengthMapping[]) {
+  const all = (mappings.length > 0 ? mappings : [undefined]).map(
+    effectivePinCodeLengths,
+  );
+  return {
+    min: Math.max(...all.map((l) => l.min)),
+    max: Math.min(...all.map((l) => l.max)),
+  };
+}
 
 /**
  * Sanitize credential for API response - never expose PIN hash/salt
@@ -26,6 +41,7 @@ function sanitizeCredential(
 
 export function lockCredentialApi(
   lockCredentialStorage: LockCredentialStorage,
+  mappingsOf: (entityId: string) => PinLengthMapping[] = () => [],
 ): Router {
   const router = Router();
 
@@ -71,15 +87,28 @@ export function lockCredentialApi(
       const decodedEntityId = decodeURIComponent(entityId);
       const { pinCode, name, enabled } = req.body;
 
-      if (!pinCode || pinCode.length < 4 || pinCode.length > 8) {
-        res
-          .status(400)
-          .json({ error: "PIN code must be between 4 and 8 digits" });
+      if (typeof pinCode !== "string" || !/^\d+$/.test(pinCode)) {
+        res.status(400).json({ error: "PIN code must contain only digits" });
         return;
       }
 
-      if (!/^\d+$/.test(pinCode)) {
-        res.status(400).json({ error: "PIN code must contain only digits" });
+      const { min, max } = pinLengthsOf(mappingsOf(decodedEntityId));
+      if (min > max) {
+        res.status(400).json({
+          error:
+            "The PIN length settings of this lock's bridges do not overlap",
+        });
+        return;
+      }
+      if (pinCode.length < min || pinCode.length > max) {
+        res
+          .status(400)
+          .json({ error: `PIN code must be between ${min} and ${max} digits` });
+        return;
+      }
+
+      if (enabled !== undefined && typeof enabled !== "boolean") {
+        res.status(400).json({ error: "enabled must be a boolean" });
         return;
       }
 
@@ -103,7 +132,11 @@ export function lockCredentialApi(
     ) => {
       const { entityId } = req.params;
       const decodedEntityId = decodeURIComponent(entityId);
-      const { enabled } = req.body;
+      const enabled = req.body?.enabled;
+      if (typeof enabled !== "boolean") {
+        res.status(400).json({ error: "enabled must be a boolean" });
+        return;
+      }
 
       const credential = await lockCredentialStorage.toggleEnabled(
         decodedEntityId,

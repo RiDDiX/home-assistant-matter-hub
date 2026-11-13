@@ -9,12 +9,13 @@ import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
 import Card from "@mui/material/Card";
 import CardContent from "@mui/material/CardContent";
+import CircularProgress from "@mui/material/CircularProgress";
 import Grid from "@mui/material/Grid";
 import Link from "@mui/material/Link";
 import Stack from "@mui/material/Stack";
 import Typography from "@mui/material/Typography";
 import { useCallback, useMemo, useState } from "react";
-import { useTranslation } from "react-i18next";
+import { Trans, useTranslation } from "react-i18next";
 import { navigation } from "../../routes.tsx";
 import { FormEditor } from "../misc/editors/FormEditor";
 import { JsonEditor } from "../misc/editors/JsonEditor";
@@ -54,6 +55,7 @@ export const BridgeConfigEditor = (props: BridgeConfigEditorProps) => {
 
   const [config, setConfig] = useState<object | undefined>(props.bridge);
   const [isValid, setIsValid] = useState<boolean>(true);
+  const [saving, setSaving] = useState(false);
 
   const validatePort = useCallback(
     (value: object | undefined): ValidationError[] => {
@@ -66,18 +68,19 @@ export const BridgeConfigEditor = (props: BridgeConfigEditorProps) => {
         return [
           {
             instancePath: "/port",
-            message: `Port is already used by bridge with id ${usedBy}`,
+            message: t("bridge.portInUse", { id: usedBy }),
           },
         ];
       }
       return [];
     },
-    [props.bridgeId, props.usedPorts],
+    [props.bridgeId, props.usedPorts, t],
   );
 
+  const [iconRevision, setIconRevision] = useState(0);
+
   const onChange = (data: object | undefined, isValid: boolean) => {
-    // Preserve the icon field when FormEditor/JsonEditor updates
-    // since icon is managed separately by BridgeIconUpload
+    // FormEditor hides the icon, BridgeIconUpload manages it
     const prevIcon = (prev: object | undefined) => (prev as BridgeConfig)?.icon;
     setConfig((prev) => {
       const icon = prevIcon(prev);
@@ -86,7 +89,16 @@ export const BridgeConfigEditor = (props: BridgeConfigEditorProps) => {
     setIsValid(isValid);
   };
 
+  // the JSON text shows the icon, so its value wins; unparsable text keeps
+  // the last parsed config
+  const onJsonChange = (data: object | undefined, isValid: boolean) => {
+    setConfig((prev) => (data ? { ...data } : prev));
+    setIsValid(isValid);
+  };
+
   const handleIconChange = useCallback((icon: BridgeIconType | undefined) => {
+    // remount the JSON editor so its text shows the picked icon
+    setIconRevision((r) => r + 1);
     setConfig((prev) => {
       if (icon != null) {
         return { ...prev, icon };
@@ -101,79 +113,52 @@ export const BridgeConfigEditor = (props: BridgeConfigEditorProps) => {
   const warnings = useMemo(() => {
     const cfg = config as Partial<BridgeConfig> | undefined;
     const flags = cfg?.featureFlags;
-    const result: { severity: "warning" | "error"; message: string }[] = [];
-
+    const result: string[] = [];
     if (flags?.serverMode) {
-      result.push({
-        severity: "warning",
-        message:
-          "Server Mode is enabled. The node carries up to 10 devices; the " +
-          "first entity is the primary and drives the node name and type. " +
-          "More than one device is experimental.",
-      });
+      result.push("bridge.serverModeWarning");
     }
-
     if (flags?.serverMode && flags?.vacuumOnOff === false) {
-      result.push({
-        severity: "warning",
-        message:
-          "Server Mode with Vacuum OnOff disabled: Alexa REQUIRES the OnOff cluster " +
-          "(PowerController) for robotic vacuums. Without it, the vacuum commissions " +
-          "but never appears in Alexa. Only disable this for Apple Home.",
-      });
+      result.push("bridge.serverModeVacuumOnOffWarning");
     }
-
     if (!flags?.serverMode && flags?.vacuumOnOff) {
-      result.push({
-        severity: "warning",
-        message:
-          "Vacuum OnOff is enabled in bridge mode. This adds a non-standard cluster " +
-          "to the RVC device type which may cause issues with Apple Home and Google Home.",
-      });
+      result.push("bridge.vacuumOnOffBridgeWarning");
     }
-
     if (flags?.autoForceSync && flags?.autoComposedDevices) {
-      result.push({
-        severity: "warning",
-        message:
-          "Auto Force Sync with Auto Composed Devices increases network traffic. " +
-          "Composed devices have more clusters, so each sync cycle sends more data.",
-      });
+      result.push("bridge.forceSyncComposedWarning");
     }
-
     return result;
   }, [config]);
 
   const saveAction = async () => {
-    if (!isValid) {
+    if (!isValid || saving) {
       return;
     }
-    await props.onSave(config as BridgeConfig);
+    setSaving(true);
+    try {
+      await props.onSave(config as BridgeConfig);
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
     <>
       <Alert severity="warning" variant="outlined">
-        Please consult{" "}
-        <Link href={navigation.faq.bridgeConfig} target="_blank">
-          the documentation
-        </Link>{" "}
-        for proper bridge configurations.{" "}
-        <strong>
-          Especially if you are using labels, see the "Labels" section.
-        </strong>
+        <Trans
+          i18nKey="bridge.configDocsHint"
+          components={{
+            docs: <Link href={navigation.faq.bridgeConfig} target="_blank" />,
+          }}
+        />
       </Alert>
 
       <Alert severity="info" variant="outlined">
-        <strong>Community tip:</strong> Users have reported that bridges with a
-        large number of devices can become unstable depending on the controller.
-        If you experience connectivity issues, consider splitting your devices
-        across multiple bridges.
+        <Trans i18nKey="bridge.communityTip" />
       </Alert>
 
-      {warnings.map((w) => (
-        <Alert key={w.message} severity={w.severity} variant="outlined">
-          {w.message}
+      {warnings.map((key) => (
+        <Alert key={key} severity="warning" variant="outlined">
+          {t(key)}
         </Alert>
       ))}
 
@@ -201,6 +186,7 @@ export const BridgeConfigEditor = (props: BridgeConfigEditorProps) => {
             onChange={onChange}
             schema={bridgeConfigSchema}
             uiSchema={{
+              "ui:submitButtonOptions": { norender: true },
               icon: { "ui:widget": "hidden" },
               featureFlags: { "ui:field": "featureFlags" },
               filter: {
@@ -229,15 +215,21 @@ export const BridgeConfigEditor = (props: BridgeConfigEditorProps) => {
 
         {editorMode === BridgeEditorMode.JSON_EDITOR && (
           <JsonEditor
+            key={iconRevision}
             value={config ?? {}}
-            onChange={onChange}
+            onChange={onJsonChange}
             schema={bridgeConfigSchema}
             customValidate={validatePort}
           />
         )}
 
         {(config as BridgeConfig)?.filter && (
-          <FilterPreview filter={(config as BridgeConfig).filter} />
+          <FilterPreview
+            filter={(config as BridgeConfig).filter}
+            includeHiddenEntities={
+              (config as BridgeConfig).featureFlags?.includeHiddenEntities
+            }
+          />
         )}
 
         <Card variant="outlined">
@@ -255,12 +247,7 @@ export const BridgeConfigEditor = (props: BridgeConfigEditorProps) => {
 
         <Grid container>
           <Grid size={{ xs: 6, sm: 4, md: 3 }}>
-            <Button
-              fullWidth
-              variant="outlined"
-              color="error"
-              onClick={props.onCancel}
-            >
+            <Button fullWidth variant="outlined" onClick={props.onCancel}>
               {t("common.cancel")}
             </Button>
           </Grid>
@@ -271,9 +258,12 @@ export const BridgeConfigEditor = (props: BridgeConfigEditorProps) => {
           <Grid size={{ xs: 6, sm: 4, md: 3 }}>
             <Button
               fullWidth
-              variant="outlined"
-              disabled={!isValid}
+              variant="contained"
+              disabled={!isValid || saving}
               onClick={saveAction}
+              startIcon={
+                saving ? <CircularProgress size={16} color="inherit" /> : null
+              }
             >
               {t("common.save")}
             </Button>

@@ -31,15 +31,13 @@ import {
 import type { BridgeDataProvider } from "./bridge-data-provider.js";
 import {
   ENDPOINT_REMOVAL_GRACE_MS,
+  ENTITY_FAILURE_RETRIES,
   type PendingRemoval,
+  removalDue,
 } from "./bridge-endpoint-manager.js";
 import type { BridgeRegistry } from "./bridge-registry.js";
 import { EntityMappingSync } from "./entity-mapping-sync.js";
-import {
-  IdentityResolver,
-  identityKey,
-  type ResolvedIdentity,
-} from "./identity-resolver.js";
+import { IdentityResolver } from "./identity-resolver.js";
 
 // Hard cap so a wildcard matcher cannot mint dozens of root endpoints (#301).
 export const MAX_SERVER_MODE_DEVICES = 10;
@@ -63,6 +61,13 @@ export class ServerModeEndpointManager extends Service {
   private unsubscribe?: () => void;
   private observingRequested = false;
   private _failedEntities: FailedEntity[] = [];
+  private _refreshIncomplete = false;
+  private _refreshDeferred = false;
+  // last create or add failure per entity and how often it repeated in a row
+  private readonly createFailures = new Map<
+    string,
+    { reason: string; count: number }
+  >();
   private readonly endpoints = new Map<string, ManagedEndpoint>();
   // Identity inputs of the primary entity as last pushed to the root node,
   // so a rename re-runs it and an unchanged refresh does not (#467).
@@ -156,7 +161,10 @@ export class ServerModeEndpointManager extends Service {
     const subscriptionIds = this.collectSubscriptionEntityIds();
     this.unsubscribe = subscribeEntities(
       this.client.connection,
-      (e) => this.updateStates(e),
+      (e, changed) =>
+        this.updateStates(e, changed).catch((err) =>
+          this.log.warn("State update failed:", err),
+        ),
       subscriptionIds,
     );
   }
@@ -250,11 +258,7 @@ export class ServerModeEndpointManager extends Service {
         this.pendingRemovals.set(entityId, { since: now, generation });
         continue;
       }
-      if (
-        now - entry.since < ENDPOINT_REMOVAL_GRACE_MS ||
-        now - this.client.runningSince < ENDPOINT_REMOVAL_GRACE_MS ||
-        generation <= entry.generation
-      ) {
+      if (!removalDue(entry, now, this.client.runningSince, generation)) {
         continue;
       }
       ready.push(entityId);
@@ -300,7 +304,38 @@ export class ServerModeEndpointManager extends Service {
     this.endpoints.delete(entityId);
   }
 
-  async refreshDevices(): Promise<void> {
+  // Overlapping runs both build the device, the second add fails and drops
+  // the map entry of the mounted endpoint, so runs queue up like in bridge mode.
+  private refreshChain: Promise<unknown> = Promise.resolve();
+
+  // Whether the last run skipped the reconcile because HA was down or the
+  // registry empty, unlike the other incomplete runs it mounted nothing.
+  get refreshDeferred(): boolean {
+    return this._refreshDeferred;
+  }
+
+  // Resolves false when the run left matching entities unmounted for a reason
+  // that only passes with time (HA down, heap pressure, a failed add).
+  refreshDevices(): Promise<boolean> {
+    const next = this.refreshChain.then(async () => {
+      let complete = false;
+      try {
+        await this.runRefreshDevices();
+        complete = !this._refreshIncomplete;
+      } finally {
+        // a start, an API refresh or a recheck needs the retry as much as a tick
+        if (!complete) this.registry.markRefreshIncomplete();
+      }
+      return complete;
+    });
+    this.refreshChain = next.catch(() => undefined);
+    return next;
+  }
+
+  private async runRefreshDevices(): Promise<void> {
+    this._refreshIncomplete = false;
+    const wasDeferred = this._refreshDeferred;
+    this._refreshDeferred = false;
     this.registry.refresh();
 
     const lifecycle = this.lifecycle;
@@ -314,9 +349,13 @@ export class ServerModeEndpointManager extends Service {
       // last good entity list and wait for HA.
       if (!this.client.haRunning || Object.keys(fullEntities).length === 0) {
         this.pendingRemovals.clear();
-        this.log.warn(
-          "HA not running or registry empty, deferring server mode reconcile",
-        );
+        const message =
+          "HA not running or registry empty, deferring server mode reconcile";
+        // once per outage, the start gate retries every few seconds
+        if (wasDeferred) this.log.debug(message);
+        else this.log.warn(message);
+        this._refreshIncomplete = true;
+        this._refreshDeferred = true;
         return;
       }
 
@@ -374,40 +413,41 @@ export class ServerModeEndpointManager extends Service {
       // existing endpoint id and keeps the device number (#404).
       const stableIdentity =
         this.dataProvider.featureFlags?.stableIdentity === true;
-      const resolvedByEntity = new Map<string, ResolvedIdentity>();
-      const endpointIdToEntity = new Map<string, string>();
-      const claimedEndpointIds = new Map<string, string>();
-      for (const entityId of orderedIds) {
-        const entityInfo = {
+      const resolvedByEntity = await this.identityResolver.resolveIdentities(
+        this.dataProvider.id,
+        orderedIds.map((entityId) => ({
           entity_id: entityId,
           registry: this.registry.entity(entityId),
-        };
-        const resolved = await this.identityResolver.resolveIdentity(
-          this.dataProvider.id,
-          entityInfo,
-          this.getEntityMapping(entityId),
-          {
-            stableIdentity,
-            isEndpointIdTaken: (id, key) =>
-              claimedEndpointIds.has(id) && claimedEndpointIds.get(id) !== key,
-          },
-        );
-        resolvedByEntity.set(entityId, resolved);
-        claimedEndpointIds.set(
-          resolved.endpointId,
-          identityKey(entityInfo) ?? `\u0000e:${entityId}`,
-        );
+        })),
+        (entityId) => this.getEntityMapping(entityId),
+        stableIdentity,
+        this.log,
+        new Map(
+          [...this.endpoints].map(([entityId, e]) => [entityId, e.endpoint.id]),
+        ),
+      );
+      const endpointIdToEntity = new Map<string, string>();
+      for (const [entityId, resolved] of resolvedByEntity) {
         endpointIdToEntity.set(resolved.endpointId, entityId);
       }
 
       // drop endpoints whose entity no longer matches the filter. A rename keeps
       // its endpoint id under a different entity, so close() (keep number)
-      // instead of delete() (frees number) for those (#404).
+      // instead of delete() (frees number) for those (#404). That includes a
+      // protected rename whose old name a new entity took in the same pass.
       const keep = new Set(orderedIds);
       for (const id of keep) {
         this.pendingRemovals.delete(id);
       }
-      const removed = [...this.endpoints.keys()].filter((id) => !keep.has(id));
+      const removed = [...this.endpoints].flatMap(([id, entry]) => {
+        const renamed = resolvedByEntity.get(
+          endpointIdToEntity.get(entry.endpoint.id) ?? "",
+        );
+        return !keep.has(id) ||
+          (renamed?.protected && renamed.renamedFrom === id)
+          ? [id]
+          : [];
+      });
       const genuinelyRemoved: string[] = [];
       for (const oldId of removed) {
         const entry = this.endpoints.get(oldId);
@@ -472,6 +512,28 @@ export class ServerModeEndpointManager extends Service {
         }
 
         const existing = this.endpoints.get(entityId);
+
+        // already exposed through another endpoint's mapped entities
+        // (e.g. the vacuum auto-claims its battery and mode selects)
+        const claimedBy = [...this.endpoints.entries()].find(
+          ([id, entry]) =>
+            id !== entityId &&
+            entry.endpoint.mappedEntityIds.includes(entityId),
+        );
+        if (claimedBy) {
+          // mounted standalone before the claim, e.g. a battery that was
+          // unavailable when the vacuum was built (#498)
+          if (existing) {
+            await this.removeEndpoints([entityId]);
+            structureChanged = true;
+          }
+          this._failedEntities.push({
+            entityId,
+            reason: `Already exposed through ${claimedBy[0]} on this node.`,
+          });
+          continue;
+        }
+
         if (
           existing &&
           existing.fingerprint ===
@@ -497,19 +559,6 @@ export class ServerModeEndpointManager extends Service {
           structureChanged = true;
         }
 
-        // already exposed through another endpoint's mapped entities
-        // (e.g. the vacuum auto-claims its battery and mode selects)
-        const claimedBy = [...this.endpoints.entries()].find(([, entry]) =>
-          entry.endpoint.mappedEntityIds.includes(entityId),
-        );
-        if (claimedBy) {
-          this._failedEntities.push({
-            entityId,
-            reason: `Already exposed through ${claimedBy[0]} on this node.`,
-          });
-          continue;
-        }
-
         // matter.js rejects duplicate endpoint ids at startup
         const endpointId =
           resolved?.endpointId ??
@@ -527,6 +576,7 @@ export class ServerModeEndpointManager extends Service {
         }
 
         if (isHeapUnderPressure()) {
+          this._refreshIncomplete = true;
           this.log.error(
             "Memory pressure detected, cannot create device endpoint. " +
               "Reduce entities on other bridges or raise the heap (add-on: heap_size_mb option, container: NODE_OPTIONS=--max-old-space-size=1024).",
@@ -550,7 +600,9 @@ export class ServerModeEndpointManager extends Service {
           if (!endpoint) {
             this._failedEntities.push({
               entityId,
-              reason: "Failed to create endpoint - unsupported device type",
+              reason: this.registry.initialState(entityId)
+                ? "Failed to create endpoint - unsupported device type"
+                : "No state in Home Assistant yet",
             });
             continue;
           }
@@ -567,7 +619,12 @@ export class ServerModeEndpointManager extends Service {
           fresh.set(entityId, endpointId);
         } catch (e) {
           const reason = e instanceof Error ? e.message : String(e);
-          this.log.error(`Failed to create server mode device ${entityId}:`, e);
+          this.logCreateFailure(
+            entityId,
+            reason,
+            `Failed to create server mode device ${entityId}:`,
+            e,
+          );
           this._failedEntities.push({ entityId, reason });
         }
       }
@@ -617,7 +674,9 @@ export class ServerModeEndpointManager extends Service {
           fresh.set(entityId, endpoint.id);
         } catch (e) {
           const reason = e instanceof Error ? e.message : String(e);
-          this.log.error(
+          this.logCreateFailure(
+            entityId,
+            reason,
             `Failed to rebuild server mode device ${entityId}:`,
             e,
           );
@@ -635,7 +694,12 @@ export class ServerModeEndpointManager extends Service {
         } catch (e) {
           this.endpoints.delete(entityId);
           const reason = e instanceof Error ? e.message : String(e);
-          this.log.error(`Failed to create server mode device ${entityId}:`, e);
+          this.logCreateFailure(
+            entityId,
+            reason,
+            `Failed to create server mode device ${entityId}:`,
+            e,
+          );
           this._failedEntities.push({ entityId, reason });
           continue;
         }
@@ -684,6 +748,12 @@ export class ServerModeEndpointManager extends Service {
         }
       }
     } finally {
+      // a success or an entity that left the pass starts its count over
+      for (const id of this.createFailures.keys()) {
+        if (!this._failedEntities.some((f) => f.entityId === id)) {
+          this.createFailures.delete(id);
+        }
+      }
       // A stop that landed mid-refresh wins: no timer on a stopped bridge.
       if (lifecycle === this.lifecycle) {
         this.scheduleRemovalRecheck();
@@ -696,18 +766,23 @@ export class ServerModeEndpointManager extends Service {
       );
       // re-subscribe on every path so mapped-entity subscriptions stay fresh
       if (this.observingRequested) {
-        this.startObserving();
+        this.startObserving().catch((e) =>
+          this.log.warn("Failed to subscribe to entity states:", e),
+        );
       }
     }
   }
 
-  async updateStates(states: HomeAssistantStates): Promise<void> {
+  async updateStates(
+    states: HomeAssistantStates,
+    changed: ReadonlySet<string> | null = null,
+  ): Promise<void> {
     // Merge subscription states into registry so EntityStateProvider
     // reads fresh values for mapped entities (battery, humidity, etc.)
-    this.registry.mergeExternalStates(states);
+    this.registry.mergeExternalStates(states, changed);
 
-    this.mappingSync.maybeRetry(states, null, this.observingRequested, () =>
-      this.refreshDevices(),
+    this.mappingSync.maybeRetry(states, changed, this.observingRequested, () =>
+      this.refreshDevices().then(() => undefined),
     );
 
     for (const [entityId, entry] of this.endpoints) {
@@ -750,6 +825,25 @@ export class ServerModeEndpointManager extends Service {
       ok = (await this.serverNode.updateAdvertisedDeviceType(deviceType)) && ok;
     }
     return ok;
+  }
+
+  private logCreateFailure(
+    entityId: string,
+    reason: string,
+    message: string,
+    e: unknown,
+  ): void {
+    const last = this.createFailures.get(entityId);
+    const count = last?.reason === reason ? last.count + 1 : 1;
+    this.createFailures.set(entityId, { reason, count });
+    // a failure that keeps coming back stops costing every registry change
+    // its full retry budget
+    if (count <= ENTITY_FAILURE_RETRIES) this._refreshIncomplete = true;
+    if (count === 1) {
+      this.log.error(message, e);
+    } else {
+      this.log.debug(message, e);
+    }
   }
 
   // Vacuums use ServerModeVacuumDevice (no bridgedDeviceBasicInformation) so

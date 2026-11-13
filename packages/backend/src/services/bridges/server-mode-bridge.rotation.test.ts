@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { Time } from "@matter/general";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { makeWarmStartState } from "./server-mode-bridge.js";
 import {
   DEFAULT_SESSION_MAX_AGE_HOURS,
@@ -6,7 +7,6 @@ import {
   SESSION_MAX_AGE_HOURS_RANGE,
   STALE_SESSION_QUIET_WINDOW_MS,
   seedExistingSessionStarts,
-  selectSupersededSessions,
   sessionIsQuiet,
   staleSessionQuietWindowMs,
   staleSessionShouldClose,
@@ -84,6 +84,24 @@ describe("staleSessionShouldClose", () => {
       staleSessionShouldClose(session({ timestamp: NOW - 1_000 }), 0, NOW),
     ).toBe(true);
   });
+
+  describe("wall-clock step", () => {
+    beforeEach(() => vi.useFakeTimers());
+    afterEach(() => vi.useRealTimers());
+
+    it("keeps a fresh session when the wall clock jumps forward", () => {
+      const fresh = session({ timestamp: Time.nowUs });
+      vi.setSystemTime(Date.now() + 3_600_000);
+      expect(staleSessionShouldClose(fresh)).toBe(false);
+    });
+
+    it("closes a quiet session when the wall clock jumps back", () => {
+      const quiet = session({ timestamp: Time.nowUs });
+      vi.advanceTimersByTime(STALE_SESSION_QUIET_WINDOW_MS);
+      vi.setSystemTime(Date.now() - 3_600_000);
+      expect(staleSessionShouldClose(quiet)).toBe(true);
+    });
+  });
 });
 
 describe("sessionIsQuiet", () => {
@@ -126,110 +144,6 @@ describe("sessionIsQuiet", () => {
     expect(sessionIsQuiet(session({ timestamp: NOW - 1_000 }), 0, NOW)).toBe(
       true,
     );
-  });
-});
-
-describe("selectSupersededSessions", () => {
-  const NOW = 1_750_000_000_000;
-  const quietTs = NOW - STALE_SESSION_QUIET_WINDOW_MS;
-  const session = (over: {
-    id: number;
-    peerNodeId?: unknown;
-    fabric?: { fabricIndex?: unknown };
-    isClosing?: boolean;
-    isPeerActive?: boolean;
-    timestamp?: number;
-    subscriptions?: { size: number };
-  }) => ({
-    peerNodeId: 7,
-    fabric: { fabricIndex: 1 },
-    isClosing: false,
-    isPeerActive: false,
-    timestamp: quietTs,
-    subscriptions: { size: 0 },
-    ...over,
-  });
-  const newSession = { id: 99, peerNodeId: 7, fabric: { fabricIndex: 1 } };
-
-  it("selects a quiet superseded session even with live subscriptions", () => {
-    expect(
-      selectSupersededSessions(
-        [session({ id: 1, subscriptions: { size: 2 } })],
-        newSession,
-        STALE_SESSION_QUIET_WINDOW_MS,
-        NOW,
-      ),
-    ).toEqual([1]);
-  });
-
-  it("never selects the new session itself", () => {
-    expect(
-      selectSupersededSessions(
-        [session({ id: newSession.id, subscriptions: { size: 2 } })],
-        newSession,
-        STALE_SESSION_QUIET_WINDOW_MS,
-        NOW,
-      ),
-    ).toEqual([]);
-  });
-
-  it("skips a superseded session with recent traffic", () => {
-    expect(
-      selectSupersededSessions(
-        [session({ id: 1, timestamp: NOW - 1_000 })],
-        newSession,
-        STALE_SESSION_QUIET_WINDOW_MS,
-        NOW,
-      ),
-    ).toEqual([]);
-  });
-
-  it("skips a superseded session whose peer is still active", () => {
-    expect(
-      selectSupersededSessions(
-        [session({ id: 1, isPeerActive: true })],
-        newSession,
-        STALE_SESSION_QUIET_WINDOW_MS,
-        NOW,
-      ),
-    ).toEqual([]);
-  });
-
-  it("skips a session from a different peer", () => {
-    expect(
-      selectSupersededSessions(
-        [session({ id: 1, peerNodeId: 8 })],
-        newSession,
-        STALE_SESSION_QUIET_WINDOW_MS,
-        NOW,
-      ),
-    ).toEqual([]);
-  });
-
-  it("skips a session on a different fabric", () => {
-    expect(
-      selectSupersededSessions(
-        [session({ id: 1, fabric: { fabricIndex: 2 } })],
-        newSession,
-        STALE_SESSION_QUIET_WINDOW_MS,
-        NOW,
-      ),
-    ).toEqual([]);
-  });
-
-  it("selects every quiet zombie left behind by the same peer", () => {
-    expect(
-      selectSupersededSessions(
-        [
-          session({ id: 1, subscriptions: { size: 2 } }),
-          session({ id: 2, subscriptions: { size: 1 } }),
-          session({ id: 3 }),
-        ],
-        newSession,
-        STALE_SESSION_QUIET_WINDOW_MS,
-        NOW,
-      ),
-    ).toEqual([1, 2, 3]);
   });
 });
 

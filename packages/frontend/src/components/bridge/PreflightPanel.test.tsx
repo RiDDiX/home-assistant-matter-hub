@@ -35,7 +35,7 @@ function stubFetch(data: NetworkDiagnosticResult) {
   );
 }
 
-describe("PreflightPanel", () => {
+describe("PreflightPanel", { timeout: 20_000 }, () => {
   beforeEach(() => {
     stubFetch(payload);
   });

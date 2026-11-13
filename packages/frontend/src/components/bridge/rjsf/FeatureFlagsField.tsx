@@ -10,8 +10,10 @@ import Typography from "@mui/material/Typography";
 import type { FieldProps } from "@rjsf/utils";
 import type { JSONSchema7 } from "json-schema";
 import { useCallback } from "react";
+import { useTranslation } from "react-i18next";
 
 export function FeatureFlagsField(props: FieldProps) {
+  const { t } = useTranslation();
   const {
     schema,
     formData = {},
@@ -48,7 +50,7 @@ export function FeatureFlagsField(props: FieldProps) {
   return (
     <Box>
       <Typography variant="h6" sx={{ mb: 2 }}>
-        Feature Flags
+        {t("bridge.featureFlags")}
       </Typography>
       <Grid container spacing={2}>
         {Object.entries(properties).map(([key, flagSchema]) => {
@@ -130,6 +132,7 @@ export function FeatureFlagsField(props: FieldProps) {
                     if (!disabled && !readonly) handleToggle(key, !value);
                   }}
                   disabled={disabled || readonly}
+                  aria-pressed={value === true}
                   sx={{ height: "100%" }}
                 >
                   <CardContent
@@ -157,11 +160,11 @@ export function FeatureFlagsField(props: FieldProps) {
                         </Typography>
                         {value && (
                           <Chip
-                            label="Active"
+                            label={t("common.active")}
                             size="small"
                             color="primary"
                             variant="outlined"
-                            sx={{ mt: 0.5, height: 20, fontSize: "0.7rem" }}
+                            sx={{ mt: 0.5 }}
                           />
                         )}
                       </Box>
@@ -172,6 +175,7 @@ export function FeatureFlagsField(props: FieldProps) {
                         tabIndex={-1}
                         onClick={(e) => e.stopPropagation()}
                         onChange={(e) => handleToggle(key, e.target.checked)}
+                        slotProps={{ input: { "aria-hidden": true } }}
                       />
                     </Box>
                     <Typography

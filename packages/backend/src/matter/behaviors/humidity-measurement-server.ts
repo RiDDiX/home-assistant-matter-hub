@@ -51,7 +51,8 @@ class HumidityMeasurementServerBase extends Base {
     if (humidity == null) {
       return null;
     }
-    return Math.round(humidity * 100);
+    // Saturated sensors report above 100, and the 0..10000 window rejects it
+    return Math.round(Math.min(100, Math.max(0, humidity)) * 100);
   }
 }
 

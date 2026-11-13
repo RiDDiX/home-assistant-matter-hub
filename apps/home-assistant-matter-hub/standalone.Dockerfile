@@ -5,6 +5,7 @@ RUN apk add --no-cache netcat-openbsd tini
 
 ARG PACKAGE_VERSION="unknown"
 ENV HAMH_STORAGE_LOCATION="/data"
+ENV DOCKER_ENV="true"
 ENV APP_VERSION="${PACKAGE_VERSION}"
 VOLUME /data
 
@@ -35,8 +36,10 @@ RUN printf '%s\n' \
  && ln -s /install/node_modules/.bin/home-assistant-matter-hub /usr/local/bin/home-assistant-matter-hub \
  && rm /install/package.tgz
 
+# Port and base path follow the same env vars and normalization as the app.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
-  CMD wget -qO /dev/null http://localhost:8482/api/health/live || exit 1
+  CMD p="${HAMH_HTTP_BASE_PATH:-/}"; p="/${p#/}"; [ "${#p}" -gt 1 ] && p="${p%/}"; [ "$p" = "/" ] && p=""; \
+    wget -qO /dev/null "http://localhost:${HAMH_HTTP_PORT:-${HAMH_WEB_PORT:-8482}}${p}/api/health/live" || exit 1
 
 # Dynamic heap sizing: 50% of effective memory, clamped to 256-2048MB.
 # Checks cgroup limits (Docker), then MemAvailable, then MemTotal.

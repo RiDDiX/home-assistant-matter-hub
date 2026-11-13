@@ -32,15 +32,11 @@ export function VideoPlayerDevice(
     .attributes as MediaPlayerDeviceAttributes;
   const supportedFeatures = attributes.supported_features ?? 0;
 
-  let device = VideoPlayerEndpointType;
-
-  // Add power control if supported
-  const supportsPower =
-    testBit(supportedFeatures, MediaPlayerDeviceFeature.TURN_ON) &&
-    testBit(supportedFeatures, MediaPlayerDeviceFeature.TURN_OFF);
-  if (supportsPower) {
-    device = device.with(MediaPlayerPowerOnOffServer);
-  }
+  // OnOff is mandatory, without the HA-bound server matter.js keeps its own
+  // that flips locally and never follows HA.
+  let device = VideoPlayerEndpointType.with(
+    MediaPlayerPowerOnOffServer(supportedFeatures),
+  );
 
   if (testBit(supportedFeatures, MediaPlayerDeviceFeature.SELECT_SOURCE)) {
     device = device.with(MediaPlayerMediaInputServer);

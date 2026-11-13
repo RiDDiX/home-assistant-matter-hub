@@ -9,7 +9,10 @@ import { BasicInformationServer } from "../../../behaviors/basic-information-ser
 import { HomeAssistantEntityBehavior } from "../../../behaviors/home-assistant-entity-behavior.js";
 import { IdentifyServer } from "../../../behaviors/identify-server.js";
 import { VideoPlayerDevice } from "./basic-video-player.js";
-import { MediaPlayerLevelControlServer } from "./behaviors/media-player-level-control-server.js";
+import {
+  MediaPlayerLevelControlServer,
+  MediaPlayerReadOnlyLevelControlServer,
+} from "./behaviors/media-player-level-control-server.js";
 import { MediaPlayerMediaInputServer } from "./behaviors/media-player-media-input-server.js";
 import { MediaPlayerMediaPlaybackServer } from "./behaviors/media-player-media-playback-server.js";
 import { MediaPlayerOnOffServer } from "./behaviors/media-player-on-off-server.js";
@@ -58,17 +61,21 @@ export function SpeakerMediaPlayerDevice(
     MediaPlayerDeviceFeature.VOLUME_SET,
   );
 
-  // Use power control if supported, otherwise fall back to mute control
-  if (supportsPower) {
-    device = device.with(MediaPlayerPowerOnOffServer);
-  } else if (supportsMute) {
+  // Use power control if supported, otherwise fall back to mute control.
+  // OnOff and LevelControl are mandatory, so they are always HA-bound: the
+  // bare matter.js servers would change only local state.
+  if (supportsMute && !supportsPower) {
     device = device.with(MediaPlayerOnOffServer);
+  } else {
+    device = device.with(MediaPlayerPowerOnOffServer(supportedFeatures));
   }
 
-  if (supportsVolume) {
-    // SpeakerLevelControlServer uses 0-254 range for Google Home compatibility
-    device = device.with(MediaPlayerLevelControlServer);
-  }
+  // SpeakerLevelControlServer uses 0-254 range for Google Home compatibility
+  device = device.with(
+    supportsVolume
+      ? MediaPlayerLevelControlServer
+      : MediaPlayerReadOnlyLevelControlServer,
+  );
 
   if (testBit(supportedFeatures, MediaPlayerDeviceFeature.SELECT_SOURCE)) {
     device = device.with(MediaPlayerMediaInputServer);

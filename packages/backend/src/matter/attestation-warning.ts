@@ -4,10 +4,11 @@ import type { OperationalCredentials } from "@matter/main/clusters";
 
 const logger = Logger.get("AttestationWarning");
 
-// A controller that accepts the attestation follows up within milliseconds.
-// Long enough that a slow one is not reported, short enough to reach the log
-// while the user is still looking at the failed pairing.
-export const CSR_GRACE_MS = 10_000;
+// Most controllers follow up within milliseconds, an Echo that accepted the
+// attestation took 14 s (#530), one that refused stalled 80 s (#449). Long
+// enough that a slow one is not reported, short enough to reach the log while
+// the user is still looking at the failed pairing.
+export const CSR_GRACE_MS = 30_000;
 
 const pending = new Map<string, NodeJS.Timeout>();
 

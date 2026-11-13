@@ -9,6 +9,7 @@ import {
   Invoke,
   type SecureSession,
 } from "@matter/protocol";
+import { errText } from "../../../utils/err-text.js";
 
 // Per Matter 11.6 the camera drives the live-view handshake by invoking commands
 // on the CONTROLLER's WebRtcTransportRequestor cluster. matter.js models the
@@ -32,13 +33,7 @@ export interface RequestorRegistration {
   owner?: unknown;
 }
 
-export type RequestorCommand = "answer" | "iceCandidates" | "end";
-
-export interface RequestorIceCandidate {
-  candidate: string;
-  sdpMid: string | null;
-  sdpmLineIndex: number | null;
-}
+export type RequestorCommand = "answer" | "end";
 
 // The command request handed to Invoke({ commands: [...] }); shape mirrors the
 // matter.js client command request (cluster + command + endpoint + fields).
@@ -66,7 +61,7 @@ const pendingDeliveries = new Map<number, ReturnType<typeof setTimeout>>();
 
 let invokeTransport: RequestorInvoke = defaultInvoke;
 
-/** Track a controller session so later answer/ice/end can reach it. */
+/** Track a controller session so a later answer or end can reach it. */
 export function registerRequestor(
   sessionId: number,
   registration: RequestorRegistration,
@@ -83,13 +78,6 @@ export function unregisterRequestor(sessionId: number): void {
     clearTimeout(timer);
     pendingDeliveries.delete(sessionId);
   }
-}
-
-/** Drop every registration and pending delivery, for process-wide teardown. */
-export function unregisterAllRequestors(): void {
-  for (const id of [...registry.keys()]) unregisterRequestor(id);
-  for (const timer of pendingDeliveries.values()) clearTimeout(timer);
-  pendingDeliveries.clear();
 }
 
 /**
@@ -172,17 +160,6 @@ export function sendAnswer(sessionId: number, sdp: string): Promise<boolean> {
   return invokeRequestor(sessionId, "answer", {
     webRtcSessionId: sessionId,
     sdp,
-  });
-}
-
-/** Trickle local ICE candidates to the controller (§ 11.6.5.3). */
-export function sendIceCandidates(
-  sessionId: number,
-  candidates: RequestorIceCandidate[],
-): Promise<boolean> {
-  return invokeRequestor(sessionId, "iceCandidates", {
-    webRtcSessionId: sessionId,
-    iceCandidates: candidates,
   });
 }
 
@@ -276,8 +253,4 @@ async function defaultInvoke({
   } finally {
     await client.close().catch(() => {});
   }
-}
-
-function errText(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
 }

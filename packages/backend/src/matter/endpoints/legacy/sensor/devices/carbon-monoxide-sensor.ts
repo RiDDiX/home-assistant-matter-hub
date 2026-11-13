@@ -3,6 +3,7 @@ import { AirQualityServer } from "@matter/main/behaviors";
 import { AirQuality } from "@matter/main/clusters";
 import { AirQualitySensorDevice } from "@matter/main/devices";
 import { applyPatchState } from "../../../../../utils/apply-patch-state.js";
+import { numericState } from "../../../../../utils/numeric-state.js";
 import { BasicInformationServer } from "../../../../behaviors/basic-information-server.js";
 import { CarbonMonoxideConcentrationMeasurementServer } from "../../../../behaviors/carbon-monoxide-concentration-measurement-server.js";
 import { HomeAssistantEntityBehavior } from "../../../../behaviors/home-assistant-entity-behavior.js";
@@ -35,8 +36,8 @@ class CoAirQualityServer extends CoAirQualityServerBase {
     let airQuality: AirQuality.AirQualityEnum =
       AirQuality.AirQualityEnum.Unknown;
 
-    if (state != null && !Number.isNaN(+state)) {
-      const ppm = +state;
+    const ppm = numericState(state);
+    if (ppm != null) {
       // CO in ppm, thresholds based on WHO indoor air quality guidelines.
       if (ppm <= 9) {
         airQuality = AirQuality.AirQualityEnum.Good;

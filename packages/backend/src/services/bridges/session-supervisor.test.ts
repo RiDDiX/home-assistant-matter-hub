@@ -112,3 +112,31 @@ describe("SessionSupervisor graceful close", () => {
     expect(s.closeSubscriptions).toHaveBeenCalledWith(true);
   });
 });
+
+describe("SessionSupervisor stale session re-arm", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("re-arming the same session keeps one timer", async () => {
+    vi.useFakeTimers();
+    const s = {
+      id: 9,
+      peerNodeId: 1n,
+      isClosing: false,
+      isPeerActive: false,
+      timestamp: Date.now(),
+      subscriptions: { size: 0 },
+      initiateClose: vi.fn(async () => {}),
+      initiateForceClose: vi.fn(async () => {}),
+    };
+    const env = { get: () => ({ sessions: [s] }) } as unknown as Environment;
+    const sup = supervisor(0, 0, env).sup as unknown as {
+      closeStaleSession(id: number): void;
+    };
+    sup.closeStaleSession(s.id);
+    sup.closeStaleSession(s.id);
+    await vi.advanceTimersByTimeAsync(10 * 60_000);
+    expect(s.initiateClose).toHaveBeenCalledTimes(1);
+  });
+});

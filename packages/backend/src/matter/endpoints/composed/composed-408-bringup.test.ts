@@ -613,9 +613,15 @@ describe("composed primary on the parent endpoint (#469)", () => {
     expect(powerSource.batPercentRemaining).toBe(160);
   });
 
-  it("skips a sub-entity that repeats the primary or another sub", async () => {
+  it.each([
+    [
+      false,
+      ["binary_sensor_occupancy_primary", "binary_sensor_occupancy_sub_0"],
+    ],
+    [true, ["binary_sensor_occupancy_sub_0"]],
+  ])("skips a sub-entity that repeats the primary or another sub (merged %s)", async (primaryOnParent, ids) => {
     const endpoint = await UserComposedEndpoint.create({
-      registry: bridgeRegistry(true, true),
+      registry: bridgeRegistry(true, primaryOnParent),
       primaryEntityId: PRIMARY,
       mapping: { entityId: PRIMARY },
       composedEntities: [
@@ -627,7 +633,8 @@ describe("composed primary on the parent endpoint (#469)", () => {
     });
 
     expect(endpoint).toBeDefined();
-    // the primary is the parent, so only the illuminance sub is left
-    expect([...endpoint!.parts].length).toBe(1);
+    // only the illuminance sub is left next to the primary, every part is
+    // reachable by a state update
+    expect([...endpoint!.parts].map((p) => p.id)).toEqual(ids);
   });
 });

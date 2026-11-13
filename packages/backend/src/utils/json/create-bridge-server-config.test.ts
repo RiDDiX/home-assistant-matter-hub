@@ -53,3 +53,17 @@ describe("createBridgeServerConfig tcp (#419)", () => {
     expect("tcp" in (cfg.network as any)).toBe(false);
   });
 });
+
+describe("createBridgeServerConfig location", () => {
+  it("passes a two-letter country code", () => {
+    const cfg = createBridgeServerConfig({ ...data, countryCode: "DE" });
+    // biome-ignore lint/suspicious/noExplicitAny: inspect basic information
+    expect((cfg.basicInformation as any).location).toBe("DE");
+  });
+
+  // A stored 3-letter value would fail the Matter constraint at node start.
+  it("omits a country code that is not two letters", () => {
+    const cfg = createBridgeServerConfig({ ...data, countryCode: "DEU" });
+    expect("location" in (cfg.basicInformation ?? {})).toBe(false);
+  });
+});

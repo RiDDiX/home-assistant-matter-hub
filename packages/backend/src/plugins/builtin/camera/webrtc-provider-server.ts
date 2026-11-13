@@ -5,8 +5,10 @@ import {
   WebRtcTransportDefinitions,
   type WebRtcTransportProvider,
 } from "@matter/main/clusters";
+import { StatusCode, StatusResponseError } from "@matter/main/types";
 import type { SecureSession } from "@matter/protocol";
 import { StreamUsage } from "@matter/types";
+import { errText } from "../../../utils/err-text.js";
 import { CameraAvStreamServer } from "./av-stream-server.js";
 import {
   deliverAnswerDeferred,
@@ -35,7 +37,7 @@ function mintSessionId(): number {
 }
 
 // The 5 WebRtcTransportProvider commands, media delegated to WebRtcBridge.
-// provideOffer is wired; solicitOffer's deferred-offer push is unverified.
+// Only provideOffer is wired, solicitOffer is refused.
 export class CameraWebRtcProviderServer extends WebRtcTransportProviderServer {
   declare state: CameraWebRtcProviderServer.State;
 
@@ -49,40 +51,14 @@ export class CameraWebRtcProviderServer extends WebRtcTransportProviderServer {
     });
   }
 
-  override solicitOffer(
-    request: WebRtcTransportProvider.SolicitOfferRequest,
-  ): MaybePromise<WebRtcTransportProvider.SolicitOfferResponse> {
-    const id = mintSessionId();
-    const videoStreams = this.videoStreamsFor(request, request.streamUsage);
-    // startSession offers video only
-    const audioStreams: number[] = [];
-    this.trackSession(
-      id,
-      request.streamUsage,
-      request.originatingEndpointId,
-      videoStreams,
-      audioStreams,
+  // Nothing pushes an Offer to the requestor yet, a session started here would
+  // stream into nowhere. SmartThings, HA and CHIP controllers send ProvideOffer.
+  override solicitOffer(): WebRtcTransportProvider.SolicitOfferResponse {
+    logger.info(`solicitOffer refused (${this.state.entityId})`);
+    throw new StatusResponseError(
+      "SolicitOffer is not supported, use ProvideOffer",
+      StatusCode.ResourceExhausted,
     );
-    logger.info(
-      `solicitOffer session=${id} (${this.state.entityId}), deferred offer`,
-    );
-    // deferredOffer: the offer is delivered later via WebRtcTransportRequestor
-    // (camera -> controller). That client-side push is not wired yet.
-    void this.state.bridge
-      .startSession(id, this.state.entityId, {
-        iceServers: request.iceServers,
-        iceTransportPolicy: request.iceTransportPolicy,
-      })
-      .catch((err) =>
-        logger.info(
-          `solicitOffer startSession failed for ${this.state.entityId}: ${errText(err)}`,
-        ),
-      );
-    return {
-      webRtcSessionId: id,
-      deferredOffer: true,
-      ...echoStreamIds(request, videoStreams, audioStreams),
-    };
   }
 
   override provideOffer(
@@ -94,6 +70,7 @@ export class CameraWebRtcProviderServer extends WebRtcTransportProviderServer {
       `provideOffer entry: entityId=${entityId} session=${id} (sdp ${request.sdp.length} chars)`,
     );
     const isNew = request.webRtcSessionId == null;
+    if (!isNew) this.checkOwner(id);
     const videoStreams = isNew
       ? this.videoStreamsFor(
           request,
@@ -170,6 +147,7 @@ export class CameraWebRtcProviderServer extends WebRtcTransportProviderServer {
     logger.info(
       `provideAnswer session=${request.webRtcSessionId} (sdp ${request.sdp.length} chars, ${this.state.entityId})`,
     );
+    this.checkOwner(request.webRtcSessionId);
     return this.state.bridge.acceptControllerAnswer(
       request.webRtcSessionId,
       request.sdp,
@@ -182,6 +160,7 @@ export class CameraWebRtcProviderServer extends WebRtcTransportProviderServer {
     logger.info(
       `provideIceCandidates session=${request.webRtcSessionId}: ${request.iceCandidates.length} candidate(s) (${this.state.entityId})`,
     );
+    this.checkOwner(request.webRtcSessionId);
     for (const c of request.iceCandidates) {
       await this.state.bridge.addControllerIceCandidate(
         request.webRtcSessionId,
@@ -198,6 +177,7 @@ export class CameraWebRtcProviderServer extends WebRtcTransportProviderServer {
     logger.info(
       `endSession session=${request.webRtcSessionId} (${this.state.entityId})`,
     );
+    this.checkOwner(request.webRtcSessionId);
     await this.state.bridge.endSession(request.webRtcSessionId);
     unregisterRequestor(request.webRtcSessionId);
     this.state.currentSessions = this.state.currentSessions.filter(
@@ -275,16 +255,10 @@ export class CameraWebRtcProviderServer extends WebRtcTransportProviderServer {
       );
   }
 
-  private trackSession(
-    id: number,
-    streamUsage: StreamUsage,
-    peerEndpointId: EndpointNumber,
-    videoStreams: number[],
-    audioStreams: number[],
-  ): void {
-    // Commands run online, so a session exists; read it structurally because
-    // the public context type also covers the offline case.
-    const session = (
+  // Commands run online, so a session exists; read it structurally because
+  // the public context type also covers the offline case.
+  private invoker() {
+    return (
       this.context as unknown as {
         session?: {
           peerNodeId?: NodeId;
@@ -292,6 +266,37 @@ export class CameraWebRtcProviderServer extends WebRtcTransportProviderServer {
         };
       }
     ).session;
+  }
+
+  // A session belongs to the controller that offered it, any other one gets
+  // NotFound. An offline act is local code and passes.
+  private checkOwner(id: number): void {
+    const session = this.invoker();
+    if (!session) return;
+    const fabricIndex = session.associatedFabric?.fabricIndex;
+    const peerNodeId = session.peerNodeId ?? NodeId(0);
+    const owned = this.state.currentSessions.some(
+      (s) =>
+        s.id === id &&
+        s.fabricIndex === fabricIndex &&
+        s.peerNodeId === peerNodeId,
+    );
+    if (!owned) {
+      throw new StatusResponseError(
+        `WebRTC session ${id} not found`,
+        StatusCode.NotFound,
+      );
+    }
+  }
+
+  private trackSession(
+    id: number,
+    streamUsage: StreamUsage,
+    peerEndpointId: EndpointNumber,
+    videoStreams: number[],
+    audioStreams: number[],
+  ): void {
+    const session = this.invoker();
     const fabricIndex = session?.associatedFabric?.fabricIndex;
     if (fabricIndex == null) {
       // No fabric (offline act in tests): a 0 sentinel fails validation.
@@ -350,7 +355,13 @@ async function answerOffer(
 ): Promise<void> {
   let answerSdp: string;
   try {
-    answerSdp = await bridge.acceptControllerOffer(id, entityId, offerSdp, ice);
+    answerSdp = await bridge.acceptControllerOffer(
+      id,
+      entityId,
+      offerSdp,
+      ice,
+      cleanup,
+    );
   } catch (err) {
     logger.info(
       `provideOffer failed for ${entityId} session=${id}: ${errText(err)}`,
@@ -365,10 +376,6 @@ async function answerOffer(
   // The answer SDP already embeds our gathered candidates (werift blocks on
   // ICE gathering in setLocalDescription), no ICE trickle needed.
   deliverAnswerDeferred(id, answerSdp, cleanup);
-}
-
-function errText(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
 }
 
 export namespace CameraWebRtcProviderServer {

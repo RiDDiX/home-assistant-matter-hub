@@ -185,15 +185,24 @@ function audioCall(endpoint: Endpoint, command: string, request: unknown) {
 // What a CaptureSnapshot invoke does to the AV state while it waits for HA:
 // matter.js locks the cluster for the whole command.
 async function holdAvState(endpoint: Endpoint): Promise<() => Promise<void>> {
-  let release = () => {};
-  const held = endpoint.act(async (agent) => {
-    // biome-ignore lint/suspicious/noExplicitAny: any write takes the lock
-    (agent as any).cameraAvStreamManagement.state.currentFrameRate = 5;
-    await new Promise<void>((r) => {
-      release = r;
-    });
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
   });
-  await new Promise((r) => setTimeout(r, 20));
+  let locked!: () => void;
+  const ready = new Promise<void>((resolve) => {
+    locked = resolve;
+  });
+  const held = endpoint.act(async (agent) => {
+    // biome-ignore lint/suspicious/noExplicitAny: behavior doubles as resource
+    const av = (agent as any).cameraAvStreamManagement;
+    agent.context.transaction.addResourcesSync(av);
+    await agent.context.transaction.begin();
+    av.state.currentFrameRate = 5;
+    locked();
+    await gate;
+  });
+  await Promise.race([ready, held]);
   return async () => {
     release();
     await held;
@@ -479,7 +488,10 @@ describe("provideOffer negotiates after responding", () => {
     await vi.waitFor(() =>
       expect(allocatedAudioStreams(endpoint)[0].referenceCount).toBe(0),
     );
-    await audioCall(endpoint, "audioStreamDeallocate", { audioStreamId });
+    // the drop can still hold the state lock right after the count reads 0
+    await vi.waitFor(() =>
+      audioCall(endpoint, "audioStreamDeallocate", { audioStreamId }),
+    );
     expect(allocatedAudioStreams(endpoint)).toEqual([]);
   });
 });
@@ -826,24 +838,42 @@ describe("audio streams", () => {
     expect(res.audioStreamId).toBe(3);
   });
 
-  it("solicitOffer leaves audio out, its offer is video only", async () => {
-    const bridge = {
-      ...fakeBridge().bridge,
-      startSession: async () => ({ sdp: "", iceCandidates: [] }),
-    } as unknown as WebRtcBridge;
+  it("solicitOffer is refused without a session or media", async () => {
+    const bridgeCalls: string[] = [];
+    const bridge = new Proxy(fakeBridge().bridge, {
+      get: (target, key) => {
+        bridgeCalls.push(String(key));
+        return Reflect.get(target, key);
+      },
+    });
     const endpoint = await mountCamera(bridge);
-
-    const res = (await endpoint.act((agent) =>
-      // biome-ignore lint/suspicious/noExplicitAny: invoke solicitOffer directly
-      (agent as any).webRtcTransportProvider.solicitOffer({
+    bridgeCalls.length = 0;
+    // biome-ignore lint/suspicious/noExplicitAny: invoke solicitOffer directly
+    const invoke = (agent: any) =>
+      agent.webRtcTransportProvider.solicitOffer({
         streamUsage: StreamUsage.LiveView,
         originatingEndpointId: EndpointNumber(1),
         videoStreamId: null,
         audioStreamId: null,
-      }),
-    )) as { audioStreamId: number | null };
+      });
+    // from a peer, so a session with a fabric could be listed
+    const session = {
+      isClosed: false,
+      peerNodeId: NodeId(1),
+      associatedFabric: { fabricIndex: FabricIndex(1) },
+    };
 
-    expect(res.audioStreamId).toBeNull();
+    expect(
+      await statusOf(() =>
+        LocalActorContext.act(
+          "solicitOffer from a peer",
+          (context) => invoke(endpoint.agentFor(context)),
+          { session } as never,
+        ),
+      ),
+    ).toBe(StatusCode.ResourceExhausted);
+    expect(currentSessions(endpoint)).toEqual([]);
+    expect(bridgeCalls).toEqual([]);
     expect(allocatedAudioStreams(endpoint)).toEqual([]);
   });
 
@@ -859,5 +889,77 @@ describe("audio streams", () => {
     touched.add(res.webRtcSessionId);
 
     expect(allocatedAudioStreams(endpoint)).toEqual([]);
+  });
+});
+
+// A session id is a small counter, so another controller on the bridge could
+// guess it. Only the controller that offered a session may touch it.
+describe("session ownership", () => {
+  function asPeer(
+    endpoint: Endpoint,
+    fabricIndex: number,
+    peerNodeId: number,
+    // biome-ignore lint/suspicious/noExplicitAny: invoke commands directly
+    fn: (provider: any) => unknown,
+  ): Promise<unknown> {
+    const session = {
+      isClosed: false,
+      peerNodeId: NodeId(peerNodeId),
+      associatedFabric: { fabricIndex: FabricIndex(fabricIndex) },
+    };
+    return LocalActorContext.act(
+      "command from a peer",
+      (context) =>
+        // biome-ignore lint/suspicious/noExplicitAny: invoke commands directly
+        fn((endpoint.agentFor(context) as any).webRtcTransportProvider),
+      { session } as never,
+    ) as Promise<unknown>;
+  }
+
+  it("answers NotFound to a controller that did not offer the session", async () => {
+    setRequestorInvokeForTests(async () => true);
+    const { bridge, endedSessions } = fakeBridge();
+    const endpoint = await mountCamera(bridge);
+    const { webRtcSessionId: id } = await provideOffer(
+      endpoint,
+      null,
+      undefined,
+      true,
+    );
+    touched.add(id);
+    await vi.waitFor(() => expect(currentSessions(endpoint)).toHaveLength(1));
+    endedSessions.length = 0;
+
+    // biome-ignore lint/suspicious/noExplicitAny: invoke commands directly
+    const calls: ((p: any) => unknown)[] = [
+      (p) => p.endSession({ webRtcSessionId: id, reason: 0 }),
+      (p) => p.provideAnswer({ webRtcSessionId: id, sdp: "v=0" }),
+      (p) => p.provideIceCandidates({ webRtcSessionId: id, iceCandidates: [] }),
+      (p) =>
+        p.provideOffer({
+          webRtcSessionId: id,
+          sdp: "v=0 takeover",
+          streamUsage: StreamUsage.LiveView,
+          originatingEndpointId: EndpointNumber(1),
+          videoStreamId: 1,
+        }),
+    ];
+    for (const call of calls) {
+      // another fabric, then the same fabric with another node
+      expect(await statusOf(() => asPeer(endpoint, 2, 1, call))).toBe(
+        StatusCode.NotFound,
+      );
+      expect(await statusOf(() => asPeer(endpoint, 1, 2, call))).toBe(
+        StatusCode.NotFound,
+      );
+    }
+    expect(endedSessions).toEqual([]);
+    expect(currentSessions(endpoint).map((s) => s.id)).toEqual([id]);
+
+    expect(await statusOf(() => asPeer(endpoint, 1, 1, calls[0]))).toBe(
+      "success",
+    );
+    expect(endedSessions).toEqual([id]);
+    expect(currentSessions(endpoint)).toEqual([]);
   });
 });

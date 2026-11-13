@@ -11,7 +11,7 @@ import UndoIcon from "@mui/icons-material/Undo";
 import Box from "@mui/material/Box";
 import CircularProgress from "@mui/material/CircularProgress";
 import IconButton from "@mui/material/IconButton";
-import { useColorScheme } from "@mui/material/styles";
+import { useTheme } from "@mui/material/styles";
 import Tooltip from "@mui/material/Tooltip";
 import Typography from "@mui/material/Typography";
 import {
@@ -36,6 +36,7 @@ import { FabricNode } from "../../components/network-map/nodes/FabricNode.tsx";
 import { FailedNode } from "../../components/network-map/nodes/FailedNode.tsx";
 import { HubNode } from "../../components/network-map/nodes/HubNode.tsx";
 import { useBridges } from "../../hooks/data/bridges.ts";
+import { safeStorage } from "../../safe-storage.ts";
 import { loadBridges } from "../../state/bridges/bridge-actions.ts";
 import { loadDevices } from "../../state/devices/device-actions.ts";
 import { useAppDispatch, useAppSelector } from "../../state/hooks.ts";
@@ -289,20 +290,27 @@ export const NetworkMapPage = () => {
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const { mode } = useColorScheme();
-  const isDark = mode === "dark";
+  // palette.mode resolves the "system" scheme, useColorScheme().mode does not
+  const isDark = useTheme().palette.mode === "dark";
   const undoStackRef = useRef<
     { nodeId: string; position: { x: number; y: number } }[]
   >([]);
   const [canUndo, setCanUndo] = useState(false);
+  // nodes state already holds the dragged position by the time the drag stops
+  const dragStartRef = useRef<{ x: number; y: number } | null>(null);
 
   useEffect(() => {
     dispatch(loadBridges());
   }, [dispatch]);
 
+  // Every bridge_update replaces the array, so reload a bridge only when its
+  // status or device count changed.
+  const loadedBridges = useRef(new Map<string, string>());
   useEffect(() => {
-    if (bridges) {
-      for (const bridge of bridges) {
+    for (const bridge of bridges ?? []) {
+      const key = `${bridge.status}:${bridge.deviceCount}`;
+      if (loadedBridges.current.get(bridge.id) !== key) {
+        loadedBridges.current.set(bridge.id, key);
         dispatch(loadDevices(bridge.id));
       }
     }
@@ -374,36 +382,37 @@ export const NetworkMapPage = () => {
     dispatch(loadBridges());
   }, [dispatch]);
 
-  const onNodeDragStop = useCallback(
+  const onNodeDragStart = useCallback(
     (_event: React.MouseEvent, node: Node) => {
-      // Save the previous position for undo before persisting
-      const prev = nodes.find((n) => n.id === node.id);
-      if (prev) {
-        undoStackRef.current.push({
-          nodeId: node.id,
-          position: { ...prev.position },
-        });
-        setCanUndo(true);
-      }
-
-      // Persist all current positions to localStorage
-      const STORAGE_KEY = "hamh-network-map-positions";
-      try {
-        const saved = localStorage.getItem(STORAGE_KEY);
-        const positions: Record<string, { x: number; y: number }> = saved
-          ? JSON.parse(saved)
-          : {};
-        positions[node.id] = { x: node.position.x, y: node.position.y };
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(positions));
-      } catch {
-        /* ignore */
-      }
+      dragStartRef.current = { ...node.position };
     },
-    [nodes],
+    [],
   );
 
+  const onNodeDragStop = useCallback((_event: React.MouseEvent, node: Node) => {
+    const start = dragStartRef.current;
+    dragStartRef.current = null;
+    if (start && (start.x !== node.position.x || start.y !== node.position.y)) {
+      undoStackRef.current.push({ nodeId: node.id, position: start });
+      setCanUndo(true);
+    }
+
+    // Persist all current positions to localStorage
+    const STORAGE_KEY = "hamh-network-map-positions";
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY);
+      const positions: Record<string, { x: number; y: number }> = saved
+        ? JSON.parse(saved)
+        : {};
+      positions[node.id] = { x: node.position.x, y: node.position.y };
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(positions));
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
   const handleResetLayout = useCallback(() => {
-    localStorage.removeItem("hamh-network-map-positions");
+    safeStorage.remove("hamh-network-map-positions");
     undoStackRef.current = [];
     setCanUndo(false);
     // Re-trigger graph build by reloading bridges
@@ -438,22 +447,23 @@ export const NetworkMapPage = () => {
   const isLoading = bridgesLoading || !devicesLoaded;
 
   return (
-    <Box sx={{ p: 2 }}>
+    <Box>
       <Box
         sx={{
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
+          flexWrap: "wrap",
+          gap: 1,
           mb: 2,
         }}
       >
-        <Typography
-          variant="h4"
-          sx={{ display: "flex", alignItems: "center", gap: 2 }}
-        >
-          <AccountTreeIcon />
-          {t("networkMap.title")}
-        </Typography>
+        <Box display="flex" alignItems="center" gap={2}>
+          <AccountTreeIcon color="primary" fontSize="large" />
+          <Typography variant="h5" component="h1">
+            {t("networkMap.title")}
+          </Typography>
+        </Box>
         <Box sx={{ display: "flex", gap: 0.5 }}>
           <Tooltip title={t("networkMap.undoMove")}>
             <span>
@@ -461,18 +471,27 @@ export const NetworkMapPage = () => {
                 onClick={handleUndo}
                 color="primary"
                 disabled={!canUndo}
+                aria-label={t("networkMap.undoMove")}
               >
                 <UndoIcon />
               </IconButton>
             </span>
           </Tooltip>
           <Tooltip title={t("networkMap.resetLayout")}>
-            <IconButton onClick={handleResetLayout} color="primary">
+            <IconButton
+              onClick={handleResetLayout}
+              color="primary"
+              aria-label={t("networkMap.resetLayout")}
+            >
               <RestartAltIcon />
             </IconButton>
           </Tooltip>
           <Tooltip title={t("networkMap.refreshData")}>
-            <IconButton onClick={handleRefresh} color="primary">
+            <IconButton
+              onClick={handleRefresh}
+              color="primary"
+              aria-label={t("networkMap.refreshData")}
+            >
               <RefreshIcon />
             </IconButton>
           </Tooltip>
@@ -486,6 +505,11 @@ export const NetworkMapPage = () => {
             <IconButton
               onClick={() => setIsFullscreen((f) => !f)}
               color="primary"
+              aria-label={
+                isFullscreen
+                  ? t("networkMap.exitFullscreen")
+                  : t("networkMap.fullscreen")
+              }
             >
               {isFullscreen ? <FullscreenExitIcon /> : <FullscreenIcon />}
             </IconButton>
@@ -501,12 +525,20 @@ export const NetworkMapPage = () => {
         <Box
           sx={{
             width: "100%",
-            height: isFullscreen ? "calc(100vh - 100px)" : 600,
+            // offsets cover the top bar, page padding and the header row
+            height: isFullscreen
+              ? "calc(100dvh - 170px)"
+              : { xs: 600, md: "max(600px, calc(100dvh - 260px))" },
             border: "1px solid",
             borderColor: "divider",
             borderRadius: 2,
             overflow: "hidden",
             transition: "height 0.3s ease",
+            // the minimap would cover a whole bridge on a phone canvas
+            "& .react-flow__minimap": { display: { xs: "none", sm: "block" } },
+            "@media (pointer: coarse)": {
+              "& .react-flow__controls-button": { width: 44, height: 44 },
+            },
           }}
         >
           <ReactFlow
@@ -514,6 +546,7 @@ export const NetworkMapPage = () => {
             edges={edges}
             onNodesChange={onNodesChange}
             onEdgesChange={onEdgesChange}
+            onNodeDragStart={onNodeDragStart}
             onNodeDragStop={onNodeDragStop}
             nodeTypes={nodeTypes}
             colorMode={isDark ? "dark" : "light"}

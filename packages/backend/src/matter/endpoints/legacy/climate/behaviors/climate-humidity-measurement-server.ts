@@ -2,6 +2,7 @@ import type {
   ClimateDeviceAttributes,
   HomeAssistantEntityState,
 } from "@home-assistant-matter-hub/common";
+import { numericState } from "../../../../../utils/numeric-state.js";
 import {
   type HumidityMeasurementConfig,
   HumidityMeasurementServer,
@@ -10,11 +11,7 @@ import {
 const humidityConfig: HumidityMeasurementConfig = {
   getValue(entity: HomeAssistantEntityState) {
     const attributes = entity.attributes as ClimateDeviceAttributes;
-    const humidity = attributes.current_humidity;
-    if (humidity == null || Number.isNaN(+humidity)) {
-      return null;
-    }
-    return +humidity;
+    return numericState(attributes.current_humidity);
   },
 };
 

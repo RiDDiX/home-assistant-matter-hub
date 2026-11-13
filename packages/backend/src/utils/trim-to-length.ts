@@ -11,12 +11,21 @@ export function trimToLength(
   if (Buffer.byteLength(stringValue) <= maxLength) {
     return stringValue;
   }
-  let room = maxLength - Buffer.byteLength(suffix);
+  const suffixLength = Buffer.byteLength(suffix);
+  if (suffixLength > maxLength) {
+    return cutToBytes(stringValue, maxLength);
+  }
+  return cutToBytes(stringValue, maxLength - suffixLength) + suffix;
+}
+
+// Longest prefix within maxBytes UTF-8 bytes, never splitting a code point.
+export function cutToBytes(value: string, maxBytes: number): string {
+  let room = maxBytes;
   let trimmed = "";
-  for (const char of stringValue) {
+  for (const char of value) {
     room -= Buffer.byteLength(char);
     if (room < 0) break;
     trimmed += char;
   }
-  return trimmed + suffix;
+  return trimmed;
 }

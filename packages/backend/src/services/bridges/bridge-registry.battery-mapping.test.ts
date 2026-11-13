@@ -160,13 +160,15 @@ describe("BridgeRegistry battery mapping", () => {
     );
   });
 
-  it("resolves the sensor after a refresh once it becomes available (#450)", () => {
+  it("resolves the sensor after a refresh once it has a state (#450)", () => {
     const states: Record<string, HomeAssistantEntityState> = {
-      "sensor.robot_battery": state("sensor.robot_battery", "unavailable", {
+      "sensor.robot_battery": state("sensor.robot_battery", "85", {
         device_class: SensorDeviceClass.battery,
       }),
     };
     const registry = sut(states);
+    // registry entry without a state yet, an unavailable one counts (#543)
+    delete states["sensor.robot_battery"];
     expect(registry.findBatteryEntityForDevice(deviceId)).toBeUndefined();
     // negative answer is cached until the next refresh
     expect(registry.findBatteryEntityForDevice(deviceId)).toBeUndefined();
@@ -178,6 +180,44 @@ describe("BridgeRegistry battery mapping", () => {
     expect(registry.findBatteryEntityForDevice(deviceId)).toBe(
       "sensor.robot_battery",
     );
+  });
+
+  it.each([
+    "unavailable",
+    "unknown",
+  ])("maps a %s battery sensor so the device shape does not wait for a value (#543)", (value) => {
+    const registry = sut({
+      "sensor.robot_battery": state("sensor.robot_battery", value, {
+        device_class: SensorDeviceClass.battery,
+      }),
+    });
+
+    expect(registry.findBatteryEntityForDevice(deviceId)).toBe(
+      "sensor.robot_battery",
+    );
+  });
+
+  it("prefers a live battery sensor over an unavailable one (#543)", () => {
+    const registry = sut({
+      "sensor.a_battery": state("sensor.a_battery", "unavailable", {
+        device_class: SensorDeviceClass.battery,
+      }),
+      "sensor.b_battery": state("sensor.b_battery", "74", {
+        device_class: SensorDeviceClass.battery,
+      }),
+    });
+
+    expect(registry.findBatteryEntityForDevice(deviceId)).toBe(
+      "sensor.b_battery",
+    );
+  });
+
+  it("does not map an unavailable sensor without the battery class (#461, #543)", () => {
+    const registry = sut({
+      "sensor.robot_battery": state("sensor.robot_battery", "unavailable", {}),
+    });
+
+    expect(registry.findBatteryEntityForDevice(deviceId)).toBeUndefined();
   });
 
   it("prefers a real battery sensor over a classless last_clean_area sibling", () => {
@@ -210,8 +250,11 @@ describe("batteryFingerprintFor (#450)", () => {
   }
 
   it("follows the resolver across a refresh", () => {
-    const states = vacuumStates("unavailable");
+    const states = vacuumStates("85");
     const registry = sut(states);
+    // registry entry without a state yet, an unavailable one counts (#543)
+    delete states[BATTERY];
+    registry.refresh();
     expect(registry.batteryFingerprintFor(VACUUM, undefined)).toBe("");
 
     states[BATTERY] = state(BATTERY, "85", {
@@ -219,6 +262,19 @@ describe("batteryFingerprintFor (#450)", () => {
     });
     registry.refresh();
     expect(registry.batteryFingerprintFor(VACUUM, undefined)).toBe(BATTERY);
+  });
+
+  it("is the same for an unavailable battery and its later value, no rebuild (#543)", () => {
+    const states = vacuumStates("unavailable");
+    const registry = sut(states);
+    const before = registry.batteryFingerprintFor(VACUUM, undefined);
+    expect(before).toBe(BATTERY);
+
+    states[BATTERY] = state(BATTERY, "85", {
+      device_class: SensorDeviceClass.battery,
+    });
+    registry.refresh();
+    expect(registry.batteryFingerprintFor(VACUUM, undefined)).toBe(before);
   });
 
   it("stays empty when the mapping already decides the battery", () => {
@@ -325,5 +381,73 @@ describe("BridgeRegistry charging entity lookup (#450)", () => {
     });
 
     expect(registry.findChargingEntityForDevice(deviceId)).toBeUndefined();
+  });
+});
+
+describe("BridgeRegistry per-device lookup", () => {
+  it("matches a full registry scan and follows a reloaded entity map", () => {
+    const states: Record<string, HomeAssistantEntityState> = {
+      "sensor.a_battery": state("sensor.a_battery", "80", {
+        device_class: "battery",
+      }),
+      "binary_sensor.a_problem": state("binary_sensor.a_problem", "off", {
+        device_class: "problem",
+      }),
+      "sensor.b_battery": state("sensor.b_battery", "50", {
+        device_class: "battery",
+      }),
+    };
+    const entities: Record<string, HomeAssistantEntityRegistry> = {
+      "sensor.a_battery": registryEntity("sensor.a_battery"),
+      "binary_sensor.a_problem": registryEntity("binary_sensor.a_problem"),
+      "sensor.b_battery": {
+        ...registryEntity("sensor.b_battery"),
+        device_id: "device-2",
+      },
+    };
+    const ha = {
+      areas: new Map(),
+      devices: { [deviceId]: device() },
+      entities,
+      labels: [],
+      states,
+    };
+    const registry = new BridgeRegistry(
+      ha as unknown as HomeAssistantRegistry,
+      {
+        featureFlags: { autoBatteryMapping: true },
+        filter: { include: [], exclude: [], includeMode: "any" },
+      } as unknown as BridgeDataProvider,
+    );
+    const lookup = (id: string) =>
+      (
+        registry as unknown as {
+          entitiesOfDevice(id: string): HomeAssistantEntityRegistry[];
+        }
+      ).entitiesOfDevice(id);
+    const scan = (id: string) =>
+      Object.values(ha.entities).filter((e) => e.device_id === id);
+
+    expect(lookup(deviceId)).toHaveLength(2);
+    expect(lookup(deviceId)).toEqual(scan(deviceId));
+    expect(lookup("device-2")).toEqual(scan("device-2"));
+    expect(registry.findBatteryEntityForDevice(deviceId)).toBe(
+      "sensor.a_battery",
+    );
+
+    // an HA reload swaps the map, no bridge refresh in between
+    ha.entities = {
+      ...entities,
+      "sensor.a_charging_state": registryEntity("sensor.a_charging_state"),
+    };
+    states["sensor.a_charging_state"] = state(
+      "sensor.a_charging_state",
+      "charging",
+      {},
+    );
+    expect(lookup(deviceId)).toEqual(scan(deviceId));
+    expect(registry.findChargingEntityForDevice(deviceId)).toBe(
+      "sensor.a_charging_state",
+    );
   });
 });

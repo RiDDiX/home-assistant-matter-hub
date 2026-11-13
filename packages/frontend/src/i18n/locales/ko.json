@@ -171,7 +171,9 @@
     "bridgeStatusRunning": "{{running}}개 실행 중",
     "bridgeStatusFailed": "{{failed}}개 실패",
     "devicesFailed": "{{count}}개 실패",
-    "uptimeFormat": "{{time}}"
+    "uptimeFormat": "{{time}}",
+    "deviceCount": "{{count}} 기기",
+    "fabricCount": "{{count}} 패브릭"
   },
   "bridge": {
     "name": "브리지 이름",
@@ -402,7 +404,8 @@
     "sortType": "기기 유형",
     "sortName": "이름",
     "deviceCount": "기기 {{count}}개",
-    "filteredCount": "전체 {{total}}개 중 {{filtered}}개"
+    "filteredCount": "전체 {{total}}개 중 {{filtered}}개",
+    "fabricCount": "{{count}} 패브릭"
   },
   "diagnostics": {
     "title": "실시간 진단",
@@ -458,7 +461,6 @@
     "namePlaceholder": "현관문",
     "nameHelperText": "이 자격 증명을 알아보기 쉬운 이름",
     "entityRequired": "엔티티 ID는 필수입니다",
-    "pinLength": "PIN은 4~8자리여야 합니다",
     "pinDigitsOnly": "PIN에는 숫자만 사용할 수 있습니다",
     "saveFailed": "저장하지 못했습니다",
     "loadFailed": "자격 증명을 불러오지 못했습니다",
@@ -547,8 +549,7 @@
     "settings": "백업 설정",
     "autoBackupLabel": "자동 백업",
     "autoBackupDesc": "애플리케이션이 종료되거나 재시작될 때 전체 백업을 자동으로 생성합니다.",
-    "retentionCount": "보관할 백업 수",
-    "retentionCountDesc": "보관할 백업 개수(오래된 백업은 자동으로 삭제됩니다)"
+    "retentionCount": "보관할 백업 수"
   },
   "networkMap": {
     "title": "네트워크 맵",

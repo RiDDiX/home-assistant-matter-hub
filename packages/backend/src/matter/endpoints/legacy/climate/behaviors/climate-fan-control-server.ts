@@ -2,6 +2,7 @@ import type {
   ClimateDeviceAttributes,
   HomeAssistantEntityState,
 } from "@home-assistant-matter-hub/common";
+import { Logger } from "@matter/general";
 import { autoPresetName } from "../../../../../utils/converters/fan-mode.js";
 import { toAscendingSpeedPresets } from "../../../../../utils/converters/fan-mode-order.js";
 import {
@@ -10,6 +11,8 @@ import {
   type FanControlServerConfig,
 } from "../../../../behaviors/fan-control-server.js";
 import { HomeAssistantEntityBehavior } from "../../../../behaviors/home-assistant-entity-behavior.js";
+
+const logger = Logger.get("ClimateFanControlServer");
 
 const attributes = (entity: HomeAssistantEntityState) =>
   entity.attributes as ClimateDeviceAttributes;
@@ -53,6 +56,42 @@ export function rockSettingToSwingMode(setting: FanControlRockSetting): string {
   }
   return "off";
 }
+
+const isOffLikeSwing = (mode: string) =>
+  ["off", "stopped", "none"].includes(mode.trim().toLowerCase());
+
+/**
+ * The swing mode to send for a Matter rock setting, in the entity's own
+ * spelling (HA swing mode names are case-sensitive). Not rocking sends the
+ * declared off-like mode. Rocking sends the matching mode, else vertical, else
+ * on, else the first non-off mode. Undefined when nothing declared fits.
+ * Entities that declare no swing modes keep the historic literals.
+ *
+ * Exported for tests.
+ */
+export function climateSwingMode(
+  swingModes: string[] | null | undefined,
+  setting: FanControlRockSetting,
+): string | undefined {
+  const wanted = rockSettingToSwingMode(setting);
+  const modes = swingModes ?? [];
+  if (modes.length === 0) {
+    return wanted;
+  }
+  if (wanted === "off") {
+    return modes.find(isOffLikeSwing);
+  }
+  const declared = (name: string) =>
+    modes.find((mode) => mode.toLowerCase() === name);
+  return (
+    declared(wanted) ??
+    declared("vertical") ??
+    declared("on") ??
+    modes.find((mode) => !isOffLikeSwing(mode))
+  );
+}
+
+const loggedNoSwingMode = new Set<string>();
 
 /**
  * The fan mode to send when a controller asks for speed zero.
@@ -102,13 +141,26 @@ export const climateFanControlConfig: FanControlServerConfig = {
   // false at zero, the controller shows the AC off, HA reports it still on, and
   // the tile flaps back. Power stays with the OnOff cluster's own commands.
   syncOnOffWithSpeed: false,
-  isOscillating: (entity) =>
-    attributes(entity).swing_mode?.toLowerCase() !== "off" &&
-    attributes(entity).swing_mode != null,
+  isOscillating: (entity) => {
+    const mode = attributes(entity).swing_mode;
+    return mode != null && !isOffLikeSwing(mode);
+  },
   supportsOscillation: (entity) =>
     (attributes(entity).swing_modes?.length ?? 0) > 0,
-  getRockSetting: (entity) =>
-    swingModeToRockSetting(attributes(entity).swing_mode),
+  getRockSetting: (entity) => {
+    const mode = attributes(entity).swing_mode;
+    const setting = swingModeToRockSetting(mode);
+    // Any declared mode that is not off-like rocks, e.g. a plain "on".
+    if (
+      mode != null &&
+      !isOffLikeSwing(mode) &&
+      !setting.rockLeftRight &&
+      !setting.rockUpDown
+    ) {
+      return { rockUpDown: true };
+    }
+    return setting;
+  },
   // Climate devices don't typically support wind modes
   getWindMode: () => undefined,
   supportsWind: () => false,
@@ -156,10 +208,27 @@ export const climateFanControlConfig: FanControlServerConfig = {
     action: "climate.set_swing_mode",
     data: { swing_mode: oscillating ? "vertical" : "off" },
   }),
-  setRockSetting: (setting) => ({
-    action: "climate.set_swing_mode",
-    data: { swing_mode: rockSettingToSwingMode(setting) },
-  }),
+  setRockSetting: (setting, agent) => {
+    const entityState = agent.get(HomeAssistantEntityBehavior).state.entity
+      .state;
+    const swingMode = climateSwingMode(
+      attributes(entityState).swing_modes,
+      setting,
+    );
+    if (swingMode === undefined) {
+      if (!loggedNoSwingMode.has(entityState.entity_id)) {
+        loggedNoSwingMode.add(entityState.entity_id);
+        logger.debug(
+          `[${entityState.entity_id}] no swing mode for rock setting ${JSON.stringify(setting)} in ${JSON.stringify(attributes(entityState).swing_modes)}, not sent`,
+        );
+      }
+      return undefined;
+    }
+    return {
+      action: "climate.set_swing_mode",
+      data: { swing_mode: swingMode },
+    };
+  },
   setWindMode: () => ({
     action: "homeassistant.turn_on",
   }),

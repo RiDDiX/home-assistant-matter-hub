@@ -5,6 +5,7 @@ import {
 import { Logger } from "@matter/general";
 import { KeypadInputServer as Base } from "@matter/main/behaviors";
 import { KeypadInput } from "@matter/main/clusters";
+import type { HomeAssistantAction } from "../../../../../services/home-assistant/home-assistant-actions.js";
 import { testBit } from "../../../../../utils/test-bit.js";
 import { HomeAssistantEntityBehavior } from "../../../../behaviors/home-assistant-entity-behavior.js";
 
@@ -21,8 +22,7 @@ export class MediaPlayerKeypadInputServer extends Base {
 
     const attributes = homeAssistant.entity.state
       .attributes as MediaPlayerDeviceAttributes;
-    const features = attributes.supported_features ?? 0;
-    const action = this.mapKeyToAction(request.keyCode, features);
+    const action = this.mapKeyToAction(request.keyCode, attributes);
 
     if (!action) {
       logger.debug(
@@ -32,36 +32,45 @@ export class MediaPlayerKeypadInputServer extends Base {
     }
 
     logger.debug(
-      `sendKey(${request.keyCode}) → ${action} for ${homeAssistant.entityId}`,
+      `sendKey(${request.keyCode}) → ${action.action} for ${homeAssistant.entityId}`,
     );
-    homeAssistant.callAction({ action });
+    homeAssistant.callAction(action);
     return { status: KeypadInput.Status.Success };
   }
 
   private mapKeyToAction(
     keyCode: KeypadInput.CecKeyCode,
-    features: number,
-  ): string | undefined {
+    attributes: MediaPlayerDeviceAttributes,
+  ): HomeAssistantAction | undefined {
+    const features = attributes.supported_features ?? 0;
+    // HA requires is_volume_muted on volume_mute
+    const mute = (muted: boolean): HomeAssistantAction | undefined =>
+      testBit(features, MediaPlayerDeviceFeature.VOLUME_MUTE)
+        ? {
+            action: "media_player.volume_mute",
+            data: { is_volume_muted: muted },
+          }
+        : undefined;
     switch (keyCode) {
       // Playback
       case KeypadInput.CecKeyCode.Play:
       case KeypadInput.CecKeyCode.PlayFunction:
         if (testBit(features, MediaPlayerDeviceFeature.PLAY)) {
-          return "media_player.media_play";
+          return { action: "media_player.media_play" };
         }
         return undefined;
 
       case KeypadInput.CecKeyCode.Pause:
       case KeypadInput.CecKeyCode.PausePlayFunction:
         if (testBit(features, MediaPlayerDeviceFeature.PAUSE)) {
-          return "media_player.media_pause";
+          return { action: "media_player.media_pause" };
         }
         return undefined;
 
       case KeypadInput.CecKeyCode.Stop:
       case KeypadInput.CecKeyCode.StopFunction:
         if (testBit(features, MediaPlayerDeviceFeature.STOP)) {
-          return "media_player.media_stop";
+          return { action: "media_player.media_stop" };
         }
         return undefined;
 
@@ -69,42 +78,38 @@ export class MediaPlayerKeypadInputServer extends Base {
       case KeypadInput.CecKeyCode.Forward:
       case KeypadInput.CecKeyCode.FastForward:
         if (testBit(features, MediaPlayerDeviceFeature.NEXT_TRACK)) {
-          return "media_player.media_next_track";
+          return { action: "media_player.media_next_track" };
         }
         return undefined;
 
       case KeypadInput.CecKeyCode.Backward:
       case KeypadInput.CecKeyCode.Rewind:
         if (testBit(features, MediaPlayerDeviceFeature.PREVIOUS_TRACK)) {
-          return "media_player.media_previous_track";
+          return { action: "media_player.media_previous_track" };
         }
         return undefined;
 
       // Volume
       case KeypadInput.CecKeyCode.VolumeUp:
         if (testBit(features, MediaPlayerDeviceFeature.VOLUME_STEP)) {
-          return "media_player.volume_up";
+          return { action: "media_player.volume_up" };
         }
         return undefined;
 
       case KeypadInput.CecKeyCode.VolumeDown:
         if (testBit(features, MediaPlayerDeviceFeature.VOLUME_STEP)) {
-          return "media_player.volume_down";
+          return { action: "media_player.volume_down" };
         }
         return undefined;
 
       case KeypadInput.CecKeyCode.Mute:
+        return mute(!attributes.is_volume_muted);
+
       case KeypadInput.CecKeyCode.MuteFunction:
-        if (testBit(features, MediaPlayerDeviceFeature.VOLUME_MUTE)) {
-          return "media_player.volume_mute";
-        }
-        return undefined;
+        return mute(true);
 
       case KeypadInput.CecKeyCode.RestoreVolumeFunction:
-        if (testBit(features, MediaPlayerDeviceFeature.VOLUME_MUTE)) {
-          return "media_player.volume_mute";
-        }
-        return undefined;
+        return mute(false);
 
       // Power
       case KeypadInput.CecKeyCode.Power:
@@ -113,19 +118,19 @@ export class MediaPlayerKeypadInputServer extends Base {
           testBit(features, MediaPlayerDeviceFeature.TURN_ON) &&
           testBit(features, MediaPlayerDeviceFeature.TURN_OFF)
         ) {
-          return "media_player.toggle";
+          return { action: "media_player.toggle" };
         }
         return undefined;
 
       case KeypadInput.CecKeyCode.PowerOnFunction:
         if (testBit(features, MediaPlayerDeviceFeature.TURN_ON)) {
-          return "media_player.turn_on";
+          return { action: "media_player.turn_on" };
         }
         return undefined;
 
       case KeypadInput.CecKeyCode.PowerOffFunction:
         if (testBit(features, MediaPlayerDeviceFeature.TURN_OFF)) {
-          return "media_player.turn_off";
+          return { action: "media_player.turn_off" };
         }
         return undefined;
 

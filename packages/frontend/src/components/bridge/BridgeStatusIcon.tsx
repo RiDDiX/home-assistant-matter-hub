@@ -5,6 +5,8 @@ import PauseCircle from "@mui/icons-material/PauseCircle";
 import Sync from "@mui/icons-material/Sync";
 import Chip from "@mui/material/Chip";
 import Tooltip from "@mui/material/Tooltip";
+import { useTranslation } from "react-i18next";
+import { bridgeStatusMessage } from "./bridge-status-message.ts";
 
 export interface BridgeStatusIconProps {
   status: BridgeStatus;
@@ -20,34 +22,35 @@ const statusConfig: Record<
   }
 > = {
   [BridgeStatus.Starting]: {
-    label: "Starting",
+    label: "common.starting",
     color: "info",
     icon: <Sync fontSize="small" />,
   },
   [BridgeStatus.Running]: {
-    label: "Running",
+    label: "common.running",
     color: "success",
     icon: <CheckCircle fontSize="small" />,
   },
   [BridgeStatus.Stopped]: {
-    label: "Stopped",
+    label: "common.stopped",
     color: "warning",
     icon: <PauseCircle fontSize="small" />,
   },
   [BridgeStatus.Failed]: {
-    label: "Failed",
+    label: "common.failed",
     color: "error",
     icon: <ErrorIcon fontSize="small" />,
   },
 };
 
 export const BridgeStatusIcon = ({ status, reason }: BridgeStatusIconProps) => {
+  const { t } = useTranslation();
   const config = statusConfig[status];
 
   const chip = (
     <Chip
       icon={config.icon}
-      label={config.label}
+      label={t(config.label)}
       size="small"
       color={config.color}
       variant="filled"
@@ -56,7 +59,7 @@ export const BridgeStatusIcon = ({ status, reason }: BridgeStatusIconProps) => {
   );
 
   if (reason) {
-    return <Tooltip title={reason}>{chip}</Tooltip>;
+    return <Tooltip title={bridgeStatusMessage(reason, t)}>{chip}</Tooltip>;
   }
 
   return chip;

@@ -14,9 +14,9 @@ export interface MdnsInterfaceChoice {
   // The likely LAN interface, when exactly one candidate is left. Only a
   // suggestion for the warning, never bound automatically.
   readonly selected?: string;
-  // LAN candidates: external interfaces that are not Docker or Thread by name;
-  // with more than one, those on a Docker IPv4 range drop out (#482). Falls
-  // back to every external interface when nothing else is left.
+  // LAN candidates: external interfaces that are not Docker, Thread or a VPN
+  // tunnel by name; with more than one, those on a Docker IPv4 range drop out
+  // (#482). Falls back to every external interface when nothing else is left.
   readonly candidates: readonly MdnsInterfaceAddrs[];
   // Routable (non-loopback, non-link-local) external interfaces.
   readonly external: readonly MdnsInterfaceAddrs[];
@@ -40,11 +40,15 @@ type RawInterfaces = Record<
 
 // docker0/hassio/veth*/cni* are container-internal. br-* is intentionally NOT
 // here: br-lan and friends are common real LAN bridge names.
-const DOCKER_NAME = /^(docker\d*|hassio|veth|cni)/;
+export const DOCKER_NAME = /^(docker\d*|hassio|veth|cni)/;
 
 // wpan0/otbr* are OpenThread border-router interfaces. Their mesh-local fd::
 // ULA is not routable off the host, so mDNS must not advertise it (#388).
 const THREAD_NAME = /^(wpan|otbr)/;
+
+// VPN tunnels carry no LAN multicast, so they are never the LAN interface. Left
+// in, a tunnel beside a 172.x LAN NIC would become the suggestion.
+const TUNNEL_NAME = /^(tailscale|wg|tun|utun|zt)/;
 
 // 172.16.0.0/12 is the default Docker bridge range.
 function inDockerRange(ipv4: string): boolean {
@@ -92,7 +96,10 @@ export function selectMdnsInterface(raw: RawInterfaces): MdnsInterfaceChoice {
     external.push({ name, ipv4, ipv6 });
   }
   const lan = external.filter(
-    (i) => !DOCKER_NAME.test(i.name) && !THREAD_NAME.test(i.name),
+    (i) =>
+      !DOCKER_NAME.test(i.name) &&
+      !THREAD_NAME.test(i.name) &&
+      !TUNNEL_NAME.test(i.name),
   );
   // a compose bridge is named br-<hash> like a real LAN bridge, its 172.x
   // address gives it away once there is another candidate (#482)

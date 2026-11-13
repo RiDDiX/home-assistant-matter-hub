@@ -159,6 +159,8 @@ export interface EntityMappingConfig {
   /**
    * Optional: Entity ID of a problem/safety binary sensor on the same device.
    * Drives hardwareFaultAlert on a smoke/CO alarm (#408).
+   * For vacuums, a Roborock vacuum_error enum sensor supplies native RVC
+   * operational-error details. Auto-detected from the same HA device.
    * Example: "binary_sensor.smoke_problem"
    */
   readonly faultEntity?: string;
@@ -171,6 +173,8 @@ export interface EntityMappingConfig {
    * Example: "sensor.vacuum_charging_state"
    */
   readonly chargingStateEntity?: string;
+  /** Opt-in readiness sensor. Enables Matter UpdatingMaps; requires a compatible controller. */
+  readonly readinessEntity?: string;
   /**
    * Optional: Array of button entity IDs for room-based cleaning (Roborock, etc.).
    * Each button entity represents a room/scene in the vacuum app.
@@ -210,13 +214,15 @@ export interface EntityMappingConfig {
   /** Optional: Override the advertised maximum PIN length (uint8, 1..20). Default 8. */
   readonly lockPinMaxLength?: number;
   /**
-   * Optional: Entity ID of a power sensor (device_class: power, unit: W).
+   * Optional: Entity ID of a power sensor (device_class: power). unit_of_measurement
+   * mW/W/kW/MW is converted, a missing unit is taken as W.
    * Adds ElectricalPowerMeasurement cluster to show real-time power consumption.
    * Example: "sensor.smart_plug_power"
    */
   readonly powerEntity?: string;
   /**
-   * Optional: Entity ID of an energy sensor (device_class: energy, unit: kWh).
+   * Optional: Entity ID of an energy sensor (device_class: energy). unit_of_measurement
+   * Wh/kWh/MWh is converted, a missing unit is taken as kWh.
    * Adds ElectricalEnergyMeasurement cluster to show cumulative energy consumption.
    * Example: "sensor.smart_plug_energy"
    */
@@ -323,6 +329,8 @@ export interface EntityMappingConfig {
    * cleaned area plus per-room sizeSqm advances currentArea/progress (#368).
    */
   readonly cleanedAreaEntity?: string;
+  /** Internal whole-job dependency resolved from Roborock registry metadata, not persisted. */
+  readonly cleaningJobEntity?: string;
   /**
    * Optional: The vacuum cleans rooms in ascending area ID order regardless of
    * the order they were picked in (Roborock batch segment cleaning does this).
@@ -430,6 +438,14 @@ export interface EntityMappingConfig {
    */
   readonly climateForceTurnOn?: boolean;
   /**
+   * Optional: Refuse Off from Matter controllers for this climate entity, and
+   * skip the OnOff cluster. Apple Home always shows a power button on
+   * thermostats; with this set a tap on it does nothing and the entity keeps
+   * its mode, e.g. a Wiser room stays on its schedule (#527). Off set in HA
+   * itself is still shown.
+   */
+  readonly climateBlockOff?: boolean;
+  /**
    * Optional: Expose a second Matter Fan device alongside this climate AC,
    * bound to the same HA entity. Apple Home does not surface a thermostat
    * fan / fan_only mode, so this companion Fan tile turns the AC's fan_only
@@ -515,8 +531,10 @@ export interface EntityMappingRequest {
   readonly humidityEntity?: string;
   readonly pressureEntity?: string;
   readonly batteryEntity?: string;
+  readonly faultEntity?: string;
   readonly disableBatteryMapping?: boolean;
   readonly chargingStateEntity?: string;
+  readonly readinessEntity?: string;
   readonly roomEntities?: string[];
   readonly disableLockPin?: boolean;
   readonly lockWithoutPin?: boolean;
@@ -561,6 +579,7 @@ export interface EntityMappingRequest {
   readonly disableClimateFanControl?: boolean;
   readonly climateKeepModeOnIdle?: boolean;
   readonly climateForceTurnOn?: boolean;
+  readonly climateBlockOff?: boolean;
   readonly climateExposeFan?: boolean;
   readonly climateAutoMode?: ClimateAutoMode;
   readonly composedEntities?: ComposedSubEntity[];

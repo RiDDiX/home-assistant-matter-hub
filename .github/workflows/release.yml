@@ -21,6 +21,7 @@ permissions:
 
 jobs:
   release:
+    if: github.repository == 'RiDDiX/home-assistant-matter-hub'
     permissions:
       contents: write
       packages: write

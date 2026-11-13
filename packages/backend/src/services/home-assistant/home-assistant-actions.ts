@@ -36,6 +36,28 @@ const TARGET_FAILURE_THRESHOLD = 3;
 // through it (#453).
 const RECENT_CHANGE_MS = 2000;
 
+// HA answered and refused the call (a result error with a string code such as
+// service_validation_error). Repeating it changes nothing, and counting it in
+// the app-wide breaker would let one broken integration block every device.
+function isHaRefusal(error: unknown): boolean {
+  return (
+    !(error instanceof Error) &&
+    typeof (error as { code?: unknown } | null)?.code === "string"
+  );
+}
+
+// Lock PINs from Matter controllers, the HA call gets them, nothing else does.
+const SECRET_KEYS = new Set(["code", "usercode", "user_code", "pin"]);
+
+function redactData(data: object | undefined): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(data ?? {}).map(([key, value]) => [
+      key,
+      SECRET_KEYS.has(key) ? "[redacted]" : value,
+    ]),
+  );
+}
+
 const defaultConfig: Required<HomeAssistantActionsConfig> = {
   retryAttempts: 3,
   retryBaseDelayMs: 100,
@@ -64,7 +86,6 @@ export class HomeAssistantActions extends Service {
   private readonly circuitBreaker: CircuitBreaker;
   private readonly config: Required<HomeAssistantActionsConfig>;
   private consecutiveFailures = 0;
-  private lastSuccessTime = Date.now();
 
   constructor(
     logger: LoggerService,
@@ -116,6 +137,12 @@ export class HomeAssistantActions extends Service {
   // calls per issuing entity, only the latest one may roll back (#446)
   private readonly callSeq = new Map<string, number>();
 
+  // a light.turn_on with data hit this light within RECENT_CHANGE_MS
+  lightChangedRecently(entityId: string): boolean {
+    const at = this.lastChangeAt.get(`${entityId}-light.turn_on`);
+    return at != null && Date.now() - at < RECENT_CHANGE_MS;
+  }
+
   private processAction(key: string, calls: HomeAssistantActionCall[]) {
     this.leadingOn.delete(key);
     // target === false means skip entity targeting (domain-level services like mqtt.publish)
@@ -152,18 +179,19 @@ export class HomeAssistantActions extends Service {
           this.log.debug(`Rollback for '${origin}' failed: ${e}`);
         }
       });
+    const shownData = redactData(data);
     diagnosticEventBus.emit(
       "command_received",
       `Action ${action} for ${entity_id ?? "(no target)"}`,
       {
         entityId: entity_id ?? calls[0].entityId,
-        details: { action, data },
+        details: { action, data: shownData },
       },
     );
     this.fireEvent("hamh_action", {
       entity_id: entity_id ?? calls[0].entityId,
       action,
-      data,
+      data: shownData,
       source: "matter_controller",
     });
   }
@@ -186,9 +214,7 @@ export class HomeAssistantActions extends Service {
           this.debounceContext.get(commandKey, 100).unregister();
         }
       } else if (
-        Date.now() -
-          (this.lastChangeAt.get(base) ?? Number.NEGATIVE_INFINITY) >=
-          RECENT_CHANGE_MS &&
+        !this.lightChangedRecently(target) &&
         !this.debounceContext.isPending(commandKey)
       ) {
         // no recent level change, this On may start a pair
@@ -211,46 +237,51 @@ export class HomeAssistantActions extends Service {
     const targetStr = JSON.stringify(target);
 
     this.log.debug(
-      `Calling action '${actionKey}' for target ${targetStr} with data ${JSON.stringify(data ?? {})}`,
+      `Calling action '${actionKey}' for target ${targetStr} with data ${JSON.stringify(redactData(data))}`,
     );
 
     try {
-      const result = await this.circuitBreaker.execute(() =>
-        withRetry(
-          async () => {
-            // sendHaMessage, not callService: the library call never times
-            // out, so a socket that stays open but never answers would park
-            // the retry chain and the breaker would never see a failure.
-            const res = await sendHaMessage<T>(
-              this.client.connection,
-              {
-                type: "call_service",
-                domain,
-                service: action,
-                service_data: data,
-                target,
-                return_response: returnResponse,
-              },
-              this.client.messageTimeoutMs,
-            );
-            return res as T;
-          },
-          {
-            maxAttempts: this.config.retryAttempts,
-            baseDelayMs: this.config.retryBaseDelayMs,
-            maxDelayMs: this.config.retryMaxDelayMs,
-            // A timeout does not mean HA ignored the call, it may have run it.
-            // Repeating a button press or a script would be worse than failing.
-            shouldRetry: (error) =>
-              !(error instanceof Error && error.message.includes("timed out")),
-            onRetry: (attempt, error, delayMs) => {
-              const errorMsg = this.formatError(error);
-              this.log.warn(
-                `Retrying action '${actionKey}' for ${targetStr} (attempt ${attempt}): ${errorMsg}. Next retry in ${delayMs}ms`,
+      const result = await this.circuitBreaker.execute(
+        () =>
+          withRetry(
+            async () => {
+              // sendHaMessage, not callService: the library call never times
+              // out, so a socket that stays open but never answers would park
+              // the retry chain and the breaker would never see a failure.
+              const res = await sendHaMessage<T>(
+                this.client.connection,
+                {
+                  type: "call_service",
+                  domain,
+                  service: action,
+                  service_data: data,
+                  target,
+                  return_response: returnResponse,
+                },
+                this.client.messageTimeoutMs,
               );
+              return res as T;
             },
-          },
-        ),
+            {
+              maxAttempts: this.config.retryAttempts,
+              baseDelayMs: this.config.retryBaseDelayMs,
+              maxDelayMs: this.config.retryMaxDelayMs,
+              // A timeout does not mean HA ignored the call, it may have run it.
+              // Repeating a button press or a script would be worse than failing.
+              shouldRetry: (error) =>
+                !isHaRefusal(error) &&
+                !(
+                  error instanceof Error && error.message.includes("timed out")
+                ),
+              onRetry: (attempt, error, delayMs) => {
+                const errorMsg = this.formatError(error);
+                this.log.warn(
+                  `Retrying action '${actionKey}' for ${targetStr} (attempt ${attempt}): ${errorMsg}. Next retry in ${delayMs}ms`,
+                );
+              },
+            },
+          ),
+        (error) => !isHaRefusal(error),
       );
 
       this.onActionSuccess();
@@ -263,7 +294,6 @@ export class HomeAssistantActions extends Service {
 
   private onActionSuccess(): void {
     this.consecutiveFailures = 0;
-    this.lastSuccessTime = Date.now();
   }
 
   private formatError(error: unknown): string {
@@ -304,19 +334,9 @@ export class HomeAssistantActions extends Service {
     }
   }
 
-  getHealthStatus(): {
-    consecutiveFailures: number;
-    circuitBreakerOpen: boolean;
-    lastSuccessMs: number;
-  } {
-    return {
-      consecutiveFailures: this.consecutiveFailures,
-      circuitBreakerOpen: this.circuitBreaker.isOpen,
-      lastSuccessMs: Date.now() - this.lastSuccessTime,
-    };
-  }
-
   fireEvent(eventType: string, eventData?: Record<string, unknown>): void {
+    // HA allows fire_event for admins only (#548)
+    if (this.client.isAdmin === false) return;
     sendHaMessage(this.client.connection, {
       type: "fire_event",
       event_type: eventType,

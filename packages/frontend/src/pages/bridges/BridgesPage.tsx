@@ -2,18 +2,21 @@ import {
   Add,
   AutoFixHigh,
   Download,
+  Hub,
   Map as MapIcon,
   PlayArrow,
   RestartAlt,
   Stop,
   Upload,
 } from "@mui/icons-material";
+import Alert from "@mui/material/Alert";
 import Backdrop from "@mui/material/Backdrop";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
 import CircularProgress from "@mui/material/CircularProgress";
 import Divider from "@mui/material/Divider";
 import Stack from "@mui/material/Stack";
+import Typography from "@mui/material/Typography";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router";
@@ -26,6 +29,7 @@ import {
 import { BridgeImportDialog } from "../../components/bridge/BridgeImportDialog.js";
 import { BridgeList } from "../../components/bridge/BridgeList";
 import { BridgeWizard } from "../../components/bridge/BridgeWizard.js";
+import { ConfirmDialog } from "../../components/misc/ConfirmDialog.tsx";
 import { useNotifications } from "../../components/notifications/use-notifications.ts";
 import { useBridges } from "../../hooks/data/bridges";
 import { navigation } from "../../routes.tsx";
@@ -42,6 +46,9 @@ export const BridgesPage = () => {
   const [importDialogOpen, setImportDialogOpen] = useState(false);
   const [wizardOpen, setWizardOpen] = useState(false);
   const [bulkLoading, setBulkLoading] = useState(false);
+  const [pendingBulk, setPendingBulk] = useState<"stop" | "restart" | null>(
+    null,
+  );
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleExport = useCallback(async () => {
@@ -137,101 +144,149 @@ export const BridgesPage = () => {
       </Backdrop>
 
       <Stack spacing={4}>
+        <Stack spacing={2}>
+          <Box display="flex" alignItems="center" gap={2}>
+            <Hub color="primary" fontSize="large" />
+            <Typography variant="h5" component="h1" flexGrow={1}>
+              {t("nav.bridges")}
+            </Typography>
+            <Button
+              component={Link}
+              to={navigation.createBridge}
+              startIcon={<Add />}
+              variant="contained"
+            >
+              {t("dashboard.createBridge")}
+            </Button>
+          </Box>
+          {!bridges && bridgeError && (
+            <Alert severity="error">
+              {bridgeError.message ?? t("bridge.couldNotLoad")}
+            </Alert>
+          )}
+        </Stack>
         {bridges && (
           <>
-            <Box
-              display="flex"
-              justifyContent="end"
-              flexWrap="wrap"
-              gap={1}
-              paddingTop={{ xs: 1, sm: 0 }}
-            >
-              {bridges.length >= 1 && (
-                <>
-                  <Button
-                    onClick={() => handleBulkAction("start")}
-                    startIcon={<PlayArrow />}
-                    variant="outlined"
-                    size="small"
-                    color="success"
-                    disabled={bulkLoading}
-                  >
-                    {t("common.startAll")}
-                  </Button>
-                  <Button
-                    onClick={() => handleBulkAction("stop")}
-                    startIcon={<Stop />}
-                    variant="outlined"
-                    size="small"
-                    color="error"
-                    disabled={bulkLoading}
-                  >
-                    {t("common.stopAll")}
-                  </Button>
-                  <Button
-                    onClick={() => handleBulkAction("restart")}
-                    startIcon={<RestartAlt />}
-                    variant="outlined"
-                    size="small"
-                    color="warning"
-                    disabled={bulkLoading}
-                  >
-                    {t("common.restartAll")}
-                  </Button>
-                  <Divider orientation="vertical" flexItem />
-                </>
-              )}
-              <Button
-                onClick={handleImportClick}
-                startIcon={<Download />}
-                variant="outlined"
-              >
-                {t("common.import")}
-              </Button>
-              <Button
-                onClick={handleExport}
-                startIcon={<Upload />}
-                variant="outlined"
-                disabled={bridges.length === 0}
-              >
-                {t("common.exportAll")}
-              </Button>
-              <Button
-                component={Link}
-                to={navigation.areaSetup}
-                startIcon={<MapIcon />}
-                variant="outlined"
-              >
-                {t("areaSetup.title")}
-              </Button>
-              <Button
-                onClick={() => setWizardOpen(true)}
-                startIcon={<AutoFixHigh />}
-                variant="outlined"
-              >
-                {t("bridgeWizard.title")}
-              </Button>
-              <Button
-                component={Link}
-                to={navigation.createBridge}
-                endIcon={<Add />}
-                variant="outlined"
-              >
-                {t("dashboard.createBridge")}
-              </Button>
-              <input
-                type="file"
-                ref={fileInputRef}
-                onChange={handleFileChange}
-                accept=".json"
-                style={{ display: "none" }}
-              />
-            </Box>
+            <Stack spacing={2}>
+              <Box display="flex" alignItems="center" flexWrap="wrap" gap={1}>
+                {bridges.length >= 1 && (
+                  <>
+                    <Button
+                      onClick={() => handleBulkAction("start")}
+                      startIcon={<PlayArrow />}
+                      variant="outlined"
+                      size="small"
+                      color="success"
+                      disabled={bulkLoading}
+                    >
+                      {t("common.startAll")}
+                    </Button>
+                    <Button
+                      onClick={() => setPendingBulk("stop")}
+                      startIcon={<Stop />}
+                      variant="outlined"
+                      size="small"
+                      color="error"
+                      disabled={bulkLoading}
+                    >
+                      {t("common.stopAll")}
+                    </Button>
+                    <Button
+                      onClick={() => setPendingBulk("restart")}
+                      startIcon={<RestartAlt />}
+                      variant="outlined"
+                      size="small"
+                      color="warning"
+                      disabled={bulkLoading}
+                    >
+                      {t("common.restartAll")}
+                    </Button>
+                    <Divider
+                      orientation="vertical"
+                      flexItem
+                      sx={{ display: { xs: "none", sm: "block" } }}
+                    />
+                  </>
+                )}
+                <Button
+                  onClick={handleImportClick}
+                  startIcon={<Download />}
+                  variant="outlined"
+                  size="small"
+                >
+                  {t("common.import")}
+                </Button>
+                <Button
+                  onClick={handleExport}
+                  startIcon={<Upload />}
+                  variant="outlined"
+                  size="small"
+                  disabled={bridges.length === 0}
+                >
+                  {t("common.exportAll")}
+                </Button>
+                <Button
+                  component={Link}
+                  to={navigation.areaSetup}
+                  startIcon={<MapIcon />}
+                  variant="outlined"
+                  size="small"
+                >
+                  {t("areaSetup.title")}
+                </Button>
+                <Button
+                  onClick={() => setWizardOpen(true)}
+                  startIcon={<AutoFixHigh />}
+                  variant="outlined"
+                  size="small"
+                >
+                  {t("bridgeWizard.title")}
+                </Button>
+                <input
+                  type="file"
+                  ref={fileInputRef}
+                  onChange={handleFileChange}
+                  accept=".json"
+                  style={{ display: "none" }}
+                />
+              </Box>
+            </Stack>
 
-            <BridgeList bridges={bridges} />
+            {bridges.length === 0 ? (
+              <Alert severity="info">{t("dashboard.noBridgesHint")}</Alert>
+            ) : (
+              <BridgeList bridges={bridges} />
+            )}
           </>
         )}
       </Stack>
+
+      <ConfirmDialog
+        open={pendingBulk === "stop"}
+        title={t("bridge.confirmStopAllTitle")}
+        message={t("bridge.confirmStopAllMessage")}
+        confirmLabel={t("common.stopAll")}
+        cancelLabel={t("common.cancel")}
+        confirmColor="error"
+        onConfirm={() => {
+          setPendingBulk(null);
+          handleBulkAction("stop");
+        }}
+        onCancel={() => setPendingBulk(null)}
+      />
+      <ConfirmDialog
+        open={pendingBulk === "restart"}
+        title={t("bridge.confirmRestartAllTitle")}
+        message={t("bridge.confirmRestartAllMessage")}
+        confirmLabel={t("common.restartAll")}
+        cancelLabel={t("common.cancel")}
+        confirmColor="warning"
+        onConfirm={() => {
+          setPendingBulk(null);
+          handleBulkAction("restart");
+        }}
+        onCancel={() => setPendingBulk(null)}
+      />
 
       <BridgeImportDialog
         open={importDialogOpen}

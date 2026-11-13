@@ -50,6 +50,22 @@ describe("migrateBridgeV1ToV2", () => {
     expect(bridge.name).toBe("living");
   });
 
+  it("gives the same result when run twice", async () => {
+    await storage.set("ids", JSON.stringify(["b1"]));
+    await storage.set(
+      "b1",
+      JSON.stringify({ id: "b1", compatibility: "old", name: "living" }),
+    );
+
+    await migrateBridgeV1ToV2(storage);
+    await expect(migrateBridgeV1ToV2(storage)).resolves.toBe(2);
+
+    expect(await storage.get("ids")).toEqual(["b1"]);
+    const bridge = await readBridge(storage, "b1");
+    expect(bridge.compatibility).toBeUndefined();
+    expect(bridge.name).toBe("living");
+  });
+
   it("defaults ids to an empty array when not set", async () => {
     await expect(migrateBridgeV1ToV2(storage)).resolves.toBe(2);
     const ids = (await storage.get("ids", "[]")) as unknown as string[];
@@ -110,6 +126,21 @@ describe("migrateBridgeV3ToV4", () => {
     expect(flags.coverSwapOpenClose).toBe(true);
     expect(flags.mimicHaCoverPercentage).toBeUndefined();
     expect(flags.otherFlag).toBe(true);
+  });
+
+  it("gives the same result when run twice", async () => {
+    await storage.set("ids", ["b1"]);
+    await storage.set("b1", {
+      id: "b1",
+      featureFlags: { mimicHaCoverPercentage: true },
+    } as unknown as Record<string, string>);
+
+    await migrateBridgeV3ToV4(storage);
+    await migrateBridgeV3ToV4(storage);
+    const flags = await readFlags(storage, "b1");
+    expect(flags.coverDoNotInvertPercentage).toBe(true);
+    expect(flags.coverSwapOpenClose).toBe(true);
+    expect(flags.mimicHaCoverPercentage).toBeUndefined();
   });
 
   it("defaults the two new flags to false when the legacy flag is absent", async () => {

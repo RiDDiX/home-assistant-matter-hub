@@ -5,6 +5,8 @@ import {
   ERR_CANNOT_CONNECT,
   ERR_INVALID_AUTH,
   getConfig,
+  getUser,
+  type HaWebSocket,
 } from "home-assistant-js-websocket";
 import type { BetterLogger, LoggerService } from "../../core/app/logger.js";
 import { Service } from "../../core/ioc/service.js";
@@ -35,6 +37,11 @@ export function isTransientConnectError(reason: unknown): boolean {
   );
 }
 
+// The library has no heartbeat, a peer that vanished without a close (HA host
+// powered off, NAT drop) would leave the socket open and silent.
+const PING_INTERVAL_MS = 30_000;
+const PONG_TIMEOUT_MS = 10_000;
+
 export interface HomeAssistantClientProps {
   readonly url: string;
   readonly accessToken: string;
@@ -50,6 +57,10 @@ export class HomeAssistantClient extends Service {
   private _haRunning = false;
   private _runningSince = 0;
   private runningPollGeneration = 0;
+  private heartbeat?: ReturnType<typeof setInterval>;
+  private missedPongs = 0;
+  private userLookupGeneration = 0;
+  private _isAdmin: boolean | undefined;
 
   get connection(): Connection {
     return this._connection;
@@ -66,6 +77,12 @@ export class HomeAssistantClient extends Service {
   // start, so it counts from here, not from wall time (#438).
   get runningSince(): number {
     return this._runningSince;
+  }
+
+  // HA refuses fire_event and vacuum/get_segments for non-admin users (#548).
+  // Undefined until the user lookup answered.
+  get isAdmin(): boolean | undefined {
+    return this._isAdmin;
   }
 
   get baseUrl(): string {
@@ -94,6 +111,31 @@ export class HomeAssistantClient extends Service {
     // otherwise never be seen. connected covers that same window.
     this.watchRunningState(this._connection);
     this.setRunning(this._connection.connected ?? true);
+    this.startHeartbeat(this._connection);
+    await this.lookupUser(this._connection);
+  }
+
+  private startHeartbeat(connection: Connection) {
+    this.heartbeat = setInterval(() => {
+      if (!connection.connected) {
+        this.missedPongs = 0;
+        return;
+      }
+      sendHaMessage(connection, { type: "ping" }, PONG_TIMEOUT_MS).then(
+        () => {
+          this.missedPongs = 0;
+        },
+        () => {
+          // one slow answer from a busy HA is no reason to drop the socket
+          if (++this.missedPongs < 2) return;
+          this.missedPongs = 0;
+          this.log.warnCtx("Home Assistant stopped answering, reconnecting", {
+            url: this.options.url,
+          });
+          connection.reconnect(true);
+        },
+      );
+    }, PING_INTERVAL_MS);
   }
 
   private setRunning(running: boolean) {
@@ -105,6 +147,7 @@ export class HomeAssistantClient extends Service {
 
   override async dispose() {
     this.runningPollGeneration++;
+    clearInterval(this.heartbeat);
     this.connection?.close();
   }
 
@@ -119,6 +162,8 @@ export class HomeAssistantClient extends Service {
       this.setRunning(false);
     });
     connection.addEventListener("ready", () => {
+      // the token may belong to another user after a reconnect
+      void this.lookupUser(connection);
       const generation = ++this.runningPollGeneration;
       this.setRunning(false);
       this.confirmRunning(connection, generation).catch((e) => {
@@ -127,6 +172,87 @@ export class HomeAssistantClient extends Service {
         });
       });
     });
+    // The library stops retrying after an auth_invalid on reconnect.
+    connection.addEventListener("reconnect-error", () => {
+      this.runningPollGeneration++;
+      this.setRunning(false);
+      this.log.errorCtx(
+        "Home Assistant refused the reconnect, one more attempt in 5 s",
+        new Error("Invalid authentication credentials"),
+        { url: this.options.url },
+      );
+      this.redial(connection);
+    });
+  }
+
+  // Dials on the same connection: every subscription and listener on it
+  // comes back with the new socket, a fresh Connection would lose them.
+  private async redial(connection: Connection) {
+    for (let attempt = 1; !connection.closeRequested; attempt++) {
+      await new Promise((resolve) => setTimeout(resolve, 5000));
+      if (connection.closeRequested) return;
+      try {
+        const socket = await connection.options.createSocket({
+          ...connection.options,
+          setupRetry: 0,
+        });
+        // the library's own reconnect path, it fires ready
+        (
+          connection as unknown as { _setSocket(socket: HaWebSocket): void }
+        )._setSocket(socket);
+        return;
+      } catch (reason: unknown) {
+        if (!isTransientConnectError(reason)) {
+          this.log.errorCtx(
+            "Reconnect to Home Assistant failed, restart after checking the access token",
+            new Error(
+              reason === ERR_INVALID_AUTH
+                ? "Invalid authentication credentials"
+                : String(reason),
+            ),
+            { url: this.options.url },
+          );
+          return;
+        }
+        this.log.warnCtx("Unable to reconnect to Home Assistant, retrying...", {
+          url: this.options.url,
+          attempt,
+          retryDelayMs: 5000,
+          reason: reason instanceof Error ? reason.message : String(reason),
+        });
+      }
+    }
+  }
+
+  // A failed lookup keeps the old value, it never fails the connect.
+  private async lookupUser(connection: Connection) {
+    const generation = ++this.userLookupGeneration;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const user = await Promise.race([
+        getUser(connection),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(
+            () => reject(new Error("auth/current_user timed out")),
+            this.options.messageTimeoutMs,
+          );
+        }),
+      ]);
+      // a flapping reconnect can answer out of order, only the newest counts
+      if (generation !== this.userLookupGeneration) return;
+      if (user.is_admin === false && this._isAdmin !== false) {
+        this.log.info(
+          `Home Assistant user "${user.name}" is not an admin, hamh_action events and the vacuum segment lookup stay off`,
+        );
+      }
+      this._isAdmin = user.is_admin;
+    } catch (e) {
+      this.log.debugCtx("Home Assistant user lookup failed", {
+        reason: e instanceof Error ? e.message : String(e),
+      });
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   private async confirmRunning(connection: Connection, generation: number) {
@@ -156,7 +282,7 @@ export class HomeAssistantClient extends Service {
       try {
         const connection = await createConnection({
           auth: createLongLivedTokenAuth(
-            props.url.replace(/\/$/, ""),
+            props.url.trim().replace(/\/+$/, ""),
             props.accessToken,
           ),
         });

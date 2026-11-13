@@ -39,4 +39,30 @@ describe("binary sensor detector types are 1.3-safe (#365)", () => {
   it("keeps a door sensor as a ContactSensor (control)", () => {
     expect(deviceTypeFor(BinarySensorDeviceClass.Door)).toBe(CONTACT_SENSOR);
   });
+
+  it("gives moisture/cold detectors a power source for a battery attribute", () => {
+    for (const deviceClass of [
+      BinarySensorDeviceClass.Moisture,
+      BinarySensorDeviceClass.Cold,
+    ]) {
+      const entity = {
+        entity_id: "binary_sensor.leak",
+        state: {
+          entity_id: "binary_sensor.leak",
+          state: "off",
+          attributes: {
+            device_class: deviceClass,
+            battery_level: 40,
+          } as BinarySensorDeviceAttributes,
+          context: { id: "c" },
+          last_changed: "2026-01-01T00:00:00",
+          last_updated: "2026-01-01T00:00:00",
+        },
+      } as HomeAssistantEntityInformation;
+      // biome-ignore lint/suspicious/noExplicitAny: read behaviors off the EndpointType
+      const type = BinarySensorDevice({ entity } as never) as any;
+      expect(type.deviceType).toBe(CONTACT_SENSOR);
+      expect("powerSource" in type.behaviors).toBe(true);
+    }
+  });
 });

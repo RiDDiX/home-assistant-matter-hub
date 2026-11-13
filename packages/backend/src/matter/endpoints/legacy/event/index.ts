@@ -5,6 +5,7 @@ import { BasicInformationServer } from "../../../behaviors/basic-information-ser
 import {
   HaGenericSwitchServer,
   HaGenericSwitchServerSimple,
+  pressCountOf,
 } from "../../../behaviors/generic-switch-server.js";
 import { HomeAssistantEntityBehavior } from "../../../behaviors/home-assistant-entity-behavior.js";
 import { IdentifyServer } from "../../../behaviors/identify-server.js";
@@ -23,20 +24,8 @@ const EventEndpointTypeSimple = GenericSwitchDevice.with(
   HaGenericSwitchServerSimple,
 );
 
-const multiPressPatterns: [RegExp, number][] = [
-  [/triple|3_press|three/, 3],
-  [/double|2_press|two|multi/, 2],
-];
-
 export function detectMultiPressMax(eventTypes: string[]): number {
-  let max = 1;
-  for (const et of eventTypes) {
-    const lower = et.toLowerCase();
-    for (const [pattern, count] of multiPressPatterns) {
-      if (pattern.test(lower) && count > max) max = count;
-    }
-  }
-  return max;
+  return Math.max(1, ...eventTypes.map(pressCountOf));
 }
 
 export function EventDevice(

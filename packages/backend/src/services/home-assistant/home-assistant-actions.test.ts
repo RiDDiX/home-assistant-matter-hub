@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import type { LoggerService } from "../../core/app/logger.js";
-import { HomeAssistantActions } from "./home-assistant-actions.js";
+import { diagnosticEventBus } from "../diagnostics/diagnostic-event-bus.js";
+import {
+  HomeAssistantActions,
+  type HomeAssistantActionsConfig,
+} from "./home-assistant-actions.js";
 import type { HomeAssistantClient } from "./home-assistant-client.js";
 
 // #446: a command must not report success when the call cannot reach HA, and
@@ -22,6 +26,7 @@ function makeActions(
     type: string;
     [key: string]: unknown;
   }) => Promise<unknown>,
+  config: HomeAssistantActionsConfig = {},
 ) {
   const client = {
     haRunning: true,
@@ -32,6 +37,7 @@ function makeActions(
     retryAttempts: 1,
     retryBaseDelayMs: 1,
     circuitBreakerResetMs: 10_000,
+    ...config,
   });
   return { actions, client };
 }
@@ -369,6 +375,173 @@ describe("HomeAssistantActions on-then-level (#491)", () => {
       expect(sent).toContainEqual({ service: "light.turn_on", data: {} });
     } finally {
       vi.useRealTimers();
+    }
+  });
+});
+
+describe("HomeAssistantActions HA refusals", () => {
+  it("sends a refused call once and keeps the breaker closed", async () => {
+    const refusal = { code: "service_validation_error", message: "bad" };
+    const send = vi.fn(async (): Promise<unknown> => {
+      throw refusal;
+    });
+    const { actions } = makeActions(send, {
+      retryAttempts: 3,
+      circuitBreakerThreshold: 1,
+    });
+
+    await expect(
+      actions.callAction("light", "turn_on", {}, { entity_id: "light.a" }),
+    ).rejects.toBe(refusal);
+    expect(send).toHaveBeenCalledTimes(1);
+
+    send.mockResolvedValueOnce({});
+    await expect(
+      actions.callAction("light", "turn_on", {}, { entity_id: "light.b" }),
+    ).resolves.toEqual({});
+  });
+});
+
+// #547: the thermostat resume sends the mode and the setpoint as two calls.
+describe("HomeAssistantActions call order", () => {
+  it("sends set_hvac_mode before set_temperature without waiting for it", async () => {
+    vi.useFakeTimers();
+    try {
+      const sent: string[] = [];
+      const pending: Array<(value: unknown) => void> = [];
+      const { actions } = makeActions(
+        (message) =>
+          new Promise((resolve) => {
+            if (message.type === "call_service") {
+              sent.push(`${message.domain}.${message.service}`);
+            }
+            pending.push(resolve);
+          }),
+      );
+
+      actions.call(
+        { action: "climate.set_hvac_mode", data: { hvac_mode: "heat" } },
+        "climate.trv",
+      );
+      actions.call(
+        { action: "climate.set_temperature", data: { temperature: 21 } },
+        "climate.trv",
+      );
+      await vi.advanceTimersByTimeAsync(99);
+      expect(sent).toEqual([]);
+      await vi.advanceTimersByTimeAsync(1);
+
+      // Same order, but the temperature goes out while the mode call is
+      // still unanswered: HA may run both at once.
+      expect(sent).toEqual([
+        "climate.set_hvac_mode",
+        "climate.set_temperature",
+      ]);
+      for (const resolve of pending) resolve({});
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe("HomeAssistantActions lock PIN", () => {
+  it("keeps the PIN out of the diagnostic event, hamh_action and the log", async () => {
+    vi.useFakeTimers();
+    const events: unknown[] = [];
+    const unsubscribe = diagnosticEventBus.subscribe((e) => events.push(e));
+    try {
+      const debug = vi.fn();
+      const logger = {
+        get: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug }),
+      } as unknown as LoggerService;
+      const sent: { type: string; [key: string]: unknown }[] = [];
+      const client = {
+        haRunning: true,
+        messageTimeoutMs: 50,
+        connection: {
+          sendMessagePromise: async (message: {
+            type: string;
+            [key: string]: unknown;
+          }) => {
+            sent.push(message);
+            return {};
+          },
+        },
+      } as unknown as HomeAssistantClient;
+      const actions = new HomeAssistantActions(logger, client, {
+        retryAttempts: 1,
+      });
+
+      actions.call(
+        { action: "lock.unlock", data: { code: "482913" } },
+        "lock.front",
+      );
+      await vi.advanceTimersByTimeAsync(150);
+
+      const call = sent.find((m) => m.type === "call_service");
+      expect(call?.service_data).toEqual({ code: "482913" });
+      const fired = sent.find((m) => m.type === "fire_event");
+      expect(fired).toBeDefined();
+      expect(JSON.stringify(fired)).not.toContain("482913");
+      expect(events).toHaveLength(1);
+      expect(JSON.stringify(events)).not.toContain("482913");
+      expect(debug).toHaveBeenCalled();
+      expect(JSON.stringify(debug.mock.calls)).not.toContain("482913");
+    } finally {
+      unsubscribe();
+      vi.useRealTimers();
+    }
+  });
+});
+
+// #548: HA allows fire_event for admins only, a non-admin token got a WARN
+// here and an error in HA for every command.
+describe("HomeAssistantActions hamh_action for non-admin users", () => {
+  function sut(isAdmin: boolean | undefined) {
+    const warn = vi.fn();
+    const logger = {
+      get: () => ({ info: vi.fn(), warn, error: vi.fn(), debug: vi.fn() }),
+    } as unknown as LoggerService;
+    const sent: string[] = [];
+    const client = {
+      isAdmin,
+      haRunning: true,
+      messageTimeoutMs: 50,
+      connection: {
+        sendMessagePromise: async (message: { type: string }) => {
+          sent.push(message.type);
+          if (message.type === "fire_event") throw { message: "Unauthorized" };
+          return {};
+        },
+      },
+    } as unknown as HomeAssistantClient;
+    const actions = new HomeAssistantActions(logger, client, {
+      retryAttempts: 1,
+    });
+    return { actions, sent, warn };
+  }
+
+  it("sends no event and logs no warn when not an admin", async () => {
+    vi.useFakeTimers();
+    try {
+      const { actions, sent, warn } = sut(false);
+      actions.fireEvent("hamh_action", {});
+      actions.call({ action: "light.turn_off" }, "light.desk");
+      await vi.advanceTimersByTimeAsync(150);
+
+      expect(sent).toEqual(["call_service"]);
+      expect(warn).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("still fires when admin or unknown", async () => {
+    for (const isAdmin of [true, undefined]) {
+      const { actions, sent } = sut(isAdmin);
+      actions.fireEvent("hamh_action", {});
+      await Promise.resolve();
+      expect(sent).toEqual(["fire_event"]);
     }
   });
 });

@@ -1,5 +1,6 @@
 import type * as os from "node:os";
 import { filterAdvertisedIpv6 } from "../core/app/filtered-network.js";
+import { DOCKER_NAME } from "../core/app/select-mdns-interface.js";
 
 // matter.js bakes the interface addresses into the operational mDNS records at
 // first announcement and caches them. After an ISP IPv6 prefix change the old
@@ -23,7 +24,14 @@ export function collectAdvertisedAddresses(
   stripGlobalIpv6?: boolean,
   ipv4Enabled = true,
 ): string[] {
-  const names = netInterface ? [netInterface] : Object.keys(interfaces);
+  // veth links come and go with other containers and would republish every
+  // bridge for nothing; hassio is a stable, real network and stays
+  const all = Object.keys(interfaces).filter((n) =>
+    interfaces[n]?.some((a) => !a.internal),
+  );
+  const lan = all.filter((n) => n === "hassio" || !DOCKER_NAME.test(n));
+  // a host whose only LAN link has a container-like name keeps being watched
+  const names = netInterface ? [netInterface] : lan.length > 0 ? lan : all;
   const out = new Set<string>();
   for (const name of names) {
     const addrs = interfaces[name];
@@ -42,17 +50,26 @@ export function collectAdvertisedAddresses(
   return [...out].sort();
 }
 
+// Addresses only in curr (added) and only in prev (removed).
+export function diffAdvertisedAddresses(
+  prev: string[],
+  curr: string[],
+): { added: string[]; removed: string[] } {
+  const before = new Set(prev);
+  const after = new Set(curr);
+  return {
+    added: curr.filter((a) => !before.has(a)),
+    removed: prev.filter((a) => !after.has(a)),
+  };
+}
+
 // Simple set inequality between two collected snapshots.
 export function advertisedAddressesChanged(
   prev: string[],
   curr: string[],
 ): boolean {
-  if (prev.length !== curr.length) return true;
-  const seen = new Set(prev);
-  for (const a of curr) {
-    if (!seen.has(a)) return true;
-  }
-  return false;
+  const { added, removed } = diffAdvertisedAddresses(prev, curr);
+  return added.length > 0 || removed.length > 0;
 }
 
 export interface MdnsAddressWatchDeps {
@@ -61,17 +78,23 @@ export interface MdnsAddressWatchDeps {
   stripGlobalIpv6?: boolean;
   ipv4Enabled?: boolean;
   currentSnapshot: string[];
+  // consecutive ticks that kept the old snapshot because a fabric failed
+  failedRetries?: number;
   fabrics: () => Iterable<unknown>;
   refresh: (fabric: unknown) => Promise<void>;
   onChange?: (prev: string[], curr: string[]) => void;
+  onRefreshError?: (fabric: unknown, error: unknown) => void;
 }
+
+export const MDNS_REFRESH_MAX_RETRIES = 3;
 
 // One watcher tick: recompute the snapshot and, when it changed, refresh the
 // operational advertisement for every fabric so matter.js re-runs its address
-// lookup. Returns the snapshot to store (unchanged when nothing moved).
+// lookup. Returns the snapshot to store (unchanged when nothing moved) and the
+// retry count to pass into the next tick.
 export async function runMdnsAddressWatchTick(
   deps: MdnsAddressWatchDeps,
-): Promise<string[]> {
+): Promise<{ snapshot: string[]; failedRetries: number }> {
   const next = collectAdvertisedAddresses(
     deps.readInterfaces(),
     deps.netInterface,
@@ -79,11 +102,25 @@ export async function runMdnsAddressWatchTick(
     deps.ipv4Enabled,
   );
   if (!advertisedAddressesChanged(deps.currentSnapshot, next)) {
-    return deps.currentSnapshot;
+    return { snapshot: deps.currentSnapshot, failedRetries: 0 };
   }
-  deps.onChange?.(deps.currentSnapshot, next);
+  const retries = deps.failedRetries ?? 0;
+  // a retry tick keeps the old snapshot, so it would report the same change
+  if (retries === 0) {
+    deps.onChange?.(deps.currentSnapshot, next);
+  }
+  let failed = 0;
+  // one failing fabric must not skip the rest; any failure retries the whole set
   for (const fabric of deps.fabrics()) {
-    await deps.refresh(fabric);
+    try {
+      await deps.refresh(fabric);
+    } catch (e) {
+      failed++;
+      deps.onRefreshError?.(fabric, e);
+    }
   }
-  return next;
+  if (failed > 0 && retries < MDNS_REFRESH_MAX_RETRIES) {
+    return { snapshot: deps.currentSnapshot, failedRetries: retries + 1 };
+  }
+  return { snapshot: next, failedRetries: 0 };
 }

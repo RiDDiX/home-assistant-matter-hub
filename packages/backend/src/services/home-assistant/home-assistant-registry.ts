@@ -24,6 +24,9 @@ import type {
 } from "./home-assistant-client.js";
 
 const logger = Logger.get("HomeAssistantRegistry");
+// shortcut: groups still incomplete after 60s use auto-refresh; revisit if controllers still rediscover devices.
+const STARTUP_WAIT_MS = 60_000;
+const INCOMPLETE_REFRESH_RETRIES = 3;
 
 export type HomeAssistantDevices = Record<string, HomeAssistantDeviceRegistry>;
 export type HomeAssistantEntities = Record<string, HomeAssistantEntityRegistry>;
@@ -33,7 +36,15 @@ export type HomeAssistantAreas = Map<string, string>;
 
 export class HomeAssistantRegistry extends Service {
   private autoRefresh?: NodeJS.Timeout;
+  private refreshPending = false;
+  private refreshRetries = 0;
+  // Set with every new fingerprint, so a change found by an outside reload()
+  // still reaches the bridges on the next tick.
+  private registryChanged = false;
   private lastRegistryFingerprint = "";
+  // reloads overlap (tick, API, bridges), an older one must not commit last
+  private reloadsStarted = 0;
+  private lastCommittedReload = 0;
 
   // Bumped on every successful reload, even an unchanged one. Endpoint
   // removal requires a bump between stamp and delete, so a stale cached
@@ -82,25 +93,81 @@ export class HomeAssistantRegistry extends Service {
   protected override async initialize(): Promise<void> {
     try {
       await this.reload();
+      // A snapshot fetched while HA was starting is dropped, bridges started on
+      // it would go online with no devices (#543). HA can also report RUNNING
+      // before group sensors inherit their members' classes. The deadline is
+      // checked between reloads, each reload has its own retry bound.
+      const deadline = Date.now() + STARTUP_WAIT_MS;
+      if (this._snapshotGeneration === 0) {
+        logger.info(
+          "Waiting for Home Assistant to finish starting before starting bridges",
+        );
+      }
+      let pending = this.pendingGroupSensors();
+      let groupsLogged = false;
+      while (
+        (this._snapshotGeneration === 0 || pending.length > 0) &&
+        Date.now() < deadline
+      ) {
+        if (pending.length > 0 && !groupsLogged) {
+          groupsLogged = true;
+          logger.info(
+            "Waiting for group sensor attributes before starting bridges",
+          );
+        }
+        await new Promise((resolve) => setTimeout(resolve, 3000));
+        try {
+          await this.reload();
+        } catch (e) {
+          logger.debug("Startup registry reload failed, retrying:", e);
+        }
+        pending = this.pendingGroupSensors();
+      }
+      if (this._snapshotGeneration === 0) {
+        logger.warn(
+          "Home Assistant still starting after the startup wait, continuing with auto-refresh",
+        );
+      }
+      if (pending.length > 0) {
+        logger.warn(
+          `Group sensors still initializing after the startup wait, continuing with auto-refresh: ${pending.join(", ")}`,
+        );
+      }
     } catch (e) {
       // HA's WS endpoint can drop in-flight queries during HA's own startup,
-      // and after maxAttempts withRetry gives up. Start empty rather than
-      // tear down the addon. enableAutoRefresh keeps trying every tick.
-      logger.warn(
-        "Initial registry fetch failed, starting empty and relying on auto-refresh:",
-        e,
-      );
+      // and after maxAttempts withRetry gives up. Keep any cached snapshot;
+      // enableAutoRefresh keeps trying every tick.
+      logger.warn("Initial registry fetch failed, relying on auto-refresh:", e);
     }
+  }
+
+  private pendingGroupSensors(): string[] {
+    return Object.values(this._entities)
+      .filter((entity) => {
+        const state = this._states[entity.entity_id];
+        return (
+          entity.disabled_by == null &&
+          entity.platform === "group" &&
+          entity.entity_id.startsWith("sensor.") &&
+          !state?.attributes.device_class &&
+          (!state || state.state === "unknown" || state.state === "unavailable")
+        );
+      })
+      .map((entity) => entity.entity_id);
   }
 
   override async dispose(): Promise<void> {
     this.disableAutoRefresh();
   }
 
-  enableAutoRefresh(onRefresh: () => Promise<void> | void) {
+  enableAutoRefresh(
+    onRefresh: () => Promise<boolean | undefined> | boolean | undefined,
+  ) {
     this.disableAutoRefresh();
 
     let refreshing = false;
+    this.refreshRetries = 0;
+    this.refreshPending = false;
     this.autoRefresh = setInterval(async () => {
       if (refreshing) {
         // Previous tick is still mid-retry (HA slow / reconnecting).
@@ -116,11 +183,35 @@ export class HomeAssistantRegistry extends Service {
         // refresh (#438).
         const runningSince = this.client.runningSince;
         const restarted = runningSince !== this.lastRunningSince;
-        const changed = await this.reload();
+        const changed = (await this.reload()) || this.registryChanged;
         // stamp only now: a reload that failed must not consume the restart
         this.lastRunningSince = runningSince;
         if (changed || restarted) {
-          await onRefresh();
+          this.refreshRetries = 0;
+        } else if (
+          !this.refreshPending ||
+          this.refreshRetries >= INCOMPLETE_REFRESH_RETRIES
+        ) {
+          return;
+        } else {
+          this.refreshRetries++;
+        }
+        // cleared before the run, a late refresh may mark it during the run
+        this.refreshPending = false;
+        this.registryChanged = false;
+        try {
+          if ((await onRefresh()) === false) this.refreshPending = true;
+        } catch (e) {
+          logger.warn("Bridge refresh failed:", e);
+          this.refreshPending = true;
+        }
+        if (
+          this.refreshPending &&
+          this.refreshRetries === INCOMPLETE_REFRESH_RETRIES
+        ) {
+          logger.warn(
+            "Bridge refresh still incomplete, waiting for the next registry change",
+          );
         }
       } catch (e) {
         logger.warn("Failed to refresh registry, will retry next interval:", e);
@@ -128,6 +219,20 @@ export class HomeAssistantRegistry extends Service {
         refreshing = false;
       }
     }, this.options.refreshInterval * 1000);
+  }
+
+  // Every device refresh that ends incomplete calls this, also one finishing
+  // after its tick. Arms the retry without resetting its count, only a
+  // registry change or grantRefreshRetries does that.
+  markRefreshIncomplete() {
+    this.refreshPending = true;
+  }
+
+  // A start, update or API refresh that ended incomplete gets a fresh retry
+  // budget. Ticks and internal rechecks never call this, so the cap holds.
+  grantRefreshRetries() {
+    this.refreshPending = true;
+    this.refreshRetries = 0;
   }
 
   disableAutoRefresh() {
@@ -138,7 +243,8 @@ export class HomeAssistantRegistry extends Service {
   }
 
   async reload(): Promise<boolean> {
-    return await withRetry(() => this.fetchRegistries(), {
+    const seq = ++this.reloadsStarted;
+    return await withRetry(() => this.fetchRegistries(seq), {
       maxAttempts: 10,
       baseDelayMs: 2000,
       maxDelayMs: 30000,
@@ -151,10 +257,10 @@ export class HomeAssistantRegistry extends Service {
     });
   }
 
-  private async fetchRegistries(): Promise<boolean> {
+  private async fetchRegistries(seq: number): Promise<boolean> {
     await this.waitForConnection(30_000);
     try {
-      return await this.runRegistryQueries();
+      return await this.runRegistryQueries(seq);
     } catch (e) {
       if (!isConnectionLost(e)) throw e;
       // WS dropped mid-flight; the library auto-reconnects. Wait for the
@@ -162,7 +268,7 @@ export class HomeAssistantRegistry extends Service {
       // by withRetry's backoff.
       logger.debug("Registry fetch hit connection drop, waiting for reconnect");
       await this.waitForConnection(60_000);
-      return await this.runRegistryQueries();
+      return await this.runRegistryQueries(seq);
     }
   }
 
@@ -189,7 +295,7 @@ export class HomeAssistantRegistry extends Service {
     });
   }
 
-  private async runRegistryQueries(): Promise<boolean> {
+  private async runRegistryQueries(seq: number): Promise<boolean> {
     // Trust must hold for the WHOLE fetch: a flip to RUNNING mid-flight
     // would otherwise let a STARTING-era partial snapshot commit (#438).
     const trustedAtStart = this.client.haRunning;
@@ -210,11 +316,24 @@ export class HomeAssistantRegistry extends Service {
         getDeviceRegistry(connection, timeoutMs),
         // failed query: keep last labels, empty would unmount filtered
         // endpoints (#500)
-        getLabelRegistry(connection, timeoutMs).catch(() => this._labels),
-        getAreaRegistry(connection, timeoutMs).catch(
-          () => [] as Array<{ area_id: string; name: string }>,
-        ),
+        getLabelRegistry(connection, timeoutMs).catch((e) => {
+          logger.warn("Label registry fetch failed, keeping last labels:", e);
+          return this._labels;
+        }),
+        // same for areas: empty flips the fingerprint and drops room names
+        getAreaRegistry(connection, timeoutMs).catch((e) => {
+          logger.warn("Area registry fetch failed, keeping last areas:", e);
+          return Array.from(this._areas, ([area_id, name]) => ({
+            area_id,
+            name,
+          }));
+        }),
       ]);
+
+    if (seq < this.lastCommittedReload) {
+      logger.debug("Discarding registry snapshot, a newer reload committed");
+      return false;
+    }
 
     // Fingerprint structural registry data to detect changes.
     // State *values* change constantly (handled by WebSocket subscription);
@@ -222,7 +341,7 @@ export class HomeAssistantRegistry extends Service {
     const hash = createHash("md5");
     for (const e of entityRegistry) {
       hash.update(
-        `${e.entity_id}\0${e.device_id ?? ""}\0${e.disabled_by ?? ""}\0${e.hidden_by ?? ""}\0${e.area_id ?? ""}\0${(e.labels ?? []).join(",")}\0${e.platform ?? ""}\0${e.entity_category ?? ""}\0${e.name ?? ""}\0${e.original_name ?? ""}\n`,
+        `${e.entity_id}\0${e.unique_id ?? ""}\0${e.device_id ?? ""}\0${e.disabled_by ?? ""}\0${e.hidden_by ?? ""}\0${e.area_id ?? ""}\0${(e.labels ?? []).join(",")}\0${e.platform ?? ""}\0${e.entity_category ?? ""}\0${e.name ?? ""}\0${e.original_name ?? ""}\n`,
       );
     }
     for (const s of statesList) {
@@ -230,10 +349,11 @@ export class HomeAssistantRegistry extends Service {
     }
     for (const d of deviceRegistry) {
       hash.update(
-        `${d.id}\0${(d.labels ?? []).join(",")}\0${d.area_id ?? ""}\0${d.name_by_user ?? ""}\0${d.name ?? ""}\0${d.model ?? ""}\0${d.model_id ?? ""}\0${d.manufacturer ?? ""}\0${d.hw_version ?? ""}\0${d.sw_version ?? ""}\0${d.serial_number ?? ""}\n`,
+        `${d.id}\0${(d.labels ?? []).join(",")}\0${d.area_id ?? ""}\0${d.name_by_user ?? ""}\0${d.name ?? ""}\0${d.model ?? ""}\0${d.model_id ?? ""}\0${d.manufacturer ?? ""}\0${d.hw_version ?? ""}\0${d.sw_version ?? ""}\0${d.serial_number ?? ""}\0${d.default_name ?? ""}\0${d.default_model ?? ""}\0${d.default_manufacturer ?? ""}\n`,
       );
     }
-    for (const l of labels) hash.update(`${l.label_id}\n`);
+    // name too: matchers resolve label names to ids, a rename must refresh
+    for (const l of labels) hash.update(`${l.label_id}\0${l.name}\n`);
     for (const a of areas) hash.update(`${a.area_id}\0${a.name}\n`);
     const fingerprint = hash.digest("hex");
 
@@ -250,16 +370,25 @@ export class HomeAssistantRegistry extends Service {
       return false;
     }
     this._snapshotGeneration++;
+    this.lastCommittedReload = seq;
 
     // Always update states (values change via WebSocket, but fresh data
     // is needed for the UI and initial endpoint state)
-    this._states = keyBy(statesList, "entity_id");
+    // Subscription events merged into the old map while the fetch was in
+    // flight, keep those over the older snapshot.
+    const states: HomeAssistantStates = keyBy(statesList, "entity_id");
+    for (const [id, current] of Object.entries(this._states)) {
+      const fetched = states[id];
+      if (fetched && current.last_updated > fetched.last_updated) {
+        states[id] = current;
+      }
+    }
+    this._states = states;
 
     if (fingerprint === this.lastRegistryFingerprint) {
       logger.debug("Registry unchanged, skipping full refresh");
       return false;
     }
-    this.lastRegistryFingerprint = fingerprint;
 
     // Structure changed, full rebuild
     entityRegistry.forEach((e) => {
@@ -293,6 +422,9 @@ export class HomeAssistantRegistry extends Service {
 
     this._labels = labels;
     this._areas = new Map(areas.map((a) => [a.area_id, a.name]));
+    // only now: a rebuild that threw must not read as unchanged next time
+    this.lastRegistryFingerprint = fingerprint;
+    this.registryChanged = true;
 
     return true;
   }

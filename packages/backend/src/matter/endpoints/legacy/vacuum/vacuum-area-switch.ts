@@ -62,6 +62,7 @@ export class VacuumAreaSwitchEndpoint extends EntityEndpoint {
         isOn: () => false,
         // off is a no-op (momentary auto-reset only, script pattern).
         turnOff: null,
+        momentary: true,
         turnOn: (_value, agent) => {
           const ha = agent.get(HomeAssistantEntityBehavior);
           // Dispatch from the creation-time snapshot: live state gets

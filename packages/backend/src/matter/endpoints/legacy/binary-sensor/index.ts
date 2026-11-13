@@ -12,6 +12,7 @@ import {
   ContactSensorType,
   ContactSensorWithBatteryType,
   DetectorContactSensorType,
+  DetectorContactSensorWithBatteryType,
 } from "./contact-sensor.js";
 import {
   MotionSensorType,
@@ -82,6 +83,7 @@ const deviceClasses: Partial<Record<BinarySensorDeviceClass, CombinedType>> = {
 // Mapping from normal type to battery type
 const batteryTypes = new Map<CombinedType, CombinedType>([
   [ContactSensorType, ContactSensorWithBatteryType],
+  [DetectorContactSensorType, DetectorContactSensorWithBatteryType],
   [MotionSensorType, MotionSensorWithBatteryType],
   [OccupancySensorType, OccupancySensorWithBatteryType],
   [OnOffSensorType, OnOffSensorWithBatteryType],

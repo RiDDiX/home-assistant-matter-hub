@@ -19,9 +19,8 @@ export interface MdnsOptions {
 export function mdns(env: Environment, options: MdnsOptions) {
   if (options.stripGlobalIpv6) {
     env.set(Network, new FilteredNetwork());
-  } else {
-    warnAboutAdvertising(options);
   }
+  warnAboutAdvertising(options);
   new MdnsService(env, {
     ipv4: options.ipv4,
     networkInterface: options.networkInterface,
@@ -31,9 +30,9 @@ export function mdns(env: Environment, options: MdnsOptions) {
 // Warn about advertised addresses controllers often cannot reach. A global IPv6
 // can be stripped with mdns-strip-global-ipv6 (#361); Docker-internal
 // interfaces are narrowed with mdns-network-interface.
-function warnAboutAdvertising(options: MdnsOptions) {
+export function warnAboutAdvertising(options: MdnsOptions) {
   const choice = selectMdnsInterface(os.networkInterfaces());
-  if (choice.hasGlobalIpv6) {
+  if (choice.hasGlobalIpv6 && !options.stripGlobalIpv6) {
     logger.warn(
       "Matter mDNS is advertising a global IPv6 address that controllers may not reach on the LAN, so devices can show No Response (#361). If devices work, nothing to do; otherwise turn on mdns_strip_global_ipv6 (add-on) or --mdns-strip-global-ipv6 (container).",
     );

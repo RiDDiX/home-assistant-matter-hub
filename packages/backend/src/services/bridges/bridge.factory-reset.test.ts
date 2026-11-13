@@ -1,5 +1,5 @@
 import { BridgeStatus } from "@home-assistant-matter-hub/common";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { Bridge } from "./bridge.js";
 import type { BridgeServerStatus } from "./bridge-data-provider.js";
 import { ServerModeBridge } from "./server-mode-bridge.js";
@@ -87,10 +87,26 @@ describe.each([
     const bridge = Object.create(Ctor.prototype);
     prepare(bridge, calls);
     bridge.status = { code: BridgeStatus.Stopped };
+    const beforeReset = vi.fn(async () => {});
 
-    await bridge.factoryReset();
+    expect(await bridge.factoryReset(beforeReset)).toBe(false);
 
     expect(calls).toEqual([]);
+    expect(beforeReset).not.toHaveBeenCalled();
+  });
+
+  it("runs beforeReset ahead of the stop", async () => {
+    const calls: string[] = [];
+    const bridge = Object.create(Ctor.prototype);
+    prepare(bridge, calls);
+
+    const ran = await bridge.factoryReset(async () => {
+      calls.push("beforeReset");
+    });
+
+    expect(ran).toBe(true);
+    expect(calls.indexOf("beforeReset")).toBe(0);
+    expect(calls).toContain("server.factoryReset");
   });
 });
 
@@ -138,5 +154,35 @@ describe("Bridge factory reset plugins", () => {
 
     expect(calls).toContain("stopPlugins");
     expect(calls.indexOf("stopPlugins")).toBeLessThan(calls.indexOf("start"));
+  });
+});
+
+describe.each([
+  ["Bridge", Bridge],
+  ["ServerModeBridge", ServerModeBridge],
+])("%s stop during a start that never settles", (_name, Ctor) => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("stops anyway once the start wait runs out", async () => {
+    vi.useFakeTimers();
+    const calls: string[] = [];
+    const bridge = Object.create(Ctor.prototype);
+    prepare(bridge, calls);
+    bridge.log.warn = vi.fn();
+    bridge.startInFlight = new Promise(() => {});
+
+    const stopping = bridge.stop();
+    await vi.advanceTimersByTimeAsync(59_999);
+    expect(calls).not.toContain("server.cancel");
+    await vi.advanceTimersByTimeAsync(1);
+    await stopping;
+
+    expect(calls).toContain("server.cancel");
+    expect(bridge.status.code).toBe(BridgeStatus.Stopped);
+    expect(bridge.log.warn).toHaveBeenCalledWith(
+      "b: start still pending after 60s, stopping anyway",
+    );
   });
 });

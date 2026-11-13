@@ -158,7 +158,9 @@
     "bridgeStatusRunning": "{{running}} fut",
     "bridgeStatusFailed": "{{failed}} sikertelen",
     "devicesFailed": "{{count}} sikertelen",
-    "uptimeFormat": "{{time}}"
+    "uptimeFormat": "{{time}}",
+    "deviceCount": "{{count}} Eszközök",
+    "fabricCount": "{{count}} Fabricok"
   },
   "bridge": {
     "name": "Bridge neve",
@@ -371,7 +373,8 @@
     "sortType": "Eszköztípus",
     "sortName": "Név",
     "deviceCount": "{{count}} eszköz",
-    "filteredCount": "{{total}} eszközből {{filtered}}"
+    "filteredCount": "{{total}} eszközből {{filtered}}",
+    "fabricCount": "{{count}} Fabricok"
   },
   "diagnostics": {
     "title": "Élő diagnosztika",
@@ -427,7 +430,6 @@
     "namePlaceholder": "Bejárati ajtó",
     "nameHelperText": "Barátságos név ehhez a hitelesítő adathoz",
     "entityRequired": "Az entitás azonosító kötelező",
-    "pinLength": "A PIN-kódnak 4-8 számjegyűnek kell lennie",
     "pinDigitsOnly": "A PIN-kód csak számjegyeket tartalmazhat",
     "saveFailed": "A mentés sikertelen",
     "loadFailed": "A hitelesítő adatok betöltése sikertelen",
@@ -516,8 +518,7 @@
     "settings": "Biztonsági mentés beállításai",
     "autoBackupLabel": "Automatikus biztonsági mentés",
     "autoBackupDesc": "Automatikusan teljes biztonsági mentés készítése az alkalmazás leállásakor vagy újraindításakor.",
-    "retentionCount": "Mentések megtartása",
-    "retentionCountDesc": "A megtartandó mentések száma (a legrégebbiek automatikusan törlődnek)"
+    "retentionCount": "Mentések megtartása"
   },
   "networkMap": {
     "title": "Hálózati térkép",

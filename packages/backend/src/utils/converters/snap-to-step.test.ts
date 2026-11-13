@@ -26,6 +26,12 @@ describe("snapToStep", () => {
     expect(snapToStep(20.5, 20, undefined)).toBe(20.5);
   });
 
+  it("rounds conversion noise to 0.1 when step is missing", () => {
+    expect(snapToStep(69.99799999999999, 70, undefined)).toBe(70);
+    expect(snapToStep(71.99600000000001, 72, undefined)).toBe(72);
+    expect(snapToStep(44.996, 45, undefined)).toBe(45);
+  });
+
   it("passes through for non-positive or non-finite step", () => {
     expect(snapToStep(20.5, 20, 0)).toBe(20.5);
     expect(snapToStep(20.5, 20, -1)).toBe(20.5);

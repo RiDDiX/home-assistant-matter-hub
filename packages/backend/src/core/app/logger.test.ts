@@ -32,6 +32,8 @@ describe("MATTER_TRAFFIC_FACILITIES", () => {
     expect(MATTER_TRAFFIC_FACILITIES.has("MessageExchange")).toBe(true);
     expect(MATTER_TRAFFIC_FACILITIES.has("MessageChannel")).toBe(true);
     expect(MATTER_TRAFFIC_FACILITIES.has("ServerSubscription")).toBe(true);
+    expect(MATTER_TRAFFIC_FACILITIES.has("InteractionMessenger")).toBe(true);
+    expect(MATTER_TRAFFIC_FACILITIES.has("ExchangeManager")).toBe(true);
   });
 
   it("surfaces rejected invokes in the traffic category (#423)", () => {
@@ -44,6 +46,12 @@ describe("MATTER_TRAFFIC_FACILITIES", () => {
     expect(categoryFor("CaseServer")).toBe("matter-traffic");
     expect(categoryFor("PaseServer")).toBe("matter-traffic");
     expect(categoryFor("FailsafeContext")).toBe("matter-traffic");
+  });
+
+  it("surfaces camera plugin logs (#539)", () => {
+    expect(categoryFor("CameraPlugin")).toBe("matter-traffic");
+    expect(categoryFor("CameraWebRtc")).toBe("matter-traffic");
+    expect(categoryFor("CameraWebRtcRequestor")).toBe("matter-traffic");
   });
 
   it("keeps the passcode-carrying Commissioning facility out", () => {

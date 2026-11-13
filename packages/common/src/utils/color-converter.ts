@@ -56,9 +56,12 @@ export abstract class ColorConverter {
    */
   static fromXY(x: number, y: number): ColorInstance {
     function toXYZ(x: number, y: number): [X: number, Y: number, Z: number] {
+      // Matter allows colorY 0, which would divide by zero. Use the smallest
+      // step above it instead.
+      const safeY = Math.max(y, 1 / 65536);
       const Y = 1.0;
-      const X = (Y / y) * x;
-      const Z = (Y / y) * (1 - x - y);
+      const X = (Y / safeY) * x;
+      const Z = (Y / safeY) * (1 - x - safeY);
       return [X, Y, Z];
     }
 

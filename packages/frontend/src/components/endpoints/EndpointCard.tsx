@@ -1,16 +1,37 @@
 import type { EndpointData } from "@home-assistant-matter-hub/common";
+import type { SvgIconComponent } from "@mui/icons-material";
 import BatteryAlertIcon from "@mui/icons-material/BatteryAlert";
 import BatteryChargingFullIcon from "@mui/icons-material/BatteryChargingFull";
 import BatteryFullIcon from "@mui/icons-material/BatteryFull";
+import BlindsIcon from "@mui/icons-material/Blinds";
+import BoltIcon from "@mui/icons-material/Bolt";
 import CameraAltIcon from "@mui/icons-material/CameraAlt";
 import CheckCircleIcon from "@mui/icons-material/CheckCircle";
 import DeleteIcon from "@mui/icons-material/Delete";
+import DevicesOtherIcon from "@mui/icons-material/DevicesOther";
 import EditIcon from "@mui/icons-material/Edit";
 import ErrorIcon from "@mui/icons-material/Error";
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
+import InfoOutlinedIcon from "@mui/icons-material/InfoOutlined";
+import LightbulbIcon from "@mui/icons-material/Lightbulb";
 import LinkIcon from "@mui/icons-material/Link";
+import LocalFireDepartmentIcon from "@mui/icons-material/LocalFireDepartment";
+import LocalLaundryServiceIcon from "@mui/icons-material/LocalLaundryService";
+import LockIcon from "@mui/icons-material/Lock";
+import MeetingRoomIcon from "@mui/icons-material/MeetingRoom";
+import SensorOccupiedIcon from "@mui/icons-material/SensorOccupied";
+import SensorsIcon from "@mui/icons-material/Sensors";
+import SmartToyIcon from "@mui/icons-material/SmartToy";
+import SpeakerIcon from "@mui/icons-material/Speaker";
+import ThermostatIcon from "@mui/icons-material/Thermostat";
+import ToggleOnIcon from "@mui/icons-material/ToggleOn";
+import TvIcon from "@mui/icons-material/Tv";
 import WarningAmberIcon from "@mui/icons-material/WarningAmber";
+import WaterDamageIcon from "@mui/icons-material/WaterDamage";
+import WaterDropIcon from "@mui/icons-material/WaterDrop";
+import WindPowerIcon from "@mui/icons-material/WindPower";
 import Box from "@mui/material/Box";
+import ButtonBase from "@mui/material/ButtonBase";
 import Card from "@mui/material/Card";
 import CardContent from "@mui/material/CardContent";
 import Chip from "@mui/material/Chip";
@@ -21,7 +42,7 @@ import Stack from "@mui/material/Stack";
 import { useTheme } from "@mui/material/styles";
 import Tooltip from "@mui/material/Tooltip";
 import Typography from "@mui/material/Typography";
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useId, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { DeviceImageInfo } from "../../api/device-images";
 import {
@@ -29,7 +50,12 @@ import {
   getDeviceImageUrl,
   uploadDeviceImage,
 } from "../../api/device-images";
+import { useNotifications } from "../notifications/use-notifications";
 import { getEndpointName } from "./EndpointName";
+import { linkedEntities } from "./EndpointState";
+
+// bigger hit area on touch screens only
+const touchTarget = { "@media (pointer: coarse)": { p: 1.25 } };
 
 interface BasicInfo {
   reachable?: boolean;
@@ -79,6 +105,8 @@ interface DoorLockState {
 
 interface BooleanState {
   stateValue?: boolean;
+  // contact sensors are inverted, detectors (leak, freeze, rain) are not
+  config?: { inverted?: boolean };
 }
 
 interface StateChip {
@@ -86,54 +114,46 @@ interface StateChip {
   color?: "success" | "error" | "warning" | "info" | "default";
 }
 
-const getDeviceIcon = (deviceType: string): string => {
-  const type = deviceType.toLowerCase();
-  if (type.includes("light")) return "💡";
-  if (type.includes("switch") || type.includes("plugin")) return "🔌";
-  if (type.includes("lock")) return "🔒";
-  if (type.includes("thermostat")) return "🌡️";
-  if (type.includes("temperature")) return "🌡️";
-  if (type.includes("humidity")) return "💧";
-  if (type.includes("pressure")) return "📊";
-  if (type.includes("sensor")) return "📊";
-  if (type.includes("fan")) return "🌀";
-  if (type.includes("cover") || type.includes("window")) return "🪟";
-  if (type.includes("contact")) return "🚪";
-  if (type.includes("occupancy")) return "👤";
-  if (type.includes("smoke") || type.includes("alarm")) return "🚨";
-  if (type.includes("water")) return "💧";
-  if (type.includes("air")) return "🌬️";
-  return "📱";
-};
+// First match wins, so the specific sensors come before the generic "sensor".
+// Light colors keep 4.5:1 on their own tint in light mode.
+const deviceStyles: [string[], SvgIconComponent, string, string][] = [
+  [["contact"], MeetingRoomIcon, "#455A64", "#90A4AE"],
+  [["occupancy"], SensorOccupiedIcon, "#C2185B", "#F48FB1"],
+  [["smoke", "alarm"], LocalFireDepartmentIcon, "#BF360C", "#FF8A65"],
+  [["leak", "freeze", "rain"], WaterDamageIcon, "#01579B", "#4FC3F7"],
+  [["humidity"], WaterDropIcon, "#01579B", "#4FC3F7"],
+  [
+    ["thermostat", "temperature", "heater", "conditioner"],
+    ThermostatIcon,
+    "#BF360C",
+    "#FF8A65",
+  ],
+  [["sensor"], SensorsIcon, "#7B1FA2", "#CE93D8"],
+  [["light"], LightbulbIcon, "#8D5300", "#FFE082"],
+  [["switch", "plugin", "onoff"], ToggleOnIcon, "#1B5E20", "#81C784"],
+  [["lock"], LockIcon, "#1565C0", "#64B5F6"],
+  [["fan", "air"], WindPowerIcon, "#006064", "#4DD0E1"],
+  [["cover", "window"], BlindsIcon, "#5D4037", "#BCAAA4"],
+  [["vacuum"], SmartToyIcon, "#616161", "#BDBDBD"],
+  [["speaker"], SpeakerIcon, "#616161", "#BDBDBD"],
+  [["video"], TvIcon, "#616161", "#BDBDBD"],
+  [["battery", "solar", "meter", "evse"], BoltIcon, "#8D5300", "#FFE082"],
+  [["valve", "pump", "water"], WaterDropIcon, "#01579B", "#4FC3F7"],
+  [["laundry", "dishwasher"], LocalLaundryServiceIcon, "#616161", "#BDBDBD"],
+];
 
-const getDeviceColor = (deviceType: string, isDark: boolean): string => {
+const getDeviceStyle = (deviceType: string, isDark: boolean) => {
   const type = deviceType.toLowerCase();
-  if (isDark) {
-    if (type.includes("light")) return "#FFE082";
-    if (type.includes("switch") || type.includes("plugin")) return "#81C784";
-    if (type.includes("lock")) return "#64B5F6";
-    if (type.includes("thermostat")) return "#FF8A65";
-    if (type.includes("temperature")) return "#FF8A65";
-    if (type.includes("humidity")) return "#4FC3F7";
-    if (type.includes("sensor")) return "#CE93D8";
-    if (type.includes("fan")) return "#4DD0E1";
-    if (type.includes("cover") || type.includes("window")) return "#A1887F";
-    if (type.includes("contact")) return "#90A4AE";
-    if (type.includes("occupancy")) return "#F48FB1";
-    return "#BDBDBD";
-  }
-  if (type.includes("light")) return "#F9A825";
-  if (type.includes("switch") || type.includes("plugin")) return "#388E3C";
-  if (type.includes("lock")) return "#1976D2";
-  if (type.includes("thermostat")) return "#E64A19";
-  if (type.includes("temperature")) return "#E64A19";
-  if (type.includes("humidity")) return "#0288D1";
-  if (type.includes("sensor")) return "#7B1FA2";
-  if (type.includes("fan")) return "#00838F";
-  if (type.includes("cover") || type.includes("window")) return "#5D4037";
-  if (type.includes("contact")) return "#455A64";
-  if (type.includes("occupancy")) return "#C2185B";
-  return "#616161";
+  const match = deviceStyles.find(([keys]) =>
+    keys.some((key) => type.includes(key)),
+  );
+  const [, Icon, light, dark] = match ?? [
+    [],
+    DevicesOtherIcon,
+    "#616161",
+    "#BDBDBD",
+  ];
+  return { Icon, color: isDark ? dark : light };
 };
 
 interface HomeAssistantEntityState {
@@ -157,8 +177,6 @@ interface HomeAssistantEntityState {
     currentEntity?: string;
     batteryPowerEntity?: string;
     batteryEnergyEntity?: string;
-    chargingSwitchEntity?: string;
-    currentLimitEntity?: string;
   };
 }
 
@@ -209,8 +227,18 @@ export const formatTemperature = (
 };
 
 // Matter lift position is percent closed, 10000 is fully closed (#495).
-export const formatCoverPosition = (liftPercent100ths: number): string =>
-  `${Math.round((10000 - liftPercent100ths) / 100)}% open`;
+export const coverOpenPercent = (liftPercent100ths: number): number =>
+  Math.round((10000 - liftPercent100ths) / 100);
+
+// global attributes every cluster carries, noise in the card details
+const hiddenClusterKeys = new Set([
+  "config",
+  "clusterRevision",
+  "featureMap",
+  "attributeList",
+  "acceptedCommandList",
+  "generatedCommandList",
+]);
 
 export interface EndpointCardProps {
   endpoint: EndpointData;
@@ -232,10 +260,16 @@ export const EndpointCard = ({
   onImageChanged,
 }: EndpointCardProps) => {
   const { t } = useTranslation();
+  const notifications = useNotifications();
   const theme = useTheme();
   const isDark = theme.palette.mode === "dark";
   const name = getEndpointName(endpoint.state) ?? endpoint.id.local;
   const deviceType = endpoint.type.name;
+  const { Icon: DeviceIcon, color: deviceColor } = getDeviceStyle(
+    deviceType,
+    isDark,
+  );
+  const detailsId = useId();
 
   const basicInfo = useMemo(() => {
     const state = endpoint.state as {
@@ -258,55 +292,7 @@ export const EndpointCard = ({
   const isUnavailable = haState === "unavailable" || haState === "unknown";
 
   const mapping = haEntity?.mapping;
-  const autoMappings = useMemo(() => {
-    const mappings: { label: string; entity: string }[] = [];
-    if (mapping?.batteryEntity) {
-      mappings.push({ label: "Battery", entity: mapping.batteryEntity });
-    }
-    if (mapping?.humidityEntity) {
-      mappings.push({ label: "Humidity", entity: mapping.humidityEntity });
-    }
-    if (mapping?.pressureEntity) {
-      mappings.push({ label: "Pressure", entity: mapping.pressureEntity });
-    }
-    if (mapping?.powerEntity) {
-      mappings.push({ label: "Power", entity: mapping.powerEntity });
-    }
-    if (mapping?.energyEntity) {
-      mappings.push({ label: "Energy", entity: mapping.energyEntity });
-    }
-    if (mapping?.voltageEntity) {
-      mappings.push({ label: "Voltage", entity: mapping.voltageEntity });
-    }
-    if (mapping?.currentEntity) {
-      mappings.push({ label: "Current", entity: mapping.currentEntity });
-    }
-    if (mapping?.batteryPowerEntity) {
-      mappings.push({
-        label: "Battery Power",
-        entity: mapping.batteryPowerEntity,
-      });
-    }
-    if (mapping?.batteryEnergyEntity) {
-      mappings.push({
-        label: "Battery Energy",
-        entity: mapping.batteryEnergyEntity,
-      });
-    }
-    if (mapping?.chargingSwitchEntity) {
-      mappings.push({
-        label: "Charging Switch",
-        entity: mapping.chargingSwitchEntity,
-      });
-    }
-    if (mapping?.currentLimitEntity) {
-      mappings.push({
-        label: "Current Limit",
-        entity: mapping.currentLimitEntity,
-      });
-    }
-    return mappings;
-  }, [mapping]);
+  const autoMappings = useMemo(() => linkedEntities(mapping), [mapping]);
 
   const autoMappedClusters = useMemo(() => {
     const set = new Set<string>();
@@ -368,11 +354,16 @@ export const EndpointCard = ({
         setImgVersion((v) => v + 1);
         onImageChanged?.();
       } catch (err) {
-        console.error("Failed to upload device image:", err);
+        notifications.show({
+          message: t("endpoints.imageUploadFailed", {
+            error: err instanceof Error ? err.message : String(err),
+          }),
+          severity: "error",
+        });
       }
       if (fileInputRef.current) fileInputRef.current.value = "";
     },
-    [entityId, onImageChanged],
+    [entityId, onImageChanged, notifications, t],
   );
 
   const handleDeleteImage = useCallback(
@@ -385,10 +376,15 @@ export const EndpointCard = ({
         setImgVersion((v) => v + 1);
         onImageChanged?.();
       } catch (err) {
-        console.error("Failed to delete device image:", err);
+        notifications.show({
+          message: t("endpoints.imageDeleteFailed", {
+            error: err instanceof Error ? err.message : String(err),
+          }),
+          severity: "error",
+        });
       }
     },
-    [entityId, onImageChanged],
+    [entityId, onImageChanged, notifications, t],
   );
 
   const clusters = useMemo(() => {
@@ -433,7 +429,7 @@ export const EndpointCard = ({
     // On/Off state
     if (onOff?.onOff !== undefined) {
       chips.push({
-        label: onOff.onOff ? "On" : "Off",
+        label: onOff.onOff ? t("endpoints.state.on") : t("endpoints.state.off"),
         color: onOff.onOff ? "success" : "default",
       });
     }
@@ -459,17 +455,17 @@ export const EndpointCard = ({
     }
     if (thermo?.systemMode !== undefined) {
       const modes: Record<number, string> = {
-        0: "Off",
-        1: "Auto",
-        3: "Cool",
-        4: "Heat",
-        7: "Fan",
-        8: "Dry",
+        0: "off",
+        1: "auto",
+        3: "cool",
+        4: "heat",
+        7: "fan",
+        8: "dry",
       };
       const mode = modes[thermo.systemMode];
       if (mode) {
         chips.push({
-          label: mode,
+          label: t(`endpoints.state.${mode}`),
           color: thermo.systemMode === 0 ? "default" : "info",
         });
       }
@@ -514,13 +510,19 @@ export const EndpointCard = ({
 
     // Fan
     if (fan?.percentCurrent != null && fan.percentCurrent > 0) {
-      chips.push({ label: `Fan ${fan.percentCurrent}%` });
+      chips.push({
+        label: t("endpoints.state.fanPercent", {
+          percent: fan.percentCurrent,
+        }),
+      });
     }
 
     // Window covering
     if (cover?.currentPositionLiftPercent100ths != null) {
       chips.push({
-        label: formatCoverPosition(cover.currentPositionLiftPercent100ths),
+        label: t("endpoints.state.percentOpen", {
+          percent: coverOpenPercent(cover.currentPositionLiftPercent100ths),
+        }),
       });
     }
 
@@ -528,21 +530,38 @@ export const EndpointCard = ({
     if (lock?.lockState !== undefined) {
       const locked = lock.lockState === 1;
       chips.push({
-        label: locked ? "Locked" : "Unlocked",
+        label: locked
+          ? t("endpoints.state.locked")
+          : t("endpoints.state.unlocked"),
         color: locked ? "success" : "warning",
       });
     }
 
-    // Boolean state (contact sensors, etc.)
+    // Boolean state: contact sensors report true for closed, detectors for detected
     if (boolean?.stateValue !== undefined && onOff?.onOff === undefined) {
-      chips.push({
-        label: boolean.stateValue ? "Closed" : "Open",
-        color: boolean.stateValue ? "success" : "warning",
-      });
+      // plugin contact sensors carry no HAMH config but are contacts
+      const isContact =
+        boolean.config?.inverted === true ||
+        (endpoint.type.name === "ContactSensor" && !s.homeAssistantEntity);
+      if (isContact) {
+        chips.push({
+          label: boolean.stateValue
+            ? t("endpoints.state.closed")
+            : t("endpoints.state.open"),
+          color: boolean.stateValue ? "success" : "warning",
+        });
+      } else {
+        chips.push({
+          label: boolean.stateValue
+            ? t("endpoints.state.detected")
+            : t("endpoints.state.clear"),
+          color: boolean.stateValue ? "error" : "success",
+        });
+      }
     }
 
     return chips;
-  }, [endpoint.state]);
+  }, [endpoint.state, endpoint.type.name, t]);
 
   return (
     <Card
@@ -550,14 +569,7 @@ export const EndpointCard = ({
       sx={{
         height: "100%",
         cursor: onClick ? "pointer" : "default",
-        transition: "transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out",
-        opacity: isReachable ? 1 : 0.6,
-        "&:hover": onClick
-          ? {
-              transform: "translateY(-4px)",
-              boxShadow: 4,
-            }
-          : {},
+        "&:hover": onClick ? { borderColor: "primary.main" } : {},
       }}
     >
       <CardContent>
@@ -571,9 +583,11 @@ export const EndpointCard = ({
               width: 56,
               height: 56,
               borderRadius: 2,
-              backgroundColor: `${getDeviceColor(deviceType, isDark)}20`,
+              backgroundColor: `${deviceColor}20`,
               overflow: "hidden",
               flexShrink: 0,
+              // dim only the icon, dimming the card fails text contrast
+              opacity: isReachable ? 1 : 0.5,
             }}
           >
             {hasImage && imageUrl ? (
@@ -589,12 +603,33 @@ export const EndpointCard = ({
                 }}
               />
             ) : (
-              getDeviceIcon(deviceType)
+              <DeviceIcon sx={{ fontSize: 32, color: deviceColor }} />
             )}
           </Box>
           <Box sx={{ flexGrow: 1, minWidth: 0 }}>
-            <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-              <Typography variant="h6" noWrap sx={{ flexGrow: 1 }}>
+            <Box
+              sx={{
+                display: "flex",
+                alignItems: "center",
+                gap: 1,
+                // phones: actions move under the name so it stays readable
+                flexWrap: { xs: "wrap", sm: "nowrap" },
+              }}
+            >
+              <Typography
+                variant="h6"
+                title={name}
+                sx={{
+                  flexBasis: { xs: "100%", sm: "auto" },
+                  flexGrow: 1,
+                  minWidth: 0,
+                  display: "-webkit-box",
+                  WebkitLineClamp: 2,
+                  WebkitBoxOrient: "vertical",
+                  overflow: "hidden",
+                  wordBreak: "break-word",
+                }}
+              >
                 {name}
               </Typography>
               {entityId && (
@@ -610,8 +645,8 @@ export const EndpointCard = ({
                     <IconButton
                       size="small"
                       onClick={handleUploadClick}
-                      sx={{ ml: 0.5 }}
-                      aria-label={`Upload image for ${name}`}
+                      sx={{ ml: 0.5, ...touchTarget }}
+                      aria-label={`${t("endpoints.uploadImage")}: ${name}`}
                     >
                       <CameraAltIcon fontSize="small" />
                     </IconButton>
@@ -621,8 +656,8 @@ export const EndpointCard = ({
                       <IconButton
                         size="small"
                         onClick={handleDeleteImage}
-                        sx={{ ml: -0.5 }}
-                        aria-label={`Remove image for ${name}`}
+                        sx={{ ml: -0.5, ...touchTarget }}
+                        aria-label={`${t("endpoints.removeImage")}: ${name}`}
                       >
                         <DeleteIcon fontSize="small" />
                       </IconButton>
@@ -638,15 +673,15 @@ export const EndpointCard = ({
                       e.stopPropagation();
                       onEditMapping(entityId, bridgeId);
                     }}
-                    sx={{ ml: 0.5 }}
-                    aria-label={`Edit mapping for ${name}`}
+                    sx={{ ml: 0.5, ...touchTarget }}
+                    aria-label={`${t("endpoints.editMapping")}: ${name}`}
                   >
                     <EditIcon fontSize="small" />
                   </IconButton>
                 </Tooltip>
               )}
               {isUnavailable ? (
-                <Tooltip title={`HA State: ${haState}`}>
+                <Tooltip title={`${t("endpoints.haState")}: ${haState}`}>
                   <WarningAmberIcon color="warning" fontSize="small" />
                 </Tooltip>
               ) : (
@@ -666,28 +701,38 @@ export const EndpointCard = ({
                 variant="caption"
                 color="text.secondary"
                 fontFamily="monospace"
+                display="block"
                 noWrap
+                title={entityId}
               >
                 {entityId}
               </Typography>
             )}
             {bridgeName && (
-              <Typography variant="body2" color="text.secondary" noWrap>
+              <Typography
+                variant="body2"
+                color="text.secondary"
+                noWrap
+                title={bridgeName}
+              >
                 {bridgeName}
               </Typography>
             )}
             <Stack
               direction="row"
               spacing={0.5}
+              useFlexGap
               sx={{ mt: 1, flexWrap: "wrap", gap: 0.5 }}
             >
-              <Tooltip title={`Device Type ID: ${endpoint.type.id}`}>
+              <Tooltip
+                title={t("endpoints.deviceTypeId", { id: endpoint.type.id })}
+              >
                 <Chip
                   label={`${deviceType} (${endpoint.type.id})`}
                   size="small"
                   sx={{
-                    backgroundColor: `${getDeviceColor(deviceType, isDark)}20`,
-                    color: getDeviceColor(deviceType, isDark),
+                    backgroundColor: `${deviceColor}20`,
+                    color: deviceColor,
                     fontWeight: 500,
                   }}
                 />
@@ -712,6 +757,7 @@ export const EndpointCard = ({
             <Stack
               direction="row"
               spacing={1}
+              useFlexGap
               alignItems="center"
               sx={{ flexWrap: "wrap", gap: 0.5, mb: 1 }}
             >
@@ -741,10 +787,10 @@ export const EndpointCard = ({
                 />
               )}
               {autoMappings.map((m) => (
-                <Tooltip key={m.label} title={m.entity}>
+                <Tooltip key={m.field} title={m.entity}>
                   <Chip
                     icon={<LinkIcon />}
-                    label={m.label}
+                    label={t(`endpoints.linked.${m.field}`)}
                     size="small"
                     variant="outlined"
                     sx={{ fontSize: "0.7rem", height: 22 }}
@@ -757,34 +803,59 @@ export const EndpointCard = ({
 
         {/* Clusters */}
         <Box>
-          <Box
-            display="flex"
-            alignItems="center"
-            sx={{ cursor: "pointer" }}
-            onClick={(e) => {
-              e.stopPropagation();
-              setExpanded(!expanded);
-            }}
-          >
-            <Typography
-              variant="caption"
-              color="text.secondary"
-              sx={{ flexGrow: 1 }}
-            >
-              {t("endpoints.clusters")} ({clusters.length})
-            </Typography>
-            <ExpandMoreIcon
-              sx={{
-                fontSize: 16,
-                color: "text.secondary",
-                transform: expanded ? "rotate(180deg)" : "rotate(0deg)",
-                transition: "transform 0.2s",
+          <Box display="flex" alignItems="center" gap={1}>
+            <ButtonBase
+              aria-expanded={expanded}
+              aria-controls={detailsId}
+              onClick={(e) => {
+                e.stopPropagation();
+                setExpanded(!expanded);
               }}
-            />
+              sx={{
+                display: "flex",
+                alignItems: "center",
+                width: "100%",
+                textAlign: "left",
+                borderRadius: 1,
+              }}
+            >
+              <Typography
+                variant="caption"
+                color="text.secondary"
+                sx={{ flexGrow: 1 }}
+              >
+                {t("endpoints.clusters")} ({clusters.length})
+              </Typography>
+              <ExpandMoreIcon
+                sx={{
+                  fontSize: 16,
+                  color: "text.secondary",
+                  transform: expanded ? "rotate(180deg)" : "rotate(0deg)",
+                  transition: "transform 0.2s",
+                }}
+              />
+            </ButtonBase>
+            {/* the card click opens the same dialog, this makes it reachable by keyboard */}
+            {onClick && (
+              <Tooltip title={t("endpoints.showDetails")}>
+                <IconButton
+                  size="small"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onClick();
+                  }}
+                  aria-label={`${t("endpoints.showDetails")}: ${name}`}
+                  sx={touchTarget}
+                >
+                  <InfoOutlinedIcon fontSize="small" />
+                </IconButton>
+              </Tooltip>
+            )}
           </Box>
           <Stack
             direction="row"
             spacing={0.5}
+            useFlexGap
             sx={{ flexWrap: "wrap", gap: 0.5, mt: 0.5 }}
           >
             {clusters.slice(0, expanded ? undefined : 5).map((cluster) => {
@@ -794,8 +865,8 @@ export const EndpointCard = ({
                   key={cluster}
                   title={
                     isAutoMapped
-                      ? `Auto-mapped from linked entity`
-                      : `Device cluster`
+                      ? t("endpoints.autoMappedCluster")
+                      : t("endpoints.deviceCluster")
                   }
                 >
                   <Chip
@@ -821,84 +892,87 @@ export const EndpointCard = ({
         </Box>
 
         {/* Expanded: Cluster state details + HA entity info */}
-        <Collapse in={expanded}>
+        <Collapse in={expanded} id={detailsId}>
           <Divider sx={{ my: 1 }} />
-
-          {/* HA Entity Info */}
-          {entityId && (
-            <Box sx={{ mb: 1 }}>
-              <Typography
-                variant="caption"
-                color="text.secondary"
-                sx={{ display: "block", mb: 0.5 }}
-              >
-                {t("endpoints.homeAssistantEntity")}
-              </Typography>
-              <Typography
-                variant="body2"
-                fontFamily="monospace"
-                fontSize="0.75rem"
-              >
-                {t("endpoints.haState")}: {haState ?? t("common.unknown")}
-              </Typography>
-              <Typography
-                variant="body2"
-                fontFamily="monospace"
-                fontSize="0.75rem"
-              >
-                Device Type: {endpoint.type.name} ({endpoint.type.id})
-              </Typography>
-              <Typography
-                variant="body2"
-                fontFamily="monospace"
-                fontSize="0.75rem"
-              >
-                Endpoint: {endpoint.endpoint ?? "N/A"}
-              </Typography>
-            </Box>
-          )}
-
-          {/* Cluster State Details */}
-          {clusters.map((cluster) => {
-            const clusterState = (endpoint.state as Record<string, unknown>)[
-              cluster
-            ];
-            if (
-              !clusterState ||
-              typeof clusterState !== "object" ||
-              Object.keys(clusterState as object).length === 0
-            ) {
-              return null;
-            }
-            const entries = Object.entries(
-              clusterState as Record<string, unknown>,
-            ).filter(([k]) => !k.startsWith("__") && k !== "config");
-            if (entries.length === 0) return null;
-            return (
-              <Box key={cluster} sx={{ mb: 1 }}>
+          <Box sx={{ maxHeight: 320, overflowY: "auto" }}>
+            {/* HA Entity Info */}
+            {entityId && (
+              <Box sx={{ mb: 1 }}>
                 <Typography
                   variant="caption"
                   color="text.secondary"
-                  fontWeight={600}
-                  sx={{ display: "block", mb: 0.25 }}
+                  sx={{ display: "block", mb: 0.5 }}
                 >
-                  {cluster}
+                  {t("endpoints.homeAssistantEntity")}
                 </Typography>
-                {entries.map(([key, value]) => (
-                  <Typography
-                    key={key}
-                    variant="body2"
-                    fontFamily="monospace"
-                    fontSize="0.7rem"
-                    color="text.secondary"
-                    noWrap
-                  >
-                    {key}: {formatClusterValue(value)}
-                  </Typography>
-                ))}
+                <Typography
+                  variant="body2"
+                  fontFamily="monospace"
+                  fontSize="0.75rem"
+                >
+                  {t("endpoints.haState")}: {haState ?? t("common.unknown")}
+                </Typography>
+                <Typography
+                  variant="body2"
+                  fontFamily="monospace"
+                  fontSize="0.75rem"
+                >
+                  {`${t("mapping.deviceType")}: ${endpoint.type.name} (${endpoint.type.id})`}
+                </Typography>
+                <Typography
+                  variant="body2"
+                  fontFamily="monospace"
+                  fontSize="0.75rem"
+                >
+                  {t("endpoints.endpointNumber")}: {endpoint.endpoint ?? "-"}
+                </Typography>
               </Box>
-            );
-          })}
+            )}
+
+            {/* Cluster State Details */}
+            {clusters.map((cluster) => {
+              const clusterState = (endpoint.state as Record<string, unknown>)[
+                cluster
+              ];
+              if (
+                !clusterState ||
+                typeof clusterState !== "object" ||
+                Object.keys(clusterState as object).length === 0
+              ) {
+                return null;
+              }
+              const entries = Object.entries(
+                clusterState as Record<string, unknown>,
+              ).filter(
+                ([k]) => !k.startsWith("__") && !hiddenClusterKeys.has(k),
+              );
+              if (entries.length === 0) return null;
+              return (
+                <Box key={cluster} sx={{ mb: 1 }}>
+                  <Typography
+                    variant="caption"
+                    color="text.secondary"
+                    fontWeight={600}
+                    sx={{ display: "block", mb: 0.25 }}
+                  >
+                    {cluster}
+                  </Typography>
+                  {entries.map(([key, value]) => (
+                    <Typography
+                      key={key}
+                      variant="body2"
+                      fontFamily="monospace"
+                      fontSize="0.7rem"
+                      color="text.secondary"
+                      noWrap
+                    >
+                      {key}: {formatClusterValue(value)}
+                    </Typography>
+                  ))}
+                </Box>
+              );
+            })}
+          </Box>
         </Collapse>
       </CardContent>
     </Card>

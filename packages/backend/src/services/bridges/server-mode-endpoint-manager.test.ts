@@ -76,9 +76,14 @@ interface Harness {
     // biome-ignore lint/suspicious/noExplicitAny: registry stub
     fullEntities: Record<string, any>;
     snapshotGeneration: number;
+    markRefreshIncomplete: ReturnType<typeof vi.fn>;
   };
   client: { connection: object; haRunning: boolean; runningSince: number };
   mappingStorage: { getMapping: ReturnType<typeof vi.fn> };
+  identityStorage: Pick<
+    EntityIdentityStorage,
+    "setIdentity" | "getBridgeIdentities"
+  >;
   // biome-ignore lint/suspicious/noExplicitAny: harness data provider stub
   dataProvider: any;
 }
@@ -126,6 +131,7 @@ function makeHarness(
     forgetBatteryCacheForDevice: vi.fn(),
     fullEntities,
     snapshotGeneration: 1,
+    markRefreshIncomplete: vi.fn(),
   };
   const mappingStorage = {
     getMapping: vi.fn(() => undefined),
@@ -191,6 +197,7 @@ function makeHarness(
     registry,
     client,
     mappingStorage,
+    identityStorage,
     dataProvider,
   };
 }
@@ -618,6 +625,203 @@ describe("ServerModeEndpointManager (#301)", () => {
     ]);
   });
 
+  it("names a missing HA state instead of an unsupported type", async () => {
+    legacyCreate.mockImplementation(async (_registry, entityId) =>
+      entityId === "light.bad"
+        ? undefined
+        : (fakeEndpoint(entityId as string) as unknown as LegacyEndpoint),
+    );
+    const h = makeHarness(["light.good", "light.bad"]);
+    h.registry.initialState.mockImplementation((id: string) =>
+      id === "light.bad" ? undefined : { state: "on" },
+    );
+    await h.manager.refreshDevices();
+
+    expect(h.manager.failedEntities).toEqual([
+      { entityId: "light.bad", reason: "No state in Home Assistant yet" },
+    ]);
+  });
+
+  it("reports a create that threw as incomplete and arms the registry retry until a later one mounts it", async () => {
+    legacyCreate.mockRejectedValueOnce(new Error("create failed"));
+    const h = makeHarness(["light.one"]);
+    await expect(h.manager.refreshDevices()).resolves.toBe(false);
+    expect(h.manager.devices).toEqual([]);
+    expect(h.registry.markRefreshIncomplete).toHaveBeenCalledTimes(1);
+
+    await expect(h.manager.refreshDevices()).resolves.toBe(true);
+    expect(h.manager.devices).toHaveLength(1);
+    expect(h.registry.markRefreshIncomplete).toHaveBeenCalledTimes(1);
+  });
+
+  it("flags only a refresh deferred for HA as deferred", async () => {
+    legacyCreate.mockRejectedValueOnce(new Error("create failed"));
+    const h = makeHarness(["light.one"]);
+    await expect(h.manager.refreshDevices()).resolves.toBe(false);
+    expect(h.manager.refreshDeferred).toBe(false);
+
+    h.client.haRunning = false;
+    await expect(h.manager.refreshDevices()).resolves.toBe(false);
+    expect(h.manager.refreshDeferred).toBe(true);
+
+    h.client.haRunning = true;
+    await expect(h.manager.refreshDevices()).resolves.toBe(true);
+    expect(h.manager.refreshDeferred).toBe(false);
+  });
+
+  it("arms the registry retry when the refresh itself throws", async () => {
+    const h = makeHarness(["light.one"]);
+    h.registry.refresh.mockImplementationOnce(() => {
+      throw new Error("boom");
+    });
+    await expect(h.manager.refreshDevices()).rejects.toThrow("boom");
+    expect(h.registry.markRefreshIncomplete).toHaveBeenCalledTimes(1);
+
+    await expect(h.manager.refreshDevices()).resolves.toBe(true);
+    expect(h.registry.markRefreshIncomplete).toHaveBeenCalledTimes(1);
+  });
+
+  it("warns about a deferred refresh once per HA outage", async () => {
+    const h = makeHarness(["light.one"]);
+    // biome-ignore lint/suspicious/noExplicitAny: reach the private logger
+    const log = (h.manager as any).log as Logger;
+    const deferWarns = () =>
+      vi
+        .mocked(log.warn)
+        .mock.calls.filter((c) => String(c[0]).includes("deferring server"));
+
+    h.client.haRunning = false;
+    await h.manager.refreshDevices();
+    await h.manager.refreshDevices();
+    expect(deferWarns()).toHaveLength(1);
+    expect(log.debug).toHaveBeenCalledWith(
+      expect.stringContaining("deferring server"),
+    );
+
+    h.client.haRunning = true;
+    await h.manager.refreshDevices();
+    h.client.haRunning = false;
+    await h.manager.refreshDevices();
+    expect(deferWarns()).toHaveLength(2);
+  });
+
+  it("logs a create that keeps failing once", async () => {
+    legacyCreate.mockRejectedValue(new Error("create failed"));
+    const h = makeHarness(["light.one"]);
+    // biome-ignore lint/suspicious/noExplicitAny: reach the private logger
+    const log = (h.manager as any).log as Logger;
+    for (let i = 0; i < 3; i++) {
+      await expect(h.manager.refreshDevices()).resolves.toBe(false);
+    }
+    expect(log.error).toHaveBeenCalledTimes(1);
+    expect(log.debug).toHaveBeenCalledWith(
+      "Failed to create server mode device light.one:",
+      expect.any(Error),
+    );
+  });
+
+  it("stops marking a refresh incomplete after three failures with one reason", async () => {
+    let reason: string | undefined = "create failed";
+    legacyCreate.mockImplementation(async (_registry, entityId) => {
+      if (reason) throw new Error(reason);
+      return fakeEndpoint(entityId as string) as unknown as LegacyEndpoint;
+    });
+    const h = makeHarness(["light.one"]);
+    // biome-ignore lint/suspicious/noExplicitAny: reach the private logger
+    const log = (h.manager as any).log as Logger;
+    for (let i = 0; i < 3; i++) {
+      await expect(h.manager.refreshDevices()).resolves.toBe(false);
+    }
+    for (let i = 0; i < 2; i++) {
+      await expect(h.manager.refreshDevices()).resolves.toBe(true);
+      expect(h.manager.failedEntities.map((f) => f.entityId)).toEqual([
+        "light.one",
+      ]);
+    }
+    expect(log.error).toHaveBeenCalledTimes(1);
+
+    reason = "another reason";
+    await expect(h.manager.refreshDevices()).resolves.toBe(false);
+    expect(log.error).toHaveBeenCalledTimes(2);
+
+    reason = undefined;
+    await expect(h.manager.refreshDevices()).resolves.toBe(true);
+    expect(h.manager.devices).toHaveLength(1);
+
+    // a success starts the count over
+    reason = "create failed";
+    h.mappingStorage.getMapping.mockReturnValue({ customName: "changed" });
+    await expect(h.manager.refreshDevices()).resolves.toBe(false);
+    expect(log.error).toHaveBeenCalledTimes(3);
+  });
+
+  it("logs an add that keeps failing in full once and stops marking it incomplete", async () => {
+    const h = makeHarness(["light.one"]);
+    h.serverNode.addDevice.mockRejectedValue(new Error("add failed"));
+    // biome-ignore lint/suspicious/noExplicitAny: reach the private logger
+    const log = (h.manager as any).log as Logger;
+    for (let i = 0; i < 3; i++) {
+      await expect(h.manager.refreshDevices()).resolves.toBe(false);
+    }
+    await expect(h.manager.refreshDevices()).resolves.toBe(true);
+    expect(h.manager.failedEntities.map((f) => f.entityId)).toEqual([
+      "light.one",
+    ]);
+    expect(log.error).toHaveBeenCalledTimes(1);
+    expect(log.debug).toHaveBeenCalledWith(
+      "Failed to create server mode device light.one:",
+      expect.any(Error),
+    );
+  });
+
+  it("logs a failure in full again after the entity left the node and came back", async () => {
+    legacyCreate.mockImplementation(async (_registry, entityId) => {
+      if (entityId === "light.one") throw new Error("create failed");
+      return fakeEndpoint(entityId as string) as unknown as LegacyEndpoint;
+    });
+    const h = makeHarness(["light.one", "light.two"]);
+    // biome-ignore lint/suspicious/noExplicitAny: reach the private logger
+    const log = (h.manager as any).log as Logger;
+    await h.manager.refreshDevices();
+    h.registry.entityIds = ["light.two"];
+    await h.manager.refreshDevices();
+    h.registry.entityIds = ["light.one", "light.two"];
+    await expect(h.manager.refreshDevices()).resolves.toBe(false);
+    expect(log.error).toHaveBeenCalledTimes(2);
+  });
+
+  it("reports a tag rebuild that threw as incomplete and logs it once", async () => {
+    let failRebuild = false;
+    legacyCreate.mockImplementation(async (_registry, entityId) => {
+      if (failRebuild && entityId === "switch.b") {
+        throw new Error("rebuild failed");
+      }
+      return fakeEndpoint(entityId as string, {
+        deviceType: 0x010a,
+      }) as unknown as LegacyEndpoint;
+    });
+    const h = makeHarness(["switch.b"]);
+    // biome-ignore lint/suspicious/noExplicitAny: reach the private logger
+    const log = (h.manager as any).log as Logger;
+    await h.manager.refreshDevices();
+
+    failRebuild = true;
+    h.registry.entityIds = ["switch.b", "switch.a"];
+    h.registry.fullEntities["switch.a"] = { entity_id: "switch.a" };
+    await expect(h.manager.refreshDevices()).resolves.toBe(false);
+    expect(h.manager.devices.map((d) => d.entityId)).toEqual(["switch.a"]);
+    // the next pass builds it fresh and fails the same way
+    await expect(h.manager.refreshDevices()).resolves.toBe(false);
+    expect(log.error).toHaveBeenCalledTimes(1);
+
+    failRebuild = false;
+    await expect(h.manager.refreshDevices()).resolves.toBe(true);
+    expect(h.manager.devices.map((d) => d.entityId).sort()).toEqual([
+      "switch.a",
+      "switch.b",
+    ]);
+  });
+
   it("uses the vacuum endpoint and skips entities the vacuum already claims", async () => {
     vacuumCreate.mockImplementation(
       async (_registry, entityId) =>
@@ -640,6 +844,29 @@ describe("ServerModeEndpointManager (#301)", () => {
     ]);
     const advertised = h.serverNode.updateAdvertisedDeviceType.mock.calls[0][0];
     expect(advertised).toBe(0x74);
+  });
+
+  it("drops a standalone endpoint once the vacuum claims its entity (#498)", async () => {
+    const h = makeHarness(["vacuum.robo", "sensor.vac_battery"], "vacuum.robo");
+    await h.manager.refreshDevices();
+    const added = h.serverNode.addDevice.mock.calls.map(
+      (c) => c[0] as EntityEndpoint,
+    );
+    const vacuum = added.find((e) => e.entityId === "vacuum.robo");
+    const battery = added.find((e) => e.entityId === "sensor.vac_battery");
+    expect(battery).toBeDefined();
+
+    // the vacuum picked the battery up once it became available
+    (vacuum as unknown as { mappedEntityIds: string[] }).mappedEntityIds = [
+      "sensor.vac_battery",
+    ];
+    await h.manager.refreshDevices();
+
+    expect(battery?.delete).toHaveBeenCalled();
+    expect(h.manager.failedEntities).toContainEqual({
+      entityId: "sensor.vac_battery",
+      reason: "Already exposed through vacuum.robo on this node.",
+    });
   });
 
   it("removes an endpoint immediately when its entity leaves the filter but stays in HA (#468)", async () => {
@@ -769,6 +996,37 @@ describe("ServerModeEndpointManager (#301)", () => {
     ]);
   });
 
+  it("a second refresh waits for the first instead of building the device again", async () => {
+    const h = makeHarness(["light.a"], "light.a");
+    let release!: () => void;
+    h.serverNode.addDevice.mockImplementationOnce(
+      () => new Promise<void>((r) => (release = r)),
+    );
+    const first = h.manager.refreshDevices();
+    const second = h.manager.refreshDevices();
+    await vi.waitFor(() =>
+      expect(h.serverNode.addDevice).toHaveBeenCalledTimes(1),
+    );
+    expect(h.registry.refresh).toHaveBeenCalledTimes(1);
+
+    release();
+    await Promise.all([first, second]);
+    expect(h.registry.refresh).toHaveBeenCalledTimes(2);
+    expect(legacyCreate).toHaveBeenCalledTimes(1);
+    expect(h.manager.devices).toHaveLength(1);
+    expect(h.manager.failedEntities).toEqual([]);
+  });
+
+  it("a failed refresh does not block the next one", async () => {
+    const h = makeHarness(["light.a"], "light.a");
+    h.registry.refresh.mockImplementationOnce(() => {
+      throw new Error("boom");
+    });
+    await expect(h.manager.refreshDevices()).rejects.toThrow("boom");
+    await h.manager.refreshDevices();
+    expect(h.manager.devices).toHaveLength(1);
+  });
+
   it("fans state updates out to every endpoint after merging states", async () => {
     const h = makeHarness(["light.a", "light.b"], "light.a");
     await h.manager.refreshDevices();
@@ -779,7 +1037,7 @@ describe("ServerModeEndpointManager (#301)", () => {
     const states = { "light.a": { state: "on" } } as never;
     await h.manager.updateStates(states);
 
-    expect(h.registry.mergeExternalStates).toHaveBeenCalledWith(states);
+    expect(h.registry.mergeExternalStates).toHaveBeenCalledWith(states, null);
     for (const endpoint of endpoints) {
       expect(endpoint.updateStates).toHaveBeenCalledWith(states);
     }
@@ -804,7 +1062,7 @@ describe("ServerModeEndpointManager (#301)", () => {
 
     const refresh = vi
       .spyOn(h.manager, "refreshDevices")
-      .mockResolvedValue(undefined);
+      .mockResolvedValue(true);
     h.registry.batteryFingerprintFor.mockReturnValue("sensor.robo_battery");
     await h.manager.updateStates({
       "sensor.robo_battery": { state: "85" },
@@ -859,6 +1117,104 @@ describe("ServerModeEndpointManager (#301)", () => {
     expect(h.serverNode.addDevice).toHaveBeenCalledTimes(1);
     expect(h.manager.devices.map((d) => d.entityId)).toEqual(["light.new"]);
   });
+
+  it("a renamed entity keeps its frozen id when a new entity takes its old name (#404)", async () => {
+    const h = makeHarness(["light.a", "light.b"], "light.a", {
+      flags: { stableIdentity: true },
+      entities: {
+        "light.a": { unique_id: "UY", platform: "hue" },
+        "light.b": { unique_id: "UX", platform: "hue" },
+      },
+    });
+    // light.b was light.a before the rename
+    h.identityStorage.setIdentity("bridge1", "hue\u0000light\u0000UX", {
+      endpointId: "light_a",
+      anchorEntityId: "light.a",
+      lastEntityId: "light.a",
+    });
+    legacyCreate.mockImplementation(
+      async (_registry, entityId, ...rest) =>
+        fakeEndpoint(entityId as string, {
+          id: rest[3] as string,
+        }) as unknown as LegacyEndpoint,
+    );
+    await h.manager.refreshDevices();
+
+    const ids = Object.fromEntries(
+      h.serverNode.addDevice.mock.calls.map((c) => [
+        (c[0] as EntityEndpoint).entityId,
+        (c[0] as EntityEndpoint).id,
+      ]),
+    );
+    expect(ids).toEqual({ "light.a": "light_a_2", "light.b": "light_a" });
+    expect(h.manager.failedEntities).toEqual([]);
+  });
+
+  for (const yFirst of [true, false]) {
+    it(`a mounted entity renamed while another takes its old name keeps its endpoint (#404, ${yFirst ? "new first" : "renamed first"})`, async () => {
+      legacyCreate.mockImplementation(
+        async (_registry, entityId, ...rest) =>
+          fakeEndpoint(entityId as string, {
+            id: rest[3] as string,
+          }) as unknown as LegacyEndpoint,
+      );
+      const order = yFirst ? ["light.a", "light.b"] : ["light.b", "light.a"];
+      for (const y of ["keyed", "keyless", "next refresh"]) {
+        const x = { unique_id: "UX", platform: "hue" };
+        const entities: Record<
+          string,
+          { unique_id?: string; platform?: string }
+        > = { "light.a": x };
+        const h = makeHarness(["light.a"], "light.a", {
+          flags: { stableIdentity: true },
+          entities,
+        });
+        await h.manager.refreshDevices();
+        const mounted = h.serverNode.addDevice.mock
+          .calls[0][0] as EntityEndpoint;
+
+        entities["light.b"] = x;
+        h.registry.fullEntities["light.b"] = { entity_id: "light.b", ...x };
+        if (y === "next refresh") {
+          h.registry.entityIds = ["light.b"];
+          h.registry.firstEntityMatching = vi.fn(() => "light.b");
+          delete entities["light.a"];
+          await h.manager.refreshDevices();
+        }
+        entities["light.a"] =
+          y === "keyless" ? {} : { unique_id: "UY", platform: "hue" };
+        h.registry.fullEntities["light.a"] = {
+          entity_id: "light.a",
+          ...entities["light.a"],
+        };
+        h.registry.entityIds = order;
+        h.registry.firstEntityMatching = vi.fn(() => order[0]);
+        await h.manager.refreshDevices();
+
+        // close(), not delete(): the renamed entity keeps the number
+        expect(mounted.close).toHaveBeenCalledTimes(1);
+        expect(mounted.delete).not.toHaveBeenCalled();
+        const ids = (m: ServerModeEndpointManager) =>
+          Object.fromEntries(m.devices.map((d) => [d.entityId, d.id]));
+        expect(ids(h.manager), y).toEqual({
+          "light.a": "light_a_2",
+          "light.b": "light_a",
+        });
+        expect(h.manager.failedEntities).toEqual([]);
+
+        // a restart with the same registry and records mounts the same ids
+        const restarted = makeHarness(order, order[0], {
+          flags: { stableIdentity: true },
+          entities,
+        });
+        for (const [k, r] of h.identityStorage.getBridgeIdentities("bridge1")) {
+          restarted.identityStorage.setIdentity("bridge1", k, { ...r });
+        }
+        await restarted.manager.refreshDevices();
+        expect(ids(restarted.manager)).toEqual(ids(h.manager));
+      }
+    });
+  }
 
   it("a rename resolving a pending absence drops the stamp (#438)", async () => {
     const reg = { unique_id: "U", platform: "hue" };

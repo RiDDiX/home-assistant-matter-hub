@@ -68,7 +68,7 @@ export class HomeAssistantEntityBehavior extends Behavior {
   // #446: fail the command instead of telling the controller it worked while
   // the call never reaches HA. `=== false` on purpose: test stubs do not
   // define `available`, and undefined must read as "no opinion".
-  // ponytail: commands only. Attribute writes that fan and thermostat handle
+  // Commands only. Attribute writes that fan and thermostat handle
   // in reactors run as a local actor, so they still go through and rely on HA
   // state to correct them. Plumb it there too if that shows up in reports.
   assertAvailable() {

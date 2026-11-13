@@ -60,7 +60,12 @@ export class CircuitBreaker {
     private readonly resetTimeoutMs: number = 30000,
   ) {}
 
-  async execute<T>(fn: () => Promise<T>): Promise<T> {
+  // isFailure false: the error is an answer, not an outage, so it proves the
+  // link works and never trips the breaker.
+  async execute<T>(
+    fn: () => Promise<T>,
+    isFailure: (error: unknown) => boolean = () => true,
+  ): Promise<T> {
     if (this.state === "open") {
       if (Date.now() - this.lastFailureTime >= this.resetTimeoutMs) {
         this.state = "half-open";
@@ -74,7 +79,8 @@ export class CircuitBreaker {
       this.onSuccess();
       return result;
     } catch (error) {
-      this.onFailure();
+      if (isFailure(error)) this.onFailure();
+      else this.onSuccess();
       throw error;
     }
   }
@@ -95,20 +101,5 @@ export class CircuitBreaker {
 
   get isOpen(): boolean {
     return this.state === "open";
-  }
-
-  // Open AND still inside the reset window. Callers that pre-check
-  // availability must use this, not isOpen, or the half-open probe never
-  // happens and the breaker stays latched forever (#446).
-  get isBlocking(): boolean {
-    return (
-      this.state === "open" &&
-      Date.now() - this.lastFailureTime < this.resetTimeoutMs
-    );
-  }
-
-  reset(): void {
-    this.failures = 0;
-    this.state = "closed";
   }
 }

@@ -6,15 +6,18 @@ import type {
 import { Logger } from "@matter/general";
 import type { EndpointType } from "@matter/main";
 import debounce from "debounce";
+import { isEqual } from "lodash-es";
 import type { BridgeRegistry } from "../../services/bridges/bridge-registry.js";
 import type { HomeAssistantStates } from "../../services/home-assistant/home-assistant-registry.js";
 import { EntityEndpoint, getMappedEntityIds } from "./entity-endpoint.js";
-import { supportsCleaningModes } from "./legacy/vacuum/behaviors/vacuum-rvc-clean-mode-server.js";
+import { resolveCleaningModeOptions } from "./legacy/create-legacy-endpoint-type.js";
 import {
   type VacuumEffectiveConfig,
   withResolvedRooms,
 } from "./legacy/vacuum/behaviors/vacuum-service-area-server.js";
 import { ServerModeVacuumDevice } from "./legacy/vacuum/server-mode-vacuum-device.js";
+import { resolveVacuumFaultMapping } from "./legacy/vacuum/utils/resolve-vacuum-fault-mapping.js";
+import { resolveVacuumJobMapping } from "./legacy/vacuum/utils/resolve-vacuum-job-mapping.js";
 import { updateEntityState } from "./update-entity-state.js";
 
 const logger = Logger.get("ServerModeVacuumEndpoint");
@@ -231,6 +234,14 @@ export class ServerModeVacuumEndpoint extends EntityEndpoint {
       logger.warn(`${entityId}: No device_id, cannot auto-assign battery`);
     }
 
+    if (entityId.startsWith("vacuum.")) {
+      effectiveMapping = resolveVacuumFaultMapping(
+        registry,
+        entityId,
+        effectiveMapping,
+      );
+    }
+
     const payload = {
       entity_id: entityId,
       state,
@@ -238,33 +249,17 @@ export class ServerModeVacuumEndpoint extends EntityEndpoint {
       deviceRegistry,
     };
 
-    // Resolve cleaning mode options for accurate RvcCleanMode generation.
-    // Reads actual entity options so only supported types get modes.
-    const vacAttrsForClean = state.attributes as VacuumDeviceAttributes;
-    let cleaningModeOptions: string[] | undefined;
-    if (effectiveMapping?.cleaningModeEntity) {
-      const cmState = registry.initialState(
-        effectiveMapping.cleaningModeEntity,
-      );
-      cleaningModeOptions = (
-        cmState?.attributes as { options?: string[] } | undefined
-      )?.options;
-    }
-    // Fallback: if no options from entity (unavailable / not loaded),
-    // use hardcoded defaults so mop modes are still generated.
-    // The runtime getCurrentMode/setCleanMode reads the entity live.
-    if (
-      !cleaningModeOptions &&
-      (effectiveMapping?.cleaningModeEntity ||
-        supportsCleaningModes(vacAttrsForClean))
-    ) {
-      cleaningModeOptions = [
-        "vacuum",
-        "mop",
-        "vacuum_and_mop",
-        "vacuum_then_mop",
-      ];
-    }
+    effectiveMapping = resolveVacuumJobMapping(
+      registry,
+      entityId,
+      effectiveMapping,
+    );
+
+    const cleaningModeOptions = resolveCleaningModeOptions(
+      registry,
+      payload,
+      effectiveMapping,
+    );
 
     const customName = effectiveMapping?.customName;
     const endpointType = ServerModeVacuumDevice(
@@ -273,7 +268,7 @@ export class ServerModeVacuumEndpoint extends EntityEndpoint {
         customName,
         mapping: effectiveMapping,
       },
-      registry.isServerModeVacuumOnOffEnabled(),
+      registry.isVacuumOnOffEnabled(),
       cleaningModeOptions,
     );
 
@@ -334,13 +329,17 @@ export class ServerModeVacuumEndpoint extends EntityEndpoint {
     // even when the actual device state/attributes are identical.
     // Skipping these prevents unnecessary Matter subscription reports
     // and reduces MRP traffic that can cause session loss.
-    if (
-      !mappedChanged &&
-      state.state === this.lastState?.state &&
-      JSON.stringify(state.attributes) ===
-        JSON.stringify(this.lastState?.attributes)
-    ) {
-      return;
+    if (!mappedChanged) {
+      // Same state object ref: the HA diff never touched this entity.
+      if (state === this.lastState) return;
+      // Reused attributes ref skips the deep compare on the hot path.
+      if (
+        state.state === this.lastState?.state &&
+        (state.attributes === this.lastState?.attributes ||
+          isEqual(state.attributes, this.lastState?.attributes))
+      ) {
+        return;
+      }
     }
 
     if (mappedChanged) {
@@ -369,6 +368,12 @@ export class ServerModeVacuumEndpoint extends EntityEndpoint {
         last_updated: new Date().toISOString(),
       };
     }
-    await updateEntityState(this, effectiveState);
+    // debounce drops this promise, a rejection would otherwise surface as an
+    // unhandled rejection without the entity id
+    try {
+      await updateEntityState(this, effectiveState);
+    } catch (e) {
+      logger.warn(`State update failed for ${this.entityId}:`, e);
+    }
   }
 }

@@ -1,65 +1,10 @@
-import type {
-  ClimateAutoMode,
-  CustomServiceArea,
-  EntityMappingConfig,
-  FanWindPresets,
-  MatterDeviceType,
-} from "./entity-mapping.js";
+import type { EntityMappingConfig } from "./entity-mapping.js";
 import type { HomeAssistantDomain } from "./home-assistant-domain.js";
 
-export interface MappingProfileEntry {
+export type MappingProfileEntry = Omit<EntityMappingConfig, "entityId"> & {
   readonly domain: HomeAssistantDomain;
   readonly entityIdPattern?: string;
-  readonly matterDeviceType?: MatterDeviceType;
-  readonly customName?: string;
-  readonly disabled?: boolean;
-  readonly filterLifeEntity?: string;
-  readonly cleaningModeEntity?: string;
-  readonly temperatureEntity?: string;
-  readonly humidityEntity?: string;
-  readonly pressureEntity?: string;
-  readonly batteryEntity?: string;
-  readonly disableBatteryMapping?: boolean;
-  readonly roomEntities?: string[];
-  readonly disableLockPin?: boolean;
-  readonly lockWithoutPin?: boolean;
-  readonly lockUsercodeService?: string;
-  readonly lockUsercodeSlot?: number;
-  readonly lockPinMinLength?: number;
-  readonly lockPinMaxLength?: number;
-  readonly powerEntity?: string;
-  readonly energyEntity?: string;
-  readonly meterSerialNumber?: string;
-  readonly pointOfDelivery?: string;
-  readonly voltageEntity?: string;
-  readonly currentEntity?: string;
-  readonly batteryPowerEntity?: string;
-  readonly batteryEnergyEntity?: string;
-  readonly chargingSwitchEntity?: string;
-  readonly currentLimitEntity?: string;
-  readonly suctionLevelEntity?: string;
-  readonly mopIntensityEntity?: string;
-  readonly customServiceAreas?: CustomServiceArea[];
-  readonly customFanSpeedTags?: Record<string, number>;
-  /** Localized HA fan preset names that map to Matter wind modes (#387). */
-  readonly fanWindPresets?: FanWindPresets;
-  /** Restore the last fan speed when a controller turns the fan on, ignoring an injected value (Apple Home power button, #387). */
-  readonly fanRestoreSpeedOnPowerOn?: boolean;
-  readonly valetudoIdentifier?: string;
-  readonly coverSwapOpenClose?: boolean;
-  readonly coverOpenCloseAsPosition?: boolean;
-  readonly coverSliderDebounceMs?: number;
-  readonly fanSliderDebounceMs?: number;
-  readonly disableClimateOnOff?: boolean;
-  readonly disableClimateFanControl?: boolean;
-  readonly climateKeepModeOnIdle?: boolean;
-  readonly climateForceTurnOn?: boolean;
-  readonly climateExposeFan?: boolean;
-  readonly climateAutoMode?: ClimateAutoMode;
-  readonly disableMomentaryFlip?: boolean;
-  readonly vacuumAscendingRoomOrder?: boolean;
-  readonly vacuumRoomSwitches?: boolean;
-}
+};
 
 export interface MappingProfile {
   readonly version: 1;
@@ -84,12 +29,6 @@ export interface MappingProfileImportPreview {
   readonly totalEntries: number;
   readonly matches: MappingProfileImportMatch[];
   readonly unmatchedEntries: MappingProfileEntry[];
-}
-
-export interface MappingProfileImportRequest {
-  readonly bridgeId: string;
-  readonly profile: MappingProfile;
-  readonly selectedEntityIds: string[];
 }
 
 export interface MappingProfileImportResult {

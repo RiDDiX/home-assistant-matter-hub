@@ -112,36 +112,18 @@ describe("CircuitBreaker", () => {
     const result = await cb.execute(() => Promise.resolve("stable"));
     expect(result).toBe("stable");
   });
-
-  it("should reset manually", async () => {
-    const cb = new CircuitBreaker(1, 60000);
-    await cb.execute(() => Promise.reject(new Error("fail"))).catch(() => {});
-    expect(cb.isOpen).toBe(true);
-    cb.reset();
-    expect(cb.isOpen).toBe(false);
-    const result = await cb.execute(() => Promise.resolve("ok"));
-    expect(result).toBe("ok");
-  });
 });
 
-// #446: callers pre-check availability, so isOpen alone would keep the
-// breaker latched: nothing would ever run the half-open probe.
-describe("CircuitBreaker.isBlocking", () => {
-  it("stops blocking once the reset window has passed", async () => {
-    const breaker = new CircuitBreaker(1, 50);
+describe("CircuitBreaker isFailure", () => {
+  it("does not open on errors the caller marks as answers", async () => {
+    const cb = new CircuitBreaker(1, 60000);
     await expect(
-      breaker.execute(async () => {
-        throw new Error("nope");
-      }),
-    ).rejects.toThrow("nope");
-    expect(breaker.isOpen).toBe(true);
-    expect(breaker.isBlocking).toBe(true);
-
-    await new Promise((resolve) => setTimeout(resolve, 60));
-    expect(breaker.isOpen).toBe(true);
-    expect(breaker.isBlocking).toBe(false);
-    await expect(breaker.execute(async () => "probe")).resolves.toBe("probe");
-    expect(breaker.isOpen).toBe(false);
+      cb.execute(
+        () => Promise.reject(new Error("refused")),
+        () => false,
+      ),
+    ).rejects.toThrow("refused");
+    expect(cb.isOpen).toBe(false);
   });
 });
 
