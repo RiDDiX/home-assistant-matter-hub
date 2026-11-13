@@ -27,12 +27,17 @@ export async function deleteBridgeIcon(bridgeId: string): Promise<void> {
 export async function checkBridgeIconExists(
   bridgeId: string,
 ): Promise<boolean> {
-  const response = await fetch(`${BASE_URL}/${bridgeId}/exists`);
-  if (!response.ok) {
+  // callers fire this from effects without a catch, cannot tell means no icon
+  try {
+    const response = await fetch(`${BASE_URL}/${bridgeId}/exists`);
+    if (!response.ok) {
+      return false;
+    }
+    const { exists } = await parseJsonResponse<{ exists: boolean }>(response);
+    return exists;
+  } catch {
     return false;
   }
-  const { exists } = await parseJsonResponse<{ exists: boolean }>(response);
-  return exists;
 }
 
 export function getBridgeIconUrl(bridgeId: string): string {
