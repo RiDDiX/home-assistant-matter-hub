@@ -183,6 +183,35 @@ describe("Off setpoint nudge does not accumulate", () => {
     }
   });
 
+  it("keeps the heat setpoint over Off-Heat-Off cycles without a temperature", async () => {
+    const { server, endpoint } = await mount(climateEntity("off", {}));
+    try {
+      expect(setpoints(endpoint).heat).toBe(2001);
+      for (let i = 0; i < 5; i++) {
+        await updates(endpoint, "heat", {}, 1);
+        await updates(endpoint, "off", {}, 1);
+      }
+      expect(setpoints(endpoint).heat).toBe(2001);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("keeps the cool setpoint over Off-Cool-Off cycles without a temperature", async () => {
+    const modes = { hvac_modes: ["off", "cool"] };
+    const { server, endpoint } = await mount(climateEntity("off", modes));
+    try {
+      const first = setpoints(endpoint).cool;
+      for (let i = 0; i < 5; i++) {
+        await updates(endpoint, "cool", modes, 1);
+        await updates(endpoint, "off", modes, 1);
+      }
+      expect(setpoints(endpoint).cool).toBe(first);
+    } finally {
+      await server.close();
+    }
+  });
+
   it("nudges once when HA drops the temperature on the way to Off", async () => {
     const { server, endpoint } = await mount(
       climateEntity("heat", { temperature: 22 }),

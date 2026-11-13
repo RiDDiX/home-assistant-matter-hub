@@ -20,6 +20,7 @@ import { HomeAssistantConfig } from "../../../services/home-assistant/home-assis
 import type { HomeAssistantStates } from "../../../services/home-assistant/home-assistant-registry.js";
 import { convertPressureToHpa } from "../../../utils/converters/pressure.js";
 import { Temperature } from "../../../utils/converters/temperature.js";
+import { numericState } from "../../../utils/numeric-state.js";
 import { trimToLength } from "../../../utils/trim-to-length.js";
 import { BasicInformationServer } from "../../behaviors/basic-information-server.js";
 import { HaElectricalEnergyMeasurementServer } from "../../behaviors/electrical-energy-measurement-server.js";
@@ -56,7 +57,7 @@ const temperatureConfig: TemperatureMeasurementConfig = {
       agent.env.get(HomeAssistantConfig).unitSystem.temperature;
     const state = entity.state;
     const attributes = entity.attributes as SensorDeviceAttributes;
-    const temperature = state == null || Number.isNaN(+state) ? null : +state;
+    const temperature = numericState(state);
     if (temperature == null) return undefined;
     return Temperature.withUnit(
       temperature,
@@ -67,8 +68,7 @@ const temperatureConfig: TemperatureMeasurementConfig = {
 
 const humidityConfig: HumidityMeasurementConfig = {
   getValue({ state }: HomeAssistantEntityState) {
-    if (state == null || Number.isNaN(+state)) return null;
-    return +state;
+    return numericState(state);
   },
 };
 
@@ -76,7 +76,7 @@ const pressureConfig: PressureMeasurementConfig = {
   getValue(entity) {
     const state = entity.state;
     const attributes = entity.attributes as SensorDeviceAttributes;
-    const pressure = state == null || Number.isNaN(+state) ? null : +state;
+    const pressure = numericState(state);
     if (pressure == null) return undefined;
     return convertPressureToHpa(pressure, attributes.unit_of_measurement);
   },

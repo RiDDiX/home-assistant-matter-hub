@@ -130,10 +130,9 @@ export class Bridge extends BridgeBase<
       await this.server.act("topology change", (agent) =>
         agent.get(BasicInformationServer).increaseConfigurationVersion(change),
       );
-      this.log.debugCtx("Matter topology configuration version increased", {
-        configurationVersion: this.server.stateOf(BasicInformationServer)
-          .configurationVersion,
-      });
+      this.log.info(
+        `Matter topology changed, ConfigurationVersion is now ${this.server.stateOf(BasicInformationServer).configurationVersion}`,
+      );
     });
     const { basicInformation } = this.dataProvider;
     this.log.debugCtx("Root bridge BasicInformation configured", {

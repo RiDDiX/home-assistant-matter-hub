@@ -3,6 +3,7 @@ import { AirQualityServer } from "@matter/main/behaviors";
 import { AirQuality } from "@matter/main/clusters";
 import { AirQualitySensorDevice } from "@matter/main/devices";
 import { applyPatchState } from "../../../../../utils/apply-patch-state.js";
+import { numericState } from "../../../../../utils/numeric-state.js";
 import { BasicInformationServer } from "../../../../behaviors/basic-information-server.js";
 import { HomeAssistantEntityBehavior } from "../../../../behaviors/home-assistant-entity-behavior.js";
 import { IdentifyServer } from "../../../../behaviors/identify-server.js";
@@ -36,8 +37,8 @@ class Pm10AirQualityServer extends Pm10AirQualityServerBase {
     let airQuality: AirQuality.AirQualityEnum =
       AirQuality.AirQualityEnum.Unknown;
 
-    if (state != null && !Number.isNaN(+state)) {
-      const value = +state;
+    const value = numericState(state);
+    if (value != null) {
       // PM10 in µg/m³ (US EPA AQI breakpoints)
       if (value <= 54) {
         airQuality = AirQuality.AirQualityEnum.Good;

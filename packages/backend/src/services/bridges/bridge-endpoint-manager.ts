@@ -9,7 +9,11 @@ import { type Logger, Time } from "@matter/general";
 import { Endpoint, type MutableEndpoint, ServerNodeStore } from "@matter/main";
 import { DescriptorServer } from "@matter/main/behaviors";
 import { Descriptor } from "@matter/main/clusters";
-import { FabricManager, SessionManager } from "@matter/main/protocol";
+import {
+  FabricManager,
+  SessionManager,
+  Subscription,
+} from "@matter/main/protocol";
 import { Service } from "../../core/ioc/service.js";
 import { AggregatorEndpoint } from "../../matter/endpoints/aggregator-endpoint.js";
 import {
@@ -83,6 +87,22 @@ export const ENTITY_FAILURE_RETRIES = 3;
 export interface PendingRemoval {
   since: number;
   generation: number;
+}
+
+// An absent entity or area keeps its endpoint until the grace passed since
+// it was first missed, HA has been up as long, and a newer snapshot still
+// misses it (#438).
+export function removalDue(
+  entry: PendingRemoval,
+  now: number,
+  runningSince: number,
+  generation: number,
+): boolean {
+  return !(
+    now - entry.since < ENDPOINT_REMOVAL_GRACE_MS ||
+    now - runningSince < ENDPOINT_REMOVAL_GRACE_MS ||
+    generation <= entry.generation
+  );
 }
 
 // Plugin devices mount as bare Endpoints without any entity fields, keep them
@@ -284,69 +304,85 @@ export class BridgeEndpointManager extends Service {
         {
           sessions: number;
           subs: number;
+          ids: string[];
           heard: number;
-          maxInterval: number;
+          heardAny: number;
+          silent: boolean;
           covered: boolean;
         }
       >();
+      // same clock as Session.activeTimestamp, milliseconds despite the name
+      const now = Time.nowUs;
       for (const session of env.maybeGet(SessionManager)?.sessions ?? []) {
         const index = session.fabric?.fabricIndex;
         if (index === undefined) continue;
         const count = counts.get(index) ?? {
           sessions: 0,
           subs: 0,
+          ids: [],
           heard: 0,
-          maxInterval: 0,
+          heardAny: 0,
+          silent: false,
           covered: false,
         };
         count.sessions++;
         count.subs += session.subscriptions.size;
-        count.heard = Math.max(count.heard, session.activeTimestamp);
+        count.heardAny = Math.max(count.heardAny, session.activeTimestamp);
+        let maxInterval = 0;
         for (const sub of session.subscriptions) {
           const s = sub as {
+            subscriptionId?: number;
             maxInterval?: number;
             request?: { attributeRequests?: unknown };
           };
-          count.maxInterval = Math.max(count.maxInterval, s.maxInterval ?? 0);
+          count.ids.push(Subscription.idStrOf(s) ?? "?");
+          maxInterval = Math.max(maxInterval, s.maxInterval ?? 0);
           count.covered ||= selectsPartsList(
             s.request?.attributeRequests,
             aggregator,
           );
         }
+        // a session without a subscription that just talked must not hide a
+        // subscribed one that went quiet
+        if (session.subscriptions.size > 0 && session.activeTimestamp > 0) {
+          count.heard = Math.max(count.heard, session.activeTimestamp);
+          count.silent ||=
+            maxInterval > 0 && now - session.activeTimestamp > maxInterval;
+        }
         counts.set(index, count);
       }
       return fabrics.map((fabric) => {
-        const { sessions, subs, heard, maxInterval, covered } = counts.get(
-          fabric.fabricIndex,
-        ) ?? {
-          sessions: 0,
-          subs: 0,
-          heard: 0,
-          maxInterval: 0,
-          covered: false,
-        };
+        const { sessions, subs, ids, heard, heardAny, silent, covered } =
+          counts.get(fabric.fabricIndex) ?? {
+            sessions: 0,
+            subs: 0,
+            ids: [],
+            heard: 0,
+            heardAny: 0,
+            silent: false,
+            covered: false,
+          };
         const vendor = fabric.rootVendorId;
         const name = classifyController(vendor) ?? "vendor";
-        // same clock as Session.activeTimestamp, milliseconds despite the name
-        const silence = Time.nowUs - heard;
+        const last = subs > 0 ? heard : heardAny;
+        const silence = now - last;
         let seen = sessions > 0 ? ", never heard" : "";
-        if (heard > 0) {
+        if (last > 0) {
           const amount =
             silence < 120_000
               ? `${Math.round(silence / 1000)} s`
               : `${Math.round(silence / 60_000)} min`;
           seen = `, last heard ${amount} ago`;
-          if (maxInterval > 0 && silence > maxInterval) {
-            seen += ", silent past its report interval";
-          }
+          if (silent) seen += ", silent past its report interval";
         }
+        const subIds = ids.length > 0 ? ` (sub# ${ids.join(", ")})` : "";
         const hint =
           subs === 0
             ? ", not subscribed, it sees the new device list when it subscribes again"
             : covered
               ? ""
               : ", device list not in its subscription";
-        return `Controller fabric ${fabric.fabricIndex} (${name} 0x${vendor.toString(16)}): ${sessions} ${sessions === 1 ? "session" : "sessions"}, ${subs} ${subs === 1 ? "subscription" : "subscriptions"}${seen}${hint}`;
+        return `Controller fabric ${fabric.fabricIndex} (${name} 0x${vendor.toString(16)}): ${sessions} ${sessions === 1 ? "session" : "sessions"}, ${subs} ${subs === 1 ? "subscription" : "subscriptions"}${subIds}${seen}${hint}`;
       });
     } catch {
       return [];
@@ -782,7 +818,17 @@ export class BridgeEndpointManager extends Service {
    * Isolate an entity by removing it from the aggregator.
    * Called by EntityIsolationService when a runtime error is detected.
    */
-  async isolateEntity(entityName: string): Promise<void> {
+  isolateEntity(entityName: string): Promise<void> {
+    // a running refresh works from its snapshot of the parts, so wait it out.
+    // Nothing inside a refresh awaits this, the error handlers fire and forget.
+    const next = this.refreshChain.then(() =>
+      this.runIsolateEntity(entityName),
+    );
+    this.refreshChain = next.catch(() => undefined);
+    return next;
+  }
+
+  private async runIsolateEntity(entityName: string): Promise<void> {
     const endpoints = [...this.root.parts].filter(hasEntityIdentity);
     // The room switches share the vacuum's entity_id, so an entity_id match
     // must land on the vacuum. A switch is only isolated via its own part id.
@@ -847,17 +893,6 @@ export class BridgeEndpointManager extends Service {
         if (lifecycle === this.lifecycle) this.scheduleRemovalRecheck();
       });
     }, ENDPOINT_REMOVAL_GRACE_MS + 5_000);
-  }
-
-  // An absent entity or area keeps its endpoint until the grace passed since
-  // it was first missed, HA has been up as long, and a newer snapshot still
-  // misses it (#438).
-  private removalDue(entry: PendingRemoval, now: number): boolean {
-    return !(
-      now - entry.since < ENDPOINT_REMOVAL_GRACE_MS ||
-      now - this.client.runningSince < ENDPOINT_REMOVAL_GRACE_MS ||
-      this.registry.snapshotGeneration <= entry.generation
-    );
   }
 
   private getPluginDomainMappings(): Map<string, string> | undefined {
@@ -1228,7 +1263,14 @@ export class BridgeEndpointManager extends Service {
           existingEndpoints.push(endpoint);
           continue;
         }
-        if (!this.removalDue(entry, now)) {
+        if (
+          !removalDue(
+            entry,
+            now,
+            this.client.runningSince,
+            this.registry.snapshotGeneration,
+          )
+        ) {
           existingEndpoints.push(endpoint);
           continue;
         }
@@ -1640,7 +1682,14 @@ export class BridgeEndpointManager extends Service {
             since: now,
             generation: this.registry.snapshotGeneration,
           };
-          if (!this.removalDue(entry, now)) {
+          if (
+            !removalDue(
+              entry,
+              now,
+              this.client.runningSince,
+              this.registry.snapshotGeneration,
+            )
+          ) {
             this.areaSwitchRemovals.set(sw.id, entry);
             keep = true;
           }

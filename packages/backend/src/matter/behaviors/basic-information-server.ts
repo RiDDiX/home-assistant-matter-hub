@@ -6,6 +6,7 @@ import { BridgedDeviceBasicInformationServer as Base } from "@matter/main/behavi
 import { BridgeDataProvider } from "../../services/bridges/bridge-data-provider.js";
 import { applyPatchState } from "../../utils/apply-patch-state.js";
 import { sanitizeMatterString } from "../../utils/sanitize-matter-string.js";
+import { serialNumberWithSuffix } from "../../utils/serial-number.js";
 import { trimToLength } from "../../utils/trim-to-length.js";
 import { HomeAssistantEntityBehavior } from "./home-assistant-entity-behavior.js";
 
@@ -50,22 +51,15 @@ export class BasicInformationServer extends Base {
       featureFlags?.productNameFromNodeLabel === true
         ? (ellipse(32, sanitizeMatterString(nodeLabel ?? "")) ?? undefined)
         : undefined;
-    const serialNumberSuffix =
-      this.env.get(BridgeDataProvider).serialNumberSuffix;
-    // Reserve room for the suffix so it survives the 32-byte cap; otherwise
-    // appending and then trimming chops the suffix off (#330).
-    const maxRawLen = 32 - Buffer.byteLength(serialNumberSuffix ?? "");
-    const registrySerial = featureFlags?.useHaRegistrySerial
-      ? ellipse(maxRawLen, device?.serial_number)
-      : undefined;
-    const rawSerial =
-      ellipse(maxRawLen, mapping?.customSerialNumber) ??
-      registrySerial ??
-      hash(maxRawLen, anchor);
-    const serialNumber =
-      rawSerial && serialNumberSuffix
-        ? `${rawSerial}${serialNumberSuffix}`
-        : rawSerial;
+    const serialNumber = serialNumberWithSuffix(
+      this.env.get(BridgeDataProvider).serialNumberSuffix,
+      (maxRawLen) =>
+        ellipse(maxRawLen, mapping?.customSerialNumber) ??
+        (featureFlags?.useHaRegistrySerial
+          ? ellipse(maxRawLen, device?.serial_number)
+          : undefined) ??
+        hash(maxRawLen, anchor),
+    );
     const customVendorId = mapping?.customVendorId;
     const vendorId = isValidVendorId(customVendorId)
       ? customVendorId

@@ -12,6 +12,7 @@ import { DeviceTypeId, VendorId } from "@matter/main/types";
 import { CAMERA_TCP_CONFIG } from "../../plugins/builtin/camera/camera-tcp-requirement.js";
 import { countryCodeLocation } from "../../utils/json/create-bridge-server-config.js";
 import { sanitizeMatterString } from "../../utils/sanitize-matter-string.js";
+import { serialNumberWithSuffix } from "../../utils/serial-number.js";
 import { trimToLength } from "../../utils/trim-to-length.js";
 import { legacySpecBasicInformation } from "../legacy-spec-version.js";
 import { matterSubscriptionOptions } from "../subscription-options.js";
@@ -134,18 +135,14 @@ export class ServerModeServerNode extends ServerNode {
         ? (trimToLength(sanitizeMatterString(nodeLabel ?? ""), 32, "...") ??
           undefined)
         : undefined;
-    // Reserve room for the suffix so it survives the 32-byte cap (#330).
-    const maxRawLen = 32 - Buffer.byteLength(this.serialNumberSuffix ?? "");
-    const registrySerial = this.featureFlags?.useHaRegistrySerial
-      ? trimToLength(device?.serial_number, maxRawLen, "...")
-      : undefined;
-    const rawSerial =
-      trimToLength(mapping?.customSerialNumber, maxRawLen, "...") ??
-      registrySerial;
-    const serialNumber =
-      rawSerial && this.serialNumberSuffix
-        ? `${rawSerial}${this.serialNumberSuffix}`
-        : rawSerial;
+    const serialNumber = serialNumberWithSuffix(
+      this.serialNumberSuffix,
+      (maxRawLen) =>
+        trimToLength(mapping?.customSerialNumber, maxRawLen, "...") ??
+        (this.featureFlags?.useHaRegistrySerial
+          ? trimToLength(device?.serial_number, maxRawLen, "...")
+          : undefined),
+    );
     const basicInformation = dropUndefined({
       vendorName:
         trimToLength(mapping?.customVendorName, 32, "...") ??

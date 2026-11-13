@@ -3,6 +3,7 @@ import { AirQualityServer } from "@matter/main/behaviors";
 import { AirQuality } from "@matter/main/clusters";
 import { AirQualitySensorDevice } from "@matter/main/devices";
 import { applyPatchState } from "../../../../../utils/apply-patch-state.js";
+import { numericState } from "../../../../../utils/numeric-state.js";
 import { BasicInformationServer } from "../../../../behaviors/basic-information-server.js";
 import { CarbonDioxideConcentrationMeasurementServer } from "../../../../behaviors/carbon-dioxide-concentration-measurement-server.js";
 import { HomeAssistantEntityBehavior } from "../../../../behaviors/home-assistant-entity-behavior.js";
@@ -36,8 +37,8 @@ class Co2AirQualityServer extends Co2AirQualityServerBase {
     let airQuality: AirQuality.AirQualityEnum =
       AirQuality.AirQualityEnum.Unknown;
 
-    if (state != null && !Number.isNaN(+state)) {
-      const value = +state;
+    const value = numericState(state);
+    if (value != null) {
       // CO2 in ppm - thresholds based on German UBA / ASHRAE indoor air quality guidelines.
       // Outdoor CO2 is ~420 ppm (2024+), well-ventilated indoor ~450-600 ppm.
       if (value <= 800) {

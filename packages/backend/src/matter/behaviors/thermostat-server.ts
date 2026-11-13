@@ -22,6 +22,10 @@ import { transactionIsOffline } from "../../utils/transaction-is-offline.js";
 // Prevents the nudge itself from triggering auto-resume in $Changing handlers.
 const nudgingSetpoints = new Set<string>();
 
+// Setpoint an Off update left in place, keyed `${entityId}:heat|cool`. A
+// later update that only reads it back gets no second nudge.
+const nudgedSetpoints = new Map<string, number>();
+
 // Entity IDs whose auto-resume already sent the mode change to HA (#519).
 // The systemMode$Changed reactor consumes the entry and skips the duplicate.
 // An entry older than AUTO_RESUME_MS is stale (no $Changed after the resume)
@@ -545,7 +549,9 @@ export class ThermostatServerBase extends FullFeaturedBase {
               occupiedHeatingSetpoint:
                 systemMode === Thermostat.SystemMode.Off &&
                 (haHeatingTemperature != null ||
-                  !wasOff ||
+                  (!wasOff &&
+                    nudgedSetpoints.get(`${entityId}:heat`) !==
+                      this.state.occupiedHeatingSetpoint) ||
                   clampedHeatingSetpoint !== this.state.occupiedHeatingSetpoint)
                   ? nudgeSetpoint(
                       clampedHeatingSetpoint,
@@ -559,7 +565,9 @@ export class ThermostatServerBase extends FullFeaturedBase {
               occupiedCoolingSetpoint:
                 systemMode === Thermostat.SystemMode.Off &&
                 (haCoolingTemperature != null ||
-                  !wasOff ||
+                  (!wasOff &&
+                    nudgedSetpoints.get(`${entityId}:cool`) !==
+                      this.state.occupiedCoolingSetpoint) ||
                   clampedCoolingSetpoint !== this.state.occupiedCoolingSetpoint)
                   ? nudgeSetpoint(
                       clampedCoolingSetpoint,
@@ -571,6 +579,35 @@ export class ThermostatServerBase extends FullFeaturedBase {
       });
     } finally {
       nudgingSetpoints.delete(entityId);
+    }
+    if (this.features.heating) {
+      this.trackNudge(
+        `${entityId}:heat`,
+        systemMode,
+        haHeatingTemperature,
+        this.state.occupiedHeatingSetpoint,
+      );
+    }
+    if (this.features.cooling) {
+      this.trackNudge(
+        `${entityId}:cool`,
+        systemMode,
+        haCoolingTemperature,
+        this.state.occupiedCoolingSetpoint,
+      );
+    }
+  }
+
+  private trackNudge(
+    key: string,
+    systemMode: SystemMode,
+    haTemperature: number | undefined,
+    setpoint: number,
+  ) {
+    if (systemMode === SystemMode.Off) {
+      nudgedSetpoints.set(key, setpoint);
+    } else if (haTemperature != null) {
+      nudgedSetpoints.delete(key);
     }
   }
 

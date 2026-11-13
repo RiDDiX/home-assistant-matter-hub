@@ -1,5 +1,6 @@
 import type { HomeAssistantEntityState } from "@home-assistant-matter-hub/common";
 import { LightSensorDevice } from "@matter/main/devices";
+import { numericState } from "../../../../../utils/numeric-state.js";
 import { BasicInformationServer } from "../../../../behaviors/basic-information-server.js";
 import { HomeAssistantEntityBehavior } from "../../../../behaviors/home-assistant-entity-behavior.js";
 import { IdentifyServer } from "../../../../behaviors/identify-server.js";
@@ -10,10 +11,7 @@ import {
 
 const illuminanceSensorConfig: IlluminanceMeasurementConfig = {
   getValue({ state }: HomeAssistantEntityState) {
-    if (state == null || Number.isNaN(+state)) {
-      return null;
-    }
-    return +state;
+    return numericState(state);
   },
 };
 

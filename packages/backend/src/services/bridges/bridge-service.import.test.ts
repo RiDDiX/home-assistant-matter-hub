@@ -29,6 +29,7 @@ function makeFactory(): BridgeFactory {
         data: initial,
         onStatusChange: undefined,
         start: vi.fn().mockResolvedValue(undefined),
+        dispose: vi.fn().mockResolvedValue(undefined),
         update: vi.fn(async (request: UpdateBridgeRequest) => {
           bridge.data = { ...bridge.data, ...request };
         }),
@@ -73,6 +74,19 @@ describe("BridgeService.importBridge", () => {
     await svc.importBridge(bridgeData("new", 5540));
 
     expect(svc.get("new")?.data.port).toBe(5541);
+  });
+
+  it("drops a new bridge whose storage write failed", async () => {
+    const { svc, add } = await makeService([]);
+    const error = new Error("disk full");
+    add.mockRejectedValueOnce(error);
+
+    await expect(svc.importBridge(bridgeData("new", 5545))).rejects.toBe(error);
+
+    expect(svc.get("new")).toBeUndefined();
+    const bridge = await svc.importBridge(bridgeData("new", 5545));
+    expect(bridge.data.port).toBe(5545);
+    expect(svc.bridges).toEqual([bridge]);
   });
 
   it("overwrites the running bridge with the same id", async () => {
@@ -163,5 +177,23 @@ describe("BridgeService.create", () => {
       "rejected",
     ]);
     expect(svc.bridges).toHaveLength(1);
+  });
+
+  it("drops a bridge whose storage write failed", async () => {
+    const { svc, add } = await makeService([]);
+    const error = new Error("disk full");
+    let failed: (typeof svc.bridges)[number] | undefined;
+    add.mockImplementationOnce(async () => {
+      failed = svc.bridges[0];
+      throw error;
+    });
+
+    await expect(svc.create({ ...request, port: 5600 })).rejects.toBe(error);
+
+    expect(svc.bridges).toHaveLength(0);
+    expect(failed?.dispose).toHaveBeenCalled();
+    const bridge = await svc.create({ ...request, port: 5600 });
+    expect(bridge.data.port).toBe(5600);
+    expect(svc.bridges).toEqual([bridge]);
   });
 });

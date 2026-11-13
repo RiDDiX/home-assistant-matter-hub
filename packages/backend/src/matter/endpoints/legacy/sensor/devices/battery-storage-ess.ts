@@ -8,6 +8,7 @@ import { BatteryStorageDevice } from "@matter/main/devices";
 import { EntityStateProvider } from "../../../../../services/bridges/entity-state-provider.js";
 import { applyPatchState } from "../../../../../utils/apply-patch-state.js";
 import { mappedMilli } from "../../../../../utils/converters/electrical-unit.js";
+import { numericState } from "../../../../../utils/numeric-state.js";
 import { BasicInformationServer } from "../../../../behaviors/basic-information-server.js";
 import { HomeAssistantEntityBehavior } from "../../../../behaviors/home-assistant-entity-behavior.js";
 import { IdentifyServer } from "../../../../behaviors/identify-server.js";
@@ -151,11 +152,7 @@ const BatteryStorageEssBase = BatteryStorageDevice.with(
   HaPowerTopologyServer,
   PowerSourceServer({
     getBatteryPercent(entity) {
-      const state = entity.state;
-      if (state == null || state.trim() === "" || Number.isNaN(+state)) {
-        return null;
-      }
-      return +state;
+      return numericState(entity.state);
     },
   }),
 );

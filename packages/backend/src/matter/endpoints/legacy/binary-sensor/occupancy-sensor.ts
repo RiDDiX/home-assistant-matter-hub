@@ -1,5 +1,6 @@
 import { OccupancySensorDevice } from "@matter/main/devices";
 import { EntityStateProvider } from "../../../../services/bridges/entity-state-provider.js";
+import { numericState } from "../../../../utils/numeric-state.js";
 import { BasicInformationServer } from "../../../behaviors/basic-information-server.js";
 import { HomeAssistantEntityBehavior } from "../../../behaviors/home-assistant-entity-behavior.js";
 import { IdentifyServer } from "../../../behaviors/identify-server.js";
@@ -37,10 +38,7 @@ export const OccupancySensorWithBatteryType = OccupancySensorDevice.with(
         battery_level?: number;
       };
       const level = attrs.battery_level ?? attrs.battery;
-      if (level == null || Number.isNaN(Number(level))) {
-        return null;
-      }
-      return Number(level);
+      return numericState(level);
     },
   }),
 );

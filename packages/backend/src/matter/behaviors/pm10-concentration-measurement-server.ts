@@ -2,6 +2,7 @@ import type { HomeAssistantEntityInformation } from "@home-assistant-matter-hub/
 import { Pm10ConcentrationMeasurementServer as Base } from "@matter/main/behaviors";
 import { ConcentrationMeasurement } from "@matter/main/clusters";
 import { applyPatchState } from "../../utils/apply-patch-state.js";
+import { numericState } from "../../utils/numeric-state.js";
 import { HomeAssistantEntityBehavior } from "./home-assistant-entity-behavior.js";
 
 // Use only NumericMeasurement feature.
@@ -50,11 +51,7 @@ export class Pm10ConcentrationMeasurementServer extends Pm10ConcentrationMeasure
       return;
     }
     const state = entity.state.state;
-    let measuredValue: number | null = null;
-
-    if (state != null && !Number.isNaN(+state)) {
-      measuredValue = +state;
-    }
+    const measuredValue = numericState(state);
 
     applyPatchState(this.state, {
       measuredValue,

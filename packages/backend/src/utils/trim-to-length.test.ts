@@ -25,6 +25,18 @@ describe("trimToLength", () => {
     expect(trimToLength("Living room", 16, "")).toBe("Living room");
   });
 
+  it.each([
+    ["Kitchen light", 2, "...", "Ki"],
+    ["客厅吸顶灯", 4, ".....", "客"],
+    ["light.kitchen", 3, "abcd", "lig"],
+    ["light.kitchen", 0, "...", ""],
+    ["light.kitchen", -4, "...", ""],
+  ])("cuts %s to %i bytes when suffix %s does not fit", (value, max, suffix, expected) => {
+    const trimmed = trimToLength(value, max, suffix);
+    expect(trimmed).toBe(expected);
+    expect(bytes(trimmed)).toBeLessThanOrEqual(Math.max(max, 0));
+  });
+
   it("never splits a surrogate pair", () => {
     const trimmed = trimToLength("💡".repeat(20), 64, "...");
     expect(bytes(trimmed)).toBeLessThanOrEqual(64);

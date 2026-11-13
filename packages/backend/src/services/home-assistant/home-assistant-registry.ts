@@ -42,6 +42,9 @@ export class HomeAssistantRegistry extends Service {
   // still reaches the bridges on the next tick.
   private registryChanged = false;
   private lastRegistryFingerprint = "";
+  // reloads overlap (tick, API, bridges), an older one must not commit last
+  private reloadsStarted = 0;
+  private lastCommittedReload = 0;
 
   // Bumped on every successful reload, even an unchanged one. Endpoint
   // removal requires a bump between stamp and delete, so a stale cached
@@ -240,7 +243,8 @@ export class HomeAssistantRegistry extends Service {
   }
 
   async reload(): Promise<boolean> {
-    return await withRetry(() => this.fetchRegistries(), {
+    const seq = ++this.reloadsStarted;
+    return await withRetry(() => this.fetchRegistries(seq), {
       maxAttempts: 10,
       baseDelayMs: 2000,
       maxDelayMs: 30000,
@@ -253,10 +257,10 @@ export class HomeAssistantRegistry extends Service {
     });
   }
 
-  private async fetchRegistries(): Promise<boolean> {
+  private async fetchRegistries(seq: number): Promise<boolean> {
     await this.waitForConnection(30_000);
     try {
-      return await this.runRegistryQueries();
+      return await this.runRegistryQueries(seq);
     } catch (e) {
       if (!isConnectionLost(e)) throw e;
       // WS dropped mid-flight; the library auto-reconnects. Wait for the
@@ -264,7 +268,7 @@ export class HomeAssistantRegistry extends Service {
       // by withRetry's backoff.
       logger.debug("Registry fetch hit connection drop, waiting for reconnect");
       await this.waitForConnection(60_000);
-      return await this.runRegistryQueries();
+      return await this.runRegistryQueries(seq);
     }
   }
 
@@ -291,7 +295,7 @@ export class HomeAssistantRegistry extends Service {
     });
   }
 
-  private async runRegistryQueries(): Promise<boolean> {
+  private async runRegistryQueries(seq: number): Promise<boolean> {
     // Trust must hold for the WHOLE fetch: a flip to RUNNING mid-flight
     // would otherwise let a STARTING-era partial snapshot commit (#438).
     const trustedAtStart = this.client.haRunning;
@@ -325,6 +329,11 @@ export class HomeAssistantRegistry extends Service {
           }));
         }),
       ]);
+
+    if (seq < this.lastCommittedReload) {
+      logger.debug("Discarding registry snapshot, a newer reload committed");
+      return false;
+    }
 
     // Fingerprint structural registry data to detect changes.
     // State *values* change constantly (handled by WebSocket subscription);
@@ -361,6 +370,7 @@ export class HomeAssistantRegistry extends Service {
       return false;
     }
     this._snapshotGeneration++;
+    this.lastCommittedReload = seq;
 
     // Always update states (values change via WebSocket, but fresh data
     // is needed for the UI and initial endpoint state)

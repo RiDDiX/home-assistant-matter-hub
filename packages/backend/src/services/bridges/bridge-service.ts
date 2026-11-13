@@ -416,13 +416,12 @@ export class BridgeService extends Service {
     // two creates racing on the same free port must not both pass
     this.pendingPorts.add(port);
     try {
-      const bridge = await this.addBridge({
+      const bridge = await this.addStoredBridge({
         ...request,
         port,
         id: crypto.randomUUID().replace(/-/g, ""),
         basicInformation: this.props.basicInformation,
       });
-      await this.bridgeStorage.add(bridge.data);
       await bridge.start();
       this.onBridgeChanged?.(bridge.id);
       return bridge;
@@ -445,10 +444,9 @@ export class BridgeService extends Service {
     }
     this.pendingPorts.add(port);
     try {
-      const bridge = await this.addBridge(
+      const bridge = await this.addStoredBridge(
         this.normalizeBridgeData({ ...data, port }),
       );
-      await this.bridgeStorage.add(bridge.data);
       await bridge.start();
       this.onBridgeChanged?.(bridge.id);
       return bridge;
@@ -550,6 +548,24 @@ export class BridgeService extends Service {
     // (Stopped → Starting → Running / Failed) is broadcast via WebSocket.
     bridge.onStatusChange = () => this.onBridgeChanged?.(bridge.id);
     this.bridges.push(bridge);
+    return bridge;
+  }
+
+  // a bridge whose storage write failed must not stay listed unstored
+  private async addStoredBridge(bridgeData: BridgeData): Promise<Bridge> {
+    const bridge = await this.addBridge(bridgeData);
+    try {
+      await this.bridgeStorage.add(bridge.data);
+    } catch (e) {
+      const index = this.bridges.indexOf(bridge);
+      if (index >= 0) this.bridges.splice(index, 1);
+      try {
+        await bridge.dispose();
+      } catch {
+        // the storage error is the one to report
+      }
+      throw e;
+    }
     return bridge;
   }
 

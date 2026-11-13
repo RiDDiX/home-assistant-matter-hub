@@ -15,6 +15,7 @@ import {
   mappedMilli,
   toMatterMilli,
 } from "../../../../../utils/converters/electrical-unit.js";
+import { numericState } from "../../../../../utils/numeric-state.js";
 import { BasicInformationServer } from "../../../../behaviors/basic-information-server.js";
 import { HomeAssistantEntityBehavior } from "../../../../behaviors/home-assistant-entity-behavior.js";
 import { IdentifyServer } from "../../../../behaviors/identify-server.js";
@@ -71,10 +72,9 @@ class StandalonePowerServer extends PowerFeaturedBase {
     const unit = attrs?.unit_of_measurement;
     if (primary != null) {
       // unavailable or unknown clears the reading instead of freezing the last one
+      const value = numericState(primary);
       const reading = (quantity: "power" | "voltage" | "current") =>
-        primary.trim() === "" || Number.isNaN(+primary)
-          ? null
-          : toMatterMilli(+primary, quantity, unit);
+        value == null ? null : toMatterMilli(value, quantity, unit);
       if (dc === SensorDeviceClass.power) {
         patch.activePower = reading("power");
       } else if (dc === SensorDeviceClass.voltage) {
@@ -205,9 +205,9 @@ class StandaloneEnergyServer extends EnergyFeaturedBase {
       | SensorDeviceAttributes
       | undefined;
     if (attrs?.device_class === SensorDeviceClass.energy) {
-      const state = entity.state?.state;
-      if (state != null && state.trim() !== "" && !Number.isNaN(+state)) {
-        energyMwh = toMatterMilli(+state, "energy", attrs.unit_of_measurement);
+      const value = numericState(entity.state?.state);
+      if (value != null) {
+        energyMwh = toMatterMilli(value, "energy", attrs.unit_of_measurement);
       }
     }
 

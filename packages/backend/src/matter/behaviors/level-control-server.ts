@@ -14,6 +14,7 @@ import { BridgeDataProvider } from "../../services/bridges/bridge-data-provider.
 import { applyPatchState } from "../../utils/apply-patch-state.js";
 import type { FeatureSelection } from "../../utils/feature-selection.js";
 import { HomeAssistantEntityBehavior } from "./home-assistant-entity-behavior.js";
+import { setOptimisticOnOff } from "./on-off-server.js";
 import type { ValueGetter, ValueSetter } from "./utils/cluster-config.js";
 
 // Which controller sent the current command, resolved through its fabric.
@@ -240,7 +241,12 @@ export class LevelControlServerBase extends FeaturedBase {
     return super.stepWithOnOff(request);
   }
 
-  override stepLogic(stepMode: LevelControl.StepMode, stepSize: number) {
+  override stepLogic(
+    stepMode: LevelControl.StepMode,
+    stepSize: number,
+    _transitionTime?: number | null,
+    withOnOff = false,
+  ) {
     const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);
     const config = this.state.config;
     const entityId = homeAssistant.entity.entity_id;
@@ -287,10 +293,15 @@ export class LevelControlServerBase extends FeaturedBase {
       timestamp: now,
     });
 
+    this.turnOnWithLevel(withOnOff, targetLevel, action.action);
     homeAssistant.callAction(action);
   }
 
-  override moveToLevelLogic(level: number) {
+  override moveToLevelLogic(
+    level: number,
+    _transitionTime?: number | null,
+    withOnOff = false,
+  ) {
     const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);
     const config = this.state.config;
     const entityId = homeAssistant.entity.entity_id;
@@ -410,7 +421,30 @@ export class LevelControlServerBase extends FeaturedBase {
       expectedLevel: level,
       timestamp: now,
     });
+    this.turnOnWithLevel(withOnOff, level, action.action);
     homeAssistant.callAction(action);
+  }
+
+  // These overrides skip the matter.js OnOff coupling. Only light.turn_on is
+  // sure to turn the entity on in HA, so only then OnOff follows as on() does.
+  private turnOnWithLevel(withOnOff: boolean, level: number, action: string) {
+    if (
+      !withOnOff ||
+      action !== "light.turn_on" ||
+      level <= this.minLevel ||
+      !this.agent.has(OnOffServer)
+    ) {
+      return;
+    }
+    const onOff = this.agent.get(OnOffServer);
+    if (onOff.state.onOff) {
+      return;
+    }
+    applyPatchState(onOff.state, { onOff: true });
+    setOptimisticOnOff(
+      this.agent.get(HomeAssistantEntityBehavior).entityId,
+      true,
+    );
   }
 }
 

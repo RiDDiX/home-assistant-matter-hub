@@ -8,6 +8,7 @@ import { SmokeCoAlarm } from "@matter/main/clusters";
 import { SmokeCoAlarmDevice } from "@matter/main/devices";
 import { EntityStateProvider } from "../../../../services/bridges/entity-state-provider.js";
 import { applyPatchState } from "../../../../utils/apply-patch-state.js";
+import { numericState } from "../../../../utils/numeric-state.js";
 import { BasicInformationServer } from "../../../behaviors/basic-information-server.js";
 import { HomeAssistantEntityBehavior } from "../../../behaviors/home-assistant-entity-behavior.js";
 import { IdentifyServer } from "../../../behaviors/identify-server.js";
@@ -43,10 +44,7 @@ function getBatteryPercent(
     battery_level?: number;
   };
   const level = attrs.battery_level ?? attrs.battery;
-  if (level == null || Number.isNaN(Number(level))) {
-    return null;
-  }
-  return Number(level);
+  return numericState(level);
 }
 
 // batteryAlert reuses the PowerSource thresholds (<=10 Critical, <=20 Warning).

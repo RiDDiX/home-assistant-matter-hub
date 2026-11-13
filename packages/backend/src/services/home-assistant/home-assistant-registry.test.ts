@@ -1020,4 +1020,47 @@ describe("HomeAssistantRegistry", () => {
     expect(registry.states["light.a"]).toBe(merged);
     expect(registry.states["light.b"].state).toBe("on");
   });
+
+  it("keeps the newer snapshot when an older reload finishes last", async () => {
+    const fake = makeConnection();
+    const entityLists: unknown[] = [];
+    fake.connection.sendMessagePromise = vi.fn((message: { type: string }) =>
+      Promise.resolve(
+        message.type === "config/entity_registry/list"
+          ? (entityLists.shift() ?? [])
+          : [],
+      ),
+    ) as unknown as Connection["sendMessagePromise"];
+    const client = {
+      connection: fake.connection,
+      haRunning: true,
+    } as unknown as HomeAssistantClient;
+    const registry = new HomeAssistantRegistry(client, defaultOptions);
+    await vi.runAllTimersAsync();
+    await registry.construction;
+
+    let resolveOlder!: (v: unknown[]) => void;
+    let resolveNewer!: (v: unknown[]) => void;
+    entityLists.push(
+      new Promise((r) => {
+        resolveOlder = r;
+      }),
+      new Promise((r) => {
+        resolveNewer = r;
+      }),
+    );
+    const first = registry.reload();
+    await vi.advanceTimersByTimeAsync(0);
+    const second = registry.reload();
+    await vi.advanceTimersByTimeAsync(0);
+
+    resolveNewer([{ entity_id: "light.new" }]);
+    await expect(second).resolves.toBe(true);
+    resolveOlder([{ entity_id: "light.old" }]);
+    await first;
+
+    expect(Object.keys(registry.entities)).toEqual(["light.new"]);
+    entityLists.push([{ entity_id: "light.new" }]);
+    await expect(registry.reload()).resolves.toBe(false);
+  });
 });

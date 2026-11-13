@@ -33,6 +33,7 @@ import {
   ENDPOINT_REMOVAL_GRACE_MS,
   ENTITY_FAILURE_RETRIES,
   type PendingRemoval,
+  removalDue,
 } from "./bridge-endpoint-manager.js";
 import type { BridgeRegistry } from "./bridge-registry.js";
 import { EntityMappingSync } from "./entity-mapping-sync.js";
@@ -257,11 +258,7 @@ export class ServerModeEndpointManager extends Service {
         this.pendingRemovals.set(entityId, { since: now, generation });
         continue;
       }
-      if (
-        now - entry.since < ENDPOINT_REMOVAL_GRACE_MS ||
-        now - this.client.runningSince < ENDPOINT_REMOVAL_GRACE_MS ||
-        generation <= entry.generation
-      ) {
+      if (!removalDue(entry, now, this.client.runningSince, generation)) {
         continue;
       }
       ready.push(entityId);

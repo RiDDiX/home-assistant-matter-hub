@@ -27,6 +27,8 @@ import type { EntityMappingStorage } from "../storage/entity-mapping-storage.js"
 import { BridgeDataProvider } from "./bridge-data-provider.js";
 import {
   BridgeEndpointManager,
+  ENDPOINT_REMOVAL_GRACE_MS,
+  removalDue,
   selectsPartsList,
 } from "./bridge-endpoint-manager.js";
 import { BridgeRegistry } from "./bridge-registry.js";
@@ -332,11 +334,13 @@ describe("filter edits reconcile without the grace window (#468)", () => {
       }
       if (type === SessionManager) {
         const wildcard = {
+          subscriptionId: 0x10,
           maxInterval: 60_000,
           request: { attributeRequests: [{}] },
         };
         // one attribute on a bridged endpoint, PartsList changes miss it
         const narrow = {
+          subscriptionId: 0xabcdef01,
           maxInterval: 60_000,
           request: {
             attributeRequests: [
@@ -349,7 +353,10 @@ describe("filter edits reconcile without the grace window (#468)", () => {
             {
               fabric: { fabricIndex: 2 },
               activeTimestamp: Time.nowUs - 3_000,
-              subscriptions: new Set([wildcard, { ...wildcard }]),
+              subscriptions: new Set([
+                wildcard,
+                { ...wildcard, subscriptionId: 0x11 },
+              ]),
             },
             { fabric: undefined, subscriptions: new Set() },
             {
@@ -377,10 +384,10 @@ describe("filter edits reconcile without the grace window (#468)", () => {
     expect(fabricLines()).toEqual([
       // a stalled run may read 4 s or more
       expect.stringMatching(
-        /^Controller fabric 2 \(google 0x6006\): 1 session, 2 subscriptions, last heard \d+ s ago$/,
+        /^Controller fabric 2 \(google 0x6006\): 1 session, 2 subscriptions \(sub# 00000010, 00000011\), last heard \d+ s ago$/,
       ),
       "Controller fabric 3 (apple 0x1349): 0 sessions, 0 subscriptions, not subscribed, it sees the new device list when it subscribes again",
-      "Controller fabric 4 (vendor 0xfff1): 1 session, 1 subscription, last heard 10 min ago, silent past its report interval, device list not in its subscription",
+      "Controller fabric 4 (vendor 0xfff1): 1 session, 1 subscription (sub# abcdef01), last heard 10 min ago, silent past its report interval, device list not in its subscription",
     ]);
   });
 
@@ -398,6 +405,18 @@ describe("filter edits reconcile without the grace window (#468)", () => {
       selectsPartsList([{ endpointId: 0, clusterId: 0x1d, attributeId: 0 }], 1),
     ).toBe(false);
     expect(selectsPartsList(undefined, 1)).toBe(false);
+  });
+
+  it("removes only after the grace, HA uptime and a newer snapshot", () => {
+    const grace = ENDPOINT_REMOVAL_GRACE_MS;
+    const now = 10 * grace;
+    const entry = { since: now - grace, generation: 4 };
+    expect(removalDue(entry, now, now - grace, 5)).toBe(true);
+    expect(removalDue({ ...entry, since: now - grace + 1 }, now, 0, 5)).toBe(
+      false,
+    );
+    expect(removalDue(entry, now, now - grace + 1, 5)).toBe(false);
+    expect(removalDue(entry, now, 0, 4)).toBe(false);
   });
 
   it("logs the entities newly waiting for a state in one line per pass", async () => {
@@ -676,5 +695,43 @@ describe("filter edits reconcile without the grace window (#468)", () => {
     setFilter(provider, ["vacuum.*"]);
     await manager.refreshDevices();
     expect(switchNumbers(manager)).toEqual(before);
+  });
+
+  it("an isolation during a refresh leaves no room switch behind", async () => {
+    const ha = makeHa();
+    ha.states[VACUUM].attributes.rooms = { "16": "Kitchen", "17": "Bedroom" };
+    const { manager, mapping } = await buildManager(ha);
+    mapping.put("bridge-468", { entityId: VACUUM, vacuumRoomSwitches: true });
+    const root = manager.root;
+    const add = root.add.bind(root);
+    let reached!: () => void;
+    const atSwitchAdd = new Promise<void>((r) => {
+      reached = r;
+    });
+    let release!: () => void;
+    const held = new Promise<void>((r) => {
+      release = r;
+    });
+    let first = true;
+    vi.spyOn(root, "add").mockImplementation((async (
+      ...args: Parameters<typeof add>
+    ) => {
+      if (first && args[0] instanceof VacuumAreaSwitchEndpoint) {
+        first = false;
+        reached();
+        await held;
+      }
+      return add(...args);
+    }) as typeof root.add);
+
+    const refresh = manager.refreshDevices();
+    await atSwitchAdd;
+    const isolation = manager.isolateEntity(VACUUM);
+    await new Promise((r) => setTimeout(r, 50));
+    release();
+    await Promise.all([refresh, isolation]);
+
+    expect(mountedEntityIds(manager)).toEqual([OTHER]);
+    expect(switchNumbers(manager)).toEqual({});
   });
 });

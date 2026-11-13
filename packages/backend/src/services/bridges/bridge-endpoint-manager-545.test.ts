@@ -5,11 +5,21 @@ import {
   type EntityMappingConfig,
   HomeAssistantMatcherType,
 } from "@home-assistant-matter-hub/common";
-import { Environment, type Logger, VariableService } from "@matter/general";
+import {
+  Environment,
+  type Logger,
+  Time,
+  VariableService,
+} from "@matter/general";
 import { ControllerBehavior, EndpointNumber, VendorId } from "@matter/main";
 import { OnOff } from "@matter/main/clusters";
 import { ServerNode } from "@matter/main/node";
-import { Read, Subscribe } from "@matter/main/protocol";
+import {
+  FabricManager,
+  Read,
+  SessionManager,
+  Subscribe,
+} from "@matter/main/protocol";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   type HomeAssistantAction,
@@ -243,6 +253,7 @@ beforeEach(() => {
 });
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   // the bridge goes first, a closing controller would otherwise wait on it
   await stopBridge();
   await ctl?.close().catch(() => {});
@@ -267,7 +278,7 @@ describe("controller fabric line (#545)", () => {
 
       const line = await fabricLineAfterAdd(ha, bem);
       expect(line).toMatch(
-        /^Controller fabric 1 \(vendor 0xfff1\): 1 session, 1 subscription, last heard \d+ s ago$/,
+        /^Controller fabric 1 \(vendor 0xfff1\): 1 session, 1 subscription \(sub# [0-9a-f]{8}\), last heard \d+ s ago$/,
       );
     },
   );
@@ -296,8 +307,48 @@ describe("controller fabric line (#545)", () => {
 
       const line = await fabricLineAfterAdd(ha, bem);
       expect(line).toMatch(
-        /^Controller fabric 1 \(vendor 0xfff1\): 1 session, 1 subscription, last heard \d+ s ago, device list not in its subscription$/,
+        /^Controller fabric 1 \(vendor 0xfff1\): 1 session, 1 subscription \(sub# [0-9a-f]{8}\), last heard \d+ s ago, device list not in its subscription$/,
       );
     },
   );
+
+  it("judges silence on the subscribed session only", async () => {
+    const ha = makeHa();
+    const bem = await startBridge(ha);
+    const env = bem.root.env;
+    const maybeGet = env.maybeGet.bind(env);
+    vi.spyOn(env, "maybeGet").mockImplementation(((type: unknown) => {
+      if (type === FabricManager) {
+        return { fabrics: [{ fabricIndex: 1, rootVendorId: 0xfff1 }] };
+      }
+      if (type === SessionManager) {
+        return {
+          sessions: [
+            {
+              fabric: { fabricIndex: 1 },
+              activeTimestamp: Time.nowUs - 600_000,
+              subscriptions: new Set([
+                {
+                  subscriptionId: 0x1a2b,
+                  maxInterval: 60_000,
+                  request: { attributeRequests: [{}] },
+                },
+              ]),
+            },
+            {
+              fabric: { fabricIndex: 1 },
+              activeTimestamp: Time.nowUs,
+              subscriptions: new Set(),
+            },
+          ],
+        };
+      }
+      return maybeGet(type as Parameters<typeof maybeGet>[0]);
+    }) as typeof env.maybeGet);
+
+    const line = await fabricLineAfterAdd(ha, bem);
+    expect(line).toBe(
+      "Controller fabric 1 (vendor 0xfff1): 2 sessions, 1 subscription (sub# 00001a2b), last heard 10 min ago, silent past its report interval",
+    );
+  });
 });
