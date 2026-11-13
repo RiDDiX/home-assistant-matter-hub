@@ -9,6 +9,7 @@ import { Logger } from "@matter/general";
 import type { EndpointType } from "@matter/main";
 import { FixedLabelServer } from "@matter/main/behaviors";
 import type { BridgeRegistry } from "../../../services/bridges/bridge-registry.js";
+import { isSentinelState } from "../../../utils/sentinel-state.js";
 import { trimToLength } from "../../../utils/trim-to-length.js";
 import type { HomeAssistantEntityBehavior } from "../../behaviors/home-assistant-entity-behavior.js";
 import {
@@ -253,8 +254,10 @@ export function resolveCleaningModeOptions(
     const cmState = registry.initialStateIncludingUnfiltered(
       mapping.cleaningModeEntity,
     );
-    options = (cmState?.attributes as { options?: string[] } | undefined)
+    const raw = (cmState?.attributes as { options?: string[] } | undefined)
       ?.options;
+    options = raw?.filter((o) => !isSentinelState(o));
+    if (raw?.length && !options?.length) options = undefined;
   }
   if (
     !options &&

@@ -25,6 +25,7 @@ import { HomeAssistantConfig } from "../../../../services/home-assistant/home-as
 import { HomeAssistantEntityBehavior } from "../../../behaviors/home-assistant-entity-behavior.js";
 import { RvcCleanModeServer } from "../../../behaviors/rvc-clean-mode-server.js";
 import { AggregatorEndpoint } from "../../aggregator-endpoint.js";
+import { resolveCleaningModeOptions } from "../create-legacy-endpoint-type.js";
 import { VacuumDevice } from "./index.js";
 
 // "Can not use unsupported mode: 50. Allowed modes are 0, 10, 11, 12, 13":
@@ -285,6 +286,32 @@ describe("vacuum clean mode bring-up", () => {
     states[MOP] = { state: "unavailable", attributes: {} };
     await haState(endpoint, {});
     expect(cleanMode(endpoint).current).toBe(2);
+  });
+
+  it.each([
+    ["mopping", 2],
+    ["sweeping_and_mopping", 1],
+  ])("mounts with the mop modes when the selects were unavailable at registration (%s)", async (cleaningMode, plain) => {
+    states[CLEAN] = {
+      state: "unavailable",
+      attributes: { options: ["unavailable"] },
+    };
+    states[MOP] = {
+      state: "unavailable",
+      attributes: { options: ["unavailable"] },
+    };
+    const mapping = { cleaningModeEntity: CLEAN, mopIntensityEntity: MOP };
+    const options = resolveCleaningModeOptions(
+      { initialStateIncludingUnfiltered: (id: string) => states[id] } as never,
+      vacuum({ cleaning_mode: cleaningMode }),
+      { entityId: VACUUM, ...mapping },
+    );
+    const endpoint = await mount(
+      vacuumType(options ?? [], { cleaning_mode: cleaningMode }, mapping),
+    );
+    const { current, supported } = cleanMode(endpoint);
+    expect(supported).toEqual(expect.arrayContaining([1, 2, 3, 50, 51, 52]));
+    expect(current).toBe(plain);
   });
 
   it("does not hold a mode change that sent nothing", async () => {

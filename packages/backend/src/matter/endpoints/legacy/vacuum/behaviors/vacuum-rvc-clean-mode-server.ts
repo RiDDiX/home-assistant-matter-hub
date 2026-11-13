@@ -3,6 +3,7 @@ import { Logger } from "@matter/general";
 import type { Agent } from "@matter/main";
 import { RvcCleanMode } from "@matter/main/clusters";
 import { EntityStateProvider } from "../../../../../services/bridges/entity-state-provider.js";
+import { isSentinelState } from "../../../../../utils/sentinel-state.js";
 import { HomeAssistantEntityBehavior } from "../../../../behaviors/home-assistant-entity-behavior.js";
 import {
   RvcCleanModeServer,
@@ -370,6 +371,18 @@ function mopIntensityToModeId(
   return undefined;
 }
 
+function positionalModeId(
+  state: string | undefined,
+  options: string[] | undefined,
+  list: string[],
+  base: number,
+): number | undefined {
+  if (!state || !options) return undefined;
+  const s = state.toLowerCase();
+  const idx = options.findIndex((o) => o.toLowerCase() === s);
+  return idx >= 0 && idx < list.length ? base + idx : undefined;
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -433,9 +446,12 @@ const CLEAN_TYPE_FALLBACK: Partial<Record<CleanType, CleanType>> = {
 function findMatchingCleanOption(
   ct: CleanType,
   availableOptions: string[] | undefined,
+  unavailable?: boolean,
 ): string | undefined {
   if (!availableOptions || availableOptions.length === 0) {
-    return CLEAN_TYPE_LABELS[ct];
+    if (!unavailable) return CLEAN_TYPE_LABELS[ct];
+    logger.warn(`No ${CLEAN_TYPE_LABELS[ct]} sent, the select is unavailable`);
+    return undefined;
   }
 
   const typesToTry: CleanType[] = [ct];
@@ -475,8 +491,12 @@ function buildCleaningModeAction(
   agent: Agent,
 ): { action: string; data: { option: string }; target: string } | undefined {
   const selectEntityId = getCleaningModeSelectEntity(agent);
-  const { options } = readSelectEntity(selectEntityId, agent);
-  const optionToUse = findMatchingCleanOption(targetCleanType, options);
+  const { options, unavailable } = readSelectEntity(selectEntityId, agent);
+  const optionToUse = findMatchingCleanOption(
+    targetCleanType,
+    options,
+    unavailable,
+  );
   if (optionToUse === undefined) return undefined;
   logger.info(
     `Switching cleaning mode to: ${optionToUse} via ${selectEntityId}`,
@@ -541,14 +561,18 @@ function getCleaningModeSelectEntity(agent: Agent): string {
 function readSelectEntity(
   entityId: string,
   agent: Agent,
-): { state?: string; options?: string[] } {
+): { state?: string; options?: string[]; unavailable?: boolean } {
   const stateProvider = agent.env.get(EntityStateProvider);
   const entityState = stateProvider.getState(entityId);
   if (!entityState) return {};
   const attrs = entityState.attributes as { options?: string[] } | undefined;
+  const state = entityState.state as string | undefined;
+  const options = attrs?.options?.filter((o) => !isSentinelState(o));
+  const unavailable = isSentinelState(state);
   return {
-    state: entityState.state as string | undefined,
-    options: attrs?.options,
+    state: unavailable ? undefined : state,
+    options: options?.length ? options : undefined,
+    unavailable,
   };
 }
 
@@ -577,13 +601,19 @@ export function createCleanModeConfig(
       // Without cleaning type support, default to Sweeping (fan-speed only).
       let cleanType: CleanType = CleanType.Sweeping;
       if (hasCleanTypes) {
-        if (attributes.cleaning_mode) {
+        if (
+          attributes.cleaning_mode &&
+          !isSentinelState(attributes.cleaning_mode)
+        ) {
           cleanType = parseCleanType(attributes.cleaning_mode);
         } else {
           const selectEntityId = getCleaningModeSelectEntity(agent);
-          const { state } = readSelectEntity(selectEntityId, agent);
+          const { state, unavailable } = readSelectEntity(
+            selectEntityId,
+            agent,
+          );
           // Clean type unknown, so the base keeps the current mode.
-          if (state === "unavailable" || state === "unknown") return undefined;
+          if (unavailable) return undefined;
           cleanType = parseCleanType(state);
         }
         cleanType = registeredCleanType(cleanType, registered);
@@ -607,17 +637,16 @@ export function createCleanModeConfig(
           speedState =
             (attributes.fan_speed as string | undefined) ?? undefined;
         }
-        let speedMode = fanSpeedToModeId(speedState, fanSpeedList);
         // Positional fallback: entity option names may differ from
         // fan_speed_list (e.g. "quiet" vs "Silent"). Match by index.
-        if (speedMode === undefined && speedState && entityOptions) {
-          const idx = entityOptions.findIndex(
-            (o) => o.toLowerCase() === speedState!.toLowerCase(),
+        const speedMode =
+          fanSpeedToModeId(speedState, fanSpeedList) ??
+          positionalModeId(
+            speedState,
+            entityOptions,
+            fanSpeedList,
+            FAN_SPEED_MODE_BASE,
           );
-          if (idx >= 0 && idx < fanSpeedList.length) {
-            speedMode = FAN_SPEED_MODE_BASE + idx;
-          }
-        }
         if (speedMode !== undefined && isFanSpeedMode(speedMode)) {
           logger.debug(
             `Current mode: Vacuum + fan_speed="${speedState}" -> mode ${speedMode}`,
@@ -637,17 +666,16 @@ export function createCleanModeConfig(
           mapping.mopIntensityEntity,
           agent,
         );
-        let mopMode = mopIntensityToModeId(state, mopIntensityList);
         // Positional fallback: entity option names may differ from
         // mopIntensityList (e.g. "moist" vs "medium"). Match by index.
-        if (mopMode === undefined && state && options) {
-          const idx = options.findIndex(
-            (o) => o.toLowerCase() === state!.toLowerCase(),
+        const mopMode =
+          mopIntensityToModeId(state, mopIntensityList) ??
+          positionalModeId(
+            state,
+            options,
+            mopIntensityList,
+            MOP_INTENSITY_MODE_BASE,
           );
-          if (idx >= 0 && idx < mopIntensityList.length) {
-            mopMode = MOP_INTENSITY_MODE_BASE + idx;
-          }
-        }
         if (mopMode !== undefined) {
           logger.debug(
             `Current mode: Mop + intensity="${state}" -> mode ${mopMode}`,
@@ -838,11 +866,15 @@ export function createCleanModeConfig(
 
       const cleanType = modeIdToCleanType(mode);
       const selectEntityId = getCleaningModeSelectEntity(agent);
-      const { options: availableOptions } = readSelectEntity(
+      const { options: availableOptions, unavailable } = readSelectEntity(
         selectEntityId,
         agent,
       );
-      const optionToUse = findMatchingCleanOption(cleanType, availableOptions);
+      const optionToUse = findMatchingCleanOption(
+        cleanType,
+        availableOptions,
+        unavailable,
+      );
       if (optionToUse === undefined) return undefined;
 
       logger.info(

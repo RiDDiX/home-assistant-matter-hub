@@ -3,6 +3,7 @@ import { Logger } from "@matter/general";
 import { ModeSelectServer as Base } from "@matter/main/behaviors";
 import type { HomeAssistantAction } from "../../services/home-assistant/home-assistant-actions.js";
 import { applyPatchState } from "../../utils/apply-patch-state.js";
+import { isSentinelState } from "../../utils/sentinel-state.js";
 import { trimToLength } from "../../utils/trim-to-length.js";
 import { HomeAssistantEntityBehavior } from "./home-assistant-entity-behavior.js";
 import { clampCurrentMode } from "./utils/clamp-current-mode.js";
@@ -55,14 +56,19 @@ class ModeSelectServerBase extends Base {
     const options = config.getOptions(entity);
     const current = config.getCurrentOption(entity);
 
-    if (options.length === 0) {
+    if (options.every(isSentinelState)) {
       return;
     }
 
-    applyPatchState(this.state, {
+    const next = {
       supportedModes: buildSupportedModes(options),
-      currentMode: findCurrentMode(options, current),
-    });
+      // An unavailable state keeps the last mode, the list still follows
+      currentMode: isSentinelState(current)
+        ? this.state.currentMode
+        : findCurrentMode(options, current),
+    };
+    clampCurrentMode(next, 0);
+    applyPatchState(this.state, next);
   }
 
   override changeToMode(request: { newMode: number }) {
@@ -79,6 +85,12 @@ class ModeSelectServerBase extends Base {
     }
 
     const option = options[newMode];
+    if (isSentinelState(option)) {
+      logger.warn(
+        `[${homeAssistant.entityId}] changeToMode(${newMode}) ignored, "${option}" is no real option`,
+      );
+      return;
+    }
     logger.info(
       `[${homeAssistant.entityId}] changeToMode(${newMode}) -> "${option}"`,
     );
