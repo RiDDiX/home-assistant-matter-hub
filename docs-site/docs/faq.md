@@ -129,6 +129,24 @@ An administrator keeps everything working. A normal user (default Users group) w
 
 Home Assistant counts a wrong or deleted token as a failed login from `127.0.0.1`. If you have set `login_attempts_threshold` in the `http` integration, repeated starts with a bad token can ban `127.0.0.1`, and you then have to remove it from `ip_bans.yaml` by hand.
 
+## How can an integration on the same host reach the add-on API?
+
+Available in the alpha add-on (`hamh-alpha`) since v2.1.0-alpha.990.
+
+By default the add-on API only answers the Supervisor, so the sidebar panel works and everything else gets 403. Set `local_api_password` in the add-on configuration to let clients on the Home Assistant host in, for example a custom integration in Home Assistant Core.
+
+- URL: `http://127.0.0.1:<port>`. The add-on log prints it at start, `Local API: http://127.0.0.1:<port> with user name hamh`. The port stays the same until the add-on is uninstalled.
+- Login: basic auth with user name `hamh` and the password from the option.
+- Use `127.0.0.1`, not `homeassistant.local`. A request to the host name arrives from the LAN address and is refused.
+- The sidebar panel keeps working without the password.
+- While the option is set it replaces a password set under **Settings**.
+
+```yaml
+local_api_password: "a-long-random-password"
+```
+
+Every process on the Home Assistant host can reach the API with this password. The password gives full control of HAMH: it can create and delete bridges, download backups and install plugins, and a plugin runs code inside the add-on. Give it only to software you trust that far. A reverse proxy on the same host that forwards to this port makes all of its clients local, so the password is then the only protection. Pick a long random one and leave the option empty if you do not need it.
+
 ## Alexa loses connection after a few hours
 
 This is typically caused by stale sessions, Alexa goes offline but the bridge keeps the old session alive, blocking new subscriptions. The bridge includes an automatic force-sync mechanism that periodically pushes state updates to all connected controllers. If you still experience this:
