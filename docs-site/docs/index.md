@@ -550,7 +550,10 @@ Home, ...) are not placed in the same network segment. Please make sure to revie
 <details>
 <summary><strong>🧪 Alpha (v2.1.0-alpha.x)</strong></summary>
 
-**Alpha is currently level with Stable (v2.0.60).** All alpha work up to the latest pre-release has been promoted into v2.0.60. New alpha work continues from the next pre-release tag onward and will appear here as development progresses.
+**v2.1.0-alpha.988:**
+- **Vacuum room switches**: a vacuum with room switches that disappears from Home Assistant no longer breaks the bridge refresh during the 5 minute removal grace. Before, every refresh in that window failed and newly added entities got no state updates.
+- **Long custom names**: an entity with a custom name that is very long in bytes, for example 60 Chinese characters, now gets a shorter endpoint id and mounts. Before, it failed with a file name too long error and never showed up. Names that already worked keep their id.
+- **Stable device identity**: with the opt-in `stableIdentity` flag, a new entity that takes the old entity id of a renamed entity gets its own identity. Before, both could end up with the same Matter unique id and serial number.
 
 </details>
 

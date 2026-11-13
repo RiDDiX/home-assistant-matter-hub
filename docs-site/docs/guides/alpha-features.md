@@ -31,7 +31,7 @@ docker run -d \
 
 ## Current Alpha Features
 
-Alpha is currently level with Stable (v2.0.60); there are no alpha-only features right now. Standalone Devices graduated to Stable in v2.0.47, see [Standalone Devices](../getting-started/standalone-devices.md).
+Alpha is ahead of Stable (v2.0.60). A vacuum with room switches that disappears from Home Assistant no longer breaks bridge refreshes during its removal grace, an entity with a very long custom name gets a shorter endpoint id and mounts, and with Stable device identity a new entity that takes the old entity id of a renamed one gets its own identity. See the alpha notes for each release. Standalone Devices graduated to Stable in v2.0.47, see [Standalone Devices](../getting-started/standalone-devices.md).
 
 For a complete list of all supported features and device types, see [Supported Device Types](../supported-device-types.md).
 

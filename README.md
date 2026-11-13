@@ -39,13 +39,13 @@ of port forwarding etc.
 | Channel | Branch | Current Version | Description |
 |---------|--------|-----------------|-------------|
 | **Stable** | `main` | v2.0.60 | Production-ready, recommended for most users |
-| **Alpha** | `alpha` | v2.1.0-alpha.x | Currently level with Stable; next pre-release lands here first |
+| **Alpha** | `alpha` | v2.1.0-alpha.988 | Ahead of Stable, carries the additions listed under Alpha Features |
 | **Testing** | `testing` | v4.1.0-testing.x | ⚠️ **Highly unstable!** Experimental features, may break |
 
 ### Which version should I use?
 
 - **Most users**: Use **Stable** (`main` branch) - thoroughly tested
-- **Early adopters**: Use **Alpha** (`alpha` branch) - currently level with Stable until the next pre-release lands
+- **Early adopters**: Use **Alpha** (`alpha` branch) - gets every fix and feature first, see Alpha Features below
 - **Developers/Testers**: Use **Testing** (`testing` branch) - bleeding edge, expect breakage
 
 ### Read this before updating to v2.0.60
@@ -550,7 +550,10 @@ Re-assign the affected devices to their rooms after they reconnect. See the [doc
 <details>
 <summary><strong>🧪 Alpha Features (v2.1.0-alpha.x)</strong> - Click to expand</summary>
 
-**Alpha is currently level with Stable (v2.0.60).** All alpha work up to the latest pre-release has been promoted into v2.0.60. New alpha work continues from the next pre-release tag onward and will appear here as development progresses.
+**v2.1.0-alpha.988:**
+- **Vacuum room switches**: a vacuum with room switches that disappears from Home Assistant no longer breaks the bridge refresh during the 5 minute removal grace. Before, every refresh in that window failed and newly added entities got no state updates.
+- **Long custom names**: an entity with a custom name that is very long in bytes, for example 60 Chinese characters, now gets a shorter endpoint id and mounts. Before, it failed with a file name too long error and never showed up. Names that already worked keep their id.
+- **Stable device identity**: with the opt-in `stableIdentity` flag, a new entity that takes the old entity id of a renamed entity gets its own identity. Before, both could end up with the same Matter unique id and serial number.
 
 </details>
 
