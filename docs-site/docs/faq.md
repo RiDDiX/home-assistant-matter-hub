@@ -131,7 +131,7 @@ Home Assistant counts a wrong or deleted token as a failed login from `127.0.0.1
 
 ## How can an integration on the same host reach the add-on API?
 
-Available in the alpha add-on (`hamh-alpha`). In v2.1.0-alpha.990 setting `local_api_password` alone turned this on; later alphas need `allow_local_access`.
+Available in the alpha add-on (`hamh-alpha`). In v2.1.0-alpha.990 setting `local_api_password` alone turned this on; from v2.1.0-alpha.991 on it needs `allow_local_access`.
 
 By default the add-on API only answers the Supervisor, so the sidebar panel works and everything else gets 403. Set `allow_local_access: true` in the add-on configuration to let clients on the Home Assistant host in, for example a custom integration in Home Assistant Core.
 
