@@ -24,7 +24,7 @@ import { diagnosticApi } from "./diagnostic-api.js";
 import { entityMappingApi } from "./entity-mapping-api.js";
 import { healthApi } from "./health-api.js";
 import { homeAssistantApi } from "./home-assistant-api.js";
-import { hostGuard } from "./host-guard.js";
+import { hostGuard, ipWhitelist, isSupervisorIngress } from "./host-guard.js";
 import { lockCredentialApi } from "./lock-credential-api.js";
 import { logsApi } from "./logs-api.js";
 import { mappingProfileApi } from "./mapping-profile-api.js";
@@ -69,6 +69,7 @@ export class WebApi extends Service {
 
   private app!: express.Application;
   private server?: http.Server;
+  private isAllowed?: (remoteAddress: string | undefined) => boolean;
 
   constructor(
     logger: LoggerService,
@@ -210,22 +211,15 @@ export class WebApi extends Service {
 
     // Whitelist first, so denied clients never get an auth challenge.
     if (this.props.whitelist && this.props.whitelist.length > 0) {
-      const whitelist = AccessControl({
-        log: (clientIp, access) => {
-          this.log.silly(
-            `Client ${clientIp} was ${access ? "granted" : "denied"}`,
-          );
-        },
-        mode: "allow",
-        allows: this.props.whitelist,
-        statusCode: "403",
-        message: "Forbidden",
-      });
+      const isAllowed = ipWhitelist(this.props.whitelist, this.log);
+      this.isAllowed = isAllowed;
       // The container healthcheck probes from loopback.
       middlewares.push((req, res, next) =>
-        healthProbePaths.has(req.path) && isLoopback(req.socket.remoteAddress)
+        (healthProbePaths.has(req.path) &&
+          isLoopback(req.socket.remoteAddress)) ||
+        isAllowed(req.socket.remoteAddress)
           ? next()
-          : whitelist(req, res, next),
+          : res.status(403).send("Forbidden"),
       );
     }
     middlewares.push(this.createDynamicAuthMiddleware());
@@ -318,13 +312,22 @@ export class WebApi extends Service {
         return next();
       }
       if (envMiddleware) {
-        return envMiddleware(req, res, next);
+        return this.skipsEnvAuth(req) ? next() : envMiddleware(req, res, next);
       }
       if (!this.settingsStorage.auth) {
         return next();
       }
       return storageMiddleware(req, res, next);
     };
+  }
+
+  // HA already authenticates ingress, the add-on sets env credentials only to
+  // guard local clients.
+  private skipsEnvAuth(req: http.IncomingMessage): boolean {
+    return (
+      this.props.auth !== undefined &&
+      isSupervisorIngress(req.headers, req.socket.remoteAddress)
+    );
   }
 
   // Same credentials as the http middleware, for upgrades that skip Express.
@@ -379,9 +382,10 @@ export class WebApi extends Service {
     this.wsApi.attach(
       this.server,
       this.props.basePath,
-      this.props.whitelist,
+      this.isAllowed,
       this.props.allowedHosts,
-      (header) => this.verifyAuthorization(header),
+      (header, req) =>
+        this.skipsEnvAuth(req) || this.verifyAuthorization(header),
     );
   }
 }

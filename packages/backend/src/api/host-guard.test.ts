@@ -1,5 +1,98 @@
 import { describe, expect, it, vi } from "vitest";
-import { crossSiteMessage, crossSiteReason } from "./host-guard.js";
+import type { BetterLogger } from "../core/app/logger.js";
+import {
+  crossSiteMessage,
+  crossSiteReason,
+  ipWhitelist,
+  isSupervisorIngress,
+} from "./host-guard.js";
+
+const fakeLog = () => ({ warn: vi.fn(), debug: vi.fn() });
+
+describe("ipWhitelist", () => {
+  it("warns on the first denial per address, then logs at debug", () => {
+    const log = fakeLog();
+    const allowed = ipWhitelist(["172.30.32.2"], log as never as BetterLogger);
+    expect(allowed("172.30.32.2")).toBe(true);
+    expect(allowed("::ffff:172.30.32.2")).toBe(true);
+    expect(log.warn).not.toHaveBeenCalled();
+
+    expect(allowed("127.0.0.1")).toBe(false);
+    expect(log.warn).toHaveBeenCalledTimes(1);
+    expect(log.warn.mock.calls[0][0]).toBe(
+      "Denied 127.0.0.1, not in --http-ip-whitelist",
+    );
+    expect(allowed("127.0.0.1")).toBe(false);
+    expect(log.warn).toHaveBeenCalledTimes(1);
+    expect(log.debug).toHaveBeenCalledTimes(1);
+    expect(allowed("::1")).toBe(false);
+    expect(log.warn).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps at most 50 denied addresses", () => {
+    const log = fakeLog();
+    const allowed = ipWhitelist(["10.0.0.1"], log as never as BetterLogger);
+    for (let i = 0; i < 50; i++) allowed(`192.168.0.${i}`);
+    expect(log.warn).toHaveBeenCalledTimes(50);
+    expect(log.debug).not.toHaveBeenCalled();
+    expect(allowed("192.168.0.50")).toBe(false);
+    expect(log.warn).toHaveBeenCalledTimes(50);
+    expect(log.debug).toHaveBeenCalledTimes(1);
+    expect(allowed("192.168.0.0")).toBe(false);
+    expect(log.warn).toHaveBeenCalledTimes(50);
+    expect(log.debug).toHaveBeenCalledTimes(2);
+  });
+
+  it("warns once per malformed entry and never matches it", () => {
+    const log = fakeLog();
+    const entries = ["127.0.0.1/33", "localhost", "::1/129", "10.0.0.0/8"];
+    const allowed = ipWhitelist(entries, log as never as BetterLogger);
+    expect(log.warn.mock.calls.map((c) => c[0])).toEqual([
+      'Ignoring --http-ip-whitelist entry "127.0.0.1/33", it is neither an IP nor a CIDR',
+      'Ignoring --http-ip-whitelist entry "localhost", it is neither an IP nor a CIDR',
+      'Ignoring --http-ip-whitelist entry "::1/129", it is neither an IP nor a CIDR',
+    ]);
+    expect(allowed("127.0.0.1")).toBe(false);
+    expect(allowed("::1")).toBe(false);
+    expect(allowed("10.1.2.3")).toBe(true);
+  });
+
+  it("trims whitespace around entries", () => {
+    const log = fakeLog();
+    const allowed = ipWhitelist(
+      ["10.0.0.0/8 ", " 127.0.0.1"],
+      log as never as BetterLogger,
+    );
+    expect(log.warn).not.toHaveBeenCalled();
+    expect(allowed("10.1.2.3")).toBe(true);
+    expect(allowed("127.0.0.1")).toBe(true);
+  });
+});
+
+describe("isSupervisorIngress", () => {
+  const headers = { "x-ingress-path": "/api/hassio_ingress/abc" };
+
+  it("needs the token, the header and the supervisor address", () => {
+    try {
+      vi.stubEnv("HASSIO_TOKEN", "");
+      vi.stubEnv("SUPERVISOR_TOKEN", "token");
+      expect(isSupervisorIngress(headers, "172.30.32.2")).toBe(true);
+      expect(isSupervisorIngress(headers, "::ffff:172.30.32.2")).toBe(true);
+      expect(isSupervisorIngress({}, "172.30.32.2")).toBe(false);
+      expect(
+        isSupervisorIngress(
+          { ...headers, "x-forwarded-for": "172.30.32.2" },
+          "127.0.0.1",
+        ),
+      ).toBe(false);
+      expect(isSupervisorIngress(headers, undefined)).toBe(false);
+      vi.stubEnv("SUPERVISOR_TOKEN", "");
+      expect(isSupervisorIngress(headers, "172.30.32.2")).toBe(false);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+});
 
 describe("crossSiteReason", () => {
   it("allows IP, localhost and local names", () => {

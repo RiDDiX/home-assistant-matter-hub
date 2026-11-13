@@ -1,6 +1,5 @@
 import type * as http from "node:http";
 import type { WebSocketMessage } from "@home-assistant-matter-hub/common";
-import AccessControl from "express-ip-access-control";
 import { type WebSocket, WebSocketServer } from "ws";
 import type { BetterLogger } from "../core/app/logger.js";
 import type { BridgeService } from "../services/bridges/bridge-service.js";
@@ -28,10 +27,11 @@ export class WebSocketApi {
   attach(
     server: http.Server,
     basePath = "/",
-    whitelist?: string[],
+    isAllowed?: (remoteAddress: string | undefined) => boolean,
     allowedHosts: string[] = [],
     verifyAuthorization: (
       header: string | undefined,
+      req: http.IncomingMessage,
     ) => Promise<boolean> | boolean = () => true,
   ) {
     const wsPath = `${basePath === "/" ? "" : basePath}/api/ws`;
@@ -42,10 +42,7 @@ export class WebSocketApi {
       maxPayload: 64 * 1024,
       // Upgrades skip the Express middlewares, so apply the same checks here.
       verifyClient: ({ req }, cb) => {
-        if (
-          whitelist?.length &&
-          !AccessControl.ipMatch(req.socket.remoteAddress ?? "", whitelist)
-        ) {
+        if (isAllowed && !isAllowed(req.socket.remoteAddress)) {
           return cb(false, 403);
         }
         const reason = crossSiteReason(
@@ -60,7 +57,7 @@ export class WebSocketApi {
           });
         }
         Promise.resolve()
-          .then(() => verifyAuthorization(req.headers.authorization))
+          .then(() => verifyAuthorization(req.headers.authorization, req))
           .then(
             (ok) =>
               ok

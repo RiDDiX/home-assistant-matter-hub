@@ -35,7 +35,7 @@ describe.skipIf(process.platform === "win32")(
       const bin = join(dir, "home-assistant-matter-hub");
       writeFileSync(
         bin,
-        '#!/bin/sh\nfor a in "$@"; do echo "$a"; done\necho "TOKEN=$HAMH_HOME_ASSISTANT_ACCESS_TOKEN"\n',
+        '#!/bin/sh\nfor a in "$@"; do echo "$a"; done\necho "TOKEN=$HAMH_HOME_ASSISTANT_ACCESS_TOKEN"\necho "AUTH=$HAMH_HTTP_AUTH_USERNAME:$HAMH_HTTP_AUTH_PASSWORD"\n',
       );
       chmodSync(bin, 0o755);
     });
@@ -64,12 +64,18 @@ describe.skipIf(process.platform === "win32")(
       );
       expect(result.status, result.stderr).toBe(0);
       const lines = result.stdout.split("\n");
-      const args = lines.filter((a) => !a.startsWith("TOKEN="));
+      const args = lines.filter(
+        (a) => !a.startsWith("TOKEN=") && !a.startsWith("AUTH="),
+      );
       const arg = (name: string) =>
         args.find((a) => a.startsWith(`--${name}=`))?.slice(name.length + 3);
       return {
         url: arg("home-assistant-url"),
         token: lines.find((a) => a.startsWith("TOKEN="))?.slice(6),
+        auth: lines.find((a) => a.startsWith("AUTH="))?.slice(5),
+        whitelist: args
+          .filter((a) => a.startsWith("--http-ip-whitelist="))
+          .map((a) => a.slice(20)),
         args,
         stderr: result.stderr,
       };
@@ -143,6 +149,32 @@ describe.skipIf(process.platform === "win32")(
         "LOG: Home Assistant: using the configured access token at http://ha:1",
       );
       expect(r.stderr).not.toContain("user-token");
+    });
+
+    it("keeps the API to the Supervisor without a local password", () => {
+      for (const options of [
+        {},
+        { local_api_password: "" },
+        { local_api_password: "   " },
+      ]) {
+        const r = run(options);
+        expect(r.args).toContain("--web-port=8482");
+        expect(r.whitelist).toEqual(["172.30.32.2"]);
+        expect(r.auth).toBe(":");
+        expect(r.args.join("\n")).not.toContain("auth");
+      }
+    });
+
+    it("opens the API to loopback with a local password", () => {
+      const r = run({ local_api_password: "local-secret" });
+      expect(r.args).toContain("--web-port=8482");
+      expect(r.whitelist).toEqual(["172.30.32.2", "127.0.0.1", "::1"]);
+      expect(r.auth).toBe("hamh:local-secret");
+      expect(r.args.join("\n")).not.toContain("local-secret");
+      expect(r.stderr).toContain(
+        "LOG: Local API: http://127.0.0.1:8482 with user name hamh",
+      );
+      expect(r.stderr).not.toContain("local-secret");
     });
   },
 );

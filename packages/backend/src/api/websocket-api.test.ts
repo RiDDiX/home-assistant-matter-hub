@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { WebSocket } from "ws";
 import type { BetterLogger } from "../core/app/logger.js";
 import type { BridgeService } from "../services/bridges/bridge-service.js";
+import { ipWhitelist } from "./host-guard.js";
 import { WebSocketApi } from "./websocket-api.js";
 
 const log = {
@@ -31,7 +32,13 @@ async function serve(
   } as unknown as BridgeService;
   const api = new WebSocketApi(log, bridgeService);
   const server = http.createServer();
-  api.attach(server, "/", whitelist, allowedHosts, verifyAuthorization);
+  api.attach(
+    server,
+    "/",
+    whitelist && ipWhitelist(whitelist, log),
+    allowedHosts,
+    verifyAuthorization,
+  );
   await new Promise<void>((resolve) => server.listen(0, resolve));
   cleanup.push(async () => {
     api.close();
