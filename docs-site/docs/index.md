@@ -428,6 +428,29 @@ Home, ...) are not placed in the same network segment. Please make sure to revie
 <details>
 <summary><strong>🧪 Alpha (v2.1.0-alpha.x)</strong></summary>
 
+**v2.1.0-alpha.986:**
+- **Bridge icon lookup**: a failed lookup of a custom bridge icon (network error) no longer raises an unhandled error on the dashboard, the device cards and the startup page. The bridge is shown without a custom icon instead.
+
+**v2.1.0-alpha.985:**
+- **Bridge start waits for Home Assistant**: a bridge no longer goes online with an empty device list when Home Assistant is still starting or its first registry snapshot was not usable. It waits up to 30 s (the registry start waits up to 60 s for a usable snapshot), then starts with what it has. Controllers no longer see every device vanish and come back after such a restart ([#543](https://github.com/RiDDiX/home-assistant-matter-hub/issues/543)). The Alexa "Recently Added" reports in #543 come from the Echo dropping its subscription and are not changed by this.
+- **Plugin devices at start**: camera, VeSync and external plugin devices are mounted before the bridge goes online, so they are in the first device list after a restart.
+- **Battery at start**: a battery sensor that is unavailable or unknown at start is still merged into its device, so the device is not rebuilt once the value arrives.
+- **Vacuum room switches**: a room switch keeps its endpoint number when the room is briefly missing from the vacuum's room list, with the same 5 minute grace as entities.
+- **Stable device identity**: with two stored records on one endpoint id the mounted device keeps it. A renamed entity keeps its mapping when the mapping write fails once or when two entities swap entity ids, and a failed identity file write is retried.
+- **Session handling**: the wedge watchdog rotates a controller at most once per 60 minutes per peer (the limit did not apply to the replacement session before), and a stopped bridge leaves no timers behind.
+
+**v2.1.0-alpha.984:**
+- **Stable device identity**: with the opt-in `stableIdentity` flag, an entity renamed in Home Assistant and a different entity that then took its old name could end up on the same endpoint id, and one of the two devices stayed missing after every refresh. The renamed entity now keeps its endpoint id and number and the new one gets its own, also for entities without a unique id and also when both changes arrive in the same refresh on a running bridge. Stored records that already share an id are repaired on the next refresh, with one warning in the log.
+- **Stored device identities after a downgrade**: an identity file written by a newer version is no longer overwritten after a downgrade, and entries the running version cannot read are kept as they are.
+- **Incomplete refresh retry**: a bridge start, a bridge edit or a manual refresh that ends incomplete is retried again, also when earlier retries had already run out. Before, such a start waited for the next change in Home Assistant.
+
+**v2.1.0-alpha.983:**
+- **Registry refresh endpoint**: `POST /api/home-assistant/refresh` used to take a registry change without the bridges ever being refreshed for it. Bridges now follow on the next registry refresh interval.
+- **Incomplete refresh retry**: a device refresh that ends incomplete, for example after a failed add, is now retried whatever started it: a bridge start or restart, a bridge edit or the manual refresh, not only the registry poll.
+- **Entities without state**: an entity that matches a bridge filter but has no state in Home Assistant yet is no longer skipped silently. It shows in the failed entities list as "No state in Home Assistant yet", with one log line, and is added once it has a state.
+- **Controller fabric log**: the "Controller fabric" line after "Device list changed" now also says when the controller was last heard and whether its subscription contains the device list at all ([#545](https://github.com/RiDDiX/home-assistant-matter-hub/issues/545)).
+- **Diagnostic export**: the export now includes the matter.js interaction messenger lines. They were filtered out because of a wrong facility name.
+
 **v2.1.0-alpha.982:**
 - **Lights that keep their brightness while off**: some template and MQTT lights keep showing their brightness while off. A controller asking for that same brightness now turns them on again. Since alpha.962 such a request was dropped and the light stayed off.
 - **Off thermostat without target**: a thermostat that is Off and reports no target temperature no longer drifts. Its setpoint used to rise by 0.01 degrees with every state update.
