@@ -39,7 +39,7 @@ of port forwarding etc.
 | Channel | Branch | Current Version | Description |
 |---------|--------|-----------------|-------------|
 | **Stable** | `main` | v2.0.60 | Production-ready, recommended for most users |
-| **Alpha** | `alpha` | v2.1.0-alpha.991 | Ahead of Stable, carries the additions listed under Alpha Features |
+| **Alpha** | `alpha` | v2.1.0-alpha.992 | Ahead of Stable, carries the additions listed under Alpha Features |
 | **Testing** | `testing` | v4.1.0-testing.x | ⚠️ **Highly unstable!** Experimental features, may break |
 
 ### Which version should I use?
@@ -549,6 +549,10 @@ Re-assign the affected devices to their rooms after they reconnect. See the [doc
 
 <details>
 <summary><strong>🧪 Alpha Features (v2.1.0-alpha.x)</strong> - Click to expand</summary>
+
+**v2.1.0-alpha.992:**
+- **Vacuum mode selects that go unavailable**: a vacuum whose cleaning mode, suction level and water volume selects go unavailable, as seen with Dreame, now keeps its mop modes in the clean mode list, also when the selects are already unavailable at start ([#552](https://github.com/RiDDiX/home-assistant-matter-hub/issues/552)). An unavailable suction or mop select no longer shows up as a made-up fan speed or mop level, and no `unavailable` option is sent back to Home Assistant. A vacuum attribute `cleaning_mode` of `unknown` is ignored, the cleaning mode select is used instead. alpha.989 already stopped these vacuums from failing with "Can not use unsupported mode: 50", which still happens on Stable 2.0.60.
+- **Unavailable selects**: a `select` or `input_select` entity in state `unavailable` or `unknown` now keeps its last mode. Before, it jumped to the first option.
 
 **v2.1.0-alpha.991:**
 - **Local access switch in the add-on**: local access in the alpha add-on is now turned on with the new option `allow_local_access`, off by default ([#551](https://github.com/RiDDiX/home-assistant-matter-hub/issues/551)). `local_api_password` is optional and no longer turns local access on by itself, as it did in alpha.990. With the switch on and a password set, local clients log in with basic auth, user name `hamh`. With the switch on and no password, local clients need no login, unless a password is set under **Settings** in the HAMH UI. The add-on log then warns at start that every process on the host has full control. With a password set and the switch off, local access stays closed and the add-on log says so. If you set only the password on alpha.990, turn the switch on after updating. See the FAQ entry "How can an integration on the same host reach the add-on API?" in the documentation.
