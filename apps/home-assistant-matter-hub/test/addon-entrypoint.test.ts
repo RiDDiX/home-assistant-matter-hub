@@ -18,7 +18,9 @@ bashio::config() {
   elif [ -n "\${2:-}" ]; then printf '%s\\n' "$2"
   else echo null; fi
 }
+bashio::config.true() { [ "$(bashio::config "$1")" = "true" ]; }
 bashio::log.info() { echo "LOG: $*" >&2; }
+bashio::log.warning() { echo "WARN: $*" >&2; }
 bashio::addon.version() { echo 1.0.0; }
 bashio::addon.ingress_port() { echo 8482; }
 `;
@@ -151,25 +153,58 @@ describe.skipIf(process.platform === "win32")(
       expect(r.stderr).not.toContain("user-token");
     });
 
-    it("keeps the API to the Supervisor without a local password", () => {
-      for (const options of [
-        {},
-        { local_api_password: "" },
-        { local_api_password: "   " },
-      ]) {
+    const closedWarning =
+      "WARN: local_api_password is set but allow_local_access is off, the local API stays closed";
+    const openWarning =
+      "WARN: Local API: http://127.0.0.1:8482 without a password, every process on this host has full control";
+
+    it("keeps the API to the Supervisor while local access is off", () => {
+      for (const options of [{}, { allow_local_access: "false" }]) {
         const r = run(options);
         expect(r.args).toContain("--web-port=8482");
         expect(r.whitelist).toEqual(["172.30.32.2"]);
         expect(r.auth).toBe(":");
         expect(r.args.join("\n")).not.toContain("auth");
+        expect(r.stderr).not.toContain("Local API");
+        expect(r.stderr).not.toContain(closedWarning);
+      }
+    });
+
+    it("warns about a password while local access is off", () => {
+      const r = run({
+        allow_local_access: "false",
+        local_api_password: "local-secret",
+      });
+      expect(r.args).toContain("--web-port=8482");
+      expect(r.whitelist).toEqual(["172.30.32.2"]);
+      expect(r.auth).toBe(":");
+      expect(r.args.join("\n")).not.toContain("local-secret");
+      expect(r.stderr).toContain(closedWarning);
+      expect(r.stderr).not.toContain("local-secret");
+    });
+
+    it("opens the API to loopback without a password", () => {
+      for (const password of [undefined, "", "   "]) {
+        const r = run({
+          allow_local_access: "true",
+          ...(password === undefined ? {} : { local_api_password: password }),
+        });
+        expect(r.args).toContain("--web-port=8482");
+        expect(r.whitelist).toEqual(["172.30.32.2", "127.0.0.1", "::1"]);
+        expect(r.auth).toBe(":");
+        expect(r.stderr).toContain(openWarning);
       }
     });
 
     it("opens the API to loopback with a local password", () => {
-      const r = run({ local_api_password: "local-secret" });
+      const r = run({
+        allow_local_access: "true",
+        local_api_password: "local-secret",
+      });
       expect(r.args).toContain("--web-port=8482");
       expect(r.whitelist).toEqual(["172.30.32.2", "127.0.0.1", "::1"]);
       expect(r.auth).toBe("hamh:local-secret");
+      expect(r.stderr).not.toContain(openWarning);
       expect(r.args.join("\n")).not.toContain("local-secret");
       expect(r.stderr).toContain(
         "LOG: Local API: http://127.0.0.1:8482 with user name hamh",

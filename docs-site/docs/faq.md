@@ -131,21 +131,21 @@ Home Assistant counts a wrong or deleted token as a failed login from `127.0.0.1
 
 ## How can an integration on the same host reach the add-on API?
 
-Available in the alpha add-on (`hamh-alpha`) since v2.1.0-alpha.990.
+Available in the alpha add-on (`hamh-alpha`). In v2.1.0-alpha.990 setting `local_api_password` alone turned this on; later alphas need `allow_local_access`.
 
-By default the add-on API only answers the Supervisor, so the sidebar panel works and everything else gets 403. Set `local_api_password` in the add-on configuration to let clients on the Home Assistant host in, for example a custom integration in Home Assistant Core.
+By default the add-on API only answers the Supervisor, so the sidebar panel works and everything else gets 403. Set `allow_local_access: true` in the add-on configuration to let clients on the Home Assistant host in, for example a custom integration in Home Assistant Core.
 
-- URL: `http://127.0.0.1:<port>`. The add-on log prints it at start, `Local API: http://127.0.0.1:<port> with user name hamh`. The port stays the same until the add-on is uninstalled.
-- Login: basic auth with user name `hamh` and the password from the option.
+- URL: `http://127.0.0.1:<port>`. The add-on log prints it at start. The port stays the same until the add-on is uninstalled.
 - Use `127.0.0.1`, not `homeassistant.local`. A request to the host name arrives from the LAN address and is refused.
-- The sidebar panel keeps working without the password.
-- While the option is set it replaces a password set under **Settings**.
+- Login: `local_api_password` is optional. When set, local clients log in with basic auth, user name `hamh` and this password, and it replaces a password set under **Settings**. When empty, local clients need no login, unless a password is set under **Settings** in the HAMH UI. That one then applies to them.
+- The sidebar panel keeps working without the local password.
 
 ```yaml
+allow_local_access: true
 local_api_password: "a-long-random-password"
 ```
 
-Every process on the Home Assistant host can reach the API with this password. The password gives full control of HAMH: it can create and delete bridges, download backups and install plugins, and a plugin runs code inside the add-on. Give it only to software you trust that far. A reverse proxy on the same host that forwards to this port makes all of its clients local, so the password is then the only protection. Pick a long random one and leave the option empty if you do not need it.
+With local access on, every process on the Home Assistant host can reach the API. Without a password each of them has full control of HAMH: they can create and delete bridges, download backups and install plugins, and a plugin runs code inside the add-on. Set a password unless you trust everything that runs on the host, and give the password only to software you trust that far. A reverse proxy on the same host that forwards to this port makes all of its clients local, so the password is then the only protection.
 
 ## Alexa loses connection after a few hours
 

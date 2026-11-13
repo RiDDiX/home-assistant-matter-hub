@@ -93,14 +93,23 @@ fi
 # The CLI reads HAMH_* variables; argv would show the token in ps.
 export HAMH_HOME_ASSISTANT_ACCESS_TOKEN="$ha_token"
 
-# Lets a client on this host reach the API, behind basic auth.
+# Lets a client on this host reach the API, behind basic auth when a password is set.
 local_args=()
 local_api_password=$(bashio::config 'local_api_password' '')
-if [ -n "${local_api_password//[[:space:]]/}" ] && [ "$local_api_password" != "null" ]; then
+if [ -z "${local_api_password//[[:space:]]/}" ] || [ "$local_api_password" = "null" ]; then
+  local_api_password=''
+fi
+if bashio::config.true 'allow_local_access'; then
   local_args=(--http-ip-whitelist="127.0.0.1" --http-ip-whitelist="::1")
-  export HAMH_HTTP_AUTH_USERNAME="hamh"
-  export HAMH_HTTP_AUTH_PASSWORD="$local_api_password"
-  bashio::log.info "Local API: http://127.0.0.1:$(bashio::addon.ingress_port) with user name hamh"
+  if [ -n "$local_api_password" ]; then
+    export HAMH_HTTP_AUTH_USERNAME="hamh"
+    export HAMH_HTTP_AUTH_PASSWORD="$local_api_password"
+    bashio::log.info "Local API: http://127.0.0.1:$(bashio::addon.ingress_port) with user name hamh"
+  else
+    bashio::log.warning "Local API: http://127.0.0.1:$(bashio::addon.ingress_port) without a password, every process on this host has full control"
+  fi
+elif [ -n "$local_api_password" ]; then
+  bashio::log.warning "local_api_password is set but allow_local_access is off, the local API stays closed"
 fi
 
 exec home-assistant-matter-hub start \
