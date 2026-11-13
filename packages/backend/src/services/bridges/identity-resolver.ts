@@ -232,6 +232,7 @@ export class IdentityResolver {
     // the current ids, so nothing re-mints.
     const desired = createEndpointId(entityId, mapping?.customName);
     let endpointId = desired;
+    let anchorEntityId = entityId;
     if (opts.stableIdentity) {
       // Only make unique when the frozen id will actually be used, so a record
       // seeded while the flag is off stays identical to today's derivation.
@@ -239,10 +240,19 @@ export class IdentityResolver {
       while (opts.isEndpointIdTaken(endpointId, key)) {
         endpointId = `${desired}_${n++}`;
       }
+      // A renamed entity keeps its old anchor; only a re-pair on this entity_id may share it.
+      const held = new Set(
+        [...this.identityStorage.getBridgeIdentities(bridgeId).values()]
+          .filter((r) => (r.lastEntityId ?? r.anchorEntityId) !== entityId)
+          .map((r) => r.anchorEntityId),
+      );
+      for (let a = 2; held.has(anchorEntityId); a++) {
+        anchorEntityId = `${entityId}_${a}`;
+      }
     }
     const record: IdentityRecord = {
       endpointId,
-      anchorEntityId: entityId,
+      anchorEntityId,
       lastEntityId: entityId,
       createdAt: new Date().toISOString(),
     };

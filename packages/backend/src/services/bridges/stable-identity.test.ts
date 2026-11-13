@@ -597,6 +597,37 @@ describe("IdentityResolver", () => {
     // the dormant original record must not have been touched
     expect(id.getIdentity("b", key1)?.lastEntityId).toBe("light.a");
   });
+
+  it("a new entity on a renamed entity's old name gets its own anchor", async () => {
+    const id = new FakeIdentityStorage();
+    const resolver = new IdentityResolver(
+      asIdentity(id),
+      asMapping(new FakeMappingStorage()),
+    );
+    const first = { entity_id: "light.a", registry: reg("U1", "hue") };
+    const pass = async (
+      entities: { entity_id: string; registry?: HomeAssistantEntityRegistry }[],
+    ) =>
+      resolver.resolveIdentities(
+        "b",
+        entities,
+        () => undefined,
+        true,
+        fakeLogger(),
+      );
+    await pass([first]);
+    const renamed = { entity_id: "light.b", registry: reg("U1", "hue") };
+    const added = { entity_id: "light.a", registry: reg("U2", "hue") };
+    const res = await pass([renamed, added]);
+    const anchorB = res.get("light.b")?.anchorEntityId;
+    const anchorA = res.get("light.a")?.anchorEntityId;
+    expect(anchorB).toBe("light.a");
+    expect(anchorA).not.toBe(anchorB);
+
+    const again = await pass([renamed, added]);
+    expect(again.get("light.b")?.anchorEntityId).toBe(anchorB);
+    expect(again.get("light.a")?.anchorEntityId).toBe(anchorA);
+  });
 });
 
 // --- bridge manager integration ---

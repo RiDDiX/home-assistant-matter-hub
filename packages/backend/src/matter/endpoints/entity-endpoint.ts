@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import type { EntityMappingConfig } from "@home-assistant-matter-hub/common";
 import { Endpoint } from "@matter/main";
 import type { EndpointType } from "@matter/main/node";
@@ -37,12 +38,39 @@ export abstract class EntityEndpoint extends Endpoint {
   abstract updateStates(states: HomeAssistantStates): Promise<void>;
 }
 
+// root.parts.aggregator.parts.<id>.__number__.tmp fits 255 bytes: 255 - 28 - 15 = 212
+const MAX_STORABLE_ID = 212;
+// a shortened id fits every cluster key file plus a "_2" suffix
+const SHORT_ID = 154;
+// shortcut: 155 to 212 byte ids with long cluster keys and composed children fail, fix on report
+
+// a lone surrogate cannot be URL encoded, so measure it as U+FFFD
+function wellFormed(s: string): string {
+  return s.replace(/[\u{D800}-\u{DFFF}]/gu, "\ufffd");
+}
+
+function encodedLength(id: string): number {
+  return encodeURIComponent(wellFormed(id)).replace(/[!'()*]/g, "%XX").length;
+}
+
 export function createEndpointId(
   entityId: string,
   customName?: string,
 ): string {
   const baseName = customName || entityId;
-  return baseName.replace(/\./g, "_").replace(/\s+/g, "_");
+  const id = baseName.replace(/\./g, "_").replace(/\s+/g, "_");
+  if (encodedLength(id) <= MAX_STORABLE_ID) return id;
+  const hash = crypto
+    .createHash("sha256")
+    .update(baseName)
+    .digest("hex")
+    .substring(0, 8);
+  let prefix = "";
+  for (const ch of wellFormed(id)) {
+    if (encodedLength(prefix + ch) > SHORT_ID - hash.length - 1) break;
+    prefix += ch;
+  }
+  return `${prefix}_${hash}`;
 }
 
 // A mapped entity without its own endpoint (battery, power, energy, filter

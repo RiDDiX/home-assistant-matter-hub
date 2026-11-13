@@ -90,9 +90,9 @@ export class BridgeRegistry {
     return this._entitiesByDevice.byDevice.get(deviceId) ?? [];
   }
 
-  deviceOf(entityId: string): HomeAssistantDeviceRegistry {
+  deviceOf(entityId: string): HomeAssistantDeviceRegistry | undefined {
     const entity = this._entities[entityId];
-    return this._devices[entity.device_id];
+    return entity && this._devices[entity.device_id];
   }
   entity(entityId: string) {
     return this._entities[entityId];

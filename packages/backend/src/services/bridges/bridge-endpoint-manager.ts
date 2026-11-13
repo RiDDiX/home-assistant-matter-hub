@@ -78,8 +78,10 @@ const TOPOLOGY_RETRIES = 3;
 // A failed write retries soon, the set already settled before it.
 const TOPOLOGY_RETRY_MS = 10_000;
 
-// Same count as the registry's INCOMPLETE_REFRESH_RETRIES: one registry change
-// retries a failing entity, after that the failure counts as permanent.
+// Same count as the registry's INCOMPLETE_REFRESH_RETRIES. Consecutive failed
+// runs with the same reason count up, a registry change does not reset them.
+// Past the budget the entity is still tried on every run, but its failure no
+// longer marks the run incomplete.
 export const ENTITY_FAILURE_RETRIES = 3;
 
 // First absence stamp: removal also needs a fresh successful HA reload after
@@ -174,7 +176,9 @@ export class BridgeEndpointManager extends Service {
   // The handler writes the Matter configuration version, which takes a
   // synchronous lock on the root node. Two overlapping registrations would
   // make the second one throw and leave its endpoint mounted but untracked,
-  // so every change goes through here one at a time.
+  // so plugin device adds, closes and deletes and the compare go through here
+  // one at a time. HA entity changes in a refresh and isolations do not, they
+  // run one at a time on refreshChain.
   private topologyQueue: Promise<unknown> = Promise.resolve();
   // The endpoint set is only complete once both halves are in: the plugin
   // devices after startPlugins, the HA entities after a trusted reconcile.
@@ -1721,6 +1725,9 @@ export class BridgeEndpointManager extends Service {
       const effective =
         part instanceof LegacyEndpoint ? part.vacuumEffective : undefined;
       if (!effective) continue;
+      // gone from HA, in its removal grace: keeps its switches, gets no new ones
+      const registry = this.registry.entity(entityId);
+      if (!registry) continue;
       const areas = getVacuumServiceAreas(
         effective.state.attributes as VacuumDeviceAttributes,
         effective.mapping,
@@ -1728,7 +1735,7 @@ export class BridgeEndpointManager extends Service {
       const entity = {
         entity_id: entityId,
         state: effective.state,
-        registry: this.registry.entity(entityId),
+        registry,
         deviceRegistry: this.registry.deviceOf(entityId),
       };
       for (const area of areas) {
