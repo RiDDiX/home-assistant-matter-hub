@@ -550,6 +550,10 @@ Home, ...) are not placed in the same network segment. Please make sure to revie
 <details>
 <summary><strong>🧪 Alpha (v2.1.0-alpha.x)</strong></summary>
 
+**v2.1.0-alpha.990:**
+- **Local API access in the add-on**: the alpha add-on has a new option `local_api_password` ([#551](https://github.com/RiDDiX/home-assistant-matter-hub/issues/551)). It is empty by default, and the add-on API then only answers the Supervisor, as before. Once set, programs on the Home Assistant host, for example a custom integration in Home Assistant Core, reach the API at `http://127.0.0.1:<port>` with basic auth, user name `hamh` and that password. The add-on log prints the URL at start. The sidebar panel keeps working without the password. The password gives full control of HAMH, see [How can an integration on the same host reach the add-on API?](./faq.md#how-can-an-integration-on-the-same-host-reach-the-add-on-api).
+- **IP whitelist log**: a client refused by `--http-ip-whitelist` now shows in the log as a warning, once per address and at most 50 per run, for all install types. Before, it was only visible at the lowest log level, or not at all for WebSocket. An entry that is neither an IP nor a CIDR is reported at start and ignored. Whitespace around an entry is trimmed.
+
 **v2.1.0-alpha.988:**
 - **Vacuum room switches**: a vacuum with room switches that disappears from Home Assistant no longer breaks the bridge refresh during the 5 minute removal grace. Before, every refresh in that window failed and newly added entities got no state updates.
 - **Long custom names**: an entity with a custom name that is very long in bytes, for example 60 Chinese characters, now gets a shorter endpoint id and mounts. Before, it failed with a file name too long error and never showed up. Names that already worked keep their id.
