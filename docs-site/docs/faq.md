@@ -129,8 +129,6 @@ An administrator keeps everything working. A normal user (default Users group) w
 
 Home Assistant counts a wrong or deleted token as a failed login from `127.0.0.1`. If you have set `login_attempts_threshold` in the `http` integration, repeated starts with a bad token can ban `127.0.0.1`, and you then have to remove it from `ip_bans.yaml` by hand.
 
-This is available in the Alpha add-on for now.
-
 ## Alexa loses connection after a few hours
 
 This is typically caused by stale sessions, Alexa goes offline but the bridge keeps the old session alive, blocking new subscriptions. The bridge includes an automatic force-sync mechanism that periodically pushes state updates to all connected controllers. If you still experience this:
@@ -281,8 +279,8 @@ Keep the custom names and entity mappings too: they are keyed by `entity_id`, an
 
 ## What's the difference between Stable and Alpha?
 
-- **Stable** (v2.0.59): Production-ready, recommended for daily use
-- **Alpha**: Ahead of Stable (v2.0.59); fixes and features land here first and may contain bugs
+- **Stable** (v2.0.60): Production-ready, recommended for daily use
+- **Alpha**: Currently level with Stable (v2.0.60); the next pre-release lands here first and may contain bugs
 
 See the [Alpha Features Guide](./guides/alpha-features.md) for details on alpha features.
 
@@ -338,7 +336,7 @@ Since v2.0.24, thermostats support **auto-resume**, when off and you set a tempe
 
 If not working:
 
-- Update to v2.0.36+ (current stable: v2.0.59)
+- Update to v2.0.36+ (current stable: v2.0.60)
 - Only works for single-temp mode (not range/auto)
 - Thermostat must be in "Off" state
 
