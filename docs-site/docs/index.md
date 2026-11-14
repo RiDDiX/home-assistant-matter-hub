@@ -550,6 +550,14 @@ Home, ...) are not placed in the same network segment. Please make sure to revie
 <details>
 <summary><strong>🧪 Alpha (v2.1.0-alpha.x)</strong></summary>
 
+**v2.1.0-alpha.996:**
+- **Stable Device Identity**: when deleting an identity could not be written to disk, the write is now retried, so the deleted entry does not come back after a restart.
+- **Start**: the per-bridge start timeout now covers the 10 minute wait for Home Assistant from alpha.994, so a paired bridge that is still waiting is no longer reported as `still pending after 5 min`.
+**v2.1.0-alpha.995:**
+- **Lights unavailable at start**: a light that was unavailable in Home Assistant when the bridge started was exposed as a reduced light type and stayed that way. It now gets its full type, with dimming and color, once Home Assistant reports its real capabilities. Found while looking into [#549](https://github.com/RiDDiX/home-assistant-matter-hub/issues/549).
+- **Light color**: a color change sent together with other light changes now reaches Home Assistant with a single color value instead of two conflicting ones. A color set by XY value no longer snaps back for a moment to the previous hue and saturation.
+- **Refused commands**: a command Home Assistant refuses, for example an unsupported value, no longer counts toward temporarily blocking the entity. Only connection failures do.
+- **Event entities**: an event entity with an empty or broken `event_types` list no longer fails to load.
 **v2.1.0-alpha.994:**
 - **Start after a host reboot**: a paired bridge now waits up to 10 minutes for Home Assistant before it starts, instead of 30 seconds, so controllers no longer see an empty bridge while Home Assistant is still booting ([#543](https://github.com/RiDDiX/home-assistant-matter-hub/issues/543)). The log shows the wait once a minute. A bridge that is not paired yet still starts after 30 seconds.
 - **Labels and areas at start**: when the label or area list fails to load on the first try, the bridge retries instead of starting without the entities matched by label.
