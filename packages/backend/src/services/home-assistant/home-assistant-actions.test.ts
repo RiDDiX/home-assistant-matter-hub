@@ -141,6 +141,35 @@ describe("HomeAssistantActions debounce", () => {
     await new Promise((resolve) => setTimeout(resolve, 150));
     expect(serviceData).toEqual([{ brightness: 200 }, {}]);
   });
+
+  it("keeps only the last color descriptor in a merged turn_on", async () => {
+    const serviceData: unknown[] = [];
+    const { actions } = makeActions(async (message) => {
+      if (message.type === "call_service") {
+        serviceData.push(message.service_data);
+      }
+      return {};
+    });
+
+    // HA rejects hs_color together with color_temp_kelvin
+    actions.call(
+      { action: "light.turn_on", data: { hs_color: [10, 80], brightness: 50 } },
+      "light.lamp",
+    );
+    actions.call(
+      { action: "light.turn_on", data: { color_temp_kelvin: 3000 } },
+      "light.lamp",
+    );
+    actions.call(
+      { action: "light.turn_on", data: { transition: 1 } },
+      "light.lamp",
+    );
+
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    expect(serviceData).toEqual([
+      { brightness: 50, color_temp_kelvin: 3000, transition: 1 },
+    ]);
+  });
 });
 
 // #491: Alexa sends On, then the level 37ms later, and the light flashed to
@@ -399,6 +428,54 @@ describe("HomeAssistantActions HA refusals", () => {
     await expect(
       actions.callAction("light", "turn_on", {}, { entity_id: "light.b" }),
     ).resolves.toEqual({});
+  });
+
+  it("does not block the entity for refusals, only for transport failures", async () => {
+    let error: unknown = { code: "service_validation_error", message: "bad" };
+    const { actions } = makeActions(async () => {
+      throw error;
+    });
+
+    for (let i = 0; i < 3; i++) {
+      actions.call({ action: "light.turn_on" }, "light.lamp");
+      await new Promise((resolve) => setTimeout(resolve, 150));
+    }
+    expect(actions.isTargetBlocked("light.lamp")).toBe(false);
+
+    error = new Error("Connection lost");
+    for (let i = 0; i < 3; i++) {
+      actions.call({ action: "light.turn_on" }, "light.lamp");
+      await new Promise((resolve) => setTimeout(resolve, 150));
+    }
+    await vi.waitFor(() =>
+      expect(actions.isTargetBlocked("light.lamp")).toBe(true),
+    );
+  });
+
+  it("a refusal resets the count, only three transport failures in a row block", async () => {
+    const transport = new Error("Connection lost");
+    const refusal = { code: "service_validation_error", message: "bad" };
+    let error: unknown;
+    const { actions } = makeActions(async () => {
+      throw error;
+    });
+    const fail = async (e: unknown) => {
+      error = e;
+      actions.call({ action: "light.turn_on" }, "light.lamp");
+      await new Promise((resolve) => setTimeout(resolve, 150));
+    };
+
+    await fail(transport);
+    await fail(transport);
+    await fail(refusal);
+    await fail(transport);
+    await fail(transport);
+    expect(actions.isTargetBlocked("light.lamp")).toBe(false);
+
+    await fail(transport);
+    await vi.waitFor(() =>
+      expect(actions.isTargetBlocked("light.lamp")).toBe(true),
+    );
   });
 });
 

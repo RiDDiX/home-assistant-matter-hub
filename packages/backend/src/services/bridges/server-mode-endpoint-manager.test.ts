@@ -1154,6 +1154,49 @@ describe("ServerModeEndpointManager (#301)", () => {
     expect(legacyCreate).toHaveBeenCalledTimes(1 + rebuilds);
   });
 
+  it("upgrades a light mounted unavailable once, a drop in modes keeps it", async () => {
+    const light = "light.desk";
+    let state: object = { state: "unavailable", attributes: {} };
+    const h = makeHarness([light]);
+    h.registry.initialState.mockImplementation(() => state);
+    // LegacyEndpoint is mocked, mirror the factory's pick from the modes
+    legacyCreate.mockImplementation(async (_registry, entityId) => {
+      const modes =
+        // biome-ignore lint/suspicious/noExplicitAny: state stub
+        ((state as any).attributes.supported_color_modes as string[]) ?? [];
+      return fakeEndpoint(entityId as string, {
+        deviceType: modes.includes("xy") ? 0x010d : 0x0100,
+      }) as unknown as LegacyEndpoint;
+    });
+    await h.manager.refreshDevices();
+    const first = h.serverNode.addDevice.mock.calls[0][0] as EntityEndpoint;
+    expect(first.type.deviceType).toBe(0x0100);
+    // biome-ignore lint/suspicious/noExplicitAny: the retry only runs while observing
+    (h.manager as any).observingRequested = true;
+
+    state = {
+      state: "off",
+      attributes: { supported_color_modes: ["color_temp", "xy"] },
+    };
+    await h.manager.updateStates({ [light]: state } as never, new Set([light]));
+    await vi.waitFor(() => expect(legacyCreate).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() =>
+      // biome-ignore lint/suspicious/noExplicitAny: reach the retry flag
+      expect((h.manager as any).mappingSync.retryPending).toBe(false),
+    );
+    const rebuilt = h.serverNode.addDevice.mock.calls[1][0] as EntityEndpoint;
+    expect(rebuilt.type.deviceType).toBe(0x010d);
+    expect(rebuilt.id).toBe(first.id);
+    expect(first.close).toHaveBeenCalledTimes(1);
+
+    state = { state: "on", attributes: { supported_color_modes: ["onoff"] } };
+    await h.manager.updateStates({ [light]: state } as never, new Set([light]));
+    await new Promise((r) => setTimeout(r, 50));
+    await h.manager.refreshDevices();
+    expect(legacyCreate).toHaveBeenCalledTimes(2);
+    expect(rebuilt.close).not.toHaveBeenCalled();
+  });
+
   it("closes every endpoint on dispose without deleting", async () => {
     const h = makeHarness(["light.a", "light.b"], "light.a");
     await h.manager.refreshDevices();

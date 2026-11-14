@@ -3,6 +3,7 @@ import type {
   HomeAssistantEntityState,
 } from "@home-assistant-matter-hub/common";
 import type { Logger } from "@matter/general";
+import { lightShape } from "../../matter/endpoints/legacy/light/index.js";
 import type { HomeAssistantStates } from "../home-assistant/home-assistant-registry.js";
 import { type BridgeRegistry, fingerprintBattery } from "./bridge-registry.js";
 
@@ -22,6 +23,17 @@ function fanCapabilities(
     ? [...attributes.preset_modes].sort()
     : [];
   return JSON.stringify([attributes.supported_features, presets]);
+}
+
+// A light picks OnOff/Dimmable/ExtendedColor once from supported_color_modes.
+// One mounted while unavailable has none and stays on/off. null = unknown.
+function lightRank(state: HomeAssistantEntityState | undefined): number | null {
+  if (!state || state.state === "unavailable" || state.state === "unknown") {
+    return null;
+  }
+  const modes = (state.attributes as Record<string, unknown> | undefined)
+    ?.supported_color_modes;
+  return Array.isArray(modes) ? lightShape(modes).rank : null;
 }
 
 function parseTuple(fingerprint: string): unknown[] {
@@ -44,6 +56,8 @@ export class EntityMappingSync {
   private readonly candidates = new Map<string, string>();
   // fan entityId -> as-built capability element of its fingerprint (#515)
   private readonly fanCaps = new Map<string, string | null>();
+  // light entityId -> as-built shape rank, null = built without color modes
+  private readonly lightRanks = new Map<string, number | null>();
 
   constructor(
     private readonly registry: BridgeRegistry,
@@ -86,10 +100,12 @@ export class EntityMappingSync {
       ? this.registry.batteryFingerprintFor(entityId, mapping)
       : "";
     const tuple: unknown[] = [mapping ?? null, battery || null];
-    // fans carry a third capability element (#515); other domains keep the
-    // two-element tuple so their stored fingerprints stay valid
+    // fans and lights carry a third capability element (#515); other
+    // domains keep the two-element tuple so their stored fingerprints stay valid
     if (entityId?.startsWith("fan.")) {
       tuple.push(fanCapabilities(this.registry.initialState(entityId)));
+    } else if (entityId?.startsWith("light.")) {
+      tuple.push(lightRank(this.registry.initialState(entityId)));
     }
     const companions = entityId ? this.companions(mapping, entityId) : null;
     if (companions?.some((id) => id != null)) tuple.push(companions);
@@ -170,6 +186,21 @@ export class EntityMappingSync {
         fingerprint = JSON.stringify(live);
       }
     }
+    // a light only rebuilds to a richer shape, a group whose members dropped
+    // out or an unavailable flap keeps the endpoint it has. A null stored
+    // rank was built from no color modes, an on/off light.
+    if (entityId.startsWith("light.") && storedFingerprint) {
+      const live = parseTuple(fingerprint);
+      const stored = parseTuple(storedFingerprint);
+      const built = typeof stored[2] === "number" ? stored[2] : 0;
+      if (
+        stored.length > 2 &&
+        (typeof live[2] !== "number" || live[2] <= built)
+      ) {
+        live[2] = stored[2];
+        fingerprint = JSON.stringify(live);
+      }
+    }
     const deviceId = this.registry.entity(entityId)?.device_id;
     // #505: a stored companion stays until it leaves the device or is
     // disabled, a vanished state or a second same-class sensor never rebuilds
@@ -222,6 +253,7 @@ export class EntityMappingSync {
   rebuildCandidates(entries: Iterable<[string, string]>): void {
     this.candidates.clear();
     this.fanCaps.clear();
+    this.lightRanks.clear();
     for (const [entityId, fingerprint] of entries) {
       // track the as-built capability element of every fan endpoint (#515)
       if (entityId.startsWith("fan.")) {
@@ -229,6 +261,13 @@ export class EntityMappingSync {
         this.fanCaps.set(
           entityId,
           tuple.length > 2 && typeof tuple[2] === "string" ? tuple[2] : null,
+        );
+      }
+      if (entityId.startsWith("light.")) {
+        const tuple = parseTuple(fingerprint);
+        this.lightRanks.set(
+          entityId,
+          typeof tuple[2] === "number" ? tuple[2] : null,
         );
       }
       if (fingerprintBattery(fingerprint) != null) continue;
@@ -280,7 +319,9 @@ export class EntityMappingSync {
     if (
       !observing ||
       this.retryScheduled ||
-      (this.candidates.size === 0 && this.fanCaps.size === 0)
+      (this.candidates.size === 0 &&
+        this.fanCaps.size === 0 &&
+        this.lightRanks.size === 0)
     ) {
       return;
     }
@@ -295,6 +336,18 @@ export class EntityMappingSync {
         this.fanCaps.set(id, live);
         this.scheduleRefresh(
           `Fan capabilities changed for ${id}, rebuilding`,
+          refresh,
+        );
+        return;
+      }
+      if (id.startsWith("light.")) {
+        const stored = this.lightRanks.get(id);
+        if (stored === undefined) continue;
+        const live = lightRank(states[id]);
+        if (live == null || live <= (stored ?? 0)) continue;
+        this.lightRanks.set(id, live);
+        this.scheduleRefresh(
+          `Light color modes grew for ${id}, rebuilding`,
           refresh,
         );
         return;

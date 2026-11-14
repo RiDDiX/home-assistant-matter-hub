@@ -31,6 +31,26 @@ const colorModes: LightDeviceColorMode[] = [
   LightDeviceColorMode.RGBWW,
 ];
 
+// on/off 0, dimmable 1, color or color temperature 2. Picks the device type
+// below and is the light element of the mapping fingerprint, so a light built
+// from a reduced snapshot (unavailable at start) rebuilds once it upgrades.
+export function lightShape(modes: readonly LightDeviceColorMode[]) {
+  const supportsColorControl = modes.some((mode) => colorModes.includes(mode));
+  const supportsColorTemperature = modes.includes(
+    LightDeviceColorMode.COLOR_TEMP,
+  );
+  const supportsBrightness = modes.some((mode) =>
+    brightnessModes.includes(mode),
+  );
+  const rank =
+    supportsColorControl || supportsColorTemperature
+      ? 2
+      : supportsBrightness
+        ? 1
+        : 0;
+  return { supportsColorControl, supportsColorTemperature, rank };
+}
+
 export function LightDevice(
   homeAssistantEntity: HomeAssistantEntityBehavior.State,
 ): EndpointType {
@@ -40,16 +60,8 @@ export function LightDevice(
     battery_level?: number;
   };
 
-  const supportedColorModes: LightDeviceColorMode[] =
-    attributes.supported_color_modes ?? [];
-  const supportsBrightness = supportedColorModes.some((mode) =>
-    brightnessModes.includes(mode),
-  );
-  const supportsColorControl = supportedColorModes.some((mode) =>
-    colorModes.includes(mode),
-  );
-  const supportsColorTemperature = supportedColorModes.includes(
-    LightDeviceColorMode.COLOR_TEMP,
+  const { supportsColorControl, supportsColorTemperature, rank } = lightShape(
+    attributes.supported_color_modes ?? [],
   );
   const hasBatteryAttr =
     attributes.battery_level != null || attributes.battery != null;
@@ -61,13 +73,13 @@ export function LightDevice(
   // "Behaviors have errors" during endpoint creation. ExtendedColorLight works correctly
   // with just the ColorTemperature feature enabled (supportsColorControl=false).
   const deviceType =
-    supportsColorControl || supportsColorTemperature
+    rank === 2
       ? ExtendedColorLightType(
           supportsColorControl,
           supportsColorTemperature,
           hasBattery,
         )
-      : supportsBrightness
+      : rank === 1
         ? hasBattery
           ? DimmableLightWithBatteryType
           : DimmableLightType
