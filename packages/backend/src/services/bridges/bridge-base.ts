@@ -45,12 +45,17 @@ const START_WAIT_MS = 60_000;
 // and every device comes back a refresh later (#543). A stop ends the wait,
 // shutdown has only a few seconds.
 const HA_READY_WAIT_MS = 30_000;
+// a paired controller sees an empty start as every device removed, and HA
+// can take minutes to run after a host reboot
+const HA_READY_WAIT_COMMISSIONED_MS = 10 * 60_000;
 const HA_READY_POLL_MS = 3000;
 // bridges start one after the other, once one gave up the others do not
 // wait the full time again for the same HA outage. Only for a while: HA can
 // recover through the auto-refresh, which never clears it, and fail again.
 const HA_WAIT_GAVE_UP_MS = 2 * 60_000;
 let haWaitGaveUpAt = Number.NEGATIVE_INFINITY;
+// a short give up must not cut a commissioned bridge's longer wait
+let haWaitGaveUpBound = 0;
 
 // matter.js closes the window of an unpaired node after 48 h without telling
 // anyone, so a running bridge checks for that and reopens it
@@ -304,17 +309,35 @@ export abstract class BridgeBase<
   // Only a refresh deferred for HA waits, failed entities or heap pressure
   // would not pass by waiting here.
   private async waitForHomeAssistant(): Promise<void> {
-    const deadline = Date.now() + HA_READY_WAIT_MS;
+    const since = Date.now();
+    const bound =
+      this.endpointManager.refreshDeferred &&
+      this.server.env.get(FabricManager).length > 0
+        ? HA_READY_WAIT_COMMISSIONED_MS
+        : HA_READY_WAIT_MS;
+    const deadline = since + bound;
+    let nextInfo = since + 60_000;
     let reload: Promise<unknown> | undefined;
     while (this.endpointManager.refreshDeferred && !this.stopRequested) {
       const left = deadline - Date.now();
-      const gaveUp = Date.now() - haWaitGaveUpAt < HA_WAIT_GAVE_UP_MS;
+      const gaveUp =
+        Date.now() - haWaitGaveUpAt < HA_WAIT_GAVE_UP_MS &&
+        haWaitGaveUpBound >= bound;
       if (left <= 0 || gaveUp) {
         this.log.warn(
-          `Home Assistant data not ready${gaveUp ? "" : ` after ${HA_READY_WAIT_MS / 1000}s`}, starting with what the bridge has`,
+          `Home Assistant data not ready${gaveUp ? "" : ` after ${bound / 1000}s`}, starting with what the bridge has`,
         );
-        if (!gaveUp) haWaitGaveUpAt = Date.now();
+        if (!gaveUp) {
+          haWaitGaveUpAt = Date.now();
+          haWaitGaveUpBound = bound;
+        }
         return;
+      }
+      if (Date.now() >= nextInfo) {
+        this.log.info(
+          `Waiting for Home Assistant data, ${Math.round((Date.now() - since) / 1000)}s of ${bound / 1000}s`,
+        );
+        nextInfo += 60_000;
       }
       // HA not running clears on the client's own poll, an empty registry
       // only on a reload, and the auto-refresh starts after all bridges

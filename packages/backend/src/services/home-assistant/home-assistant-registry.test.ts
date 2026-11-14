@@ -351,6 +351,54 @@ describe("HomeAssistantRegistry", () => {
     expect(registry.labels).toEqual([{ label_id: "voice_2", name: "Voice" }]);
   });
 
+  it.each([
+    ["config/label_registry/list", { label_id: "voice_2", name: "Voice" }],
+    ["config/area_registry/list", { area_id: "kitchen", name: "Kitchen" }],
+  ])("retries a first load whose %s query fails", async (type, item) => {
+    const fake = makeConnection();
+    let failures = 2;
+    fake.connection.sendMessagePromise = vi.fn((message: { type: string }) => {
+      if (message.type !== type) return Promise.resolve([]);
+      if (failures-- > 0) return Promise.reject(new Error("timed out"));
+      return Promise.resolve([item]);
+    }) as unknown as Connection["sendMessagePromise"];
+    const client = {
+      connection: fake.connection,
+      haRunning: true,
+    } as unknown as HomeAssistantClient & { haRunning: boolean };
+    const registry = new HomeAssistantRegistry(client, defaultOptions);
+    const initPromise = registry.construction;
+    await vi.runAllTimersAsync();
+    await initPromise;
+
+    // one commit only, and it carries the list
+    expect(registry.snapshotGeneration).toBe(1);
+    expect(registry.labels.length + registry.areas.size).toBe(1);
+  });
+
+  it("loads without labels after the retries when the label query never works", async () => {
+    const fake = makeConnection();
+    let labelCalls = 0;
+    fake.connection.sendMessagePromise = vi.fn((message: { type: string }) => {
+      if (message.type !== "config/label_registry/list") {
+        return Promise.resolve([]);
+      }
+      labelCalls++;
+      return Promise.reject({ code: "unauthorized", message: "Unauthorized" });
+    }) as unknown as Connection["sendMessagePromise"];
+    const client = {
+      connection: fake.connection,
+      haRunning: true,
+    } as unknown as HomeAssistantClient & { haRunning: boolean };
+    const registry = new HomeAssistantRegistry(client, defaultOptions);
+    const initPromise = registry.construction;
+    await vi.runAllTimersAsync();
+    await initPromise;
+    expect(labelCalls).toBe(4);
+    expect(registry.snapshotGeneration).toBe(1);
+    expect(registry.labels).toEqual([]);
+  });
+
   it("picks up a label rename with an unchanged id", async () => {
     const fake = makeConnection();
     let labelName = "Voice";

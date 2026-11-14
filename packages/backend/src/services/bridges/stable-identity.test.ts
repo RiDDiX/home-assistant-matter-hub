@@ -1296,6 +1296,48 @@ describe("stable identity through BridgeEndpointManager (#404)", () => {
     expect((await read(manager, "switch.b"))?.id).toBe("switch_b");
   });
 
+  it.each([
+    false,
+    true,
+  ])("rename hint with stableIdentity %s", async (stable) => {
+    const ha = makeHa();
+    setEntity(ha, "switch.old", { unique_id: "U", platform: "hue" });
+    const manager = await buildManager(
+      ha,
+      makeProvider(`bridge-hint-${stable}`, { stableIdentity: stable }),
+      new FakeMappingStorage(),
+      new FakeIdentityStorage(),
+    );
+    await manager.refreshDevices();
+    const before = await read(manager, "switch.old");
+
+    removeEntity(ha, "switch.old");
+    setEntity(ha, "switch.new", { unique_id: "U", platform: "hue" });
+    await manager.refreshDevices();
+    await manager.refreshDevices();
+
+    // biome-ignore lint/suspicious/noExplicitAny: read the private logger
+    const info = (manager as any).log.info as ReturnType<typeof vi.fn>;
+    const hints = info.mock.calls.filter((c) =>
+      String(c[0]).includes("Stable Device Identity"),
+    );
+    const after = await read(manager, "switch.new");
+    if (stable) {
+      expect(hints).toHaveLength(0);
+      expect(after!.number).toBe(before!.number);
+      return;
+    }
+    expect(hints).toEqual([
+      [
+        "Entity switch.old was renamed to switch.new, controllers will see it as a new device. The Stable Device Identity option keeps the endpoint across renames",
+      ],
+    ]);
+    // unchanged: new endpoint, old one waits out the removal grace
+    expect(after!.id).not.toBe(before!.id);
+    expect(after!.number).not.toBe(before!.number);
+    expect((await read(manager, "switch.old"))?.number).toBe(before!.number);
+  });
+
   it("a second entity on a taken endpoint id is a failed entity naming the holder", async () => {
     const ha = makeHa();
     setEntity(ha, "switch.one");

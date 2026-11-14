@@ -9,6 +9,7 @@ import {
 import { Environment, type Logger, VariableService } from "@matter/general";
 import { VendorId } from "@matter/main";
 import { ServerNode } from "@matter/main/node";
+import { FabricManager } from "@matter/main/protocol";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ServerModeServerNode } from "../../matter/endpoints/server-mode-server-node.js";
 import { PluginManager } from "../../plugins/plugin-manager.js";
@@ -358,6 +359,68 @@ describe("bridge start gate (#543 round 4)", () => {
 
     expect(online).toHaveLength(1);
     expect(bridge.data.status).toBe(BridgeStatus.Stopped);
+  });
+
+  // a host reboot: HA needs longer than 30s, a paired bridge must not go
+  // online empty
+  function commission(b: Bridge) {
+    vi.spyOn(b.server.env.get(FabricManager), "length", "get").mockReturnValue(
+      1,
+    );
+  }
+
+  it("a commissioned bridge waits past 30s and starts with every device", async () => {
+    const { bridge, client, online, log } = await make(
+      makeHa(["vacuum.a", "vacuum.b"]),
+      { haRunning: false },
+    );
+    commission(bridge);
+    await startOnFakeTimers(bridge, async () => {
+      await vi.advanceTimersByTimeAsync(39_000);
+      expect(online).toHaveLength(0);
+      client.haRunning = true;
+      await vi.advanceTimersByTimeAsync(3000);
+    });
+
+    expect(online).toEqual([[expect.any(String), expect.any(String)]]);
+    expect(notReady(log)).toBe(0);
+    expect(bridge.data.status).toBe(BridgeStatus.Running);
+  });
+
+  it("a stop during a commissioned wait leaves no timer and no start", async () => {
+    const { bridge, online } = await make(makeHa(["vacuum.a"]), {
+      haRunning: false,
+    });
+    commission(bridge);
+    await startOnFakeTimers(bridge, async () => {
+      await vi.advanceTimersByTimeAsync(45_000);
+      await bridge.stop();
+    });
+    await vi.advanceTimersByTimeAsync(10 * 60_000);
+
+    expect(online).toHaveLength(0);
+    expect(vi.getTimerCount()).toBe(0);
+    expect(bridge.data.status).toBe(BridgeStatus.Stopped);
+  });
+
+  it("a commissioned bridge logs the wait each minute and gives up at 10 min", async () => {
+    const { bridge, online, log } = await make(makeHa(["vacuum.a"]), {
+      haRunning: false,
+    });
+    commission(bridge);
+    const waiting = () =>
+      log.info.mock.calls.filter((c) =>
+        String(c[0]).startsWith("Waiting for Home Assistant data"),
+      ).length;
+    await startOnFakeTimers(bridge, async () => {
+      await vi.advanceTimersByTimeAsync(10 * 60_000 - 1);
+      expect(online).toHaveLength(0);
+      expect(waiting()).toBe(9);
+      await vi.advanceTimersByTimeAsync(1);
+    });
+
+    expect(online).toEqual([[]]);
+    expect(notReady(log)).toBe(1);
   });
 
   it("does not wait for an entity that keeps failing", async () => {

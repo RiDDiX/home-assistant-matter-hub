@@ -27,6 +27,10 @@ const logger = Logger.get("HomeAssistantRegistry");
 // shortcut: groups still incomplete after 60s use auto-refresh; revisit if controllers still rediscover devices.
 const STARTUP_WAIT_MS = 60_000;
 const INCOMPLETE_REFRESH_RETRIES = 3;
+// a failed label or area query fails only the first attempts of the first
+// load, later ones load without it so a query that never works cannot block
+// the snapshot
+const STRICT_LIST_ATTEMPTS = 3;
 
 export type HomeAssistantDevices = Record<string, HomeAssistantDeviceRegistry>;
 export type HomeAssistantEntities = Record<string, HomeAssistantEntityRegistry>;
@@ -244,23 +248,30 @@ export class HomeAssistantRegistry extends Service {
 
   async reload(): Promise<boolean> {
     const seq = ++this.reloadsStarted;
-    return await withRetry(() => this.fetchRegistries(seq), {
-      maxAttempts: 10,
-      baseDelayMs: 2000,
-      maxDelayMs: 30000,
-      onRetry: (attempt, error, delayMs) => {
-        logger.warn(
-          `Registry fetch failed (attempt ${attempt}), retrying in ${delayMs}ms:`,
-          error,
-        );
+    let attempt = 0;
+    return await withRetry(
+      () => this.fetchRegistries(seq, ++attempt <= STRICT_LIST_ATTEMPTS),
+      {
+        maxAttempts: 10,
+        baseDelayMs: 2000,
+        maxDelayMs: 30000,
+        onRetry: (attempt, error, delayMs) => {
+          logger.warn(
+            `Registry fetch failed (attempt ${attempt}), retrying in ${delayMs}ms:`,
+            error,
+          );
+        },
       },
-    });
+    );
   }
 
-  private async fetchRegistries(seq: number): Promise<boolean> {
+  private async fetchRegistries(
+    seq: number,
+    strict: boolean,
+  ): Promise<boolean> {
     await this.waitForConnection(30_000);
     try {
-      return await this.runRegistryQueries(seq);
+      return await this.runRegistryQueries(seq, strict);
     } catch (e) {
       if (!isConnectionLost(e)) throw e;
       // WS dropped mid-flight; the library auto-reconnects. Wait for the
@@ -268,7 +279,7 @@ export class HomeAssistantRegistry extends Service {
       // by withRetry's backoff.
       logger.debug("Registry fetch hit connection drop, waiting for reconnect");
       await this.waitForConnection(60_000);
-      return await this.runRegistryQueries(seq);
+      return await this.runRegistryQueries(seq, strict);
     }
   }
 
@@ -295,14 +306,17 @@ export class HomeAssistantRegistry extends Service {
     });
   }
 
-  private async runRegistryQueries(seq: number): Promise<boolean> {
+  private async runRegistryQueries(
+    seq: number,
+    strict: boolean,
+  ): Promise<boolean> {
     // Trust must hold for the WHOLE fetch: a flip to RUNNING mid-flight
     // would otherwise let a STARTING-era partial snapshot commit (#438).
     const trustedAtStart = this.client.haRunning;
     const connection = this.client.connection;
 
     // Fire the five HA queries in parallel. Label and area registries aren't
-    // guaranteed on older HA versions, so a failure there never fails the
+    // guaranteed on older HA versions, so a failure there never blocks the
     // whole reload.
     const timeoutMs = this.options.messageTimeoutMs;
     const [entityRegistry, statesList, deviceRegistry, labels, areas] =
@@ -315,13 +329,16 @@ export class HomeAssistantRegistry extends Service {
         ),
         getDeviceRegistry(connection, timeoutMs),
         // failed query: keep last labels, empty would unmount filtered
-        // endpoints (#500)
+        // endpoints (#500). With none loaded yet, retry instead of starting
+        // bridges without their label matched entities.
         getLabelRegistry(connection, timeoutMs).catch((e) => {
+          if (strict && this._snapshotGeneration === 0) throw e;
           logger.warn("Label registry fetch failed, keeping last labels:", e);
           return this._labels;
         }),
         // same for areas: empty flips the fingerprint and drops room names
         getAreaRegistry(connection, timeoutMs).catch((e) => {
+          if (strict && this._snapshotGeneration === 0) throw e;
           logger.warn("Area registry fetch failed, keeping last areas:", e);
           return Array.from(this._areas, ([area_id, name]) => ({
             area_id,

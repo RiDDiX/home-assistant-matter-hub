@@ -69,6 +69,9 @@ const SHUTDOWN_SESSION_CLOSE_TIMEOUT_MS = 2_500;
 // records, so poll and re-announce when the set moves (#415).
 const MDNS_ADDRESS_CHECK_INTERVAL_MS = 60_000;
 
+// Sessions the bridge closed itself, their close is no warning
+const bridgeClosed = new WeakSet<object>();
+
 // Close the subscriptions first, the way matter.js closes its own sessions
 // gracefully. A close deferred by open exchanges then leaves no window where
 // they keep reporting on another session of the same peer (#287).
@@ -80,6 +83,7 @@ function closeGracefully(
   },
   forceReason: string,
 ): Promise<void> {
+  bridgeClosed.add(s);
   return s
     .initiateClose(async () => {
       await s.closeSubscriptions(true);
@@ -133,6 +137,8 @@ export class SessionSupervisor {
   private subscriptionStartedAt = new WeakMap<object, number>();
   // Sessions whose subscriptions.deleted we already hooked for give-ups.
   private wedgeHookedSessions = new WeakSet<object>();
+  // matter.js ends the subscriptions before the session leaves the list
+  private subscribedSessions = new WeakSet<object>();
 
   // Watches the advertised interface addresses so a dynamic ISP IPv6 prefix
   // change forces a fresh operational announcement (#415).
@@ -348,6 +354,7 @@ export class SessionSupervisor {
       // must be watched too, the added event already fired without us.
       for (const sess of sessionManager.sessions) {
         hookGiveUpsWithPeers(sess);
+        if (sess.subscriptions.size > 0) this.subscribedSessions.add(sess);
       }
       this.sessionDiagHandler = (session: {
         id: number;
@@ -358,6 +365,9 @@ export class SessionSupervisor {
         let totalSubs = 0;
         for (const s of sessions) {
           totalSubs += s.subscriptions.size;
+        }
+        if (session.subscriptions.size > 0) {
+          this.subscribedSessions.add(session);
         }
         this.log.debug(
           `Session ${session.id} (peer ${session.peerNodeId}): subscriptions=${session.subscriptions.size} | total: sessions=${sessions.length} subscriptions=${totalSubs}`,
@@ -487,6 +497,8 @@ export class SessionSupervisor {
       this.sessionDeletedHandler = (session: {
         id: number;
         peerNodeId: unknown;
+        fabric?: { fabricIndex?: unknown };
+        isPase?: boolean;
       }) => {
         this.sessionStartedAt.delete(session.id);
         // its timer has nothing left to close
@@ -496,7 +508,14 @@ export class SessionSupervisor {
           this.staleSessionTimers.delete(session.id);
         }
         const sessions = [...sessionManager.sessions];
-        this.log.warn(
+        // only a subscribed peer losing its last session to something the
+        // bridge did not start is worth a warning
+        const unexpected =
+          !bridgeClosed.has(session) &&
+          !session.isPase &&
+          this.subscribedSessions.has(session) &&
+          !sessions.some((s) => peerKey(s) === peerKey(session));
+        this.log[unexpected ? "warn" : "info"](
           `Session closed: id=${session.id} peer=${session.peerNodeId} | remaining sessions=${sessions.length}`,
         );
         diagnosticEventBus.emit(
@@ -697,6 +716,7 @@ export class SessionSupervisor {
         this.log.warn(
           `Closing stale session ${s.id} (peer ${s.peerNodeId}, no subscriptions, no traffic for ${idleSec}s)`,
         );
+        bridgeClosed.add(s);
         s.initiateClose()
           .catch(() => {
             // Graceful close failed (peer unreachable), force-close locally
@@ -745,6 +765,7 @@ export class SessionSupervisor {
         this.log.warn(
           `Closing dead session ${s.id} (peer ${s.peerNodeId}, no subscriptions, no traffic for ${idleSec}s)`,
         );
+        bridgeClosed.add(s);
         closes.push(
           s.initiateClose().catch(() => {
             // Graceful close failed (peer unreachable), force-close locally

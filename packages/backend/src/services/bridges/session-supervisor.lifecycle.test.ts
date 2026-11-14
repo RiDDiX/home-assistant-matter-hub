@@ -211,6 +211,41 @@ describe("session deleted", () => {
   });
 });
 
+describe("session closed log level", () => {
+  const closedAt = (fn: ReturnType<typeof vi.fn>) =>
+    fn.mock.calls.filter((c) => String(c[0]).startsWith("Session closed:"))
+      .length;
+
+  it("info for a stale close the bridge started", async () => {
+    const s = fakeSession(1, 1);
+    s.timestamp = Time.nowUs - STALE_SESSION_QUIET_WINDOW_MS;
+    const { handlers, list, log } = makeSupervisor([s]);
+    handlers.subscriptionsChanged?.(s as never);
+    s.subscriptions.size = 0;
+    handlers.subscriptionsChanged?.(s as never);
+    await vi.advanceTimersByTimeAsync(DEAD_SESSION_TIMEOUT_MS);
+    expect(s.initiateClose).toHaveBeenCalled();
+
+    list.splice(0);
+    handlers.deleted?.(s as never);
+    expect(closedAt(log.info)).toBe(1);
+    expect(closedAt(log.warn)).toBe(0);
+  });
+
+  it("warn when a subscribed peer loses its last session", () => {
+    const s = fakeSession(1, 1);
+    const { handlers, list, log } = makeSupervisor([s]);
+    handlers.subscriptionsChanged?.(s as never);
+
+    list.splice(0);
+    handlers.deleted?.(s as never);
+    expect(log.warn).toHaveBeenCalledWith(
+      "Session closed: id=1 peer=99 | remaining sessions=0",
+    );
+    expect(closedAt(log.info)).toBe(0);
+  });
+});
+
 describe("wedge watchdog", () => {
   function setup(wedgeWatchdog: boolean) {
     const wedged = fakeSession(1, 1);

@@ -1148,6 +1148,14 @@ export class BridgeEndpointManager extends Service {
     }
     for (const [from] of carried) this.mappingFingerprints.delete(from);
     for (const [, to, fp] of carried) this.mappingFingerprints.set(to, fp);
+    // flag off: the identity record still tracks renames, so say why a
+    // renamed entity shows up as a new device
+    const renamedTo = new Map<string, string>();
+    if (!stableIdentity) {
+      for (const [entityId, resolved] of resolvedByEntity) {
+        if (resolved.renamedFrom) renamedTo.set(resolved.renamedFrom, entityId);
+      }
+    }
 
     // Reconcile orphan tombstones against the FULL HA registry (keyed by the
     // rename-stable identity key, so a rename, a filter change, or a scope
@@ -1253,6 +1261,12 @@ export class BridgeEndpointManager extends Service {
           this.mappingFingerprints.delete(endpoint.entityId);
           this.pendingRemovals.delete(endpoint.entityId);
           continue;
+        }
+        const newId = renamedTo.get(endpoint.entityId);
+        if (newId != null) {
+          this.log.info(
+            `Entity ${endpoint.entityId} was renamed to ${newId}, controllers will see it as a new device. The Stable Device Identity option keeps the endpoint across renames`,
+          );
         }
         // An entity can vanish from the registry briefly during an HA restart.
         // delete() erases the persisted endpoint number, so controllers (Alexa)
