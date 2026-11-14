@@ -913,6 +913,30 @@ describe("ServerModeEndpointManager (#301)", () => {
     expect(h.manager.devices.map((d) => d.entityId)).toEqual(["light.a"]);
   });
 
+  it("logs the endpoint number before a grace delete (#423)", async () => {
+    const h = makeHarness(["light.a", "light.b"], "light.a");
+    // biome-ignore lint/suspicious/noExplicitAny: reach the private logger
+    const log = (h.manager as any).log as Logger;
+    await h.manager.refreshDevices();
+    const endpointB = h.serverNode.addDevice.mock.calls
+      .map((c) => c[0] as EntityEndpoint)
+      .find((e) => e.entityId === "light.b");
+    Object.assign(endpointB as object, { number: 7 });
+
+    h.registry.entityIds = ["light.a"];
+    delete h.registry.fullEntities["light.b"];
+    await h.manager.refreshDevices();
+    passGrace(h);
+    vi.mocked(log.info).mockClear();
+    await h.manager.refreshDevices();
+
+    expect(endpointB?.delete).toHaveBeenCalledTimes(1);
+    expect(log.info).toHaveBeenCalledTimes(1);
+    expect(log.info).toHaveBeenCalledWith(
+      "Removing endpoint light.b (ep 7) after the grace window, controllers will see a new number if it returns",
+    );
+  });
+
   it("keeps an absent endpoint when no fresh reload confirmed it (#438)", async () => {
     const h = makeHarness(["light.a", "light.b"], "light.a");
     await h.manager.refreshDevices();
@@ -1073,6 +1097,61 @@ describe("ServerModeEndpointManager (#301)", () => {
       "dev450",
     );
     expect(refresh).toHaveBeenCalled();
+  });
+
+  it.each([
+    [
+      "an air purifier keeps its flat shape when its sensors arrive late",
+      "fan.purifier",
+      { matterDeviceType: "air_purifier" },
+      { state: "off", attributes: { supported_features: 57 } },
+      0,
+    ],
+    [
+      "a temperature sensor rebuilds once for a late humidity merge",
+      "sensor.purifier_temperature",
+      undefined,
+      { state: "21.5", attributes: { device_class: "temperature" } },
+      1,
+    ],
+  ])("%s, server mode never composes (#505)", async (_l, entityId, mapping, state, rebuilds) => {
+    const h = makeHarness([entityId], entityId, {
+      flags: { autoComposedDevices: true },
+      entities: { [entityId]: { device_id: "dev505" } },
+    });
+    h.mappingStorage.getMapping.mockReturnValue(
+      mapping && { entityId, ...mapping },
+    );
+    h.registry.initialState.mockReturnValue(state);
+    let late: Record<string, string | undefined> = {};
+    Object.assign(h.registry, {
+      isAutoComposedDevicesEnabled: () => true,
+      isAutoHumidityMappingEnabled: () => true,
+      isAutoPressureMappingEnabled: () => true,
+      findTemperatureEntityForDevice: () => late.temperature,
+      findHumidityEntityForDevice: () => late.humidity,
+      findPressureEntityForDevice: () => undefined,
+    });
+    h.registry.fullEntities["sensor.purifier_temperature"] = {
+      entity_id: "sensor.purifier_temperature",
+      device_id: "dev505",
+    };
+    h.registry.fullEntities["sensor.purifier_humidity"] = {
+      entity_id: "sensor.purifier_humidity",
+      device_id: "dev505",
+    };
+    await h.manager.refreshDevices();
+
+    late = {
+      temperature: entityId.startsWith("fan.")
+        ? "sensor.purifier_temperature"
+        : undefined,
+      humidity: "sensor.purifier_humidity",
+    };
+    await h.manager.refreshDevices();
+    await h.manager.refreshDevices();
+
+    expect(legacyCreate).toHaveBeenCalledTimes(1 + rebuilds);
   });
 
   it("closes every endpoint on dispose without deleting", async () => {

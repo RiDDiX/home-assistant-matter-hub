@@ -2,10 +2,12 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { HomeAssistantEntityInformation } from "@home-assistant-matter-hub/common";
-import { Environment, VariableService } from "@matter/general";
+import type { DataNamespace } from "@matter/general";
+import { Environment, StorageService, VariableService } from "@matter/general";
 import { Endpoint, VendorId } from "@matter/main";
 import { ServerNode } from "@matter/main/node";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { CustomStorage } from "../../../../core/app/storage/custom-storage.js";
 import { BridgeDataProvider } from "../../../../services/bridges/bridge-data-provider.js";
 import {
   type HomeAssistantAction,
@@ -124,5 +126,55 @@ describe("fan SpeedMax across an unavailable phase (#505)", () => {
     expect(seen[0].speedMax).toBe(100);
     expect(seen).toEqual([seen[0], seen[0], seen[0]]);
     expect(calls).toEqual([]);
+  });
+
+  it("keeps SpeedMax when the fan is unavailable at the next start", async () => {
+    const storageService = env.get(StorageService);
+    storageService.registerDriver({
+      id: CustomStorage.driverId,
+      async create(namespace: DataNamespace) {
+        const driver = new CustomStorage(namespace);
+        await driver.initialize();
+        return driver;
+      },
+    });
+    storageService.defaultDriver = CustomStorage.driverId;
+
+    const start = async (
+      state: string,
+      attributes: Record<string, unknown>,
+    ) => {
+      const server = await ServerNode.create({
+        // biome-ignore lint/suspicious/noExplicitAny: env valid at runtime
+        environment: env as any,
+        id: "fan-505-restart",
+        network: { port: 0 },
+        commissioning: { passcode: 20202021, discriminator: 3840 },
+        basicInformation: { vendorId: VendorId(0xfff1), productId: 0x8000 },
+      });
+      const aggregator = new AggregatorEndpoint("aggregator");
+      await server.add(aggregator);
+      const endpoint = new Endpoint(
+        FanDevice({
+          entity: fan(state, attributes),
+          mapping: undefined,
+        } as never),
+        { id: "fan" },
+      );
+      await aggregator.add(endpoint);
+      // biome-ignore lint/suspicious/noExplicitAny: read cluster state
+      const speedMax = (endpoint.stateOf("fanControl" as any) as any).speedMax;
+      await server.close().catch(() => {});
+      return speedMax;
+    };
+
+    const first = await start("on", available);
+    const second = await start("unavailable", unavailable);
+
+    expect(first).toBe(100);
+    expect(second).toBe(first);
+    // unknown but with percentage_step present still computes SpeedMax
+    await start("unknown", { supported_features: 1, percentage_step: 10 });
+    expect(await start("unavailable", unavailable)).toBe(10);
   });
 });

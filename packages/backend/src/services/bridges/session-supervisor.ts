@@ -1,6 +1,6 @@
 import * as os from "node:os";
 import { alexaPairingPortProblem } from "@home-assistant-matter-hub/common";
-import { type Environment, type Logger, Time } from "@matter/general";
+import { type Environment, hex, type Logger, Time } from "@matter/general";
 import { Network } from "@matter/main";
 import { InteractionServer } from "@matter/main/node";
 import {
@@ -130,6 +130,7 @@ export class SessionSupervisor {
   private lastCommandImAt = new WeakMap<object, number>();
   private subscribeTimesMs = new WeakMap<object, number[]>();
   private giveUpTimesMs = new WeakMap<object, number[]>();
+  private subscriptionStartedAt = new WeakMap<object, number>();
   // Sessions whose subscriptions.deleted we already hooked for give-ups.
   private wedgeHookedSessions = new WeakSet<object>();
 
@@ -576,7 +577,12 @@ export class SessionSupervisor {
   // coincident inbound IM request, so that is the discriminator.
   private hookSubscriptionGiveUps(
     session: {
+      id?: unknown;
+      peerNodeId?: unknown;
+      fabric?: { fabricIndex?: unknown };
+      isClosing?: boolean;
       subscriptions?: {
+        added?: { on?: (fn: (sub: unknown) => void) => void };
         deleted?: { on?: (fn: (sub: unknown) => void) => void };
       };
     },
@@ -591,6 +597,9 @@ export class SessionSupervisor {
       return;
     }
     this.wedgeHookedSessions.add(key);
+    session.subscriptions?.added?.on?.((sub) => {
+      if (sub) this.subscriptionStartedAt.set(sub as object, Date.now());
+    });
     deleted.on((sub) => {
       if ((sub as { isTerminated?: boolean })?.isTerminated !== true) {
         return;
@@ -616,8 +625,18 @@ export class SessionSupervisor {
       // Cross-checkable against matter.js "Giving up on subscription" notices:
       // a recorded give-up WITHOUT that notice was an InvalidSubscription or
       // Failure answer from a live controller, not a delivery give-up.
-      this.log.debug(
-        `wedge v2 give-up recorded sub=${(sub as { subscriptionId?: number })?.subscriptionId}`,
+      const subscriptionId = (sub as { subscriptionId?: number })
+        ?.subscriptionId;
+      this.log.debug(`wedge v2 give-up recorded sub=${subscriptionId}`);
+      // A closing session ends its subscriptions itself, HAMH rotations included.
+      if (session.isClosing) {
+        return;
+      }
+      const startedAt = this.subscriptionStartedAt.get(sub as object);
+      const lived =
+        startedAt != null ? `${Math.round((now - startedAt) / 1000)}s` : "?s";
+      this.log.info(
+        `Subscription ${subscriptionId != null ? hex.fixed(subscriptionId, 8) : "?"} on session ${session.id} (peer ${session.peerNodeId}, fabric ${session.fabric?.fabricIndex}) ended after ${lived}`,
       );
     });
   }

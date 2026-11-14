@@ -51,6 +51,8 @@ export class EntityMappingSync {
       entityId: string,
     ) => EntityMappingConfig | undefined,
     private readonly log: Logger,
+    // server mode builds every entity flat (#301)
+    private readonly composes = true,
   ) {}
 
   // Only endpoints the auto-mapping applies to belong in the candidates: a
@@ -83,13 +85,69 @@ export class EntityMappingSync {
     const battery = entityId
       ? this.registry.batteryFingerprintFor(entityId, mapping)
       : "";
+    const tuple: unknown[] = [mapping ?? null, battery || null];
     // fans carry a third capability element (#515); other domains keep the
     // two-element tuple so their stored fingerprints stay valid
     if (entityId?.startsWith("fan.")) {
-      const caps = fanCapabilities(this.registry.initialState(entityId));
-      return JSON.stringify([mapping ?? null, battery || null, caps]);
+      tuple.push(fanCapabilities(this.registry.initialState(entityId)));
     }
-    return JSON.stringify([mapping ?? null, battery || null]);
+    const companions = entityId ? this.companions(mapping, entityId) : null;
+    if (companions?.some((id) => id != null)) tuple.push(companions);
+    return JSON.stringify(tuple);
+  }
+
+  // #505: auto-resolved sensors that decide the endpoint shape, mirrors
+  // LegacyEndpoint.create: an air purifier composes over its device's
+  // temperature and humidity, a temperature sensor merges or composes its
+  // humidity and pressure (a user composite still merges them into its
+  // primary). A null slot is not resolvable right now, null = no companions.
+  private companions(
+    mapping: EntityMappingConfig | undefined,
+    entityId: string,
+  ): (string | null)[] | null {
+    const r = this.registry;
+    const deviceId = r.entity(entityId)?.device_id;
+    if (!deviceId) return null;
+    let slots: (string | undefined)[];
+    if (entityId.startsWith("fan.")) {
+      if (
+        !this.composes ||
+        !r.isAutoComposedDevicesEnabled?.() ||
+        !!mapping?.composedEntities?.length ||
+        (mapping?.matterDeviceType ?? "fan") !== "air_purifier"
+      ) {
+        return null;
+      }
+      slots = [
+        mapping?.temperatureEntity ||
+          r.findTemperatureEntityForDevice(deviceId),
+        mapping?.humidityEntity || r.findHumidityEntityForDevice(deviceId),
+      ];
+    } else if (
+      entityId.startsWith("sensor.") &&
+      r.initialState(entityId)?.attributes?.device_class === "temperature"
+    ) {
+      slots = [
+        !mapping?.humidityEntity && r.isAutoHumidityMappingEnabled?.()
+          ? r.findHumidityEntityForDevice(deviceId)
+          : undefined,
+        !mapping?.pressureEntity && r.isAutoPressureMappingEnabled?.()
+          ? r.findPressureEntityForDevice(deviceId)
+          : undefined,
+      ];
+    } else {
+      return null;
+    }
+    return slots.map((id) => (id && id !== entityId ? id : null));
+  }
+
+  // A mapped sensor whose state is missing right now (HA restart) still
+  // belongs to the endpoint while it exists on the same device, enabled.
+  private stillOnDevice(id: string, deviceId: string | undefined): boolean {
+    const entity = this.registry.fullEntities[id];
+    return (
+      !!deviceId && entity?.device_id === deviceId && entity.disabled_by == null
+    );
   }
 
   // Live fingerprint for reconcile compares: when the resolver finds nothing
@@ -112,15 +170,33 @@ export class EntityMappingSync {
         fingerprint = JSON.stringify(live);
       }
     }
+    const deviceId = this.registry.entity(entityId)?.device_id;
+    // #505: a stored companion stays until it leaves the device or is
+    // disabled, a vanished state or a second same-class sensor never rebuilds
+    const at = entityId.startsWith("fan.") ? 3 : 2;
+    const storedCompanions = storedFingerprint
+      ? parseTuple(storedFingerprint)[at]
+      : undefined;
+    const slots = Array.isArray(storedCompanions)
+      ? this.companions(mapping, entityId)
+      : null;
+    if (Array.isArray(storedCompanions) && slots) {
+      const kept = storedCompanions.map((id, i) =>
+        typeof id === "string" && this.stillOnDevice(id, deviceId)
+          ? id
+          : slots[i],
+      );
+      if (kept.some((id) => id != null)) {
+        const live = parseTuple(fingerprint);
+        live[at] = kept;
+        fingerprint = JSON.stringify(live);
+      }
+    }
     if (fingerprintBattery(fingerprint) != null || !storedFingerprint)
       return fingerprint;
     if (!this.eligible(entityId)) return fingerprint;
     const battery = fingerprintBattery(storedFingerprint);
-    if (!battery) return fingerprint;
-    const deviceId = this.registry.entity(entityId)?.device_id;
-    const stillSameDevice =
-      !!deviceId && this.registry.fullEntities[battery]?.device_id === deviceId;
-    if (!stillSameDevice) return fingerprint;
+    if (!battery || !this.stillOnDevice(battery, deviceId)) return fingerprint;
     const merged = parseTuple(fingerprint);
     merged[1] = battery;
     return JSON.stringify(merged);

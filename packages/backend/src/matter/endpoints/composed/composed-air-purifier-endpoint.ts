@@ -26,6 +26,7 @@ import { BasicInformationServer } from "../../behaviors/basic-information-server
 import { HaElectricalEnergyMeasurementServer } from "../../behaviors/electrical-energy-measurement-server.js";
 import { HaElectricalPowerMeasurementServer } from "../../behaviors/electrical-power-measurement-server.js";
 import { FanSpeedMemoryBehavior } from "../../behaviors/fan-speed-memory.js";
+import { HepaFilterMemoryBehavior } from "../../behaviors/hepa-filter-memory.js";
 import { HomeAssistantEntityBehavior } from "../../behaviors/home-assistant-entity-behavior.js";
 import {
   type HumidityMeasurementConfig,
@@ -207,6 +208,7 @@ export class ComposedAirPurifierEndpoint extends Endpoint {
     if (hasFilterLife) {
       airPurifierSubType = airPurifierSubType.with(
         AirPurifierHepaFilterMonitoringServer,
+        HepaFilterMemoryBehavior,
       );
     }
 

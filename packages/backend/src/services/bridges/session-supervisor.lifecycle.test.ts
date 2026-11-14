@@ -349,6 +349,60 @@ describe("wedge watchdog per peer", () => {
   });
 });
 
+describe("subscription ended by the peer side (#543)", () => {
+  function watched() {
+    const s = fakeSession(1, 1);
+    const subHandlers: {
+      added?: (sub: unknown) => void;
+      deleted?: (sub: unknown) => void;
+    } = {};
+    Object.assign(s.subscriptions, {
+      added: { on: (fn: (sub: unknown) => void) => (subHandlers.added = fn) },
+      deleted: {
+        on: (fn: (sub: unknown) => void) => (subHandlers.deleted = fn),
+      },
+    });
+    const harness = makeSupervisor([s]);
+    const sub = { subscriptionId: 0x1a2b, isTerminated: true };
+    subHandlers.added?.(sub);
+    const ended = () =>
+      harness.log.info.mock.calls.filter((c) =>
+        String(c[0]).includes("ended after"),
+      );
+    return { s, sub, subHandlers, ended, ...harness };
+  }
+
+  it("names peer, fabric, session and lifetime", async () => {
+    const { sub, subHandlers, ended, log } = watched();
+    await vi.advanceTimersByTimeAsync(90_000);
+    subHandlers.deleted?.(sub);
+    expect(ended()).toEqual([
+      [
+        "Subscription 00001a2b on session 1 (peer 99, fabric 1) ended after 90s",
+      ],
+    ]);
+    expect(log.debug).toHaveBeenCalledWith(
+      expect.stringContaining("wedge v2 give-up recorded"),
+    );
+  });
+
+  it("stays quiet when the session is closing", async () => {
+    const { s, sub, subHandlers, ended } = watched();
+    await vi.advanceTimersByTimeAsync(90_000);
+    s.isClosing = true;
+    subHandlers.deleted?.(sub);
+    expect(ended()).toEqual([]);
+  });
+
+  it("stays quiet when a new subscribe replaced it", async () => {
+    const { s, sub, subHandlers, ended, imRequest } = watched();
+    await vi.advanceTimersByTimeAsync(90_000);
+    imRequest(s, MessageType.SubscribeRequest);
+    subHandlers.deleted?.(sub);
+    expect(ended()).toEqual([]);
+  });
+});
+
 describe("lifecycle", () => {
   const timed = () =>
     makeSupervisor([], { wedgeWatchdog: true }, { sessionMaxAgeHours: 1 });

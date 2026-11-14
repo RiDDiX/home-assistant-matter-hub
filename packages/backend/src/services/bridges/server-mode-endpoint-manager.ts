@@ -114,6 +114,7 @@ export class ServerModeEndpointManager extends Service {
       registry,
       (entityId) => this.getEntityMapping(entityId),
       log,
+      false,
     );
   }
 
@@ -468,6 +469,13 @@ export class ServerModeEndpointManager extends Service {
         removed.length > genuinelyRemoved.length ||
         genuinelyRemoved.length > absent.length ||
         confirmedRemoved.length > 0;
+      for (const id of confirmedRemoved) {
+        const entry = this.endpoints.get(id);
+        if (!entry) continue;
+        this.log.info(
+          `Removing endpoint ${id} (ep ${entry.endpoint.number}) after the grace window, controllers will see a new number if it returns`,
+        );
+      }
       await this.removeEndpoints(confirmedRemoved);
 
       // Reserve every disabled entity's id up front: an active entity that

@@ -1,5 +1,5 @@
 import type { HomeAssistantEntityInformation } from "@home-assistant-matter-hub/common";
-import { Logger, Transaction } from "@matter/general";
+import { Logger } from "@matter/general";
 import type { ActionContext } from "@matter/main";
 import {
   FanControlServer as Base,
@@ -26,20 +26,11 @@ import { FanSpeedMemoryBehavior } from "./fan-speed-memory.js";
 import { HomeAssistantEntityBehavior } from "./home-assistant-entity-behavior.js";
 import { setOptimisticOnOff } from "./on-off-server.js";
 import type { ValueGetter, ValueSetter } from "./utils/cluster-config.js";
+import { lockResource } from "./utils/lock-resource.js";
 
 import AirflowDirection = FanControl.AirflowDirection;
 
 const logger = Logger.get("FanControlServer");
-
-// matter.js locks the datasource behind a behavior, but the reactor's lock check
-// reads lockedBy off the raw object, so hand it the datasource itself.
-function lockResource(behavior: object): Transaction.Resource {
-  let resource = behavior as Transaction.Resource;
-  while (resource[Transaction.Resource.reference]) {
-    resource = resource[Transaction.Resource.reference] as Transaction.Resource;
-  }
-  return resource;
-}
 
 const defaultStepSize = 33.33;
 const minSpeedMax = 3;
@@ -303,6 +294,11 @@ export class FanControlServerBase extends FeaturedBase {
     let speedMax: number;
     let speed: number;
     let fallback = false;
+    let rememberedSpeedMax: number | undefined;
+    // Read when needed, a restart may start with the entity unavailable (#505)
+    const memory = this.agent.has(FanSpeedMemoryBehavior)
+      ? this.agent.get(FanSpeedMemoryBehavior).state
+      : undefined;
 
     if (supportsPercentage) {
       // Fan supports percentage control - use percentage-based logic
@@ -312,9 +308,13 @@ export class FanControlServerBase extends FeaturedBase {
         stepSize != null && stepSize > 0 ? stepSize : defaultStepSize;
       // HA drops percentage_step while the fan is unavailable. SpeedMax is a
       // fixed attribute, so keep the last one instead of the default (#505).
+      const unreachable =
+        entity.state.state === "unavailable" ||
+        entity.state.state === "unknown";
       const knownSpeedMax =
-        stepSize == null && entity.state.state === "unavailable"
-          ? (this.state as { speedMax?: number }).speedMax
+        stepSize == null && unreachable
+          ? memory?.lastSpeedMax ||
+            (this.state as { speedMax?: number }).speedMax
           : undefined;
       const calculatedSpeedMax =
         knownSpeedMax ?? Math.round(100 / effectiveStepSize);
@@ -322,6 +322,9 @@ export class FanControlServerBase extends FeaturedBase {
         minSpeedMax,
         Math.min(maxSpeedMax, calculatedSpeedMax),
       );
+      if (memory && knownSpeedMax === undefined) {
+        rememberedSpeedMax = speedMax;
+      }
       // An on entity without a percentage (Dyson in preset Auto) must not
       // read as off while OnOff says on (#546). The stand-in is not remembered.
       // Fans only: a humidifier percentSetting is its target humidity.
@@ -439,9 +442,13 @@ export class FanControlServerBase extends FeaturedBase {
             }
           : {}),
       });
-    } catch {
-      // Ignore transaction conflicts during post-commit phase
-      // The state will be updated on the next entity update
+      if (memory && rememberedSpeedMax !== undefined) {
+        applyPatchState(memory, { lastSpeedMax: rememberedSpeedMax });
+      }
+    } catch (e) {
+      logger.debug(
+        `[${entity.entity_id}] update failed: ${e instanceof Error ? e.message : String(e)}`,
+      );
     }
   }
 
@@ -625,8 +632,10 @@ export class FanControlServerBase extends FeaturedBase {
               }
             : {}),
         });
-      } catch {
-        // Transaction conflict, HA echo will set the correct values
+      } catch (e) {
+        logger.debug(
+          `[${homeAssistant.entityId}] speed restore failed: ${e instanceof Error ? e.message : String(e)}`,
+        );
       }
     }
     this.syncOnOffFromSpeed(percentage !== 0);
@@ -828,6 +837,7 @@ export class FanControlServerBase extends FeaturedBase {
       // Without this, targetPercentSettingChanged fires and sends a second
       // fan.turn_on(percentage), overriding the no-param fan.turn_on from
       // OnOffServer.on(), which causes Auto→Manual mode regression (#219).
+      const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);
       this.agent.asLocalActor(() => {
         try {
           applyPatchState(this.state, {
@@ -836,13 +846,14 @@ export class FanControlServerBase extends FeaturedBase {
               ? { speedSetting: remembered.speed }
               : {}),
           });
-        } catch {
-          // Transaction conflict, HA state update will set correct values
+        } catch (e) {
+          logger.debug(
+            `[${homeAssistant.entityId}] onOff speed restore failed: ${e instanceof Error ? e.message : String(e)}`,
+          );
         }
       });
       // Also tell HA to turn on at the remembered speed so the fan doesn't
       // fall back to 100% when a plain OnOff.on() is used (#275).
-      const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);
       if (homeAssistant.isAvailable) {
         if (remembered.auto) {
           homeAssistant.callAction(
