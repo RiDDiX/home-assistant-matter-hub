@@ -39,7 +39,7 @@ of port forwarding etc.
 | Channel | Branch | Current Version | Description |
 |---------|--------|-----------------|-------------|
 | **Stable** | `main` | v2.0.60 | Production-ready, recommended for most users |
-| **Alpha** | `alpha` | v2.1.0-alpha.993 | Ahead of Stable, carries the additions listed under Alpha Features |
+| **Alpha** | `alpha` | v2.1.0-alpha.994 | Ahead of Stable, carries the additions listed under Alpha Features |
 | **Testing** | `testing` | v4.1.0-testing.x | ⚠️ **Highly unstable!** Experimental features, may break |
 
 ### Which version should I use?
@@ -550,6 +550,10 @@ Re-assign the affected devices to their rooms after they reconnect. See the [doc
 <details>
 <summary><strong>🧪 Alpha Features (v2.1.0-alpha.x)</strong> - Click to expand</summary>
 
+**v2.1.0-alpha.994:**
+- **Start after a host reboot**: a paired bridge now waits up to 10 minutes for Home Assistant before it starts, instead of 30 seconds, so controllers no longer see an empty bridge while Home Assistant is still booting ([#543](https://github.com/RiDDiX/home-assistant-matter-hub/issues/543)). The log shows the wait once a minute. A bridge that is not paired yet still starts after 30 seconds.
+- **Labels and areas at start**: when the label or area list fails to load on the first try, the bridge retries instead of starting without the entities matched by label.
+- **Logs**: `Session closed` is now an info line unless a subscribed controller loses its last session unexpectedly. With Stable Device Identity off, renaming an entity in Home Assistant logs a hint that controllers will see it as a new device.
 **v2.1.0-alpha.993:**
 - **Fan and air purifier values at start**: a fan or air purifier that is unavailable while the bridge starts now keeps its last speed range instead of falling back to 3 steps, and an air purifier whose filter sensor is unavailable at start keeps its last filter condition instead of showing 100 % ([#505](https://github.com/RiDDiX/home-assistant-matter-hub/issues/505)). An auto-composed air purifier, and a temperature sensor with merged humidity or pressure, now pick up those sensors when they show up after the first refresh, without a restart.
 - **Diagnostics**: the diagnostic export now carries the whole log buffer, 1000 lines on every host. The log names session, peer and fabric when a controller ends a subscription, and server mode logs the endpoint number before a device is removed after the grace window.
