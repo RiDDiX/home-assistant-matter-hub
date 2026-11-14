@@ -47,7 +47,7 @@ const START_WAIT_MS = 60_000;
 const HA_READY_WAIT_MS = 30_000;
 // a paired controller sees an empty start as every device removed, and HA
 // can take minutes to run after a host reboot
-const HA_READY_WAIT_COMMISSIONED_MS = 10 * 60_000;
+export const HA_READY_WAIT_COMMISSIONED_MS = 10 * 60_000;
 const HA_READY_POLL_MS = 3000;
 // bridges start one after the other, once one gave up the others do not
 // wait the full time again for the same HA outage. Only for a while: HA can

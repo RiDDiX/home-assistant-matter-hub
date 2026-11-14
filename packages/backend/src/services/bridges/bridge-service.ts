@@ -14,6 +14,7 @@ import {
 } from "../storage/app-settings-storage.js";
 import type { BridgeStorage } from "../storage/bridge-storage.js";
 import type { Bridge } from "./bridge.js";
+import { HA_READY_WAIT_COMMISSIONED_MS } from "./bridge-base.js";
 import type { BridgeFactory } from "./bridge-factory.js";
 
 export interface BridgeServiceProps {
@@ -41,7 +42,8 @@ function clampRecoveryInterval(ms: number): number {
 
 // a hung bridge must not keep the others from picking up registry changes
 const REFRESH_TIMEOUT_MS = 120_000;
-const START_TIMEOUT_MS = 5 * 60_000;
+// a paired bridge may legitimately wait that long for HA
+const START_TIMEOUT_MS = HA_READY_WAIT_COMMISSIONED_MS + 60_000;
 
 export class BridgeService extends Service {
   private readonly pendingPorts = new Set<number>();

@@ -487,7 +487,8 @@ describe("BridgeService refreshAll", () => {
     const all = svc.startAll().then(() => {
       done = true;
     });
-    await vi.advanceTimersByTimeAsync(5 * 60_000 - 1);
+    // past a paired bridge's full HA wait
+    await vi.advanceTimersByTimeAsync(11 * 60_000 - 1);
     expect(done).toBe(false);
     await vi.advanceTimersByTimeAsync(1);
     await all;

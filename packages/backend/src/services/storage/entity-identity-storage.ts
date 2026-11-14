@@ -142,7 +142,10 @@ export class EntityIdentityStorage extends Service {
       // any write that lands ends the run, a flush too
       this.persistFailing = false;
     } catch (e) {
+      // Still dirty, retry until a write lands, a failed flush too. A write
+      // in flight at dispose must not re-arm on a torn down storage.
       this.dirty = true;
+      if (!this.disposed) this.armPersist(PERSIST_RETRY_MS);
       throw e;
     }
   }
@@ -157,14 +160,12 @@ export class EntityIdentityStorage extends Service {
     this.persistTimer = setTimeout(() => {
       this.persistTimer = null;
       this.persist().catch((e) => {
-        // Still dirty on failure, retry until a write lands. Warn once per
-        // run of failures, not every retry. A write in flight at dispose
-        // must not re-arm on a torn down storage.
+        // persist() armed the retry. Warn once per run of failures, not
+        // every retry.
         if (!this.persistFailing) {
           logger.warn("Failed to persist entity identities:", e);
         }
         this.persistFailing = true;
-        if (this.dirty && !this.disposed) this.armPersist(PERSIST_RETRY_MS);
       });
     }, delay);
   }

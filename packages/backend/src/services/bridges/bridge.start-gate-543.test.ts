@@ -423,6 +423,45 @@ describe("bridge start gate (#543 round 4)", () => {
     expect(notReady(log)).toBe(1);
   });
 
+  it("an unpaired give up does not cut a commissioned bridge's wait", async () => {
+    const { bridge, client, online, log } = await make(makeHa(["vacuum.a"]));
+    await bridge.start();
+    await bridge.stop();
+    client.haRunning = false;
+    await startOnFakeTimers(bridge, async () => {
+      await vi.advanceTimersByTimeAsync(30_000);
+    });
+    expect(online).toHaveLength(2);
+    await bridge.stop();
+    commission(bridge);
+    const starting = bridge.start();
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(online).toHaveLength(2);
+    await vi.advanceTimersByTimeAsync(10 * 60_000 - 30_000 - 1);
+    expect(online).toHaveLength(2);
+    await vi.advanceTimersByTimeAsync(1);
+    await starting;
+    expect(online).toHaveLength(3);
+    expect(notReady(log)).toBe(2);
+  });
+
+  it("a commissioned give up spares a later commissioned bridge the wait", async () => {
+    const { bridge, client, online, log } = await make(makeHa(["vacuum.a"]));
+    await bridge.start();
+    await bridge.stop();
+    client.haRunning = false;
+    commission(bridge);
+    await startOnFakeTimers(bridge, async () => {
+      await vi.advanceTimersByTimeAsync(10 * 60_000);
+    });
+    expect(online).toHaveLength(2);
+    await bridge.stop();
+    await vi.advanceTimersByTimeAsync(60_000);
+    await bridge.start();
+    expect(online).toHaveLength(3);
+    expect(notReady(log)).toBe(2);
+  });
+
   it("does not wait for an entity that keeps failing", async () => {
     const { bridge, bem, online, log } = await make(
       makeHa(["vacuum.a", "vacuum.bad"]),
