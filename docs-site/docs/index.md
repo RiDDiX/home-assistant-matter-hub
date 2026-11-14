@@ -550,6 +550,9 @@ Home, ...) are not placed in the same network segment. Please make sure to revie
 <details>
 <summary><strong>🧪 Alpha (v2.1.0-alpha.x)</strong></summary>
 
+**v2.1.0-alpha.993:**
+- **Fan and air purifier values at start**: a fan or air purifier that is unavailable while the bridge starts now keeps its last speed range instead of falling back to 3 steps, and an air purifier whose filter sensor is unavailable at start keeps its last filter condition instead of showing 100 % ([#505](https://github.com/RiDDiX/home-assistant-matter-hub/issues/505)). An auto-composed air purifier, and a temperature sensor with merged humidity or pressure, now pick up those sensors when they show up after the first refresh, without a restart.
+- **Diagnostics**: the diagnostic export now carries the whole log buffer, 1000 lines on every host. The log names session, peer and fabric when a controller ends a subscription, and server mode logs the endpoint number before a device is removed after the grace window.
 **v2.1.0-alpha.992:**
 - **Vacuum mode selects that go unavailable**: a vacuum whose cleaning mode, suction level and water volume selects go unavailable, as seen with Dreame, now keeps its mop modes in the clean mode list, also when the selects are already unavailable at start ([#552](https://github.com/RiDDiX/home-assistant-matter-hub/issues/552)). An unavailable suction or mop select no longer shows up as a made-up fan speed or mop level, and no `unavailable` option is sent back to Home Assistant. A vacuum attribute `cleaning_mode` of `unknown` is ignored, the cleaning mode select is used instead. alpha.989 already stopped these vacuums from failing with "Can not use unsupported mode: 50", which still happens on Stable 2.0.60.
 - **Unavailable selects**: a `select` or `input_select` entity in state `unavailable` or `unknown` now keeps its last mode. Before, it jumped to the first option.
