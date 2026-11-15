@@ -25,13 +25,11 @@ function fanCapabilities(
   return JSON.stringify([attributes.supported_features, presets]);
 }
 
-// A light picks OnOff/Dimmable/ExtendedColor once from supported_color_modes.
-// One mounted while unavailable has none and stays on/off. null = unknown.
+// A light picks OnOff/Dimmable/ExtendedColor once from supported_color_modes,
+// whatever its state. One mounted while unavailable has none and stays
+// on/off. null = no modes to rank.
 function lightRank(state: HomeAssistantEntityState | undefined): number | null {
-  if (!state || state.state === "unavailable" || state.state === "unknown") {
-    return null;
-  }
-  const modes = (state.attributes as Record<string, unknown> | undefined)
+  const modes = (state?.attributes as Record<string, unknown> | undefined)
     ?.supported_color_modes;
   return Array.isArray(modes) ? lightShape(modes).rank : null;
 }

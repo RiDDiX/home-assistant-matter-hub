@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { BridgeDataProvider } from "./bridge-data-provider.js";
 import {
   DEAD_SESSION_TIMEOUT_MS,
+  FAST_DEAD_SESSION_TIMEOUT_MS,
   PRIMING_GRACE_MS,
   STALE_SESSION_QUIET_WINDOW_MS,
 } from "./session-rotation.js";
@@ -43,6 +44,9 @@ function fakeSession(id: number, subs = 0): FakeSession {
   };
 }
 
+// a commissioner holds the failsafe while its CASE session has no subscription
+let failsafeArmed = false;
+
 function makeSupervisor(
   sessions: FakeSession[],
   featureFlags: object = {},
@@ -79,6 +83,8 @@ function makeSupervisor(
   };
   const fabricManager = { events: { added: event("fabricAdded") } };
   const env = {
+    has: (type: { name?: string }) =>
+      type?.name === "FailsafeContext" && failsafeArmed,
     get: (type: { name?: string }) =>
       type?.name === "InteractionServer"
         ? interactionServer
@@ -124,6 +130,7 @@ function makeSupervisor(
 
 beforeEach(() => {
   vi.useFakeTimers();
+  failsafeArmed = false;
 });
 
 afterEach(() => {
@@ -194,6 +201,46 @@ describe("0-sub session replaced by a new session", () => {
     expect(old.initiateClose).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(1);
     expect(old.initiateClose).toHaveBeenCalled();
+  });
+});
+
+describe("armed failsafe under fastSessionRecovery", () => {
+  it("dead session timer closes nothing until the failsafe ends", async () => {
+    const lost = fakeSession(1);
+    const phone = fakeSession(2);
+    phone.peerNodeId = 7n;
+    const { handlers } = makeSupervisor([lost, phone], {
+      fastSessionRecovery: true,
+    });
+    failsafeArmed = true;
+
+    handlers.subscriptionsChanged?.(lost as never);
+    await vi.advanceTimersByTimeAsync(FAST_DEAD_SESSION_TIMEOUT_MS * 3);
+    expect(phone.initiateClose).not.toHaveBeenCalled();
+    expect(lost.initiateClose).not.toHaveBeenCalled();
+
+    failsafeArmed = false;
+    await vi.advanceTimersByTimeAsync(FAST_DEAD_SESSION_TIMEOUT_MS);
+    expect(phone.initiateClose).toHaveBeenCalled();
+    expect(lost.initiateClose).toHaveBeenCalled();
+  });
+
+  it("replaced session timer waits for the failsafe to end", async () => {
+    const old = fakeSession(1);
+    const fresh = fakeSession(2, 1);
+    const { handlers } = makeSupervisor([old, fresh], {
+      fastSessionRecovery: true,
+    });
+    failsafeArmed = true;
+
+    handlers.added?.(fresh as never);
+    await vi.advanceTimersByTimeAsync(PRIMING_GRACE_MS * 2);
+    expect(old.initiateClose).not.toHaveBeenCalled();
+
+    failsafeArmed = false;
+    await vi.advanceTimersByTimeAsync(FAST_DEAD_SESSION_TIMEOUT_MS);
+    expect(old.initiateClose).toHaveBeenCalled();
+    expect(fresh.initiateClose).not.toHaveBeenCalled();
   });
 });
 

@@ -74,7 +74,10 @@ interface LifecycleEndpointManager {
  * guards added to one cannot be missing from the other again.
  */
 export abstract class BridgeBase<
-  S extends ServerNode & { factoryReset(): Promise<void> },
+  S extends ServerNode & {
+    factoryReset(): Promise<void>;
+    eraseOnline?: () => Promise<void>;
+  },
   M extends LifecycleEndpointManager,
 > {
   protected readonly sessions: SessionSupervisor;
@@ -119,6 +122,7 @@ export abstract class BridgeBase<
       () => this.data,
       sessionMaxAgeHours,
     );
+    server.eraseOnline = () => this.resetAfterLastFabric();
   }
 
   /** "Bridge" or "Server mode bridge", for status reasons and events. */
@@ -506,20 +510,47 @@ export abstract class BridgeBase<
     if (this.status.code !== BridgeStatus.Running) {
       return false;
     }
-    this.resetInFlight = this.runFactoryReset(beforeReset).finally(() => {
+    await this.runReset(beforeReset);
+    return true;
+  }
+
+  private runReset(beforeReset?: () => Promise<void>) {
+    this.resetInFlight ??= this.runFactoryReset(beforeReset).finally(() => {
       this.resetInFlight = undefined;
     });
-    await this.resetInFlight;
-    return true;
+    return this.resetInFlight;
   }
 
   private async runFactoryReset(beforeReset?: () => Promise<void>) {
     await beforeReset?.();
+    const stopped = this.stopRequested;
     // Regular stop first, or the restart rejects every plugin as already
     // registered (#477, #478).
-    await this.stop(BridgeStatus.Stopped, "Factory reset");
+    const stopping = this.stop(BridgeStatus.Stopped, "Factory reset");
+    // only a stop or delete from here on keeps the bridge down
+    this.stopRequested = stopped;
+    await stopping;
     await this.server.factoryReset();
+    if (this.stopRequested) return;
     await this.start();
+  }
+
+  // the node's erase hands an online reset here, matter.js runs it once the
+  // last fabric is gone and its rejection would crash the runtime
+  private async resetAfterLastFabric(): Promise<void> {
+    try {
+      await this.runReset();
+    } catch (e) {
+      this.log.error(
+        `${this.id}: factory reset after the last fabric failed:`,
+        e,
+      );
+      if (this.stopRequested) return;
+      await this.stop(
+        BridgeStatus.Failed,
+        `Factory reset failed:\n${e?.toString()}`,
+      ).catch((e) => this.log.error(`${this.id}: stop after failed reset:`, e));
+    }
   }
 
   private async reopenExpiredCommissioning() {

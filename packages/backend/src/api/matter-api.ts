@@ -164,7 +164,6 @@ export function matterApi(
           .json({ error: "Bridge must be running to factory reset" });
         return;
       }
-      await bridge.start();
       res.status(200).json(bridge.data);
     } catch (e) {
       res.status(500).json({

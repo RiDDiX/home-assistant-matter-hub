@@ -126,9 +126,5 @@ export class AppEnvironment extends EnvironmentBase {
         this.options.webApi,
       ),
     );
-
-    this.runtime.add({
-      [Symbol.asyncDispose]: () => this.dispose(),
-    });
   }
 }

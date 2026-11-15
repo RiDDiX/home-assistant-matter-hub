@@ -2,10 +2,34 @@ import type { AddressInfo } from "node:net";
 import { BridgeStatus } from "@home-assistant-matter-hub/common";
 import express from "express";
 import { describe, expect, it, vi } from "vitest";
+import { Bridge } from "../services/bridges/bridge.js";
 import type { BridgeService } from "../services/bridges/bridge-service.js";
 import type { EntityIdentityStorage } from "../services/storage/entity-identity-storage.js";
 import type { EntityMappingStorage } from "../services/storage/entity-mapping-storage.js";
 import { matterApi } from "./matter-api.js";
+
+async function post(bridge: object, deleteBridgeIdentities = vi.fn()) {
+  const app = express();
+  app.use(express.json());
+  app.use(
+    "/matter",
+    matterApi({ bridges: [bridge] } as unknown as BridgeService, undefined, {
+      deleteBridgeIdentities,
+    } as unknown as EntityIdentityStorage),
+  );
+  const server = app.listen(0);
+  try {
+    await new Promise<void>((resolve) => server.once("listening", resolve));
+    const { port } = server.address() as AddressInfo;
+    const res = await fetch(
+      `http://127.0.0.1:${port}/matter/bridges/b1/actions/factory-reset`,
+      { method: "POST" },
+    );
+    return res.status;
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+}
 
 // runs: what Bridge.factoryReset sees, the bridge can stop after data was read
 async function factoryReset(
@@ -23,26 +47,8 @@ async function factoryReset(
     start: vi.fn().mockResolvedValue(undefined),
   };
   const deleteBridgeIdentities = vi.fn().mockResolvedValue(undefined);
-  const app = express();
-  app.use(express.json());
-  app.use(
-    "/matter",
-    matterApi({ bridges: [bridge] } as unknown as BridgeService, undefined, {
-      deleteBridgeIdentities,
-    } as unknown as EntityIdentityStorage),
-  );
-  const server = app.listen(0);
-  try {
-    await new Promise<void>((resolve) => server.once("listening", resolve));
-    const { port } = server.address() as AddressInfo;
-    const res = await fetch(
-      `http://127.0.0.1:${port}/matter/bridges/b1/actions/factory-reset`,
-      { method: "POST" },
-    );
-    return { status: res.status, bridge, deleteBridgeIdentities };
-  } finally {
-    await new Promise<void>((resolve) => server.close(() => resolve()));
-  }
+  const code = await post(bridge, deleteBridgeIdentities);
+  return { status: code, bridge, deleteBridgeIdentities };
 }
 
 describe("POST /bridges/:id/actions/factory-reset", () => {
@@ -75,6 +81,47 @@ describe("POST /bridges/:id/actions/factory-reset", () => {
     expect(status).toBe(200);
     expect(deleteBridgeIdentities).toHaveBeenCalledWith("b1");
     expect(bridge.factoryReset).toHaveBeenCalled();
+  });
+
+  it("leaves a bridge down that was stopped during the reset", async () => {
+    // prototype fake as in bridge.factory-reset.test.ts
+    const bridge = Object.create(Bridge.prototype);
+    const noop = async () => {};
+    Object.assign(bridge, {
+      log: { debug() {}, info() {}, warn() {}, error() {} },
+      status: { code: BridgeStatus.Running },
+      sessions: { stop() {}, start() {}, closeActiveSessions: noop },
+      endpointManager: {
+        root: { parts: [] },
+        failedEntities: [],
+        stopPlugins: noop,
+        stopObserving() {},
+      },
+      dataProvider: {
+        id: "b1",
+        name: "b",
+        withMetadata: (status: { code: BridgeStatus }) => ({
+          id: "b1",
+          status: status.code,
+        }),
+      },
+      server: {
+        cancel: noop,
+        // the user presses stop while the erase is still running
+        factoryReset: async () => {
+          await new Promise((r) => setTimeout(r, 50));
+          await bridge.stop();
+        },
+      },
+    });
+    bridge.start = vi.fn(async () => {
+      bridge.status = { code: BridgeStatus.Running };
+    });
+
+    expect(await post(bridge)).toBe(200);
+
+    expect(bridge.start).not.toHaveBeenCalled();
+    expect(bridge.status.code).toBe(BridgeStatus.Stopped);
   });
 });
 

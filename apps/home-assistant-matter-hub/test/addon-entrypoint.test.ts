@@ -133,6 +133,19 @@ describe.skipIf(process.platform === "win32")(
       expect(r.url).toBe("http://127.0.0.1:8123");
     });
 
+    it("leaves the mDNS interface unset without the option", () => {
+      for (const options of [{}, { mdns_network_interface: "" }]) {
+        const r = run(options);
+        expect(r.args).toContain("--mdns-network-interface=");
+        expect(r.args).not.toContain("--mdns-network-interface=null");
+      }
+    });
+
+    it("passes a set mDNS interface", () => {
+      const r = run({ mdns_network_interface: " end0 \n" });
+      expect(r.args).toContain("--mdns-network-interface=end0");
+    });
+
     it("keeps the token out of argv", () => {
       const user = run({ access_token: "user-token" });
       expect(user.token).toBe("user-token");

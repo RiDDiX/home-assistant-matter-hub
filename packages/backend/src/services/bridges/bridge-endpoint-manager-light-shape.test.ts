@@ -296,6 +296,24 @@ describe("light shape rebuild", () => {
     expect(deviceType(lightEndpoint(manager))).toBe(EXTENDED_COLOR);
   });
 
+  it("a light mounted unknown with color modes keeps its endpoint", async () => {
+    const ha = makeHa("unknown", COLOR);
+    const { manager, registry } = await buildManager(ha);
+    await manager.refreshDevices();
+    const first = lightEndpoint(manager);
+    expect(deviceType(first)).toBe(EXTENDED_COLOR);
+    await observe(manager);
+    const refresh = vi.spyOn(manager, "refreshDevices");
+
+    ha.states[LIGHT].state = "on";
+    await manager.updateStates(ha.states, new Set([LIGHT]));
+    await settled(manager);
+    expect(refresh).not.toHaveBeenCalled();
+    registry.refresh();
+    await manager.refreshDevices();
+    expect(lightEndpoint(manager)).toBe(first);
+  });
+
   it("an on/off light that stays on/off never rebuilds", async () => {
     const ha = makeHa("off", { supported_color_modes: ["onoff"] });
     const { manager, registry } = await buildManager(ha);

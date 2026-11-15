@@ -112,12 +112,19 @@ elif [ -n "$local_api_password" ]; then
   bashio::log.warning "local_api_password is set but allow_local_access is off, the local API stays closed"
 fi
 
+# bashio prints null for a cleared optional field
+mdns_interface=$(bashio::config 'mdns_network_interface' '')
+mdns_interface="${mdns_interface//[[:space:]]/}"
+if [ "$mdns_interface" = "null" ]; then
+  mdns_interface=''
+fi
+
 exec home-assistant-matter-hub start \
   --log-level=$(bashio::config 'app_log_level') \
   --protocol-log-level=$(bashio::config 'protocol_log_level' 'info') \
   --disable-log-colors=$(bashio::config 'disable_log_colors') \
   --mdns-disable-ipv4=$(bashio::config 'mdns_disable_ipv4' 'false') \
-  --mdns-network-interface="$(bashio::config 'mdns_network_interface')" \
+  --mdns-network-interface="$mdns_interface" \
   --mdns-strip-global-ipv6=$(bashio::config 'mdns_strip_global_ipv6' 'false') \
   --storage-location=/config/data \
   --web-port=$(bashio::addon.ingress_port) \

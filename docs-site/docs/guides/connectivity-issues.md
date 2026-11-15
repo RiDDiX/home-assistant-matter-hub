@@ -5,7 +5,7 @@ Alexa, follow this guide to address common problems.
 
 :::tip Start with the built-in diagnostics
 
-Open **Health & Diagnostics** in the HAMH web UI. The **Network Diagnostics** card lists every network interface, shows which one mDNS is bound to, and runs automated checks that flag the most common problems (for example mDNS advertising on Docker-internal or extra interfaces) with a direct hint on what to change. It is the fastest way to see what your bridge is actually advertising before you touch any settings.
+Open **Health & Diagnostics** in the HAMH web UI. The **Network Diagnostics** card lists every network interface, shows which one mDNS is bound to, and runs automated checks that flag the most common problems (for example a configured mDNS interface that does not exist) with a direct hint on what to change. It is the fastest way to see what your bridge is actually advertising before you touch any settings.
 
 HAMH logs the same warnings at startup, so the add-on log is a good second place to look. The **Controller Health** card on the same page shows each connected controller and whether its link has gone stale.
 
@@ -108,20 +108,20 @@ Many routers, access points, and managed switches have features that **filter, t
 
 ### mDNS Network Interface Binding
 
-On a host with several network interfaces, Matter advertises its operational records on **all** of them and writes every interface address into those records. A controller can then latch onto an unreachable address and show devices as **"No Response"** (Apple Home) or **"Offline"** (Google Home), even though pairing succeeded. With Google Home this often looks like the device being found during setup but failing at "connecting to device". A power outage or reboot can trigger it by reshuffling interfaces or addresses.
+On a host with several network interfaces, Matter advertises its operational records on **all** of them, and each interface answers with its own addresses only. A controller can still be handed an address on its own network that it cannot use and show devices as **"No Response"** (Apple Home) or **"Offline"** (Google Home), even though pairing succeeded. With Google Home this often looks like the device being found during setup but failing at "connecting to device". A power outage or reboot can trigger it by reshuffling interfaces or addresses.
 
-Interfaces that commonly cause this:
+The address that commonly causes this:
 
-- **Docker bridges** like `docker0`, `hassio`, or `veth*`, and the container's own bridge on a `172.16.x` / `172.30.x` address. Controllers cannot reach these from the LAN.
-- **OpenThread / OTBR interfaces** (`wpan0`, `otbr*`) that appear when you also run the Thread Border Router or the official Matter Server add-on. They carry a Thread mesh-local ULA (an `fd::` address) that is not routable to the rest of your network, so a controller that picks it cannot connect.
 - A **global IPv6 address** (`2000::/3`) on your LAN NIC that a controller cannot reach back on the local network.
 
-HAMH flags this in two places: the **Network Diagnostics** card on the **Health & Diagnostics** page names the extra interfaces and suggests your likely LAN interface, and the startup log prints the same warning. Bind mDNS to your real LAN interface yourself (**not** a Docker or Thread one):
+Docker bridges like `docker0`, `hassio`, or `veth*` and Thread interfaces like `wpan0` or `otbr*` do not cause this on their own: their addresses are only announced on those interfaces, so a controller on the LAN only sees them when an mDNS reflector or a bridged network repeats them. With the Thread Border Router the known problem is a kernel route instead, see [OTBR route trap across ULA VLANs](#otbr-route-trap-across-ula-vlans).
+
+HAMH warns about the global IPv6 and OTBR cases in the startup log, and about a container that only has Docker addresses (no host networking). To limit which interfaces HAMH announces on, bind mDNS to your real LAN interface yourself (**not** a Docker or Thread one):
 
 - **HA OS add-on:** set the `mdns_network_interface` option to the LAN NIC (e.g. `end0`, `eth0`, `enp0s3`), not `docker0`, `hassio`, `veth*`, or `wpan0`.
 - **Plain container:** pass `--mdns-network-interface eth1` (your LAN NIC on `192.168.x`), not the Docker bridge (e.g. `eth0` on `172.16.x`), or run the container with `--network=host` (recommended for Matter).
 
-If your LAN interface also carries a global IPv6 that controllers cannot reach, drop it from what mDNS advertises with `mdns_strip_global_ipv6` (add-on, both channels) or `--mdns-strip-global-ipv6` (container). This drops the global IPv6 addresses and keeps the link-local and ULA ones (when an interface has neither, nothing is dropped); the IPv4 address and the rest of the advertisement stay unchanged. It does **not** remove a Thread `fd::` address, since that is a ULA; for Thread interfaces, bind the LAN interface instead.
+If your LAN interface also carries a global IPv6 that controllers cannot reach, drop it from what mDNS advertises with `mdns_strip_global_ipv6` (add-on, both channels) or `--mdns-strip-global-ipv6` (container). This drops the global IPv6 addresses and keeps the link-local and ULA ones (when an interface has neither, nothing is dropped); the IPv4 address and the rest of the advertisement stay unchanged. It does **not** remove a Thread `fd::` address, since that is a ULA.
 
 If the advertised IPv4 address is unroutable (for example podman without host networking behind an avahi reflector), force controllers onto IPv6 with `mdns_disable_ipv4` (add-on) or `--mdns-disable-ipv4` (container). This stops mDNS advertising IPv4 so only IPv6 is used. Only reach for it when IPv4 is the problem: an IPv6-only advertisement leaves controllers without IPv6 connectivity (some older Alexa or Google Home hubs) unable to discover the bridge.
 
@@ -129,7 +129,7 @@ Check names and addresses with `ip addr`, or read them straight from the Network
 
 ### OTBR route trap across ULA VLANs
 
-Running the Thread Border Router (OTBR) add-on next to HAMH needs a second fix beyond interface binding. The bridge works until OTBR starts, then goes offline on any controller that sits on a different ULA VLAN. Pinning `mdns_network_interface` to the LAN NIC fixes the mDNS side (the correct routable `fd::` address is advertised again), but pairing still ends in `peer-unresponsive` and the request only travels one way.
+Running the Thread Border Router (OTBR) add-on next to HAMH can need a fix that interface binding does not give. The bridge works until OTBR starts, then goes offline on any controller that sits on a different ULA VLAN. Pinning `mdns_network_interface` to the LAN NIC does not solve it: pairing still ends in `peer-unresponsive` and the request only travels one way.
 
 The cause is a kernel route the OTBR agent injects on the host: an external route for `fc00::/7` via `wpan0` (visible in the OTBR log as it adds an external route `fc00::/7` in kernel). `fc00::/7` covers **every** `fd::` ULA network and is more specific than the `::/0` default, so return packets to a controller on another ULA VLAN (e.g. `fd30::/64`) get routed into the Thread mesh and dropped. The pairing request arrives, the reply never does, and the controller times out.
 

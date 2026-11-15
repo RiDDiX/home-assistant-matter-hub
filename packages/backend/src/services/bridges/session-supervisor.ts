@@ -7,6 +7,7 @@ import {
   DeviceAdvertiser,
   type Fabric,
   FabricManager,
+  FailsafeContext,
   MdnsService,
   MessageType,
   SessionManager,
@@ -678,6 +679,16 @@ export class SessionSupervisor {
     );
   }
 
+  // A commissioner holds no subscription while the failsafe is armed, and
+  // the fast quiet window would close it mid commissioning.
+  private failsafeArmed(): boolean {
+    try {
+      return this.server.env.has(FailsafeContext);
+    } catch {
+      return false;
+    }
+  }
+
   private closeStaleSession(sessionId: number, minQuietMs = 0) {
     try {
       const sessionManager = this.server.env.get(SessionManager);
@@ -687,6 +698,7 @@ export class SessionSupervisor {
         }
         const idleSec = Math.round((Time.nowUs - s.timestamp) / 1000);
         if (
+          this.failsafeArmed() ||
           !staleSessionShouldClose(
             s,
             Math.max(
@@ -750,6 +762,7 @@ export class SessionSupervisor {
         }
         const idleSec = Math.round((Time.nowUs - s.timestamp) / 1000);
         if (
+          this.failsafeArmed() ||
           !staleSessionShouldClose(
             s,
             staleSessionQuietWindowMs(this.dataProvider.featureFlags),

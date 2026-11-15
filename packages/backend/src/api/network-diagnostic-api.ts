@@ -5,11 +5,7 @@ import {
   BridgeStatus,
 } from "@home-assistant-matter-hub/common";
 import express from "express";
-import {
-  DOCKER_NAME,
-  describeInterface,
-  selectMdnsInterface,
-} from "../core/app/select-mdns-interface.js";
+import { DOCKER_NAME } from "../core/app/select-mdns-interface.js";
 import type { BridgeService } from "../services/bridges/bridge-service.js";
 
 export interface NetworkInterfaceInfo {
@@ -226,31 +222,7 @@ export async function runDiagnostics(
     });
   }
 
-  // Check 6: Multiple external interfaces, often Docker-internal ones that make
-  // controllers show devices as offline (#361).
-  if (!mdnsInterface) {
-    const choice = selectMdnsInterface(os.networkInterfaces());
-    if (choice.suspicious || choice.external.length > 1) {
-      const picked = choice.candidates.find((i) => i.name === choice.selected);
-      const suggestion = picked
-        ? `set mdns-network-interface to ${describeInterface(picked)}, your LAN interface.`
-        : `set mdns-network-interface to your LAN interface, one of ${choice.candidates
-            .map(describeInterface)
-            .join(", ")}.`;
-      checks.push({
-        name: "multiple_interfaces",
-        status: "warn",
-        message: choice.suspicious
-          ? "mDNS is advertising on Docker-internal or extra interfaces, which can make controllers show devices as offline"
-          : `${choice.external.length} external interfaces detected without explicit binding`,
-        detail: choice.suspicious
-          ? `Matter puts every interface address into its records, so a controller may pick one it cannot reach. If your devices work, nothing to do. If a controller shows them offline, ${suggestion}`
-          : `mDNS will broadcast on all interfaces. If controllers are on a specific VLAN, ${suggestion}`,
-      });
-    }
-  }
-
-  // Check 7: port 80, on loopback and on the LAN address for containers
+  // Check 6: port 80, on loopback and on the LAN address for containers
   const probeHosts = [
     "127.0.0.1",
     ...(mdnsInterface
@@ -271,7 +243,7 @@ export async function runDiagnostics(
     });
   }
 
-  // Check 8: matter.js answers a plain _matterc browse with only the first
+  // Check 7: matter.js answers a plain _matterc browse with only the first
   // unpaired bridge, and Alexa browses exactly that way
   const unpaired = bridges.filter(
     (b) =>

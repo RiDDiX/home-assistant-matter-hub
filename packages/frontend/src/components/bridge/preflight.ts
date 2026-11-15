@@ -58,10 +58,6 @@ const optionByCheck: Record<
     addonOption: "mdns_network_interface",
     containerFlag: "--mdns-network-interface",
   },
-  multiple_interfaces: {
-    addonOption: "mdns_network_interface",
-    containerFlag: "--mdns-network-interface",
-  },
   mdns_ipv4: {
     addonOption: "mdns_disable_ipv4",
     containerFlag: "--mdns-disable-ipv4",

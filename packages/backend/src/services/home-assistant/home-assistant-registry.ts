@@ -29,7 +29,7 @@ const STARTUP_WAIT_MS = 60_000;
 const INCOMPLETE_REFRESH_RETRIES = 3;
 // a failed label or area query fails only the first attempts of the first
 // load, later ones load without it so a query that never works cannot block
-// the snapshot
+// the snapshot. A refusal no retry can change is never retried.
 const STRICT_LIST_ATTEMPTS = 3;
 
 export type HomeAssistantDevices = Record<string, HomeAssistantDeviceRegistry>;
@@ -332,13 +332,25 @@ export class HomeAssistantRegistry extends Service {
         // endpoints (#500). With none loaded yet, retry instead of starting
         // bridges without their label matched entities.
         getLabelRegistry(connection, timeoutMs).catch((e) => {
-          if (strict && this._snapshotGeneration === 0) throw e;
+          if (
+            strict &&
+            this._snapshotGeneration === 0 &&
+            !isPermanentRefusal(e)
+          ) {
+            throw e;
+          }
           logger.warn("Label registry fetch failed, keeping last labels:", e);
           return this._labels;
         }),
         // same for areas: empty flips the fingerprint and drops room names
         getAreaRegistry(connection, timeoutMs).catch((e) => {
-          if (strict && this._snapshotGeneration === 0) throw e;
+          if (
+            strict &&
+            this._snapshotGeneration === 0 &&
+            !isPermanentRefusal(e)
+          ) {
+            throw e;
+          }
           logger.warn("Area registry fetch failed, keeping last areas:", e);
           return Array.from(this._areas, ([area_id, name]) => ({
             area_id,
@@ -445,6 +457,13 @@ export class HomeAssistantRegistry extends Service {
 
     return true;
   }
+}
+
+// HA without that registry, or a token without its scope. Other codes such
+// as unknown_error can be startup noise and keep the retry.
+function isPermanentRefusal(e: unknown): boolean {
+  const code = (e as { code?: unknown } | null)?.code;
+  return code === "unknown_command" || code === "unauthorized";
 }
 
 function isConnectionLost(e: unknown): boolean {

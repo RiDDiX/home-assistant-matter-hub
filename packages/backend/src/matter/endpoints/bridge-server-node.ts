@@ -20,9 +20,31 @@ export class BridgeServerNode extends ServerNode {
     });
   }
 
+  eraseOnline?: () => Promise<void>;
+
+  override async erase() {
+    await eraseNode(this, () => super.erase());
+  }
+
   async factoryReset() {
     await factoryResetNode(this);
   }
+}
+
+/**
+ * matter.js erases an online node itself once the last fabric is gone and
+ * binds the port again inside erase, a port taken meanwhile crashes the
+ * runtime. The bridge set in eraseOnline resets through its own stop and start.
+ */
+export async function eraseNode(
+  node: ServerNode & { eraseOnline?: () => Promise<void> },
+  erase: () => Promise<void>,
+) {
+  if (node.eraseOnline && node.lifecycle.isOnline) {
+    await node.eraseOnline();
+    return;
+  }
+  await erase();
 }
 
 export async function factoryResetNode(node: ServerNode) {

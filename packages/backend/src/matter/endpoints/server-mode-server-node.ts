@@ -17,7 +17,7 @@ import { trimToLength } from "../../utils/trim-to-length.js";
 import { legacySpecBasicInformation } from "../legacy-spec-version.js";
 import { matterSubscriptionOptions } from "../subscription-options.js";
 import { rootEndpointType } from "../tc-general-commissioning.js";
-import { factoryResetNode } from "./bridge-server-node.js";
+import { eraseNode, factoryResetNode } from "./bridge-server-node.js";
 
 const logger = Logger.get("ServerModeServerNode");
 
@@ -188,6 +188,12 @@ export class ServerModeServerNode extends ServerNode {
       logger.warn(`Failed to set server-mode device type: ${msg}`);
       return false;
     }
+  }
+
+  eraseOnline?: () => Promise<void>;
+
+  override async erase() {
+    await eraseNode(this, () => super.erase());
   }
 
   async factoryReset(): Promise<void> {

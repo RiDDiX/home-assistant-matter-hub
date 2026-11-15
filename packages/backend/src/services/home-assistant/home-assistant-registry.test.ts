@@ -376,27 +376,58 @@ describe("HomeAssistantRegistry", () => {
     expect(registry.labels.length + registry.areas.size).toBe(1);
   });
 
-  it("loads without labels after the retries when the label query never works", async () => {
-    const fake = makeConnection();
-    let labelCalls = 0;
-    fake.connection.sendMessagePromise = vi.fn((message: { type: string }) => {
-      if (message.type !== "config/label_registry/list") {
-        return Promise.resolve([]);
-      }
-      labelCalls++;
-      return Promise.reject({ code: "unauthorized", message: "Unauthorized" });
-    }) as unknown as Connection["sendMessagePromise"];
-    const client = {
-      connection: fake.connection,
-      haRunning: true,
-    } as unknown as HomeAssistantClient & { haRunning: boolean };
-    const registry = new HomeAssistantRegistry(client, defaultOptions);
-    const initPromise = registry.construction;
-    await vi.runAllTimersAsync();
-    await initPromise;
-    expect(labelCalls).toBe(4);
-    expect(registry.snapshotGeneration).toBe(1);
-    expect(registry.labels).toEqual([]);
+  // HA answers a failed command with { code, message }; a dropped socket
+  // rejects with the result wrapper around code 3
+  const listFailures: [string, () => unknown, number, number][] = [
+    [
+      "unknown_command",
+      () => ({ code: "unknown_command", message: "x" }),
+      1,
+      0,
+    ],
+    ["unauthorized", () => ({ code: "unauthorized", message: "x" }), 1, 0],
+    [
+      "unknown_error",
+      () => ({ code: "unknown_error", message: "x" }),
+      4,
+      14_000,
+    ],
+    ["timeout", () => new Error("timed out"), 4, 14_000],
+    // fetchRegistries retries a drop once inside the attempt
+    ["connection lost", lostError, 7, 14_000],
+  ];
+  describe.each([
+    ["config/label_registry/list"],
+    ["config/area_registry/list"],
+  ])("first load with a failing %s", (type) => {
+    it.each(listFailures)("%s", async (_, error, calls, elapsed) => {
+      const fake = makeConnection();
+      let listCalls = 0;
+      fake.connection.sendMessagePromise = vi.fn(
+        (message: { type: string }) => {
+          if (message.type !== type) return Promise.resolve([]);
+          listCalls++;
+          return Promise.reject(error());
+        },
+      ) as unknown as Connection["sendMessagePromise"];
+      const client = {
+        connection: fake.connection,
+        haRunning: true,
+      } as unknown as HomeAssistantClient & { haRunning: boolean };
+      const start = Date.now();
+      const registry = new HomeAssistantRegistry(client, defaultOptions);
+      let doneAt = 0;
+      const initPromise = registry.construction.then(() => {
+        doneAt = Date.now();
+      });
+      await vi.runAllTimersAsync();
+      await initPromise;
+      expect(listCalls).toBe(calls);
+      expect(doneAt - start).toBe(elapsed);
+      // loads without it after the last strict attempt, as before
+      expect(registry.snapshotGeneration).toBe(1);
+      expect(registry.labels.length + registry.areas.size).toBe(0);
+    });
   });
 
   it("picks up a label rename with an unchanged id", async () => {
