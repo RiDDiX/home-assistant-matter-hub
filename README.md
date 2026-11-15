@@ -39,7 +39,7 @@ of port forwarding etc.
 | Channel | Branch | Current Version | Description |
 |---------|--------|-----------------|-------------|
 | **Stable** | `main` | v2.0.60 | Production-ready, recommended for most users |
-| **Alpha** | `alpha` | v2.1.0-alpha.996 | Ahead of Stable, carries the additions listed under Alpha Features |
+| **Alpha** | `alpha` | v2.1.0-alpha.997 | Ahead of Stable, carries the additions listed under Alpha Features |
 | **Testing** | `testing` | v4.1.0-testing.x | ⚠️ **Highly unstable!** Experimental features, may break |
 
 ### Which version should I use?
@@ -550,6 +550,14 @@ Re-assign the affected devices to their rooms after they reconnect. See the [doc
 <details>
 <summary><strong>🧪 Alpha Features (v2.1.0-alpha.x)</strong> - Click to expand</summary>
 
+**v2.1.0-alpha.997:**
+- **Factory reset**: removing the bridge from the last controller could crash the whole app when the Matter port was taken at that moment, and the web UI stayed down until a restart. The bridge now resets through its own stop and start and retries, and the root unique id is renewed on that path too ([#549](https://github.com/RiDDiX/home-assistant-matter-hub/issues/549)). A stop or delete during a factory reset is no longer undone by the reset's own restart.
+- **Runtime crashes**: after a fatal runtime crash the process now exits with code 1 instead of staying up without the web UI.
+- **mDNS**: the startup warning about Docker interfaces and the matching Network Diagnostics check are gone, since matter.js announces each interface with its own addresses only ([#543](https://github.com/RiDDiX/home-assistant-matter-hub/issues/543)). The OTBR warning now names the `fc00::/7` route. New warnings show up for a container without host networking and for a configured mDNS interface that does not exist. The global IPv6 warning only looks at the pinned interface.
+- **Add-on**: a cleared `mdns_network_interface` option no longer stops mDNS.
+- **Labels and areas at start**: label and area lists that Home Assistant refuses for good, for example with a non-admin token, are no longer retried, which saves a few seconds per start.
+- **Pairing**: the session supervisor no longer closes a session while a pairing is in progress.
+- **Lights unknown at start**: a light that is `unknown` at start is no longer rebuilt once.
 **v2.1.0-alpha.996:**
 - **Stable Device Identity**: when deleting an identity could not be written to disk, the write is now retried, so the deleted entry does not come back after a restart.
 - **Start**: the per-bridge start timeout now covers the 10 minute wait for Home Assistant from alpha.994, so a paired bridge that is still waiting is no longer reported as `still pending after 5 min`.
