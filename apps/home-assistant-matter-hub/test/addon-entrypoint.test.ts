@@ -1,5 +1,11 @@
 import { spawnSync } from "node:child_process";
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -223,6 +229,46 @@ describe.skipIf(process.platform === "win32")(
         "LOG: Local API: http://127.0.0.1:8482 with user name hamh",
       );
       expect(r.stderr).not.toContain("local-secret");
+    });
+
+    describe("anonymous /config guard", () => {
+      const guard = readFileSync(entrypoint, "utf8").match(
+        /^config_on_anonymous_volume\(\) \{[\s\S]*?^\}$/m,
+      )?.[0];
+
+      function onAnonymousVolume(mountinfo: string) {
+        const file = join(dir, "mountinfo");
+        writeFileSync(file, mountinfo);
+        const result = spawnSync(
+          "bash",
+          ["-c", `${guard}\nconfig_on_anonymous_volume "$1"`, "bash", file],
+          { encoding: "utf8", timeout: 15_000 },
+        );
+        return result.status === 0;
+      }
+
+      const root = "1026 1017 259:2 / / rw - ext4 /dev/sda1 rw\n";
+
+      it("fails on an anonymous volume", () => {
+        expect(guard).toBeDefined();
+        expect(
+          onAnonymousVolume(
+            `${root}1027 1017 259:2 /var/lib/docker/volumes/${"d7".repeat(32)}/_data /config rw,relatime master:1 - ext4 /dev/sda1 rw\n`,
+          ),
+        ).toBe(true);
+      });
+
+      it("passes on a Supervisor bind", () => {
+        expect(
+          onAnonymousVolume(
+            `${root}1027 1017 259:2 /supervisor/addon_configs/abc_hamh /config rw,relatime master:1 - ext4 /dev/sda1 rw\n`,
+          ),
+        ).toBe(false);
+      });
+
+      it("passes without a /config mount", () => {
+        expect(onAnonymousVolume(root)).toBe(false);
+      });
     });
   },
 );

@@ -150,6 +150,7 @@ export class SessionSupervisor {
   // snapshot.
   private mdnsCheckInFlight = false;
   private mdnsFailedRetries = 0;
+  private mdnsNotifiedSnapshot: string[] | undefined;
 
   // Session lifecycle diagnostic handlers (non-destructive, logging only).
   // biome-ignore lint/suspicious/noExplicitAny: matter.js internal types
@@ -1071,6 +1072,7 @@ export class SessionSupervisor {
       ipv4Enabled,
     );
     this.mdnsFailedRetries = 0;
+    this.mdnsNotifiedSnapshot = undefined;
     this.mdnsAddressTimer = setInterval(() => {
       if (this.mdnsCheckInFlight) return;
       this.mdnsCheckInFlight = true;
@@ -1118,31 +1120,34 @@ export class SessionSupervisor {
       this.readMdnsWatchSettings();
     const advertiser = this.server.env.get(DeviceAdvertiser);
     const fabrics = this.server.env.get(FabricManager);
-    const { snapshot, failedRetries } = await runMdnsAddressWatchTick({
-      readInterfaces: () => os.networkInterfaces(),
-      netInterface,
-      stripGlobalIpv6,
-      ipv4Enabled,
-      currentSnapshot: this.advertisedAddressSnapshot,
-      failedRetries: this.mdnsFailedRetries,
-      fabrics: () => fabrics.fabrics,
-      refresh: (fabric) =>
-        advertiser.refreshOperationalAdvertisement(fabric as Fabric),
-      onChange: (prev, curr) => {
-        const { added, removed } = diffAdvertisedAddresses(prev, curr);
-        this.log.warn(
-          `Advertised address set changed (${prev.length} -> ${curr.length} addresses), re-announcing operational mDNS (#415), added: [${added.join(", ")}] removed: [${removed.join(", ")}]`,
-        );
-      },
-      onRefreshError: (fabric, e) => {
-        this.log.warn(
-          `mDNS re-announce failed for fabric ${(fabric as Fabric).fabricIndex}:`,
-          e,
-        );
-      },
-    });
+    const { snapshot, failedRetries, notifiedSnapshot } =
+      await runMdnsAddressWatchTick({
+        readInterfaces: () => os.networkInterfaces(),
+        netInterface,
+        stripGlobalIpv6,
+        ipv4Enabled,
+        currentSnapshot: this.advertisedAddressSnapshot,
+        failedRetries: this.mdnsFailedRetries,
+        notifiedSnapshot: this.mdnsNotifiedSnapshot,
+        fabrics: () => fabrics.fabrics,
+        refresh: (fabric) =>
+          advertiser.refreshOperationalAdvertisement(fabric as Fabric),
+        onChange: (prev, curr) => {
+          const { added, removed } = diffAdvertisedAddresses(prev, curr);
+          this.log.warn(
+            `Advertised address set changed (${prev.length} -> ${curr.length} addresses), re-announcing operational mDNS (#415), added: [${added.join(", ")}] removed: [${removed.join(", ")}]`,
+          );
+        },
+        onRefreshError: (fabric, e) => {
+          this.log.warn(
+            `mDNS re-announce failed for fabric ${(fabric as Fabric).fabricIndex}:`,
+            e,
+          );
+        },
+      });
     this.advertisedAddressSnapshot = snapshot;
     this.mdnsFailedRetries = failedRetries;
+    this.mdnsNotifiedSnapshot = notifiedSnapshot;
   }
 
   // Env var unset or garbage falls back to defaultMaxAgeHours, 0 (rotation

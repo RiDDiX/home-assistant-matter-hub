@@ -80,6 +80,8 @@ export interface MdnsAddressWatchDeps {
   currentSnapshot: string[];
   // consecutive ticks that kept the old snapshot because a fabric failed
   failedRetries?: number;
+  // set already reported by onChange while the retries keep the old snapshot
+  notifiedSnapshot?: string[];
   fabrics: () => Iterable<unknown>;
   refresh: (fabric: unknown) => Promise<void>;
   onChange?: (prev: string[], curr: string[]) => void;
@@ -91,10 +93,14 @@ export const MDNS_REFRESH_MAX_RETRIES = 3;
 // One watcher tick: recompute the snapshot and, when it changed, refresh the
 // operational advertisement for every fabric so matter.js re-runs its address
 // lookup. Returns the snapshot to store (unchanged when nothing moved) and the
-// retry count to pass into the next tick.
+// retry count and reported set to pass into the next tick.
 export async function runMdnsAddressWatchTick(
   deps: MdnsAddressWatchDeps,
-): Promise<{ snapshot: string[]; failedRetries: number }> {
+): Promise<{
+  snapshot: string[];
+  failedRetries: number;
+  notifiedSnapshot?: string[];
+}> {
   const next = collectAdvertisedAddresses(
     deps.readInterfaces(),
     deps.netInterface,
@@ -105,8 +111,11 @@ export async function runMdnsAddressWatchTick(
     return { snapshot: deps.currentSnapshot, failedRetries: 0 };
   }
   const retries = deps.failedRetries ?? 0;
-  // a retry tick keeps the old snapshot, so it would report the same change
-  if (retries === 0) {
+  // a retry tick keeps the old snapshot, so only report a set not yet reported
+  if (
+    !deps.notifiedSnapshot ||
+    advertisedAddressesChanged(deps.notifiedSnapshot, next)
+  ) {
     deps.onChange?.(deps.currentSnapshot, next);
   }
   let failed = 0;
@@ -120,7 +129,11 @@ export async function runMdnsAddressWatchTick(
     }
   }
   if (failed > 0 && retries < MDNS_REFRESH_MAX_RETRIES) {
-    return { snapshot: deps.currentSnapshot, failedRetries: retries + 1 };
+    return {
+      snapshot: deps.currentSnapshot,
+      failedRetries: retries + 1,
+      notifiedSnapshot: next,
+    };
   }
   return { snapshot: next, failedRetries: 0 };
 }

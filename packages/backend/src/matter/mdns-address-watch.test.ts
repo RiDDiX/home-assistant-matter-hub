@@ -228,7 +228,7 @@ describe("runMdnsAddressWatchTick", () => {
       onRefreshError,
     };
     const first = await runMdnsAddressWatchTick(deps);
-    expect(first).toEqual({ snapshot: old, failedRetries: 1 });
+    expect(first).toMatchObject({ snapshot: old, failedRetries: 1 });
     expect(refresh).toHaveBeenCalledTimes(2);
     expect(refresh).toHaveBeenLastCalledWith({ id: 2 });
     expect(onRefreshError).toHaveBeenCalledOnce();
@@ -258,7 +258,7 @@ describe("runMdnsAddressWatchTick", () => {
       refresh,
     };
     const first = await runMdnsAddressWatchTick(deps);
-    expect(first).toEqual({ snapshot: old, failedRetries: 1 });
+    expect(first).toMatchObject({ snapshot: old, failedRetries: 1 });
 
     refresh.mockClear();
     const second = await runMdnsAddressWatchTick({
@@ -285,7 +285,7 @@ describe("runMdnsAddressWatchTick", () => {
       refresh,
     };
     const first = await runMdnsAddressWatchTick(deps);
-    expect(first).toEqual({ snapshot: old, failedRetries: 1 });
+    expect(first).toMatchObject({ snapshot: old, failedRetries: 1 });
 
     refresh.mockClear();
     refresh.mockImplementation(async () => {});
@@ -307,22 +307,27 @@ describe("runMdnsAddressWatchTick", () => {
     });
     const onChange = vi.fn();
     const old = collectAdvertisedAddresses(oldPrefix);
-    let state = { snapshot: old, failedRetries: 0 };
+    let state: Awaited<ReturnType<typeof runMdnsAddressWatchTick>> = {
+      snapshot: old,
+      failedRetries: 0,
+    };
     for (let i = 0; i < MDNS_REFRESH_MAX_RETRIES; i++) {
       state = await runMdnsAddressWatchTick({
         readInterfaces: () => newPrefix,
         currentSnapshot: state.snapshot,
         failedRetries: state.failedRetries,
+        notifiedSnapshot: state.notifiedSnapshot,
         fabrics: () => [{ id: 1 }],
         refresh,
         onChange,
       });
-      expect(state).toEqual({ snapshot: old, failedRetries: i + 1 });
+      expect(state).toMatchObject({ snapshot: old, failedRetries: i + 1 });
     }
     state = await runMdnsAddressWatchTick({
       readInterfaces: () => newPrefix,
       currentSnapshot: state.snapshot,
       failedRetries: state.failedRetries,
+      notifiedSnapshot: state.notifiedSnapshot,
       fabrics: () => [{ id: 1 }],
       refresh,
       onChange,
@@ -334,6 +339,48 @@ describe("runMdnsAddressWatchTick", () => {
       snapshot: collectAdvertisedAddresses(newPrefix),
       failedRetries: 0,
     });
+  });
+
+  it("reports a set that moves again while a retry is pending", async () => {
+    const thirdPrefix = ifaces({
+      eth0: [
+        { address: "192.168.1.10", family: "IPv4", internal: false },
+        { address: "2601:eee:f00:2::42", family: "IPv6", internal: false },
+      ],
+    });
+    const refresh = vi.fn(async (): Promise<void> => {
+      throw new Error("boom");
+    });
+    const onChange = vi.fn();
+    const a = collectAdvertisedAddresses(oldPrefix);
+    const b = collectAdvertisedAddresses(newPrefix);
+    const c = collectAdvertisedAddresses(thirdPrefix);
+    let current = newPrefix;
+    let state: Awaited<ReturnType<typeof runMdnsAddressWatchTick>> = {
+      snapshot: a,
+      failedRetries: 0,
+    };
+    const tick = async () => {
+      state = await runMdnsAddressWatchTick({
+        readInterfaces: () => current,
+        currentSnapshot: state.snapshot,
+        failedRetries: state.failedRetries,
+        notifiedSnapshot: state.notifiedSnapshot,
+        fabrics: () => [{ id: 1 }],
+        refresh,
+        onChange,
+      });
+    };
+    await tick();
+    await tick();
+    expect(state).toMatchObject({ snapshot: a, failedRetries: 2 });
+    expect(onChange).toHaveBeenCalledOnce();
+    expect(onChange).toHaveBeenLastCalledWith(a, b);
+
+    current = thirdPrefix;
+    await tick();
+    expect(onChange).toHaveBeenCalledTimes(2);
+    expect(onChange).toHaveBeenLastCalledWith(a, c);
   });
 
   it("stores the snapshot when there are no fabrics to refresh", async () => {

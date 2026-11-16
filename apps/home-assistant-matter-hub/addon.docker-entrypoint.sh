@@ -1,5 +1,17 @@
 #!/usr/bin/with-contenv bashio
 
+# A Supervisor older than 2026.07.1 skips the app_config map, then Docker backs
+# /config with an anonymous volume that the next update throws away.
+config_on_anonymous_volume() {
+  awk '$5 == "/config" { anon = ($4 ~ /\/volumes\/[0-9a-f]{64}\/_data$/) } END { exit !anon }' \
+    "${1:-/proc/self/mountinfo}" 2>/dev/null
+}
+if config_on_anonymous_volume /proc/self/mountinfo; then
+  echo "Storage is not mapped to the Home Assistant host: the Supervisor is too old for this add-on version." >&2
+  echo "Update the Supervisor to 2026.07.1 or newer and restart the add-on. Data from before is untouched on the host." >&2
+  exit 1
+fi
+
 # Dynamically limit Node.js heap based on available container memory.
 # Docker containers may have cgroup memory limits that are lower than
 # the host's total RAM. We check (in order):
