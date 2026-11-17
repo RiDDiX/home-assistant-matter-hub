@@ -1777,3 +1777,38 @@ describe("registry snapshot follows Home Assistant (#467)", () => {
     expect(after!.id).toBe(before!.id);
   });
 });
+
+// #555: the alias rides on the registry entry, an alias edit must reach
+// nodeLabel live without moving the endpoint or its identity
+describe("entity alias as nodeLabel (#555)", () => {
+  it("an alias change reaches nodeLabel with preferEntityAlias", async () => {
+    const ha = makeHa();
+    setEntity(ha, "switch.lamp", { unique_id: "U", platform: "hue" });
+    ha.entities["switch.lamp"].aliases = [null, "Desk Lamp"];
+    const manager = await buildManager(
+      ha,
+      makeProvider("bridge-555-alias", { preferEntityAlias: true }),
+      new FakeMappingStorage(),
+      new FakeIdentityStorage(),
+    );
+
+    await manager.refreshDevices();
+    const before = await read(manager, "switch.lamp");
+    expect(before!.nodeLabel).toBe("Desk Lamp");
+
+    ha.entities["switch.lamp"] = {
+      entity_id: "switch.lamp",
+      unique_id: "U",
+      platform: "hue",
+      aliases: ["Reading Lamp"],
+    };
+    await manager.refreshDevices();
+
+    const after = await read(manager, "switch.lamp");
+    expect(after!.nodeLabel).toBe("Reading Lamp");
+    expect(after!.number).toBe(before!.number);
+    expect(after!.id).toBe(before!.id);
+    expect(after!.uniqueId).toBe(before!.uniqueId);
+    expect(after!.serialNumber).toBe(before!.serialNumber);
+  });
+});

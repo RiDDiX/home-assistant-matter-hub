@@ -90,6 +90,8 @@ export class HomeAssistantRegistry extends Service {
   constructor(
     private readonly client: HomeAssistantClient,
     private readonly options: HomeAssistantClientProps,
+    // aliases cost an extra query, only fetched while a bridge uses them
+    private readonly wantsAliases: () => boolean = () => false,
   ) {
     super("HomeAssistantRegistry");
   }
@@ -358,6 +360,9 @@ export class HomeAssistantRegistry extends Service {
           }));
         }),
       ]);
+    if (this.wantsAliases()) {
+      await this.loadAliases(entityRegistry, timeoutMs);
+    }
 
     if (seq < this.lastCommittedReload) {
       logger.debug("Discarding registry snapshot, a newer reload committed");
@@ -370,7 +375,7 @@ export class HomeAssistantRegistry extends Service {
     const hash = createHash("md5");
     for (const e of entityRegistry) {
       hash.update(
-        `${e.entity_id}\0${e.unique_id ?? ""}\0${e.device_id ?? ""}\0${e.disabled_by ?? ""}\0${e.hidden_by ?? ""}\0${e.area_id ?? ""}\0${(e.labels ?? []).join(",")}\0${e.platform ?? ""}\0${e.entity_category ?? ""}\0${e.name ?? ""}\0${e.original_name ?? ""}\n`,
+        `${e.entity_id}\0${e.unique_id ?? ""}\0${e.device_id ?? ""}\0${e.disabled_by ?? ""}\0${e.hidden_by ?? ""}\0${e.area_id ?? ""}\0${(e.labels ?? []).join(",")}\0${e.platform ?? ""}\0${e.entity_category ?? ""}\0${e.name ?? ""}\0${e.original_name ?? ""}\0${JSON.stringify(e.aliases ?? [])}\n`,
       );
     }
     for (const s of statesList) {
@@ -456,6 +461,33 @@ export class HomeAssistantRegistry extends Service {
     this.registryChanged = true;
 
     return true;
+  }
+
+  // the list call never carries aliases, only the extended entries do (#555)
+  private async loadAliases(
+    entityRegistry: HomeAssistantEntityRegistry[],
+    timeoutMs: number,
+  ): Promise<void> {
+    const enabled = entityRegistry.filter((e) => !e.disabled_by);
+    if (enabled.length === 0) return;
+    try {
+      const entries = await sendHaMessage<
+        Record<string, { aliases?: (string | null)[] } | null>
+      >(
+        this.client.connection,
+        {
+          type: "config/entity_registry/get_entries",
+          entity_ids: enabled.map((e) => e.entity_id),
+        },
+        timeoutMs,
+      );
+      for (const e of enabled) e.aliases = entries[e.entity_id]?.aliases;
+    } catch (e) {
+      logger.warn("Entity alias fetch failed, keeping last aliases:", e);
+      for (const entity of enabled) {
+        entity.aliases = this._entities[entity.entity_id]?.aliases;
+      }
+    }
   }
 }
 

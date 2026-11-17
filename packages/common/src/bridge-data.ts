@@ -79,6 +79,16 @@ interface AllBridgeFeatureFlags {
    */
   readonly preferEntityRegistryName: boolean;
   /**
+   * Prefer Entity Alias: Use the first Home Assistant entity alias (entity
+   * settings, Voice assistants, Aliases) as nodeLabel. nodeLabel resolves as
+   * customName → first alias → registry name (with preferEntityRegistryName)
+   * → friendly_name → entity_id. Blank and null aliases are skipped, an entity
+   * without an alias keeps its normal name. A per-entity customName still
+   * takes precedence.
+   * Default: false (disabled)
+   */
+  readonly preferEntityAlias: boolean;
+  /**
    * Vacuum OnOff Cluster: Add an OnOff cluster to robot vacuum endpoints.
    * Amazon Alexa REQUIRES PowerController (mapped from OnOff) for robotic vacuums.
    * Without it, the vacuum commissions but never appears in the Alexa app.

@@ -1142,4 +1142,99 @@ describe("HomeAssistantRegistry", () => {
     entityLists.push([{ entity_id: "light.new" }]);
     await expect(registry.reload()).resolves.toBe(false);
   });
+
+  describe("entity aliases (#555)", () => {
+    function makeAliasRegistry(wanted: boolean) {
+      const fake = makeConnection();
+      const ha = {
+        aliases: ["Desk Lamp"] as (string | null)[],
+        fail: false,
+        name: "Lamp",
+      };
+      const send = vi.fn((message: { type: string; entity_ids?: string[] }) => {
+        if (message.type === "config/entity_registry/list") {
+          return Promise.resolve([
+            { entity_id: "light.a", name: ha.name },
+            { entity_id: "light.off", disabled_by: "user" },
+          ]);
+        }
+        if (message.type === "config/entity_registry/get_entries") {
+          if (ha.fail) {
+            return Promise.reject({ code: "unknown_command" });
+          }
+          return Promise.resolve(
+            Object.fromEntries(
+              (message.entity_ids ?? []).map((id) => [
+                id,
+                { entity_id: id, aliases: ha.aliases },
+              ]),
+            ),
+          );
+        }
+        return Promise.resolve([]);
+      });
+      fake.connection.sendMessagePromise =
+        send as unknown as Connection["sendMessagePromise"];
+      const client = {
+        connection: fake.connection,
+        haRunning: true,
+      } as unknown as HomeAssistantClient;
+      const registry = new HomeAssistantRegistry(
+        client,
+        defaultOptions,
+        () => wanted,
+      );
+      const aliasCalls = () =>
+        send.mock.calls.filter(
+          ([m]) => m.type === "config/entity_registry/get_entries",
+        );
+      return { registry, ha, aliasCalls };
+    }
+
+    it("sends no alias query while no bridge wants aliases", async () => {
+      const { registry, aliasCalls } = makeAliasRegistry(false);
+      await vi.runAllTimersAsync();
+      await registry.construction;
+      await registry.reload();
+      expect(aliasCalls()).toHaveLength(0);
+      expect(registry.entities["light.a"].aliases).toBeUndefined();
+    });
+
+    it("puts aliases on enabled entries and skips disabled ones", async () => {
+      const { registry, aliasCalls } = makeAliasRegistry(true);
+      await vi.runAllTimersAsync();
+      await registry.construction;
+      expect(aliasCalls()).toHaveLength(1);
+      expect(aliasCalls()[0][0].entity_ids).toEqual(["light.a"]);
+      expect(registry.entities["light.a"].aliases).toEqual(["Desk Lamp"]);
+      expect(registry.entities["light.off"].aliases).toBeUndefined();
+    });
+
+    it("reports an alias only edit as a change", async () => {
+      const { registry, ha } = makeAliasRegistry(true);
+      await vi.runAllTimersAsync();
+      await registry.construction;
+      await expect(registry.reload()).resolves.toBe(false);
+      ha.aliases = [null, "Reading Lamp"];
+      await expect(registry.reload()).resolves.toBe(true);
+      expect(registry.entities["light.a"].aliases).toEqual([
+        null,
+        "Reading Lamp",
+      ]);
+    });
+
+    it("keeps the last aliases when the alias query fails", async () => {
+      const { registry, ha } = makeAliasRegistry(true);
+      await vi.runAllTimersAsync();
+      await registry.construction;
+      ha.fail = true;
+      await expect(registry.reload()).resolves.toBe(false);
+      expect(registry.entities["light.a"].aliases).toEqual(["Desk Lamp"]);
+      // a full rebuild on fresh entries still carries the last aliases
+      ha.name = "Lamp 2";
+      await expect(registry.reload()).resolves.toBe(true);
+      expect(registry.entities["light.a"].name).toBe("Lamp 2");
+      expect(registry.entities["light.a"].aliases).toEqual(["Desk Lamp"]);
+    });
+  });
 });

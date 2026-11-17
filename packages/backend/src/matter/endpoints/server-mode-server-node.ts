@@ -124,15 +124,11 @@ export class ServerModeServerNode extends ServerNode {
     entityId: string,
     device: HomeAssistantDeviceRegistry | undefined,
     mapping: EntityMappingConfig | undefined,
-    friendlyName: string | undefined,
+    nodeLabel: string,
   ): Promise<boolean> {
-    const nodeLabel =
-      trimToLength(mapping?.customName, 32, "...") ??
-      trimToLength(friendlyName, 32, "...") ??
-      trimToLength(entityId, 32, "...");
     const productNameFromNodeLabel =
       this.featureFlags?.productNameFromNodeLabel === true
-        ? (trimToLength(sanitizeMatterString(nodeLabel ?? ""), 32, "...") ??
+        ? (trimToLength(sanitizeMatterString(nodeLabel), 32, "...") ??
           undefined)
         : undefined;
     const serialNumber = serialNumberWithSuffix(
@@ -155,7 +151,9 @@ export class ServerModeServerNode extends ServerNode {
           : undefined) ??
         trimToLength(device?.model_id, 32, "...") ??
         trimToLength(device?.model, 32, "..."),
-      productLabel: trimToLength(device?.model, 64, "..."),
+      productLabel:
+        trimToLength(mapping?.customProductName, 64, "...") ??
+        trimToLength(device?.model, 64, "..."),
       nodeLabel,
       serialNumber,
       hardwareVersionString: trimToLength(device?.hw_version, 64, "..."),

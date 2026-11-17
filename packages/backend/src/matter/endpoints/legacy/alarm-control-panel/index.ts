@@ -2,6 +2,7 @@ import type { HomeAssistantEntityInformation } from "@home-assistant-matter-hub/
 import type { EndpointType } from "@matter/main";
 import { ModeSelectDevice, OnOffPlugInUnitDevice } from "@matter/main/devices";
 import type { HomeAssistantAction } from "../../../../services/home-assistant/home-assistant-actions.js";
+import { trimToLength } from "../../../../utils/trim-to-length.js";
 import { BasicInformationServer } from "../../../behaviors/basic-information-server.js";
 import { HomeAssistantEntityBehavior } from "../../../behaviors/home-assistant-entity-behavior.js";
 import { IdentifyServer } from "../../../behaviors/identify-server.js";
@@ -176,13 +177,16 @@ export function AlarmControlPanelDevice(
     homeAssistantEntity,
     modeSelect: {
       description:
-        homeAssistantEntity.customName ??
-        (
-          homeAssistantEntity.entity.state.attributes as {
-            friendly_name?: string;
-          }
-        ).friendly_name ??
-        "Alarm Panel",
+        trimToLength(
+          homeAssistantEntity.customName ??
+            (
+              homeAssistantEntity.entity.state.attributes as {
+                friendly_name?: string;
+              }
+            ).friendly_name,
+          64,
+          "...",
+        ) ?? "Alarm Panel",
       supportedModes: modes.map((m, index) => ({
         label: m.label,
         mode: index,

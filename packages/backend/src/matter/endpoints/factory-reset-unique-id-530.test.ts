@@ -87,3 +87,25 @@ describe.each(Object.entries(modes))("root UniqueID, %s (#530)", (_, make) => {
     expect(again).not.toBe(ID);
   });
 });
+
+describe("server mode productLabel", () => {
+  it("uses customProductName before the device model", async () => {
+    const server = new ServerModeServerNode(env(), data);
+    node = server;
+    await server.construction.ready;
+    // biome-ignore lint/suspicious/noExplicitAny: test fixture
+    const device = { model: "Model X" } as any;
+
+    await server.updateDeviceIdentity(
+      "light.a",
+      device,
+      // biome-ignore lint/suspicious/noExplicitAny: test fixture
+      { entityId: "light.a", customProductName: "My Lamp" } as any,
+      "A",
+    );
+    expect(server.state.basicInformation.productLabel).toBe("My Lamp");
+
+    await server.updateDeviceIdentity("light.a", device, undefined, "A");
+    expect(server.state.basicInformation.productLabel).toBe("Model X");
+  });
+});

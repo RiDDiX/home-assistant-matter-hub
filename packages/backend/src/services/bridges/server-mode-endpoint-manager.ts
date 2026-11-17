@@ -17,6 +17,7 @@ import { LegacyEndpoint } from "../../matter/endpoints/legacy/legacy-endpoint.js
 import type { ServerModeServerNode } from "../../matter/endpoints/server-mode-server-node.js";
 import { ServerModeVacuumEndpoint } from "../../matter/endpoints/server-mode-vacuum-endpoint.js";
 import { isHeapUnderPressure } from "../../utils/log-memory.js";
+import { resolveNodeLabel } from "../../utils/node-label.js";
 import { subscribeEntities } from "../home-assistant/api/subscribe-entities.js";
 import type { HomeAssistantClient } from "../home-assistant/home-assistant-client.js";
 import type { HomeAssistantStates } from "../home-assistant/home-assistant-registry.js";
@@ -735,9 +736,7 @@ export class ServerModeEndpointManager extends Service {
         const identity = JSON.stringify({
           primary,
           device: this.registry.deviceOf(primary),
-          friendlyName:
-            this.registry.initialState(primary)?.attributes?.friendly_name,
-          registryName: this.registryName(primary),
+          nodeLabel: this.nodeLabel(primary, primaryMapping),
           mapping: primaryMapping,
           deviceType: primaryEndpoint?.type?.deviceType,
         });
@@ -805,13 +804,18 @@ export class ServerModeEndpointManager extends Service {
     }
   }
 
-  // bridge mode reads the flag in BasicInformationServer, server mode did not (#276)
-  private registryName(entityId: string): string | undefined {
-    if (this.dataProvider.featureFlags?.preferEntityRegistryName !== true) {
-      return undefined;
-    }
-    const entry = this.registry.entity(entityId);
-    return entry?.name ?? entry?.original_name ?? undefined;
+  // same chain as BasicInformationServer in bridge mode (#276)
+  private nodeLabel(
+    entityId: string,
+    mapping: EntityMappingConfig | undefined,
+  ): string {
+    return resolveNodeLabel(
+      mapping?.customName,
+      this.registry.entity(entityId),
+      this.registry.initialState(entityId)?.attributes?.friendly_name,
+      entityId,
+      this.dataProvider.featureFlags,
+    );
   }
 
   private async updateServerNodeIdentity(
@@ -819,14 +823,11 @@ export class ServerModeEndpointManager extends Service {
     mapping: EntityMappingConfig | undefined,
     endpoint: EntityEndpoint | undefined,
   ): Promise<boolean> {
-    const device = this.registry.deviceOf(entityId);
-    const state = this.registry.initialState(entityId);
-    const friendlyName = state?.attributes?.friendly_name as string | undefined;
     let ok = await this.serverNode.updateDeviceIdentity(
       entityId,
-      device,
+      this.registry.deviceOf(entityId),
       mapping,
-      this.registryName(entityId) ?? friendlyName,
+      this.nodeLabel(entityId, mapping),
     );
     const deviceType = endpoint?.type?.deviceType;
     if (deviceType != null) {

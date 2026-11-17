@@ -275,6 +275,17 @@ const featureFlagSchema: JSONSchema7 = {
       default: false,
     },
 
+    preferEntityAlias: {
+      title: "Prefer Entity Alias",
+      description:
+        "Use the Home Assistant entity alias (entity settings, Voice assistants, Aliases) as nodeLabel. " +
+        "With several aliases the first one is used. Home Assistant before 2026.4 does not keep alias order, " +
+        "so use a single alias there. A per-entity custom name still takes precedence, " +
+        "entities without an alias keep their normal name.",
+      type: "boolean",
+      default: false,
+    },
+
     vacuumOnOff: {
       title: "Vacuum: Include OnOff Cluster (Alexa)",
       description:

@@ -92,7 +92,13 @@ interface HarnessOptions {
   flags?: Record<string, unknown>;
   entities?: Record<
     string,
-    { unique_id?: string; platform?: string; device_id?: string; name?: string }
+    {
+      unique_id?: string;
+      platform?: string;
+      device_id?: string;
+      name?: string;
+      aliases?: (string | null)[];
+    }
   >;
 }
 
@@ -323,6 +329,35 @@ describe("ServerModeEndpointManager (#301)", () => {
     await plain.manager.refreshDevices();
     expect(plain.serverNode.updateDeviceIdentity.mock.calls[0][3]).toBe(
       "Friendly",
+    );
+  });
+
+  // #555: the alias reaches the root node and an alias edit pushes once
+  it("hands the entity alias to the root node with preferEntityAlias", async () => {
+    const entities = { "light.one": { aliases: [null, "Desk Lamp"] } };
+    const h = makeHarness(["light.one"], undefined, {
+      flags: { preferEntityAlias: true },
+      entities,
+    });
+    h.registry.initialState.mockReturnValue({
+      attributes: { friendly_name: "Friendly" },
+    });
+    await h.manager.refreshDevices();
+    expect(h.serverNode.updateDeviceIdentity).toHaveBeenCalledTimes(1);
+    expect(h.serverNode.updateDeviceIdentity.mock.calls[0][3]).toBe(
+      "Desk Lamp",
+    );
+
+    h.serverNode.updateDeviceIdentity.mockClear();
+    await h.manager.refreshDevices();
+    expect(h.serverNode.updateDeviceIdentity).not.toHaveBeenCalled();
+
+    entities["light.one"] = { aliases: ["Reading Lamp"] };
+    await h.manager.refreshDevices();
+    await h.manager.refreshDevices();
+    expect(h.serverNode.updateDeviceIdentity).toHaveBeenCalledTimes(1);
+    expect(h.serverNode.updateDeviceIdentity.mock.calls[0][3]).toBe(
+      "Reading Lamp",
     );
   });
 
