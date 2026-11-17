@@ -337,7 +337,7 @@ export class ServerModeEndpointManager extends Service {
     this._refreshIncomplete = false;
     const wasDeferred = this._refreshDeferred;
     this._refreshDeferred = false;
-    this.registry.refresh();
+    this.registry.refresh((entityId) => this.getEntityMapping(entityId));
 
     const lifecycle = this.lifecycle;
     const fullEntities = this.registry.fullEntities;

@@ -62,10 +62,10 @@ export class BridgeRegistry {
   private _batteryEntityCache: Map<string, string | null> = new Map();
   // Cache for problem entity lookups (deviceId -> entityId or null) (#408)
   private _problemEntityCache: Map<string, string | null> = new Map();
-  // Track humidity entities that have been auto-assigned to temperature sensors
-  private _usedHumidityEntities: Set<string> = new Set();
-  // Track pressure entities that have been auto-assigned to temperature sensors
-  private _usedPressureEntities: Set<string> = new Set();
+  // Humidity entities auto-assigned to a temperature sensor, mapped to it
+  private _usedHumidityEntities: Map<string, string> = new Map();
+  // Pressure entities auto-assigned to a temperature sensor, mapped to it
+  private _usedPressureEntities: Map<string, string> = new Map();
   // Track entities consumed by composed devices (e.g., sensors/climate grouped under air purifier)
   private _usedComposedSubEntities: Set<string> = new Set();
   // The find*ForDevice lookups scanned the whole HA registry per call. Index
@@ -449,8 +449,17 @@ export class BridgeRegistry {
   /**
    * Mark a humidity entity as used (auto-assigned to a temperature sensor).
    */
-  markHumidityEntityUsed(entityId: string): void {
-    this._usedHumidityEntities.add(entityId);
+  markHumidityEntityUsed(entityId: string, temperatureEntityId: string): void {
+    this._usedHumidityEntities.set(entityId, temperatureEntityId);
+  }
+
+  /** True when another temperature sensor already claimed this humidity entity. */
+  isHumidityEntityClaimedByOther(
+    entityId: string,
+    temperatureEntityId: string,
+  ): boolean {
+    const claimant = this._usedHumidityEntities.get(entityId);
+    return claimant !== undefined && claimant !== temperatureEntityId;
   }
 
   /**
@@ -859,8 +868,17 @@ export class BridgeRegistry {
   /**
    * Mark a pressure entity as used (auto-assigned to a temperature sensor).
    */
-  markPressureEntityUsed(entityId: string): void {
-    this._usedPressureEntities.add(entityId);
+  markPressureEntityUsed(entityId: string, temperatureEntityId: string): void {
+    this._usedPressureEntities.set(entityId, temperatureEntityId);
+  }
+
+  /** True when another temperature sensor already claimed this pressure entity. */
+  isPressureEntityClaimedByOther(
+    entityId: string,
+    temperatureEntityId: string,
+  ): boolean {
+    const claimant = this._usedPressureEntities.get(entityId);
+    return claimant !== undefined && claimant !== temperatureEntityId;
   }
 
   /**
@@ -980,7 +998,7 @@ export class BridgeRegistry {
     return undefined;
   }
 
-  refresh() {
+  refresh(mappingOf?: (entityId: string) => EntityMappingConfig | undefined) {
     // Clear used entities on refresh to allow re-assignment
     this._usedBatteryEntities.clear();
     this._usedHumidityEntities.clear();
@@ -1021,7 +1039,7 @@ export class BridgeRegistry {
 
     // Pre-calculate auto-assignments before endpoint creation so entities
     // are marked "used" regardless of the order they're processed later.
-    this.preCalculateAutoAssignments();
+    this.preCalculateAutoAssignments(mappingOf);
   }
 
   /**
@@ -1029,7 +1047,9 @@ export class BridgeRegistry {
    * This must run BEFORE endpoint creation to ensure correct "used" marking
    * regardless of the order entities are processed.
    */
-  private preCalculateAutoAssignments(): void {
+  private preCalculateAutoAssignments(
+    mappingOf?: (entityId: string) => EntityMappingConfig | undefined,
+  ): void {
     const entities = values(this._entities);
 
     // First pass: Find all temperature sensors and mark their humidity + pressure entities
@@ -1042,20 +1062,31 @@ export class BridgeRegistry {
 
       const attrs = state.attributes as SensorDeviceAttributes;
       if (attrs.device_class === SensorDeviceClass.temperature) {
-        if (this.isAutoHumidityMappingEnabled()) {
+        // Same conditions as LegacyEndpoint.create, first sensor of a device wins
+        const mapping = mappingOf?.(entity.entity_id);
+        if (mapping?.disabled) continue;
+        if (this.isAutoHumidityMappingEnabled() && !mapping?.humidityEntity) {
           const humidityEntityId = this.findHumidityEntityForDevice(
             entity.device_id,
           );
-          if (humidityEntityId && humidityEntityId !== entity.entity_id) {
-            this._usedHumidityEntities.add(humidityEntityId);
+          if (
+            humidityEntityId &&
+            humidityEntityId !== entity.entity_id &&
+            !this._usedHumidityEntities.has(humidityEntityId)
+          ) {
+            this._usedHumidityEntities.set(humidityEntityId, entity.entity_id);
           }
         }
-        if (this.isAutoPressureMappingEnabled()) {
+        if (this.isAutoPressureMappingEnabled() && !mapping?.pressureEntity) {
           const pressureEntityId = this.findPressureEntityForDevice(
             entity.device_id,
           );
-          if (pressureEntityId && pressureEntityId !== entity.entity_id) {
-            this._usedPressureEntities.add(pressureEntityId);
+          if (
+            pressureEntityId &&
+            pressureEntityId !== entity.entity_id &&
+            !this._usedPressureEntities.has(pressureEntityId)
+          ) {
+            this._usedPressureEntities.set(pressureEntityId, entity.entity_id);
           }
         }
       }

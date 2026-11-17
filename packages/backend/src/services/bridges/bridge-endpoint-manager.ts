@@ -148,6 +148,11 @@ export class BridgeEndpointManager extends Service {
   readonly root: Endpoint;
   private entityIds: string[] = [];
   private unsubscribe?: () => void;
+  // sorted id list of the live subscription and the last full map it sent
+  private subscribedIds?: string;
+  private subscribedStates?: HomeAssistantStates;
+  // part ids already given their one remount after an isolation
+  private remountedAfterIsolation = new Set<string>();
   private observingRequested = false;
   private _failedEntities: FailedEntity[] = [];
   private _refreshIncomplete = false;
@@ -861,6 +866,16 @@ export class BridgeEndpointManager extends Service {
       if (!(endpoint instanceof VacuumAreaSwitchEndpoint)) {
         await this.closeAreaSwitchesOf(endpoint);
       }
+      // One remount via the registry retry, a second isolation stays closed
+      // so an endpoint that keeps failing cannot loop.
+      if (!this.remountedAfterIsolation.has(endpoint.id)) {
+        this.remountedAfterIsolation.add(endpoint.id);
+        try {
+          this.registry.markRefreshIncomplete();
+        } catch (e) {
+          this.log.warn("Failed to arm the remount after isolation:", e);
+        }
+      }
     }
   }
 
@@ -950,25 +965,40 @@ export class BridgeEndpointManager extends Service {
   }
 
   async startObserving() {
-    // Only the subscription resets here. stopObserving is the lifecycle stop
-    // and would take the removal timer with it (#438).
-    this.clearSubscription();
     // Wanting to observe and holding a subscription differ: a bridge started
     // while HA was down has no entities yet, and only this flag gets it
     // subscribed once the first trusted refresh brings them in.
     this.observingRequested = true;
 
     if (!this.entityIds.length) {
+      this.clearSubscription();
       return;
     }
 
     const subscriptionIds = this.collectSubscriptionEntityIds();
+    const key = [...subscriptionIds].sort().join(",");
+    // Same ids: keep the subscription, a new one only makes HA resend the
+    // full map. Endpoints rebuilt meanwhile get the last one instead.
+    if (this.unsubscribe && key === this.subscribedIds) {
+      if (this.subscribedStates) {
+        this.updateStates(this.subscribedStates).catch((err) =>
+          this.log.warn("State update failed:", err),
+        );
+      }
+      return;
+    }
+    // Only the subscription resets here. stopObserving is the lifecycle stop
+    // and would take the removal timer with it (#438).
+    this.clearSubscription();
+    this.subscribedIds = key;
     this.unsubscribe = subscribeEntities(
       this.client.connection,
-      (e, changed) =>
+      (e, changed) => {
+        this.subscribedStates = e;
         this.updateStates(e, changed).catch((err) =>
           this.log.warn("State update failed:", err),
-        ),
+        );
+      },
       subscriptionIds,
     );
   }
@@ -993,6 +1023,8 @@ export class BridgeEndpointManager extends Service {
   private clearSubscription() {
     this.unsubscribe?.();
     this.unsubscribe = undefined;
+    this.subscribedIds = undefined;
+    this.subscribedStates = undefined;
   }
 
   stopObserving() {
@@ -1045,7 +1077,7 @@ export class BridgeEndpointManager extends Service {
     this._refreshIncomplete = false;
     const wasDeferred = this._refreshDeferred;
     this._refreshDeferred = false;
-    this.registry.refresh();
+    this.registry.refresh((entityId) => this.getEntityMapping(entityId));
     const lifecycle = this.lifecycle;
     const wasLive = this.entitiesReconciled;
 

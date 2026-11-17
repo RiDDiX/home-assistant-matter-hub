@@ -644,6 +644,21 @@ describe("identity survives isolation and plugin stops (#438)", () => {
     expect(vacuumEndpoint(manager).number).toBe(before);
   });
 
+  it("arms one remount per isolated entity, a second isolation stays closed", async () => {
+    const ha = makeHa();
+    const { manager } = await buildManager(ha);
+    await manager.refreshDevices();
+    ha.markRefreshIncomplete.mockClear();
+
+    await manager.isolateEntity(VACUUM);
+    expect(ha.markRefreshIncomplete).toHaveBeenCalledTimes(1);
+    await manager.refreshDevices();
+    expect(vacuumEndpoint(manager)).toBeDefined();
+
+    await manager.isolateEntity(VACUUM);
+    expect(ha.markRefreshIncomplete).toHaveBeenCalledTimes(1);
+  });
+
   it("a recreated entity no longer lists as failed", async () => {
     const ha = makeHa();
     const { manager } = await buildManager(ha);

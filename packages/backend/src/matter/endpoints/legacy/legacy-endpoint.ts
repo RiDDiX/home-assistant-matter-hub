@@ -122,13 +122,17 @@ export class LegacyEndpoint extends EntityEndpoint {
           const humidityEntityId = registry.findHumidityEntityForDevice(
             entity.device_id,
           );
-          if (humidityEntityId && humidityEntityId !== entityId) {
+          if (
+            humidityEntityId &&
+            humidityEntityId !== entityId &&
+            !registry.isHumidityEntityClaimedByOther(humidityEntityId, entityId)
+          ) {
             effectiveMapping = {
               ...effectiveMapping,
               entityId: effectiveMapping?.entityId ?? entityId,
               humidityEntity: humidityEntityId,
             };
-            registry.markHumidityEntityUsed(humidityEntityId);
+            registry.markHumidityEntityUsed(humidityEntityId, entityId);
             logger.debug(
               `Auto-assigned humidity ${humidityEntityId} to ${entityId}`,
             );
@@ -147,13 +151,17 @@ export class LegacyEndpoint extends EntityEndpoint {
           const pressureEntityId = registry.findPressureEntityForDevice(
             entity.device_id,
           );
-          if (pressureEntityId && pressureEntityId !== entityId) {
+          if (
+            pressureEntityId &&
+            pressureEntityId !== entityId &&
+            !registry.isPressureEntityClaimedByOther(pressureEntityId, entityId)
+          ) {
             effectiveMapping = {
               ...effectiveMapping,
               entityId: effectiveMapping?.entityId ?? entityId,
               pressureEntity: pressureEntityId,
             };
-            registry.markPressureEntityUsed(pressureEntityId);
+            registry.markPressureEntityUsed(pressureEntityId, entityId);
             logger.debug(
               `Auto-assigned pressure ${pressureEntityId} to ${entityId}`,
             );

@@ -34,7 +34,6 @@ export function isFanOnly(state: HomeAssistantEntityState): boolean {
 export const companionFanControlConfig: FanControlServerConfig = {
   getPercentage: () => undefined,
   getStepSize: () => undefined,
-  getAirflowDirection: () => undefined,
   isInAutoMode: (entity) =>
     attributes(entity).fan_mode?.toLowerCase() === "auto",
   getPresetModes: (entity) => attributes(entity).fan_modes ?? [],
@@ -46,8 +45,6 @@ export const companionFanControlConfig: FanControlServerConfig = {
   // Swing stays on the AC tile; do not duplicate oscillation here.
   isOscillating: () => false,
   supportsOscillation: () => false,
-  getWindMode: () => undefined,
-  supportsWind: () => false,
 
   // Fan on/off (including speed-zero) mirrors the OnOff cluster below:
   // on => fan_only, off => climate.turn_off so the Fan tile stops the AC.
@@ -67,14 +64,12 @@ export const companionFanControlConfig: FanControlServerConfig = {
       data: { fan_mode: fanMode },
     };
   },
-  setAirflowDirection: () => ({ action: "homeassistant.turn_on" }),
   // Speed change: set the AC fan_mode without leaving fan_only.
   setPresetMode: (presetMode) => ({
     action: "climate.set_fan_mode",
     data: { fan_mode: presetMode },
   }),
   setOscillation: () => ({ action: "homeassistant.turn_on" }),
-  setWindMode: () => ({ action: "homeassistant.turn_on" }),
 };
 
 // OnOff cluster owns the fan_only operation (the actual reporter intent in

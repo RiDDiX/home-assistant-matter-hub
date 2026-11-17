@@ -110,6 +110,7 @@ interface FakeHa {
   areas: Map<string, string>;
   labels: unknown[];
   snapshotGeneration?: number;
+  markRefreshIncomplete: () => void;
 }
 
 function makeHa(): FakeHa {
@@ -119,6 +120,7 @@ function makeHa(): FakeHa {
     devices: {},
     areas: new Map(),
     labels: [],
+    markRefreshIncomplete: () => {},
   };
   // No device_id: keeps LegacyEndpoint on the plain vacuum path (no auto
   // battery/select/clean_area detection), rooms come straight from attributes.
@@ -145,6 +147,7 @@ function makeValetudoHa(): FakeHa {
     devices: {},
     areas: new Map(),
     labels: [],
+    markRefreshIncomplete: () => {},
   };
   // Valetudo shape: the vacuum entity has no rooms of its own, the segments
   // live on a sensor of the same device and get injected at creation time.
@@ -188,6 +191,7 @@ function makeSegHa(): FakeHa {
     devices: {},
     areas: new Map(),
     labels: [],
+    markRefreshIncomplete: () => {},
   };
   ha.entities[SEG] = { entity_id: SEG, device_id: "seg-dev" };
   ha.entities["sensor.robo_seg_map_segments"] = {
@@ -909,6 +913,7 @@ describe("vacuum room switches with CLEAN_AREA rooms (#516)", () => {
       devices: {},
       areas: new Map(),
       labels: [],
+      markRefreshIncomplete: () => {},
     };
     // device_id puts the vacuum on the auto-detection path that resolves
     // the CLEAN_AREA mapping.

@@ -104,7 +104,8 @@ const FeaturedBase = Base.with(
 export interface FanControlServerConfig {
   getPercentage: ValueGetter<number | undefined>;
   getStepSize: ValueGetter<number | undefined>;
-  getAirflowDirection: ValueGetter<AirflowDirection | undefined>;
+  // Optional members below are only read when the matching feature is on.
+  getAirflowDirection?: ValueGetter<AirflowDirection | undefined>;
   isInAutoMode: ValueGetter<boolean>;
   // Preset mode support for fans without percentage control
   getPresetModes: ValueGetter<string[] | undefined>;
@@ -115,8 +116,8 @@ export interface FanControlServerConfig {
   supportsOscillation: ValueGetter<boolean>;
   getRockSetting?: ValueGetter<FanControlRockSetting>;
   // Wind mode support - returns preset mode name that maps to wind
-  getWindMode: ValueGetter<"natural" | "sleep" | undefined>;
-  supportsWind: ValueGetter<boolean>;
+  getWindMode?: ValueGetter<"natural" | "sleep" | undefined>;
+  supportsWind?: ValueGetter<boolean>;
   // Which wind modes the entity actually offers. Defaults to both when the
   // domain does not implement it, preserving the previous behaviour.
   getWindSupport?: ValueGetter<{ naturalWind: boolean; sleepWind: boolean }>;
@@ -135,7 +136,7 @@ export interface FanControlServerConfig {
   syncOnOffWithSpeed?: boolean;
   turnOn: ValueSetter<number>;
   setAutoMode: ValueSetter<void>;
-  setAirflowDirection: ValueSetter<AirflowDirection>;
+  setAirflowDirection?: ValueSetter<AirflowDirection>;
   // Set preset mode for fans without percentage control
   setPresetMode: ValueSetter<string>;
   // Rocking (oscillation) control
@@ -145,7 +146,7 @@ export interface FanControlServerConfig {
     ...args: Parameters<ValueSetter<FanControlRockSetting>>
   ) => HomeAssistantAction | undefined;
   // Wind mode control - sets preset mode for wind
-  setWindMode: ValueSetter<"natural" | "sleep" | "off">;
+  setWindMode?: ValueSetter<"natural" | "sleep" | "off">;
 }
 
 export class FanControlServerBase extends FeaturedBase {
@@ -414,7 +415,7 @@ export class FanControlServerBase extends FeaturedBase {
 
         ...(this.features.airflowDirection
           ? {
-              airflowDirection: config.getAirflowDirection(
+              airflowDirection: config.getAirflowDirection?.(
                 entity.state,
                 this.agent,
               ),
@@ -437,7 +438,7 @@ export class FanControlServerBase extends FeaturedBase {
                 ? config.getWindSupport(entity.state, this.agent)
                 : { naturalWind: true, sleepWind: true },
               windSetting: this.mapWindModeToSetting(
-                config.getWindMode(entity.state, this.agent),
+                config.getWindMode?.(entity.state, this.agent),
               ),
             }
           : {}),
@@ -746,10 +747,13 @@ export class FanControlServerBase extends FeaturedBase {
         return;
       }
 
-      const config = this.state.config;
-      homeAssistant.callAction(
-        config.setAirflowDirection(airflowDirection, this.agent),
+      const action = this.state.config.setAirflowDirection?.(
+        airflowDirection,
+        this.agent,
       );
+      if (action) {
+        homeAssistant.callAction(action);
+      }
     });
   }
 
@@ -808,7 +812,10 @@ export class FanControlServerBase extends FeaturedBase {
       } else if (windSetting.sleepWind) {
         mode = "sleep";
       }
-      homeAssistant.callAction(this.state.config.setWindMode(mode, this.agent));
+      const action = this.state.config.setWindMode?.(mode, this.agent);
+      if (action) {
+        homeAssistant.callAction(action);
+      }
     });
   }
 

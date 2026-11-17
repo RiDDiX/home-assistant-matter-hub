@@ -109,6 +109,7 @@ interface FakeHa {
   areas: Map<string, string>;
   labels: unknown[];
   snapshotGeneration: number;
+  markRefreshIncomplete: () => void;
 }
 
 function addEntity(ha: FakeHa, id: string) {
@@ -131,6 +132,7 @@ function makeHa(ids: string[]): FakeHa {
     areas: new Map(),
     labels: [],
     snapshotGeneration: 1,
+    markRefreshIncomplete: () => {},
   };
   for (const id of ids) addEntity(ha, id);
   return ha;

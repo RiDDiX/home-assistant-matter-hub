@@ -22,7 +22,10 @@ import {
   swingModesToRockSupport,
 } from "./behaviors/climate-fan-control-server.js";
 import { ClimateHumidityMeasurementServer } from "./behaviors/climate-humidity-measurement-server.js";
-import { ClimateOnOffServer } from "./behaviors/climate-on-off-server.js";
+import {
+  ClimateOnOffServer,
+  RoomAirConditionerOnOffServer,
+} from "./behaviors/climate-on-off-server.js";
 import {
   ClimateThermostatServer,
   isTemperatureRangeActive,
@@ -54,6 +57,7 @@ const ClimateDeviceType = (
   features: { heating: boolean; cooling: boolean; autoMode?: boolean },
   initialState: InitialThermostatState = {},
   includeBasicInformation = true,
+  racOnOff = { canTurnOn: false, canTurnOff: false },
 ) => {
   const additionalClusters: ClusterBehavior.Type[] = [];
 
@@ -87,6 +91,14 @@ const ClimateDeviceType = (
       thermostatServer,
       ThermostatUiConfigServer,
       ClimateFanControlServer(rockSupport, supportsAutoFanMode),
+      ...(supportsOnOff
+        ? []
+        : [
+            RoomAirConditionerOnOffServer(
+              racOnOff.canTurnOn,
+              racOnOff.canTurnOff,
+            ),
+          ]),
       ...additionalClusters,
       ...basicInfo,
     );
@@ -174,11 +186,15 @@ export function ClimateDevice(
   // Per-entity opt-out: skip OnOff so room-level "off" voice commands don't
   // turn the thermostat off alongside the lights. climateBlockOff skips it
   // too, Apple's power button would otherwise use OnOff.off (#527).
-  const supportsOnOff =
-    testBit(supportedFeatures, ClimateDeviceFeature.TURN_ON) &&
+  const onOffDisabled =
+    homeAssistantEntity.mapping?.disableClimateOnOff === true;
+  const canTurnOn =
+    testBit(supportedFeatures, ClimateDeviceFeature.TURN_ON) && !onOffDisabled;
+  const canTurnOff =
     testBit(supportedFeatures, ClimateDeviceFeature.TURN_OFF) &&
-    homeAssistantEntity.mapping?.disableClimateOnOff !== true &&
+    !onOffDisabled &&
     homeAssistantEntity.mapping?.climateBlockOff !== true;
+  const supportsOnOff = canTurnOn && canTurnOff;
   // Per-entity opt-out: skip FanControl + RoomAirConditionerDevice and fall
   // back to ThermostatDevice. Workaround for controllers (e.g. Aqara) that
   // don't recognise device type 0x0072 and drop the endpoint (#318).
@@ -288,6 +304,7 @@ export function ClimateDevice(
     },
     initialState,
     includeBasicInformation,
+    { canTurnOn, canTurnOff },
   ).set({
     homeAssistantEntity,
     thermostat: {
