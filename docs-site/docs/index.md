@@ -489,7 +489,7 @@ Home, ...) are not placed in the same network segment. Please make sure to revie
 | ❄️ Climate auto mode | Expose Matter Auto mode when HA reports `auto` in `hvac_modes` ([#309](https://github.com/RiDDiX/home-assistant-matter-hub/issues/309)) |
 | 🆔 Server-mode root identity | Root identity now applies as a single transaction, so controllers don't drop devices mid-swap ([#311](https://github.com/RiDDiX/home-assistant-matter-hub/issues/311)) |
 | 🪟 Lift-only blinds | No more `TiltBlindTiltOnly` on covers without tilt, fixes Alexa routines for roller blinds ([#312](https://github.com/RiDDiX/home-assistant-matter-hub/issues/312)) |
-| 🏷️ Per-entity `disableClimateOnOff` | Turn off the OnOff cluster on climate endpoints per entity for controllers that prefer mode-only control |
+| 🏷️ Per-entity `disableClimateOnOff` | Turn off the OnOff cluster on climate endpoints per entity for controllers that prefer mode-only control, a climate with fan modes keeps its power state, which follows Home Assistant |
 | 🔢 `serialNumberSuffix` per bridge | Append a suffix to every entity serial, useful if controllers like Aqara cache stale device data |
 | 📝 `protocolLogLevel` option | Quiet matter.js logs independently from the app log level |
 | 🖥️ Bridge HW/SW version strings | HA device-registry `hw_version`/`sw_version` now show up in Matter BasicInformation on server-mode endpoints |
@@ -550,6 +550,16 @@ Home, ...) are not placed in the same network segment. Please make sure to revie
 <details>
 <summary><strong>🧪 Alpha (v2.1.0-alpha.x)</strong></summary>
 
+**v2.1.0-alpha.999:**
+- **Room Air Conditioner power state**: a climate shown as Room Air Conditioner (it has fan modes) now follows the Home Assistant power state also when the entity has no turn on/turn off support, or when `disableClimateOnOff` or `climateBlockOff` is set. Before, it always read Off there and a power command from the controller went nowhere. A blocked command is still not sent to Home Assistant ([#549](https://github.com/RiDDiX/home-assistant-matter-hub/issues/549)).
+- **Humidity and pressure auto merge**: a humidity or pressure sensor no longer disappears when the temperature sensor of its device is disabled in the entity mapping or has another humidity or pressure entity set by hand. With two temperature sensors on one device, only the first carries it ([#549](https://github.com/RiDDiX/home-assistant-matter-hub/issues/549)).
+- **Entity taken off after an error**: an entity that was removed from the bridge after an internal error is now brought back once instead of staying away until the next restart.
+- **Device refresh**: a refresh no longer subscribes all entities again at Home Assistant when the entity set did not change, which lowers the load on large bridges.
+- **Battery**: the PowerSource cluster now reports Order 0 instead of 47.
+**v2.1.0-alpha.998:**
+- **Add-on storage check**: if `/config` is not mapped to the Home Assistant host, as with a Supervisor older than 2026.07.1 that does not know the new `app_config` map type, the add-on now stops with a clear message instead of starting on empty storage. Existing data on the host is untouched ([#553](https://github.com/RiDDiX/home-assistant-matter-hub/issues/553)).
+- **Alpha add-on**: the manifest now uses the `app_config` map type, which removes the Supervisor warning `uses legacy map type 'addon_config'`. Same folder as before, nothing to migrate ([#553](https://github.com/RiDDiX/home-assistant-matter-hub/issues/553)).
+- **mDNS**: an address change is now logged when the address set changes again while a refresh retry is pending.
 **v2.1.0-alpha.997:**
 - **Factory reset**: removing the bridge from the last controller could crash the whole app when the Matter port was taken at that moment, and the web UI stayed down until a restart. The bridge now resets through its own stop and start and retries, and the root unique id is renewed on that path too ([#549](https://github.com/RiDDiX/home-assistant-matter-hub/issues/549)). A stop or delete during a factory reset is no longer undone by the reset's own restart.
 - **Runtime crashes**: after a fatal runtime crash the process now exits with code 1 instead of staying up without the web UI.
