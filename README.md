@@ -39,7 +39,7 @@ of port forwarding etc.
 | Channel | Branch | Current Version | Description |
 |---------|--------|-----------------|-------------|
 | **Stable** | `main` | v2.0.60 | Production-ready, recommended for most users |
-| **Alpha** | `alpha` | v2.1.0-alpha.999 | Ahead of Stable, carries the additions listed under Alpha Features |
+| **Alpha** | `alpha` | v2.1.0-alpha.1000 | Ahead of Stable, carries the additions listed under Alpha Features |
 | **Testing** | `testing` | v4.1.0-testing.x | ⚠️ **Highly unstable!** Experimental features, may break |
 
 ### Which version should I use?
@@ -550,6 +550,11 @@ Re-assign the affected devices to their rooms after they reconnect. See the [doc
 <details>
 <summary><strong>🧪 Alpha Features (v2.1.0-alpha.x)</strong> - Click to expand</summary>
 
+**v2.1.0-alpha.1000:**
+- **Prefer Entity Alias**: new opt-in bridge flag `preferEntityAlias` (default off). With it on, the first Home Assistant alias of an entity (entity settings, Voice assistants, Aliases) is used as the Matter device name. A per-entity custom name still wins, the alias ranks above `preferEntityRegistryName`, and entities without an alias keep their normal name. Alias edits reach the bridge with the next registry refresh, about a minute. Home Assistant keeps the alias order from 2026.4 on, on older versions use a single alias per entity ([#555](https://github.com/RiDDiX/home-assistant-matter-hub/issues/555)).
+- **Device names**: Bridge Mode and Server Mode now resolve device names in one place, so both behave the same. A blank registry name falls back to the original name, then the friendly name, in both.
+- **Alarm control panel**: the description of the mode select is cut to the Matter limit of 64 bytes, so a very long panel name no longer exceeds it.
+- **Server Mode**: `productLabel` now follows a per-entity `customProductName`, as Bridge Mode already did.
 **v2.1.0-alpha.999:**
 - **Room Air Conditioner power state**: a climate shown as Room Air Conditioner (it has fan modes) now follows the Home Assistant power state also when the entity has no turn on/turn off support, or when `disableClimateOnOff` or `climateBlockOff` is set. Before, it always read Off there and a power command from the controller went nowhere. A blocked command is still not sent to Home Assistant ([#549](https://github.com/RiDDiX/home-assistant-matter-hub/issues/549)).
 - **Humidity and pressure auto merge**: a humidity or pressure sensor no longer disappears when the temperature sensor of its device is disabled in the entity mapping or has another humidity or pressure entity set by hand. With two temperature sensors on one device, only the first carries it ([#549](https://github.com/RiDDiX/home-assistant-matter-hub/issues/549)).
