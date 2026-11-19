@@ -56,4 +56,24 @@ describe("BridgeStorage.add", () => {
       Object.keys(stored).sort(),
     );
   });
+
+  it("refuses an id that is one of its own storage keys", async () => {
+    const storage = new BridgeStorage(appStorage);
+    await storage.construction;
+    for (const id of ["ids", "version", 123]) {
+      await expect(
+        storage.add({
+          id,
+          name: "Bridge",
+          port: 5540,
+          basicInformation: {},
+        } as unknown as BridgeData),
+      ).rejects.toThrow("Invalid bridge id");
+    }
+
+    expect(storage.bridges).toEqual([]);
+    expect(await appStorage.createContext("bridges").get("ids", [])).toEqual(
+      [],
+    );
+  });
 });

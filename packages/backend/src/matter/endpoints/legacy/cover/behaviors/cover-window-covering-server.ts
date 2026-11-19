@@ -258,14 +258,8 @@ const setTiltPositionAction = (position: number, agent: Agent) => {
   if (!supportsTiltPositionControl(agent)) {
     const adjustedPosition = adjustPositionForWriting(position, agent);
     const shouldOpen = adjustedPosition != null && adjustedPosition >= 50;
-    const swapped = shouldSwapOpenClose(agent);
-    if (shouldOpen) {
-      return {
-        action: swapped ? "cover.close_cover_tilt" : "cover.open_cover_tilt",
-      };
-    }
     return {
-      action: swapped ? "cover.open_cover_tilt" : "cover.close_cover_tilt",
+      action: shouldOpen ? "cover.open_cover_tilt" : "cover.close_cover_tilt",
     };
   }
   return {
@@ -379,11 +373,7 @@ const config: WindowCoveringConfig = {
       // If adjusted position < 50, cover should be more closed → close
       // If adjusted position >= 50, cover should be more open → open
       const shouldOpen = adjustedPosition != null && adjustedPosition >= 50;
-      const swapped = shouldSwapOpenClose(agent);
-      if (shouldOpen) {
-        return { action: swapped ? "cover.close_cover" : "cover.open_cover" };
-      }
-      return { action: swapped ? "cover.open_cover" : "cover.close_cover" };
+      return { action: shouldOpen ? "cover.open_cover" : "cover.close_cover" };
     }
     return {
       action: "cover.set_cover_position",

@@ -195,26 +195,5 @@ export function deviceImageApi(
     res.json({ success: true });
   });
 
-  // Check if entity has any image
-  router.head("/:entityId", (req: express.Request, res: express.Response) => {
-    const entityId = req.params.entityId as string;
-
-    const customImage = findCustomImage(imagesDir, entityId);
-    if (customImage) {
-      res.setHeader("X-Image-Source", "custom");
-      res.status(200).end();
-      return;
-    }
-
-    const z2mUrl = resolveZ2mImageUrl(haRegistry, entityId);
-    if (z2mUrl) {
-      res.setHeader("X-Image-Source", "z2m");
-      res.status(200).end();
-      return;
-    }
-
-    res.status(404).end();
-  });
-
   return router;
 }

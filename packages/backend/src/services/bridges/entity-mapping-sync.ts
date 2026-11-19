@@ -1,9 +1,14 @@
 import type {
   EntityMappingConfig,
   HomeAssistantEntityState,
+  VacuumDeviceAttributes,
 } from "@home-assistant-matter-hub/common";
 import type { Logger } from "@matter/general";
 import { lightShape } from "../../matter/endpoints/legacy/light/index.js";
+import {
+  parseVacuumRooms,
+  toAreaId,
+} from "../../matter/endpoints/legacy/vacuum/utils/parse-vacuum-rooms.js";
 import type { HomeAssistantStates } from "../home-assistant/home-assistant-registry.js";
 import { type BridgeRegistry, fingerprintBattery } from "./bridge-registry.js";
 
@@ -34,6 +39,23 @@ function lightRank(state: HomeAssistantEntityState | undefined): number | null {
   return Array.isArray(modes) ? lightShape(modes).rank : null;
 }
 
+// A vacuum picks its ServiceArea areas once from the room attributes. One
+// mounted while unavailable gets the single Home area and keeps it. null =
+// no rooms in the attributes, where injected Roborock/Valetudo rooms never are.
+function vacuumAreaIds(
+  state: HomeAssistantEntityState | undefined,
+): string | null {
+  if (!state || state.state === "unavailable" || state.state === "unknown") {
+    return null;
+  }
+  const ids = parseVacuumRooms(
+    (state.attributes ?? {}) as VacuumDeviceAttributes,
+  )
+    .map((room) => toAreaId(room.id))
+    .sort((a, b) => a - b);
+  return ids.length > 0 ? JSON.stringify(ids) : null;
+}
+
 function parseTuple(fingerprint: string): unknown[] {
   try {
     const parsed = JSON.parse(fingerprint);
@@ -56,6 +78,8 @@ export class EntityMappingSync {
   private readonly fanCaps = new Map<string, string | null>();
   // light entityId -> as-built shape rank, null = built without color modes
   private readonly lightRanks = new Map<string, number | null>();
+  // vacuum entityId -> as-built area id element, null = built without rooms
+  private readonly vacuumAreas = new Map<string, string | null>();
 
   constructor(
     private readonly registry: BridgeRegistry,
@@ -98,12 +122,14 @@ export class EntityMappingSync {
       ? this.registry.batteryFingerprintFor(entityId, mapping)
       : "";
     const tuple: unknown[] = [mapping ?? null, battery || null];
-    // fans and lights carry a third capability element (#515); other
+    // fans, lights and vacuums carry a third capability element (#515); other
     // domains keep the two-element tuple so their stored fingerprints stay valid
     if (entityId?.startsWith("fan.")) {
       tuple.push(fanCapabilities(this.registry.initialState(entityId)));
     } else if (entityId?.startsWith("light.")) {
       tuple.push(lightRank(this.registry.initialState(entityId)));
+    } else if (entityId?.startsWith("vacuum.")) {
+      tuple.push(vacuumAreaIds(this.registry.initialState(entityId)));
     }
     const companions = entityId ? this.companions(mapping, entityId) : null;
     if (companions?.some((id) => id != null)) tuple.push(companions);
@@ -176,7 +202,11 @@ export class EntityMappingSync {
     let fingerprint = this.computeFingerprint(mapping, entityId);
     // #515: unknown live capabilities (unavailable snapshot, integrations
     // stripping attributes) must not rebuild the fan, keep the stored element.
-    if (entityId.startsWith("fan.") && storedFingerprint) {
+    // Same for a vacuum whose rooms are gone for now.
+    if (
+      (entityId.startsWith("fan.") || entityId.startsWith("vacuum.")) &&
+      storedFingerprint
+    ) {
       const live = parseTuple(fingerprint);
       const stored = parseTuple(storedFingerprint);
       if (live[2] == null && stored.length > 2 && stored[2] != null) {
@@ -252,6 +282,7 @@ export class EntityMappingSync {
     this.candidates.clear();
     this.fanCaps.clear();
     this.lightRanks.clear();
+    this.vacuumAreas.clear();
     for (const [entityId, fingerprint] of entries) {
       // track the as-built capability element of every fan endpoint (#515)
       if (entityId.startsWith("fan.")) {
@@ -266,6 +297,13 @@ export class EntityMappingSync {
         this.lightRanks.set(
           entityId,
           typeof tuple[2] === "number" ? tuple[2] : null,
+        );
+      }
+      if (entityId.startsWith("vacuum.")) {
+        const tuple = parseTuple(fingerprint);
+        this.vacuumAreas.set(
+          entityId,
+          typeof tuple[2] === "string" ? tuple[2] : null,
         );
       }
       if (fingerprintBattery(fingerprint) != null) continue;
@@ -319,7 +357,8 @@ export class EntityMappingSync {
       this.retryScheduled ||
       (this.candidates.size === 0 &&
         this.fanCaps.size === 0 &&
-        this.lightRanks.size === 0)
+        this.lightRanks.size === 0 &&
+        this.vacuumAreas.size === 0)
     ) {
       return;
     }
@@ -346,6 +385,18 @@ export class EntityMappingSync {
         this.lightRanks.set(id, live);
         this.scheduleRefresh(
           `Light color modes grew for ${id}, rebuilding`,
+          refresh,
+        );
+        return;
+      }
+      if (id.startsWith("vacuum.")) {
+        const stored = this.vacuumAreas.get(id);
+        if (stored === undefined) continue;
+        const live = vacuumAreaIds(states[id]);
+        if (live == null || live === stored) continue;
+        this.vacuumAreas.set(id, live);
+        this.scheduleRefresh(
+          `Vacuum rooms changed for ${id}, rebuilding`,
           refresh,
         );
         return;

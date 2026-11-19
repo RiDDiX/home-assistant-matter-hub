@@ -94,7 +94,7 @@ export function backupApi(
 
     const bridgeIds = options.bridgeIds;
     const bridgesToRestore = bridgeIds
-      ? backupData.bridges.filter((b) => bridgeIds.includes(b.id))
+      ? backupData.bridges.filter((b) => bridgeIds.includes(b?.id))
       : backupData.bridges;
     const restoreIdentity =
       options.restoreIdentity !== false && !!backupData.includesIdentity;
@@ -110,8 +110,15 @@ export function backupApi(
 
     for (const bridge of bridgesToRestore) {
       try {
-        if (!BRIDGE_ID.test(bridge.id)) {
-          throw new Error(`Invalid bridge id: ${bridge.id}`);
+        if (typeof bridge?.id !== "string" || !BRIDGE_ID.test(bridge.id)) {
+          throw new Error(`Invalid bridge id: ${bridge?.id}`);
+        }
+        // boot reads basicInformation of every stored bridge
+        if (
+          typeof bridge.basicInformation !== "object" ||
+          bridge.basicInformation === null
+        ) {
+          throw new Error(`Invalid basic information for bridge ${bridge.id}`);
         }
         const exists = existingIds.has(bridge.id);
         if (exists && !options.overwriteExisting) {
@@ -177,7 +184,7 @@ export function backupApi(
         await restorePluginState(zipDirectory, bridge.id, storageLocation);
       } catch (e) {
         errors.push({
-          bridgeId: bridge.id,
+          bridgeId: bridge?.id,
           error: e instanceof Error ? e.message : "Unknown error",
         });
       }

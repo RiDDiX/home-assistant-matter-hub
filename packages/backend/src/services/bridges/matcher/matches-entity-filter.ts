@@ -1,3 +1,4 @@
+import vm from "node:vm";
 import type {
   HomeAssistantDeviceRegistry,
   HomeAssistantEntityRegistry,
@@ -99,6 +100,35 @@ export function testMatcher(
 
 function escapeRegExp(text: string): string {
   return text.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, "\\$&");
+}
+
+export const FILTER_BUDGET_MS = 2000;
+
+export class FilterTimeoutError extends Error {
+  constructor(ms: number) {
+    super(`Filter pattern takes too long to evaluate (over ${ms} ms)`);
+    this.name = "FilterTimeoutError";
+  }
+}
+
+const budgetContext = vm.createContext({});
+
+// a backtracking regex rule would block the event loop, vm interrupts it
+export function withinFilterBudget<T>(
+  run: () => T,
+  ms: number = FILTER_BUDGET_MS,
+): T {
+  budgetContext.run = run;
+  try {
+    return vm.runInContext("run()", budgetContext, { timeout: ms }) as T;
+  } catch (e) {
+    if ((e as { code?: string })?.code === "ERR_SCRIPT_EXECUTION_TIMEOUT") {
+      throw new FilterTimeoutError(ms);
+    }
+    throw e;
+  } finally {
+    budgetContext.run = undefined;
+  }
 }
 
 const regexCache = new Map<string, RegExp | null>();

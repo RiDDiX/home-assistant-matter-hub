@@ -39,7 +39,14 @@ export type OptionsProps = ArgumentsCamelCase<StartOptions> & {
 };
 
 export class Options {
-  constructor(private readonly startOptions: OptionsProps) {}
+  constructor(private readonly startOptions: OptionsProps) {
+    // one of the two alone would start the web UI without any login
+    if (!startOptions.httpAuthUsername !== !startOptions.httpAuthPassword) {
+      throw new Error(
+        "HTTP authentication needs both http-auth-username and http-auth-password (HAMH_HTTP_AUTH_USERNAME and HAMH_HTTP_AUTH_PASSWORD), but only one of them is set. Set both to require a login, or neither to run without one.",
+      );
+    }
+  }
 
   get mdns(): MdnsOptions {
     return {

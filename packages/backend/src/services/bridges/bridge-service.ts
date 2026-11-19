@@ -62,6 +62,7 @@ export class BridgeService extends Service {
   private recoveryInterval?: ReturnType<typeof setInterval>;
   private recoveryIntervalMs = 60000;
   private recoveryInProgress = false;
+  private startRun = 0;
   private _recoveryHistory: RecoveryAttempt[] = [];
   private lastReactiveRecovery = 0;
   private static readonly MAX_RECOVERY_HISTORY = 20;
@@ -82,34 +83,37 @@ export class BridgeService extends Service {
   protected override async initialize() {
     // Snapshot first: addBridge mutates this.bridges and we may rewrite a port.
     for (const data of [...this.bridgeStorage.bridges]) {
-      let normalized = this.normalizeBridgeData(data);
-      // the schema takes two letters only, a stored "USA" would fail every save
-      if (
-        normalized.countryCode != null &&
-        !/^[A-Za-z]{2}$/.test(normalized.countryCode)
-      ) {
-        this.log.warn(
-          `Bridge ${normalized.name} country code "${normalized.countryCode}" is not two letters, dropped`,
-        );
-        const { countryCode: _, ...rest } = normalized;
-        normalized = rest;
-      }
-      if (this.portUsed(normalized.port)) {
-        // Two stored bridges want the same port. Only one can bind it, so move
-        // this one to a free port instead of letting it fail offline (#378).
-        const freePort = this.getNextAvailablePort(normalized.port);
-        this.log.warn(
-          `Bridge ${normalized.name} port ${normalized.port} already in use, moved to ${freePort}`,
-        );
-        normalized = { ...normalized, port: freePort };
-      }
+      let normalized = data;
       try {
+        normalized = this.normalizeBridgeData(data);
+        // the schema takes two letters only, a stored "USA" would fail every save
+        if (
+          normalized.countryCode != null &&
+          !/^[A-Za-z]{2}$/.test(normalized.countryCode)
+        ) {
+          this.log.warn(
+            `Bridge ${normalized.name} country code "${normalized.countryCode}" is not two letters, dropped`,
+          );
+          const { countryCode: _, ...rest } = normalized;
+          normalized = rest;
+        }
+        if (this.portUsed(normalized.port)) {
+          // Two stored bridges want the same port. Only one can bind it, so move
+          // this one to a free port instead of letting it fail offline (#378).
+          const freePort = this.getNextAvailablePort(normalized.port);
+          this.log.warn(
+            `Bridge ${normalized.name} port ${normalized.port} already in use, moved to ${freePort}`,
+          );
+          normalized = { ...normalized, port: freePort };
+        }
         await this.bridgeStorage.add(normalized);
         await this.addBridge(normalized);
       } catch (e) {
         // one broken bridge must not keep the others from loading, its stored
         // record still owns the port
-        this.pendingPorts.add(normalized.port);
+        if (typeof normalized.port === "number") {
+          this.pendingPorts.add(normalized.port);
+        }
         this.log.error(
           `Failed to load bridge ${normalized.id} (${normalized.name}):`,
           e,
@@ -199,6 +203,9 @@ export class BridgeService extends Service {
     this.lastRecoveryAttempt = new Date();
     try {
       for (const bridge of failedBridges) {
+        // the pass can take minutes, a bridge stopped or deleted meanwhile stays down
+        const { status } = bridge.data;
+        if (status !== "failed") continue;
         try {
           await bridge.start();
           // start() catches its own errors and leaves the bridge failed
@@ -256,6 +263,7 @@ export class BridgeService extends Service {
   }
 
   async startAll() {
+    const run = ++this.startRun;
     // Sort bridges by priority (lower = starts first), default priority is 100
     const sortedBridges = [...this.bridges].sort((a, b) => {
       const priorityA = a.data.priority ?? 100;
@@ -263,6 +271,8 @@ export class BridgeService extends Service {
       return priorityA - priorityB;
     });
     for (const bridge of sortedBridges) {
+      // a stopAll or restartAll since then owns the bridges
+      if (run !== this.startRun) return;
       try {
         const start = bridge.start();
         if (!(await this.settlesWithin(start, START_TIMEOUT_MS))) {
@@ -281,6 +291,7 @@ export class BridgeService extends Service {
   }
 
   async stopAll() {
+    this.startRun++;
     // Stop all bridges in parallel, stops are independent and a multi-bridge
     // shutdown should not wait for each one serially.
     await Promise.all(
@@ -296,6 +307,7 @@ export class BridgeService extends Service {
   }
 
   async restartAll() {
+    const run = ++this.startRun;
     // Stop in parallel (no ordering requirement), then start sequentially
     // by priority so low-priority bridges always come up first.
     await Promise.all(
@@ -316,6 +328,7 @@ export class BridgeService extends Service {
       return priorityA - priorityB;
     });
     for (const bridge of sortedBridges) {
+      if (run !== this.startRun) return;
       try {
         await bridge.start();
         this.onBridgeChanged?.(bridge.id);

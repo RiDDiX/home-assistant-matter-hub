@@ -123,30 +123,6 @@ export class ServerModeEndpointManager extends Service {
     return this.mappingStorage.getMapping(this.dataProvider.id, entityId);
   }
 
-  override async dispose(): Promise<void> {
-    this.stopObserving();
-    if (this.removalRecheckTimer) {
-      clearTimeout(this.removalRecheckTimer);
-      this.removalRecheckTimer = null;
-    }
-    this.pendingRemovals.clear();
-
-    // Close endpoints to free memory while preserving stored endpoint
-    // numbers. Using delete() here would erase persisted endpoint numbers,
-    // causing controllers to treat the device as new on the next restart.
-    for (const [entityId, entry] of this.endpoints) {
-      try {
-        await entry.endpoint.close();
-      } catch (e) {
-        this.log.warn(
-          `Failed to close endpoint ${entityId} during dispose:`,
-          e,
-        );
-      }
-    }
-    this.endpoints.clear();
-  }
-
   async startObserving(): Promise<void> {
     // Only the subscription resets here. stopObserving is the lifecycle stop
     // and would take the removal timer with it (#438).

@@ -1,6 +1,7 @@
 import express from "express";
 import type { HomeAssistantClient } from "../services/home-assistant/home-assistant-client.js";
 import type { HomeAssistantRegistry } from "../services/home-assistant/home-assistant-registry.js";
+import { safeClone } from "../utils/json/endpoint-to-json.js";
 
 export interface HomeAssistantEntityInfo {
   entity_id: string;
@@ -117,7 +118,10 @@ export function homeAssistantApi(
         device_id: entity.device_id,
         device_name: device?.name,
         state: state?.state ?? "unknown",
-        attributes: state?.attributes ?? {},
+        attributes: safeClone(state?.attributes ?? {}) as Record<
+          string,
+          unknown
+        >,
         last_changed: state?.last_changed,
         last_updated: state?.last_updated,
       };
@@ -157,7 +161,7 @@ export function homeAssistantApi(
       device_id: entity?.device_id,
       device_name: device?.name,
       state: state?.state ?? "unknown",
-      attributes: state?.attributes ?? {},
+      attributes: safeClone(state?.attributes ?? {}) as Record<string, unknown>,
       last_changed: state?.last_changed,
       last_updated: state?.last_updated,
     };
@@ -241,7 +245,10 @@ export function homeAssistantApi(
         device_id: entity.device_id,
         device_name: device.name,
         state: state?.state ?? "unknown",
-        attributes: state?.attributes ?? {},
+        attributes: safeClone(state?.attributes ?? {}) as Record<
+          string,
+          unknown
+        >,
         last_changed: state?.last_changed,
         last_updated: state?.last_updated,
       };

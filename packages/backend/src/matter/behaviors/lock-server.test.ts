@@ -512,6 +512,16 @@ describe("applyClearCredential", () => {
     expect(storage.hasCredential(ENTITY)).toBe(false);
   });
 
+  it("clears the PIN for the clear-all index 0xfffe", async () => {
+    await applyClearCredential(makeEnv(storage), ENTITY, {
+      credential: {
+        credentialType: DoorLock.CredentialType.Pin,
+        credentialIndex: 0xfffe,
+      },
+    });
+    expect(storage.hasCredential(ENTITY)).toBe(false);
+  });
+
   it("does NOT delete when credentialIndex is unsupported", async () => {
     await applyClearCredential(makeEnv(storage), ENTITY, {
       credential: {

@@ -97,8 +97,8 @@ export class ServerModeServerNode extends ServerNode {
     if (this.deviceEndpoints.has(endpoint.id)) {
       return;
     }
-    this.deviceEndpoints.set(endpoint.id, endpoint);
     await this.add(endpoint);
+    this.deviceEndpoints.set(endpoint.id, endpoint);
   }
 
   /**

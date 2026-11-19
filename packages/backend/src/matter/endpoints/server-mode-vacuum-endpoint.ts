@@ -16,6 +16,7 @@ import {
   withResolvedRooms,
 } from "./legacy/vacuum/behaviors/vacuum-service-area-server.js";
 import { ServerModeVacuumDevice } from "./legacy/vacuum/server-mode-vacuum-device.js";
+import { resolveVacuumCompanionMapping } from "./legacy/vacuum/utils/resolve-vacuum-companion-mapping.js";
 import { resolveVacuumFaultMapping } from "./legacy/vacuum/utils/resolve-vacuum-fault-mapping.js";
 import { resolveVacuumJobMapping } from "./legacy/vacuum/utils/resolve-vacuum-job-mapping.js";
 import { updateEntityState } from "./update-entity-state.js";
@@ -105,131 +106,16 @@ export class ServerModeVacuumEndpoint extends EntityEndpoint {
         }
       }
 
-      // Auto-detect vacuum select entities (cleaning mode, suction, mop intensity)
-      const vacuumEntities = registry.findVacuumSelectEntities(
-        entity.device_id,
-      );
-      if (
-        !effectiveMapping?.cleaningModeEntity &&
-        vacuumEntities.cleaningModeEntity
-      ) {
-        effectiveMapping = {
-          ...effectiveMapping,
-          entityId: effectiveMapping?.entityId ?? entityId,
-          cleaningModeEntity: vacuumEntities.cleaningModeEntity,
-        };
-        logger.info(
-          `${entityId}: Auto-assigned cleaningMode ${vacuumEntities.cleaningModeEntity}`,
-        );
-      }
-      if (
-        !effectiveMapping?.suctionLevelEntity &&
-        vacuumEntities.suctionLevelEntity
-      ) {
-        effectiveMapping = {
-          ...effectiveMapping,
-          entityId: effectiveMapping?.entityId ?? entityId,
-          suctionLevelEntity: vacuumEntities.suctionLevelEntity,
-        };
-        logger.info(
-          `${entityId}: Auto-assigned suctionLevel ${vacuumEntities.suctionLevelEntity}`,
-        );
-      }
-      if (
-        !effectiveMapping?.mopIntensityEntity &&
-        vacuumEntities.mopIntensityEntity
-      ) {
-        effectiveMapping = {
-          ...effectiveMapping,
-          entityId: effectiveMapping?.entityId ?? entityId,
-          mopIntensityEntity: vacuumEntities.mopIntensityEntity,
-        };
-        logger.info(
-          `${entityId}: Auto-assigned mopIntensity ${vacuumEntities.mopIntensityEntity}`,
-        );
-      }
-      if (
-        !effectiveMapping?.currentRoomEntity &&
-        vacuumEntities.currentRoomEntity
-      ) {
-        effectiveMapping = {
-          ...effectiveMapping,
-          entityId: effectiveMapping?.entityId ?? entityId,
-          currentRoomEntity: vacuumEntities.currentRoomEntity,
-        };
-        logger.info(
-          `${entityId}: Auto-assigned currentRoom ${vacuumEntities.currentRoomEntity}`,
-        );
-      }
-
-      // HA 2026.3 CLEAN_AREA: resolve HA area mapping before vendor-specific room detection.
-      // When CLEAN_AREA is supported and area_mapping is configured, this takes priority
-      // over all vendor-specific room detection methods.
-      const supportedFeatures =
-        (state.attributes as VacuumDeviceAttributes).supported_features ?? 0;
-      const cleanAreaRooms = await registry.resolveCleanAreaRooms(
-        entityId,
-        supportedFeatures,
-      );
-      if (cleanAreaRooms.length > 0) {
-        effectiveMapping = {
-          ...effectiveMapping,
-          entityId: effectiveMapping?.entityId ?? entityId,
-          cleanAreaRooms,
-        };
-        logger.info(
-          `${entityId}: Using ${cleanAreaRooms.length} HA areas via CLEAN_AREA`,
-        );
-      }
-
-      // Auto-detect rooms when no rooms in attributes and no CLEAN_AREA mapping
-      const vacAttrs = state.attributes as VacuumDeviceAttributes;
-      if (
-        cleanAreaRooms.length === 0 &&
-        !vacAttrs.rooms &&
-        !vacAttrs.segments &&
-        !vacAttrs.room_mapping
-      ) {
-        // Try Valetudo map segments sensor (sensor.*_map_segments on same device)
-        const valetudoRooms = registry.findValetudoMapSegments(
+      ({ mapping: effectiveMapping, state } =
+        await resolveVacuumCompanionMapping(
+          registry,
+          entityId,
           entity.device_id,
-        );
-        if (valetudoRooms.length > 0) {
-          const roomsObj: Record<string, string> = {};
-          for (const r of valetudoRooms) {
-            roomsObj[String(r.id)] = r.name;
-          }
-          state = {
-            ...state,
-            attributes: {
-              ...state.attributes,
-              rooms: roomsObj,
-            } as typeof state.attributes,
-          };
-          logger.info(
-            `${entityId}: Auto-detected ${valetudoRooms.length} Valetudo segments`,
-          );
-        } else {
-          // Try Roborock integration service call
-          const roborockRooms = await registry.resolveRoborockRooms(entityId);
-          if (roborockRooms.length > 0) {
-            const roomsObj: Record<string, string> = {};
-            for (const r of roborockRooms) {
-              roomsObj[String(r.id)] = r.name;
-            }
-            state = {
-              ...state,
-              attributes: {
-                ...state.attributes,
-                rooms: roomsObj,
-              } as typeof state.attributes,
-            };
-            logger.info(
-              `${entityId}: Auto-detected ${roborockRooms.length} Roborock rooms`,
-            );
-          }
-        }
-      }
+          state,
+          effectiveMapping,
+          logger,
+          (message) => logger.info(message),
+        ));
     } else {
       logger.warn(`${entityId}: No device_id, cannot auto-assign battery`);
     }

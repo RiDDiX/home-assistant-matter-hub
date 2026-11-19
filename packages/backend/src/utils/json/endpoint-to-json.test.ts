@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { AggregatorEndpoint } from "../../matter/endpoints/aggregator-endpoint.js";
 import { createCameraEndpointType } from "../../plugins/builtin/camera/camera-endpoint.js";
 import { WebRtcBridge } from "../../plugins/builtin/camera/webrtc-bridge.js";
-import { endpointToJson } from "./endpoint-to-json.js";
+import { endpointToJson, safeClone } from "./endpoint-to-json.js";
 
 // #155: the camera state holds the WebRtcBridge, the devices API printed its token
 
@@ -72,5 +72,19 @@ describe("endpointToJson", () => {
 
     expect(json).not.toContain("leaky");
     expect(json).toContain("[redacted]");
+  });
+});
+
+describe("safeClone", () => {
+  it("redacts entity_picture, its URL carries the proxy token", () => {
+    const clone = safeClone({
+      friendly_name: "TV",
+      entity_picture: "/api/media_player_proxy/media_player.tv?token=abc123",
+    });
+
+    expect(clone).toEqual({
+      friendly_name: "TV",
+      entity_picture: "[redacted]",
+    });
   });
 });

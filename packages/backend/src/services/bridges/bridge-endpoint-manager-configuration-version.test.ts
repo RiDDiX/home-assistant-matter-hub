@@ -110,6 +110,7 @@ interface FakeHa {
   labels: unknown[];
   snapshotGeneration: number;
   markRefreshIncomplete: () => void;
+  grantRefreshRetries: () => void;
 }
 
 function addEntity(ha: FakeHa, id: string) {
@@ -133,6 +134,7 @@ function makeHa(ids: string[]): FakeHa {
     labels: [],
     snapshotGeneration: 1,
     markRefreshIncomplete: () => {},
+    grantRefreshRetries: () => {},
   };
   for (const id of ids) addEntity(ha, id);
   return ha;

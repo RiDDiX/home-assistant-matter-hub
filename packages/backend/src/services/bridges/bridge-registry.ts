@@ -27,7 +27,11 @@ import type {
 } from "../home-assistant/home-assistant-registry.js";
 import type { BridgeDataProvider } from "./bridge-data-provider.js";
 import { resolveBatteryPercent } from "./entity-state-provider.js";
-import { testMatchers } from "./matcher/matches-entity-filter.js";
+import {
+  FilterTimeoutError,
+  testMatchers,
+  withinFilterBudget,
+} from "./matcher/matches-entity-filter.js";
 
 // Battery marker inside a manager mapping fingerprint, a JSON tuple of
 // [mapping, batteryEntityId] so mapping text can never collide with it (#450).
@@ -589,6 +593,7 @@ export class BridgeRegistry {
     };
   }
 
+  private static readonly filterLogger = Logger.get("BridgeRegistry");
   private static readonly valetudoLogger = Logger.get("ValetudoRooms");
 
   /**
@@ -999,6 +1004,39 @@ export class BridgeRegistry {
   }
 
   refresh(mappingOf?: (entityId: string) => EntityMappingConfig | undefined) {
+    // filter first: a timeout throws before any cached state is touched
+    let entities: HomeAssistantEntities;
+    try {
+      entities = withinFilterBudget(() =>
+        pickBy(this.registry.entities, (entity) => {
+          const device = this.registry.devices[entity.device_id];
+          const filter = this.dataProvider.filter;
+          const featureFlags = this.dataProvider.featureFlags ?? {};
+
+          // Always exclude disabled entities
+          if (entity.disabled_by != null) {
+            return false;
+          }
+
+          // Hidden entities are only included if includeHiddenEntities feature flag is enabled
+          const isHidden = entity.hidden_by != null;
+          if (isHidden && !featureFlags.includeHiddenEntities) {
+            return false;
+          }
+
+          // Check filter matching
+          const state = this.registry.states[entity.entity_id];
+          return this.matchesFilter(filter, entity, device, state);
+        }),
+      );
+    } catch (e) {
+      if (e instanceof FilterTimeoutError) {
+        BridgeRegistry.filterLogger.error(
+          `Bridge "${this.dataProvider.name}": ${e.message}, keeping its current devices`,
+        );
+      }
+      throw e;
+    }
     // Clear used entities on refresh to allow re-assignment
     this._usedBatteryEntities.clear();
     this._usedHumidityEntities.clear();
@@ -1010,26 +1048,7 @@ export class BridgeRegistry {
     // rebuilt per refresh too, an in-place edit keeps the map identity
     this._entitiesByDevice = undefined;
 
-    this._entities = pickBy(this.registry.entities, (entity) => {
-      const device = this.registry.devices[entity.device_id];
-      const filter = this.dataProvider.filter;
-      const featureFlags = this.dataProvider.featureFlags ?? {};
-
-      // Always exclude disabled entities
-      if (entity.disabled_by != null) {
-        return false;
-      }
-
-      // Hidden entities are only included if includeHiddenEntities feature flag is enabled
-      const isHidden = entity.hidden_by != null;
-      if (isHidden && !featureFlags.includeHiddenEntities) {
-        return false;
-      }
-
-      // Check filter matching
-      const state = this.registry.states[entity.entity_id];
-      return this.matchesFilter(filter, entity, device, state);
-    });
+    this._entities = entities;
     this._states = pickBy(
       this.registry.states,
       (e) => !!this._entities[e.entity_id],
@@ -1117,9 +1136,16 @@ export class BridgeRegistry {
           }
         }
 
+        // A disabled main never mounts, so its claim would hide the sensor.
+        // disableBatteryMapping still claims: it exists to hide a bogus battery.
+        const mapping = mappingOf?.(entity.entity_id);
+        if (mapping?.disabled) continue;
+
         const batteryEntityId = this.findBatteryEntityForDevice(
           entity.device_id,
         );
+        if (mapping?.batteryEntity && mapping.batteryEntity !== batteryEntityId)
+          continue;
         if (batteryEntityId && batteryEntityId !== entity.entity_id) {
           // Only mark if not already marked (first entity wins)
           if (!this._usedBatteryEntities.has(batteryEntityId)) {

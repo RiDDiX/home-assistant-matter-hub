@@ -74,7 +74,11 @@ afterEach(() => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-function purifierState(value: string, percentage: number) {
+function purifierState(
+  value: string,
+  percentage: number,
+  extra: Record<string, unknown> = {},
+) {
   return {
     entity_id: "fan.purifier",
     state: value,
@@ -83,6 +87,7 @@ function purifierState(value: string, percentage: number) {
       supported_features: 1,
       percentage,
       percentage_step: 1,
+      ...extra,
     },
     context: { id: "ctx" },
     last_changed: "2026-01-01T00:00:00",
@@ -96,6 +101,7 @@ async function mount(
   variant: "flat" | "composed",
   value = "on",
   percentage = 40,
+  extra: Record<string, unknown> = {},
 ) {
   const server = await ServerNode.create({
     // biome-ignore lint/suspicious/noExplicitAny: env valid at runtime
@@ -107,7 +113,7 @@ async function mount(
   });
   const aggregator = new AggregatorEndpoint("aggregator");
   await server.add(aggregator);
-  const state = purifierState(value, percentage);
+  const state = purifierState(value, percentage, extra);
   let purifier: Endpoint;
   if (variant === "flat") {
     purifier = new Endpoint(
@@ -135,8 +141,8 @@ async function mount(
   return { server, purifier };
 }
 
-async function start() {
-  const { server, purifier } = await mount("flat");
+async function start(extra: Record<string, unknown> = {}) {
+  const { server, purifier } = await mount("flat", "on", 40, extra);
   const { condition, changeIndication } = purifier.stateOf(
     // biome-ignore lint/suspicious/noExplicitAny: read cluster state
     "hepaFilterMonitoring" as any,
@@ -157,6 +163,22 @@ describe("HEPA condition across a restart", () => {
       condition: 15,
       changeIndication: ResourceMonitoring.ChangeIndication.Warning,
     });
+    expect(second).toEqual(first);
+  });
+
+  it.each([
+    [15, 15],
+    ["15", 15],
+  ])("reads filter_life %j from the fan attributes", async (value, expected) => {
+    expect((await start({ filter_life: value })).condition).toBe(expected);
+  });
+
+  it("keeps the last condition when filter_life is not a number", async () => {
+    filterLife = 15;
+    const first = await start();
+    filterLife = null;
+    const second = await start({ filter_life: "unknown" });
+
     expect(second).toEqual(first);
   });
 

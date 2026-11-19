@@ -71,6 +71,14 @@ export class BridgeStorage extends Service {
 
   async add(data: BridgeData): Promise<void> {
     const bridge = pick(data, Object.keys(bridgeDataKeys)) as BridgeData;
+    // "ids" and "version" are this context's own keys
+    if (
+      typeof bridge.id !== "string" ||
+      bridge.id === "ids" ||
+      bridge.id === "version"
+    ) {
+      throw new Error(`Invalid bridge id: ${bridge.id}`);
+    }
     const idx = this._bridges.findIndex((b) => b.id === bridge.id);
     if (idx !== -1) {
       this._bridges[idx] = bridge;

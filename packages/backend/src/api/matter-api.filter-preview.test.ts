@@ -26,10 +26,10 @@ const registry = {
   labels: [],
 } as unknown as HomeAssistantRegistry;
 
-async function preview(body: unknown) {
+async function preview(body: unknown, haRegistry = registry) {
   const app = express();
   app.use(express.json());
-  app.use("/matter", matterApi({} as BridgeService, registry));
+  app.use("/matter", matterApi({} as BridgeService, haRegistry));
   const server = app.listen(0);
   try {
     await new Promise<void>((resolve) => server.once("listening", resolve));
@@ -39,7 +39,7 @@ async function preview(body: unknown) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     });
-    return await res.json();
+    return { status: res.status, ...(await res.json()) };
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
@@ -67,5 +67,22 @@ describe("POST /filter-preview", () => {
     const result = await preview({ ...filter, includeHiddenEntities: true });
 
     expect(result.domains).toEqual({ light: 121, vacuum: 1 });
+  });
+
+  it("rejects a pattern that takes too long to evaluate", async () => {
+    const id = `sensor.${"a".repeat(33)}`;
+    const slow = {
+      ...registry,
+      entities: { [id]: entity(id) },
+    } as unknown as HomeAssistantRegistry;
+    const started = Date.now();
+    const result = await preview(
+      { include: [{ type: "regex", value: "(.*)*x" }], exclude: [] },
+      slow,
+    );
+
+    expect(result.status).toBe(400);
+    expect(result.error).toMatch(/takes too long to evaluate/);
+    expect(Date.now() - started).toBeLessThan(5000);
   });
 });

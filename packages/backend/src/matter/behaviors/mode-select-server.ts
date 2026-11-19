@@ -62,10 +62,11 @@ class ModeSelectServerBase extends Base {
 
     const next = {
       supportedModes: buildSupportedModes(options),
-      // An unavailable state keeps the last mode, the list still follows
-      currentMode: isSentinelState(current)
-        ? this.state.currentMode
-        : findCurrentMode(options, current),
+      // No matching option or an unavailable state keeps the last mode
+      currentMode:
+        current == null || isSentinelState(current)
+          ? this.state.currentMode
+          : findCurrentMode(options, current),
     };
     clampCurrentMode(next, 0);
     applyPatchState(this.state, next);

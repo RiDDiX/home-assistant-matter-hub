@@ -224,7 +224,7 @@ const managers: ServerModeEndpointManager[] = [];
 afterEach(async () => {
   // the removal recheck timer must not outlive its test
   for (const m of managers.splice(0)) {
-    await m.dispose().catch(() => {});
+    m.stopObserving();
   }
   vi.restoreAllMocks();
   vi.useRealTimers();
@@ -1230,22 +1230,6 @@ describe("ServerModeEndpointManager (#301)", () => {
     await h.manager.refreshDevices();
     expect(legacyCreate).toHaveBeenCalledTimes(2);
     expect(rebuilt.close).not.toHaveBeenCalled();
-  });
-
-  it("closes every endpoint on dispose without deleting", async () => {
-    const h = makeHarness(["light.a", "light.b"], "light.a");
-    await h.manager.refreshDevices();
-    const endpoints = h.serverNode.addDevice.mock.calls.map(
-      (c) => c[0] as EntityEndpoint,
-    );
-
-    await h.manager.dispose();
-
-    for (const endpoint of endpoints) {
-      expect(endpoint.close).toHaveBeenCalledTimes(1);
-      expect(endpoint.delete).not.toHaveBeenCalled();
-    }
-    expect(h.manager.devices).toEqual([]);
   });
 
   it("renames via close() to keep the device number, root identity untouched (#404)", async () => {

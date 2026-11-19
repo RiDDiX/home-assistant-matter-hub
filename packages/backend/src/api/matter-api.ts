@@ -9,7 +9,11 @@ import { Ajv } from "ajv";
 import express from "express";
 import { removePluginFiles } from "../plugins/plugin-storage.js";
 import type { BridgeService } from "../services/bridges/bridge-service.js";
-import { testMatchers } from "../services/bridges/matcher/matches-entity-filter.js";
+import {
+  FilterTimeoutError,
+  testMatchers,
+  withinFilterBudget,
+} from "../services/bridges/matcher/matches-entity-filter.js";
 import type { HomeAssistantRegistry } from "../services/home-assistant/home-assistant-registry.js";
 import type { EntityIdentityStorage } from "../services/storage/entity-identity-storage.js";
 import type { EntityMappingStorage } from "../services/storage/entity-mapping-storage.js";
@@ -617,34 +621,56 @@ export function matterApi(
       domain: string;
     }> = [];
 
-    for (const entity of entities) {
-      // same gates as BridgeRegistry before the filter runs
-      if (entity.disabled_by != null) continue;
-      if (entity.hidden_by != null && !filter.includeHiddenEntities) continue;
-      const device = entity.device_id ? devices[entity.device_id] : undefined;
-      const state = states[entity.entity_id];
+    try {
+      withinFilterBudget(() => {
+        for (const entity of entities) {
+          // same gates as BridgeRegistry before the filter runs
+          if (entity.disabled_by != null) continue;
+          if (entity.hidden_by != null && !filter.includeHiddenEntities)
+            continue;
+          const device = entity.device_id
+            ? devices[entity.device_id]
+            : undefined;
+          const state = states[entity.entity_id];
 
-      const included =
-        filter.include.length === 0 ||
-        testMatchers(
-          filter.include,
-          device,
-          entity,
-          filter.includeMode,
-          state,
-          labels,
-        );
-      const excluded =
-        filter.exclude.length > 0 &&
-        testMatchers(filter.exclude, device, entity, undefined, state, labels);
+          const included =
+            filter.include.length === 0 ||
+            testMatchers(
+              filter.include,
+              device,
+              entity,
+              filter.includeMode,
+              state,
+              labels,
+            );
+          const excluded =
+            filter.exclude.length > 0 &&
+            testMatchers(
+              filter.exclude,
+              device,
+              entity,
+              undefined,
+              state,
+              labels,
+            );
 
-      if (included && !excluded) {
-        matchingEntities.push({
-          entity_id: entity.entity_id,
-          friendly_name: state?.attributes?.friendly_name as string | undefined,
-          domain: entity.entity_id.split(".")[0],
-        });
+          if (included && !excluded) {
+            matchingEntities.push({
+              entity_id: entity.entity_id,
+              friendly_name: state?.attributes?.friendly_name as
+                | string
+                | undefined,
+              domain: entity.entity_id.split(".")[0],
+            });
+          }
+        }
+      });
+    } catch (e) {
+      if (e instanceof FilterTimeoutError) {
+        res.status(400).json({ error: e.message });
+        return;
       }
+      throw e;
     }
 
     matchingEntities.sort((a, b) => a.entity_id.localeCompare(b.entity_id));

@@ -204,6 +204,10 @@ class RvcRunModeServerBase extends Base {
         // Between-rooms gap: fire the next queued action and skip the
         // end-of-cleaning cleanup. Gated on observedCleaning so the
         // brief idle right after the first dispatch doesn't fire it.
+        // A fault ends the queued job, the robot gets no next room.
+        if (entity.state.state === "error") {
+          s.pendingDispatches = [];
+        }
         if (s.pendingDispatches.length > 0 && s.observedCleaning) {
           try {
             const serviceArea = this.agent.get(ServiceAreaBehavior);
@@ -896,6 +900,13 @@ class RvcRunModeServerBase extends Base {
 
     switch (newMode) {
       case RvcSupportedRunMode.Cleaning: {
+        // A new job, also without a selection: drop rooms and queue left over
+        s.activeAreas = [];
+        s.completedAreas.clear();
+        s.lastCurrentArea = null;
+        s.loggedShortCircuits.clear();
+        s.pendingDispatches = [];
+        s.cleanedAreaBaseline = null;
         // Set currentArea from selectedAreas if a controller pre-selected areas
         try {
           const serviceArea = this.agent.get(ServiceAreaBehavior);
@@ -905,10 +916,6 @@ class RvcRunModeServerBase extends Base {
             );
             // Same write-back as the area-based branch above (#368).
             serviceArea.state.selectedAreas = [...s.activeAreas];
-            s.completedAreas.clear();
-            s.lastCurrentArea = null;
-            s.loggedShortCircuits.clear();
-            s.pendingDispatches = [];
             s.cleanedAreaBaseline = this.readCleanedAreaSqm();
             this.trySetCurrentArea(s.activeAreas[0]);
           }

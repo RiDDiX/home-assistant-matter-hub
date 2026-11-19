@@ -655,14 +655,32 @@ export class ThermostatServerBase extends FullFeaturedBase {
 
     // Matter spec: amount is in 0.1°C steps (tenths of a degree).
     // Divide by 10 to convert to °C for the Temperature.plus() method.
-    const adjustedCool =
+    let adjustedCool =
       request.mode !== Thermostat.SetpointRaiseLowerMode.Heat
-        ? cool.plus(request.amount / 10, "°C")
+        ? this.clampToLimits(
+            cool.plus(request.amount / 10, "°C"),
+            this.state.minCoolSetpointLimit ?? this.state.minHeatSetpointLimit,
+            this.state.maxCoolSetpointLimit ?? this.state.maxHeatSetpointLimit,
+            "cool",
+          )
         : cool;
-    const adjustedHeat =
+    let adjustedHeat =
       request.mode !== Thermostat.SetpointRaiseLowerMode.Cool
-        ? heat.plus(request.amount / 10, "°C")
+        ? this.clampToLimits(
+            heat.plus(request.amount / 10, "°C"),
+            this.state.minHeatSetpointLimit ?? this.state.minCoolSetpointLimit,
+            this.state.maxHeatSetpointLimit ?? this.state.maxCoolSetpointLimit,
+            "heat",
+          )
         : heat;
+    // HA rejects a range with low above high, the moved setpoint drags the other
+    if (adjustedHeat.celsius() > adjustedCool.celsius()) {
+      if (request.mode === Thermostat.SetpointRaiseLowerMode.Heat) {
+        adjustedCool = adjustedHeat;
+      } else if (request.mode === Thermostat.SetpointRaiseLowerMode.Cool) {
+        adjustedHeat = adjustedCool;
+      }
+    }
     this.setTemperature(adjustedHeat, adjustedCool, request.mode, resumed);
   }
 

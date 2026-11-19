@@ -1,5 +1,6 @@
 import type { FanDeviceAttributes } from "@home-assistant-matter-hub/common";
 import { EntityStateProvider } from "../../../../../services/bridges/entity-state-provider.js";
+import { numericState } from "../../../../../utils/numeric-state.js";
 import {
   type HepaFilterMonitoringConfig,
   HepaFilterMonitoringServer,
@@ -19,9 +20,9 @@ const config: HepaFilterMonitoringConfig = {
 
     // First, try direct attributes on the fan entity
     const directFilterLife =
-      attrs.filter_life ??
-      attrs.filter_life_remaining ??
-      attrs.filter_life_level;
+      numericState(attrs.filter_life) ??
+      numericState(attrs.filter_life_remaining) ??
+      numericState(attrs.filter_life_level);
 
     if (directFilterLife != null) {
       return Math.max(0, Math.min(100, directFilterLife));

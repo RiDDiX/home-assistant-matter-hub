@@ -39,7 +39,7 @@ afterAll(() => kill.mockRestore());
 
 const ID = "0123456789abcdef0123456789abcdef";
 const bridgeStorage = {
-  bridges: [{ id: ID, name: "Bridge One", port: 5540 }],
+  bridges: [{ id: ID, name: "Bridge One", port: 5540, basicInformation: {} }],
   add: async () => {},
 } as unknown as BridgeStorage;
 const noBridges = {
@@ -269,7 +269,7 @@ describe("restore input checks", () => {
         version: 2,
         bridges: [
           { id: "../../x", name: "Evil", port: 5540 },
-          { id: legacyId, name: "Legacy", port: 5541 },
+          { id: legacyId, name: "Legacy", port: 5541, basicInformation: {} },
         ],
         entityMappings: {},
         includesIdentity: true,
@@ -313,6 +313,7 @@ describe("restore input checks", () => {
             id: ID,
             name: "Old",
             port: 5540,
+            basicInformation: {},
             featureFlags: {
               omitEventsInPriming: true,
               autoBatteryMapping: true,
@@ -334,6 +335,43 @@ describe("restore input checks", () => {
     expect(added.map((b) => b.featureFlags)).toEqual([
       { autoBatteryMapping: true },
     ]);
+  });
+
+  it("refuses a bridge without basic information and a null entry", async () => {
+    const added: BridgeData[] = [];
+    const storage = {
+      bridges: [],
+      add: async (bridge: BridgeData) => {
+        added.push(bridge);
+      },
+    } as unknown as BridgeStorage;
+    const zip = await zipOf({
+      "backup.json": JSON.stringify({
+        version: 2,
+        bridges: [
+          { id: "handmade", name: "Hand", port: 5540 },
+          { id: "nulled", name: "N", port: 5541, basicInformation: null },
+          null,
+          { id: ID, name: "Bridge One", port: 5542, basicInformation: {} },
+        ],
+        entityMappings: {},
+      }),
+    });
+    await withRouter(
+      async (base) => {
+        const res = await fetch(`${base}/backup/restore`, restoreForm(zip));
+        expect(res.status).toBe(200);
+        const body = await res.json();
+        expect(body.bridgesRestored).toBe(1);
+        expect(
+          body.errors.map((e: { bridgeId?: string }) => e.bridgeId),
+        ).toEqual(["handmade", "nulled", undefined]);
+      },
+      undefined,
+      undefined,
+      storage,
+    );
+    expect(added.map((b) => b.id)).toEqual([ID]);
   });
 
   it("rejects a backup.json larger than 50 MB", async () => {
@@ -383,7 +421,9 @@ describe("restore input checks", () => {
   it("rejects entries that inflate together past the archive cap", async () => {
     const backupJson = JSON.stringify({
       version: 2,
-      bridges: [{ id: ID, name: "Bridge One", port: 5540 }],
+      bridges: [
+        { id: ID, name: "Bridge One", port: 5540, basicInformation: {} },
+      ],
       entityMappings: {},
       includesIdentity: true,
     });
@@ -431,7 +471,9 @@ describe("restore input checks", () => {
     } as unknown as BridgeStorage;
     const backupJson = JSON.stringify({
       version: 2,
-      bridges: [{ id: ID, name: "Bridge One", port: 5540 }],
+      bridges: [
+        { id: ID, name: "Bridge One", port: 5540, basicInformation: {} },
+      ],
       entityMappings: {},
       includesIdentity: true,
     });
@@ -477,7 +519,7 @@ describe("restore input checks", () => {
     } as unknown as BridgeStorage;
     // raw JSON, an object literal would set the prototype instead of a key
     const zip = await zipOf({
-      "backup.json": `{"version":2,"bridges":[{"id":"__proto__","name":"P","port":5540},{"id":"constructor","name":"C","port":5541}],"entityMappings":{"__proto__":{"entityId":"light.x"}}}`,
+      "backup.json": `{"version":2,"bridges":[{"id":"__proto__","name":"P","port":5540},{"id":"constructor","name":"C","port":5541,"basicInformation":{}}],"entityMappings":{"__proto__":{"entityId":"light.x"}}}`,
     });
     await withRouter(
       async (base) => {
@@ -509,7 +551,9 @@ describe("restore input checks", () => {
         await zipOf({
           "backup.json": JSON.stringify({
             version: 2,
-            bridges: [{ id: ID, name: "Bridge One", port: 5540 }],
+            bridges: [
+              { id: ID, name: "Bridge One", port: 5540, basicInformation: {} },
+            ],
             entityMappings: {},
             includesIdentity: true,
           }),
@@ -557,7 +601,9 @@ describe("restore input checks", () => {
     } as unknown as BridgeStorage;
     const backupJson = JSON.stringify({
       version: 2,
-      bridges: [{ id: ID, name: "Bridge One", port: 5540 }],
+      bridges: [
+        { id: ID, name: "Bridge One", port: 5540, basicInformation: {} },
+      ],
       entityMappings: {},
       includesIdentity: true,
     });
@@ -687,7 +733,9 @@ describe("restore while the bridge runs", () => {
       get: (id: string) => (id === ID ? live : undefined),
     } as unknown as BridgeService;
     const storage = {
-      bridges: [{ id: ID, name: "Bridge One", port: 5540 }],
+      bridges: [
+        { id: ID, name: "Bridge One", port: 5540, basicInformation: {} },
+      ],
       add: async () => {
         order.push("add");
       },
@@ -695,7 +743,9 @@ describe("restore while the bridge runs", () => {
     const zip = await zipOf({
       "backup.json": JSON.stringify({
         version: 2,
-        bridges: [{ id: ID, name: "Bridge One", port: 5540 }],
+        bridges: [
+          { id: ID, name: "Bridge One", port: 5540, basicInformation: {} },
+        ],
         entityMappings: {},
         includesIdentity: true,
       }),

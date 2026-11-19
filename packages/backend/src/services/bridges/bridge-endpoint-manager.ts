@@ -84,6 +84,10 @@ const TOPOLOGY_RETRY_MS = 10_000;
 // longer marks the run incomplete.
 export const ENTITY_FAILURE_RETRIES = 3;
 
+// An isolated part gets one remount per period, so a repeat failure within it
+// stays closed and a failure after a healthy stretch is retried again.
+export const ISOLATION_REMOUNT_PERIOD_MS = 3_600_000;
+
 // First absence stamp: removal also needs a fresh successful HA reload after
 // this, so the 65s recheck can never delete from the same stale snapshot.
 export interface PendingRemoval {
@@ -151,8 +155,8 @@ export class BridgeEndpointManager extends Service {
   // sorted id list of the live subscription and the last full map it sent
   private subscribedIds?: string;
   private subscribedStates?: HomeAssistantStates;
-  // part ids already given their one remount after an isolation
-  private remountedAfterIsolation = new Set<string>();
+  // part id to the time its last remount after an isolation was armed
+  private remountedAfterIsolation = new Map<string, number>();
   private observingRequested = false;
   private _failedEntities: FailedEntity[] = [];
   private _refreshIncomplete = false;
@@ -830,23 +834,37 @@ export class BridgeEndpointManager extends Service {
   isolateEntity(entityName: string): Promise<void> {
     // a running refresh works from its snapshot of the parts, so wait it out.
     // Nothing inside a refresh awaits this, the error handlers fire and forget.
+    const named = this.findIsolationTarget(entityName);
     const next = this.refreshChain.then(() =>
-      this.runIsolateEntity(entityName),
+      this.runIsolateEntity(entityName, named),
     );
     this.refreshChain = next.catch(() => undefined);
     return next;
   }
 
-  private async runIsolateEntity(entityName: string): Promise<void> {
+  private findIsolationTarget(entityName: string): EntityEndpoint | undefined {
     const endpoints = [...this.root.parts].filter(hasEntityIdentity);
     // The room switches share the vacuum's entity_id, so an entity_id match
     // must land on the vacuum. A switch is only isolated via its own part id.
-    const endpoint =
+    return (
       endpoints.find(
         (e) =>
           !(e instanceof VacuumAreaSwitchEndpoint) &&
           (e.id === entityName || e.entityId === entityName),
-      ) ?? endpoints.find((e) => e.id === entityName);
+      ) ?? endpoints.find((e) => e.id === entityName)
+    );
+  }
+
+  private async runIsolateEntity(
+    entityName: string,
+    named: EntityEndpoint | undefined,
+  ): Promise<void> {
+    const endpoint = this.findIsolationTarget(entityName);
+    // The refresh it waited for rebuilt the endpoint, the error was the old one's.
+    if (named && endpoint && endpoint !== named) {
+      EntityIsolationService.clearIsolatedEntity(this.bridgeId, entityName);
+      return;
+    }
 
     if (endpoint) {
       this.log.warn(
@@ -866,12 +884,14 @@ export class BridgeEndpointManager extends Service {
       if (!(endpoint instanceof VacuumAreaSwitchEndpoint)) {
         await this.closeAreaSwitchesOf(endpoint);
       }
-      // One remount via the registry retry, a second isolation stays closed
-      // so an endpoint that keeps failing cannot loop.
-      if (!this.remountedAfterIsolation.has(endpoint.id)) {
-        this.remountedAfterIsolation.add(endpoint.id);
+      // One remount per period via a fresh registry retry, a repeat isolation
+      // within it stays closed so an endpoint that keeps failing cannot loop.
+      const now = Date.now();
+      const armedAt = this.remountedAfterIsolation.get(endpoint.id);
+      if (armedAt == null || now - armedAt >= ISOLATION_REMOUNT_PERIOD_MS) {
+        this.remountedAfterIsolation.set(endpoint.id, now);
         try {
-          this.registry.markRefreshIncomplete();
+          this.registry.grantRefreshRetries();
         } catch (e) {
           this.log.warn("Failed to arm the remount after isolation:", e);
         }
@@ -1668,9 +1688,9 @@ export class BridgeEndpointManager extends Service {
   // auto-resolved CLEAN_AREA). The vacuum's own endpoint is never touched here.
   // Switches are kept while their parent endpoint survives with the flag on
   // (the parent's removal grace is mirrored for free), rebuilt via close() when
-  // the parent was recreated for a mapping change so numbers survive, and
-  // deleted when the flag goes off, the area stays gone past the removal
-  // grace, or the parent is gone.
+  // the parent was recreated for a mapping change or is closed but its entity
+  // stays in the bridge so numbers survive, and deleted when the flag goes off,
+  // the area stays gone past the removal grace, or the parent is gone.
   private async reconcileAreaSwitches(): Promise<void> {
     const parts = this.root.parts.map((p) => p as EntityEndpoint);
     const switches = parts.filter(
@@ -1749,8 +1769,18 @@ export class BridgeEndpointManager extends Service {
         kept.add(sw.id);
         continue;
       }
+      // A vacuum closed for a rebuild that did not mount this pass comes back
+      // under its old id, so its switches keep their numbers too.
+      const parked =
+        !parent &&
+        this.entityIds.includes(sw.entityId) &&
+        !parts.some(
+          (p) =>
+            !(p instanceof VacuumAreaSwitchEndpoint) &&
+            p.entityId === sw.entityId,
+        );
       try {
-        if (rebuild) {
+        if (rebuild || parked) {
           // close keeps the persisted number for the recreate below
           await sw.close();
         } else {

@@ -81,6 +81,8 @@ function isLongRelease(lower: string): boolean {
 // the endpoint's multiPressMax so the two cannot drift.
 export function pressCountOf(eventType: string): number {
   const lower = eventType.toLowerCase();
+  const numbered = /^multi_press_(\d+)$/.exec(lower);
+  if (numbered) return Math.max(1, Number(numbered[1]));
   if (/triple|3_press|three/.test(lower)) return 3;
   if (/double|2_press|two|multi/.test(lower)) return 2;
   return 1;

@@ -94,8 +94,8 @@ function getCurrentAlarmOption(
 ): string | undefined {
   const attrs = entity.state.attributes as AlarmPanelAttributes;
   const modes = getAlarmModes(attrs);
-  // Transitional states (arming, pending, triggered) won't match any mode
-  // and ModeSelectServer defaults to index 0 ("Disarmed"), which is acceptable.
+  // Transitional states (arming, pending, triggered) match no mode, so
+  // ModeSelectServer keeps the last mode instead of showing "Disarmed".
   const mode = modes.find((m) => m.haState === entity.state.state);
   return mode?.label;
 }

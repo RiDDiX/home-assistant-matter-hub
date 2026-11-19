@@ -215,6 +215,23 @@ describe("door lock usercode passthrough (#418)", () => {
     });
   });
 
+  it("clears the physical slot on ClearUser of a disabled PIN", async () => {
+    const recorded = await run(passthroughMapping, async (doorLock) => {
+      await doorLock.setCredential(setCredentialRequest);
+      const storage = env.get(LockCredentialStorage) as unknown as FakeStorage;
+      const stored = storage.credentials.get("lock.front_door");
+      if (stored) stored.enabled = false;
+      await doorLock.clearUser({ userIndex: 1 });
+    });
+    const action = recorded.find(
+      (c) => c.action === "zwave_js.clear_lock_usercode",
+    );
+    expect(action).toEqual({
+      action: "zwave_js.clear_lock_usercode",
+      data: { code_slot: 3 },
+    });
+  });
+
   it("does nothing extra without a mapping (opt-in)", async () => {
     const recorded = await run(undefined, (doorLock) =>
       doorLock.setCredential(setCredentialRequest),

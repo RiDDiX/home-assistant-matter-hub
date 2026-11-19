@@ -45,6 +45,32 @@ describe("BridgeService recovery", () => {
     expect(running.start).not.toHaveBeenCalled();
   });
 
+  it("skips a failed bridge stopped while the pass started another", async () => {
+    const svc = await makeService();
+    svc.autoRecoveryEnabled = true;
+    let release!: () => void;
+    const first = makeBridge("a", "failed");
+    first.start.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          release = () => {
+            first.data.status = "running";
+            resolve();
+          };
+        }),
+    );
+    const second = makeBridge("b", "failed");
+    svc.bridges.push(first as unknown as Bridge, second as unknown as Bridge);
+
+    svc.recoverFailedBridgesNow();
+    await vi.waitFor(() => expect(first.start).toHaveBeenCalledTimes(1));
+    second.data.status = "stopped";
+    release();
+
+    await vi.waitFor(() => expect(svc.recoveryHistory).toHaveLength(1));
+    expect(second.start).not.toHaveBeenCalled();
+  });
+
   it("records a recovery attempt in the history", async () => {
     const svc = await makeService();
     svc.autoRecoveryEnabled = true;

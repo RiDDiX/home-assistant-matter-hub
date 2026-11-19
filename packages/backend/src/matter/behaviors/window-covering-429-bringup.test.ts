@@ -588,6 +588,33 @@ describe("#429 binary cover percentage moves", () => {
     expect(state(endpoint).currentPositionLiftPercent100ths).toBe(0);
     expect(state(endpoint).targetPositionLiftPercent100ths).toBe(0);
   });
+
+  // The swap already lives in the position space, the end follows from there.
+  it("bridge swap: mid-range percentage goes to the end a position cover would", async () => {
+    setFeatureFlags({ coverSwapOpenClose: true });
+    const endpoint = await mount("open", 100, undefined, {
+      supportedFeatures: BINARY_COVER,
+    });
+    calls.length = 0;
+
+    await goToLift(endpoint, 3000); // no inversion: HA 30 => close
+    await delay(500);
+    expect(calls.map((c) => c.action)).toEqual(["cover.close_cover"]);
+  });
+
+  it("per-entity swap: mid-range percentage goes to the end a position cover would", async () => {
+    const endpoint = await mount(
+      "closed",
+      0,
+      { entityId: "cover.blind", coverSwapOpenClose: true },
+      { supportedFeatures: BINARY_COVER },
+    );
+    calls.length = 0;
+
+    await goToLift(endpoint, 3500); // default inversion: HA 65 => open
+    await delay(500);
+    expect(calls.map((c) => c.action)).toEqual(["cover.open_cover"]);
+  });
 });
 
 // A discrete open/close aimed at the end the cover already sits at moves
