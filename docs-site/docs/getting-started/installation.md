@@ -140,7 +140,7 @@ Options:
 
 `--http-auth-username` and `--http-auth-password` go together. Since v2.1.0-alpha.1001 the app stops at start with an error if only one of them is set. Older versions start without a login in that case.
 
-For standalone and Docker installs, remote web access requires a login. Set `HAMH_HTTP_AUTH_USERNAME` and `HAMH_HTTP_AUTH_PASSWORD` before starting the app, or set a login in Settings by opening `http://localhost:8482` on the machine running HAMH. Usernames cannot contain a colon. Home Assistant ingress uses your Home Assistant login.
+Since v2.1.0-alpha.1002, remote web access to standalone and Docker installs requires a login. Set `HAMH_HTTP_AUTH_USERNAME` and `HAMH_HTTP_AUTH_PASSWORD` before starting the app, or set a login in Settings by opening `http://localhost:8482` on the machine running HAMH. Usernames cannot contain a colon. Home Assistant ingress uses your Home Assistant login.
 
 Without a login, other devices get a `403` and the log shows a warning at start. Addresses listed in `--http-ip-whitelist` get in without a login. A login can only be removed in Settings from a device that still gets in afterwards.
 
