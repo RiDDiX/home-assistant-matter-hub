@@ -94,6 +94,7 @@ A include- or exclude-item is an object having a `type` and a `value` property.
 **Regex** uses full JavaScript regular expressions:
 - More powerful for complex patterns
 - Example: `^(light|switch)\.kitchen_.*` matches kitchen lights and switches
+- Every regex rule is evaluated with a 2 second budget. The filter preview rejects a pattern that takes longer. A running bridge keeps its devices and logs an error, a bridge that starts with such a filter shows as Failed with the reason.
 
 ### Any Field Regex
 
