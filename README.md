@@ -39,7 +39,7 @@ of port forwarding etc.
 | Channel | Branch | Current Version | Description |
 |---------|--------|-----------------|-------------|
 | **Stable** | `main` | v2.0.60 | Production-ready, recommended for most users |
-| **Alpha** | `alpha` | v2.1.0-alpha.1001 | Ahead of Stable, carries the additions listed under Alpha Features |
+| **Alpha** | `alpha` | v2.1.0-alpha.1002 | Ahead of Stable, carries the additions listed under Alpha Features |
 | **Testing** | `testing` | v4.1.0-testing.x | ⚠️ **Highly unstable!** Experimental features, may break |
 
 ### Which version should I use?
@@ -550,6 +550,19 @@ Re-assign the affected devices to their rooms after they reconnect. See the [doc
 <details>
 <summary><strong>🧪 Alpha Features (v2.1.0-alpha.x)</strong> - Click to expand</summary>
 
+**v2.1.0-alpha.1002:**
+- **Web login (action needed for Docker and standalone)**: without a login, the web UI and API now only answer requests from the machine running the app (`http://localhost:8482`), through Home Assistant ingress, and from addresses listed in `--http-ip-whitelist`. Every other device gets a `403`, and the log shows a warning at start. Set `HAMH_HTTP_AUTH_USERNAME` and `HAMH_HTTP_AUTH_PASSWORD`, or set a login under Settings from the machine itself. The add-on through Home Assistant is not affected. Before, an install without a login was open to the whole network.
+- **Web login**: a login can only be removed in Settings from a device that still gets in afterwards, other devices get an error instead of locking themselves out. Usernames cannot contain a colon.
+- **Backup restore**: the files of a bridge are staged first and the bridge is stopped only then. If a step fails, the old files and mappings are put back and the bridge starts again. A second restore or a restart during a running restore is refused.
+- **Backup restore**: app-wide data (web login, settings, lock credentials, saved device identities) is only restored with the new option "Restore app-wide data" (`restoreAppData` in the API), off by default for uploads and stored backups. Before, every restore with identities replaced it. The restore result now shows the error texts, not only their count.
+- **Backups**: stored backups get a unique file name, so two backups in the same second no longer overwrite each other, and backup and restored files are readable by the app user only. Full backups can contain plugin passwords and tokens in plain text, the UI and the README inside the ZIP say so.
+- **Logs**: lock PINs, credential data, group keys and the pairing verifier are replaced with `[redacted]` in the Matter log lines.
+- **Pairing logs** ([#549](https://github.com/RiDDiX/home-assistant-matter-hub/issues/549)): while a controller is commissioning a bridge, the Matter read and write requests are logged at debug level, also when the log level is `info`. The level returns when commissioning ends.
+- **Sensors** ([#549](https://github.com/RiDDiX/home-assistant-matter-hub/issues/549)): a temperature sensor with humidity or pressure merged into it lists its device types with revision 3, as matter.js 0.18 defines them. Before, revision 2 was fixed in the code.
+- **State updates**: a state write that failed is tried once more with the next update, and the log names the entity. A blank temperature attribute of a climate entity is no longer read as 0 degrees.
+- **Bridges**: "Restart all" no longer waits forever on a bridge that does not stop or start, it logs the bridge and moves on. While a bridge is edited, its old and new port stay reserved.
+- **Home Assistant connection**: the wait for Home Assistant at start ends after 10 minutes also when Home Assistant keeps the connection open without answering, and that connection is closed before the next attempt.
+- **Web UI**: the pages for creating and editing bridges, area setup, network map, plugins and settings load on demand.
 **v2.1.0-alpha.1001:**
 - **Security plugin**: when the alarm trips while the Home Assistant connection is down, its alerts (sirens, scripts) are sent once the connection is back, as long as the alarm is still triggered. A turn-off that failed during an earlier alarm no longer switches off a siren that a newer trip turned on.
 - **Locks**: when a controller removes a user, the code is also cleared on the physical keypad (usercode passthrough) if the PIN was disabled in the web UI. "Clear all PIN credentials" (credential index 0xFFFE) now clears the PIN.
@@ -834,6 +847,7 @@ docker run -d \
 ```
 
 > **Note:** All environment variables require the `HAMH_` prefix.
+> For remote web access, set `HAMH_HTTP_AUTH_USERNAME` and `HAMH_HTTP_AUTH_PASSWORD` together. You can also open the UI from the Docker host at `http://localhost:8482` and set a login under Settings.
 > See the [Installation Guide](https://riddix.github.io/home-assistant-matter-hub/getting-started/installation) for all available options.
 
 For alpha versions, use tag `alpha` instead of `latest`.

@@ -66,20 +66,13 @@ Alternatively, you can also run the container as follows:
 
 ```bash
 docker run -d \
-  # more options can be found in the configuration section
-  # required: the address of your home assistant instance
   -e HAMH_HOME_ASSISTANT_URL="http://192.168.178.123:8123/" \
-  # required: a long lived access token for your home assistant instance
   -e HAMH_HOME_ASSISTANT_ACCESS_TOKEN="eyJ.....dlc" \
-  # optional: debug | info | warn | error
-  # default: info
   -e HAMH_LOG_LEVEL="info" \
-  # optional: the port to use for the web ui
-  # default: 8482
   -e HAMH_HTTP_PORT=8482 \
-  # recommended: persist the configuration and application data
-  -v $PWD/home-assistant-matter-hub:/data \
-  # required due to restrictions in matter
+  -e HAMH_HTTP_AUTH_USERNAME="admin" \
+  -e HAMH_HTTP_AUTH_PASSWORD="change-me" \
+  -v "$PWD/home-assistant-matter-hub:/data" \
   --network=host \
   ghcr.io/riddix/home-assistant-matter-hub:latest
 ```
@@ -100,19 +93,9 @@ To start the application, run
 
 ```bash
 home-assistant-matter-hub start \
-  # required: the address of your home assistant instance
-  # can be replaced with an environment variable: HAMH_HOME_ASSISTANT_URL
   --home-assistant-url="http://192.168.178.123:8123/" \
-  # required: a long lived access token for your home assistant instance
-  # can be replaced with an environment variable: HAMH_HOME_ASSISTANT_ACCESS_TOKEN
   --home-assistant-access-token="eyJ.....dlc" \
-  # optional: debug | info | warn | error
-  # default: info
-  # can be replaced with an environment variable: HAMH_LOG_LEVEL
   --log-level=info \
-  # optional: the port to use for the web ui
-  # default: 8482
-  # can be replaced with an environment variable: HAMH_WEB_PORT
   --http-port=8482
 ```
 
@@ -156,6 +139,10 @@ Options:
 ```
 
 `--http-auth-username` and `--http-auth-password` go together. Since v2.1.0-alpha.1001 the app stops at start with an error if only one of them is set. Older versions start without a login in that case.
+
+Since v2.1.0-alpha.1002, remote web access to standalone and Docker installs requires a login. Set `HAMH_HTTP_AUTH_USERNAME` and `HAMH_HTTP_AUTH_PASSWORD` before starting the app, or set a login in Settings by opening `http://localhost:8482` on the machine running HAMH. Usernames cannot contain a colon. Home Assistant ingress uses your Home Assistant login.
+
+Without a login, other devices get a `403` and the log shows a warning at start. Addresses listed in `--http-ip-whitelist` get in without a login. A login can only be removed in Settings from a device that still gets in afterwards.
 
 Each of those configuration options can be configured via environment variables, too. Simply prefix them with `HAMH_`
 and write them in capslock with underscores (e.g. `HAMH_MDNS_NETWORK_INTERFACE`).
