@@ -44,6 +44,7 @@ const bridgeDataKeys: Record<keyof BridgeData, true> = {
 export class BridgeStorage extends Service {
   private storage!: StorageContext;
   private _bridges: BridgeData[] = [];
+  private writes: Promise<void> = Promise.resolve();
 
   constructor(private readonly appStorage: AppStorage) {
     super("BridgeStorage");
@@ -69,7 +70,11 @@ export class BridgeStorage extends Service {
     return this._bridges;
   }
 
-  async add(data: BridgeData): Promise<void> {
+  add(data: BridgeData): Promise<void> {
+    return this.write(() => this.save(data));
+  }
+
+  private async save(data: BridgeData): Promise<void> {
     const bridge = pick(data, Object.keys(bridgeDataKeys)) as BridgeData;
     // "ids" and "version" are this context's own keys
     if (
@@ -80,31 +85,34 @@ export class BridgeStorage extends Service {
       throw new Error(`Invalid bridge id: ${bridge.id}`);
     }
     const idx = this._bridges.findIndex((b) => b.id === bridge.id);
-    if (idx !== -1) {
-      this._bridges[idx] = bridge;
-    } else {
-      this._bridges.push(bridge);
-    }
     // Ids first: load skips an id without a record, but never finds a record
     // the ids list does not name.
-    await this.persistIds();
-    await this.storage.set(bridge.id, bridge as unknown as StorageObjectType);
-  }
-
-  async remove(bridgeId: string): Promise<void> {
-    const idx = this._bridges.findIndex((b) => b.id === bridgeId);
-    if (idx >= 0) {
-      this._bridges.splice(idx, 1);
+    if (idx === -1) {
+      await this.storage.set("ids", [
+        ...this._bridges.map((b) => b.id),
+        bridge.id,
+      ]);
     }
-    await this.storage.delete(bridgeId);
-    await this.persistIds();
+    await this.storage.set(bridge.id, bridge as unknown as StorageObjectType);
+    if (idx === -1) this._bridges.push(bridge);
+    else this._bridges[idx] = bridge;
   }
 
-  private async persistIds() {
-    await this.storage.set(
-      "ids",
-      this._bridges.map((b) => b.id),
-    );
+  remove(bridgeId: string): Promise<void> {
+    return this.write(async () => {
+      await this.storage.delete(bridgeId);
+      this._bridges = this._bridges.filter((b) => b.id !== bridgeId);
+      await this.storage.set(
+        "ids",
+        this._bridges.map((b) => b.id),
+      );
+    });
+  }
+
+  private write(operation: () => Promise<void>): Promise<void> {
+    const next = this.writes.then(operation);
+    this.writes = next.catch(() => {});
+    return next;
   }
 
   private async migrate(): Promise<void> {

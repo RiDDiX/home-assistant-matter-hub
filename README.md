@@ -834,6 +834,7 @@ docker run -d \
 ```
 
 > **Note:** All environment variables require the `HAMH_` prefix.
+> For remote web access, set `HAMH_HTTP_AUTH_USERNAME` and `HAMH_HTTP_AUTH_PASSWORD` together. You can also open the UI from the Docker host at `http://localhost:8482` and set a login under Settings.
 > See the [Installation Guide](https://riddix.github.io/home-assistant-matter-hub/getting-started/installation) for all available options.
 
 For alpha versions, use tag `alpha` instead of `latest`.

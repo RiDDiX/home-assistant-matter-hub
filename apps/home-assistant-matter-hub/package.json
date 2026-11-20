@@ -75,37 +75,5 @@
     "minimatch": "9.0.7",
     "path-to-regexp": "^8.4.0",
     "glob": "^13.0.0"
-  },
-  "nx": {
-    "targets": {
-      "start": {
-        "cache": false,
-        "dependsOn": [
-          "build"
-        ]
-      },
-      "pack": {
-        "cache": true,
-        "dependsOn": [
-          "build"
-        ],
-        "outputs": [
-          "{projectRoot}/pack"
-        ]
-      },
-      "build": {
-        "inputs": [
-          "^default",
-          "default",
-          "{workspaceRoot}/README.md",
-          "{workspaceRoot}/LICENSE"
-        ],
-        "outputs": [
-          "{projectRoot}/dist",
-          "{projectRoot}/README.md",
-          "{projectRoot}/LICENSE"
-        ]
-      }
-    }
   }
 }

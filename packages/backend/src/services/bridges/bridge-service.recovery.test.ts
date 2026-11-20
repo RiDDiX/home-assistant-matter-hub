@@ -520,4 +520,23 @@ describe("BridgeService refreshAll", () => {
     await all;
     expect(b.start).toHaveBeenCalledTimes(1);
   });
+
+  it("restartAll skips a hung stop and moves past a hung start", async () => {
+    const svc = await makeService();
+    vi.useFakeTimers();
+    const a = { ...makeRefreshBridge("a"), stop: vi.fn(never) };
+    const b = { ...makeRefreshBridge("b"), stop: vi.fn(async () => {}) };
+    const c = { ...makeRefreshBridge("c"), stop: vi.fn(async () => {}) };
+    b.start.mockImplementationOnce(never);
+    svc.bridges.push(...([a, b, c] as unknown as Bridge[]));
+
+    const restarting = svc.restartAll();
+    await vi.advanceTimersByTimeAsync(90_000);
+    expect(a.start).not.toHaveBeenCalled();
+    expect(b.start).toHaveBeenCalledOnce();
+    expect(c.start).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(11 * 60_000);
+    await restarting;
+    expect(c.start).toHaveBeenCalledOnce();
+  });
 });

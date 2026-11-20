@@ -28,7 +28,10 @@ import {
   createLegacyEndpointType,
   resolveCleaningModeOptions,
 } from "../legacy/create-legacy-endpoint-type.js";
-import { updateEntityState } from "../update-entity-state.js";
+import {
+  updateEntityState,
+  warnOnFailedUpdate,
+} from "../update-entity-state.js";
 
 const logger = Logger.get("UserComposedEndpoint");
 
@@ -419,11 +422,11 @@ export class UserComposedEndpoint extends Endpoint {
     debouncedFn(endpoint, effectiveState);
   }
 
-  private async flushUpdate(
-    endpoint: Endpoint,
-    state: HomeAssistantEntityState,
-  ) {
-    await updateEntityState(endpoint, state);
+  private flushUpdate(endpoint: Endpoint, state: HomeAssistantEntityState) {
+    return warnOnFailedUpdate(
+      state.entity_id,
+      updateEntityState(endpoint, state),
+    );
   }
 
   // a rebuild goes through close(), the queued flush must not outlive it (#461)

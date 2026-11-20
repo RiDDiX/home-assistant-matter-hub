@@ -20,6 +20,7 @@ import {
 } from "../../matter/mdns-address-watch.js";
 import { diagnosticEventBus } from "../diagnostics/diagnostic-event-bus.js";
 import type { BridgeDataProvider } from "./bridge-data-provider.js";
+import { acquirePairingTrace, releasePairingTrace } from "./pairing-trace.js";
 import {
   deadSessionTimeoutMs,
   PRIMING_GRACE_MS,
@@ -164,6 +165,10 @@ export class SessionSupervisor {
   // biome-ignore lint/suspicious/noExplicitAny: matter.js internal types
   private fabricAddedHandler?: (fabric: any) => void;
 
+  private failsafeAddedHandler?: () => void;
+  private failsafeDeletedHandler?: () => void;
+  private pairingTraceHeld = false;
+
   // the onNewExchange wrapper outlives stop(), so it must not arm timers then;
   // a supervisor that never started counts as stopped
   private stopped = true;
@@ -184,6 +189,7 @@ export class SessionSupervisor {
     this.stopped = false;
     this.wireSessionDiagnostics();
     this.wireFabricWarnings();
+    this.wirePairingTrace();
     this.startSessionRotation();
     this.startWedgeWatchdog();
     this.startMdnsAddressWatch();
@@ -194,6 +200,8 @@ export class SessionSupervisor {
     this.stopped = true;
     this.unwireSessionDiagnostics();
     this.unwireFabricWarnings();
+    this.unwirePairingTrace();
+    this.holdPairingTrace(false);
     this.wedgeLastRotatedAt.clear();
   }
 
@@ -900,6 +908,55 @@ export class SessionSupervisor {
       // Already disposed
     }
     this.fabricAddedHandler = undefined;
+  }
+
+  // Commissioning Reads log at debug only, and reporters send INFO logs.
+  private wirePairingTrace() {
+    this.unwirePairingTrace();
+    try {
+      const events = this.server.env.eventsFor(FailsafeContext);
+      this.failsafeAddedHandler = () => this.holdPairingTrace(true);
+      this.failsafeDeletedHandler = () => this.holdPairingTrace(false);
+      events.added.on(this.failsafeAddedHandler);
+      events.deleted.on(this.failsafeDeletedHandler);
+    } catch {
+      // environment not available
+    }
+    this.holdPairingTrace(this.failsafeArmed());
+  }
+
+  private unwirePairingTrace() {
+    try {
+      const events = this.server.env.eventsFor(FailsafeContext);
+      if (this.failsafeAddedHandler) {
+        events.added.off(this.failsafeAddedHandler);
+      }
+      if (this.failsafeDeletedHandler) {
+        events.deleted.off(this.failsafeDeletedHandler);
+      }
+    } catch {
+      // Already disposed
+    }
+    this.failsafeAddedHandler = undefined;
+    this.failsafeDeletedHandler = undefined;
+  }
+
+  private holdPairingTrace(hold: boolean) {
+    if (hold === this.pairingTraceHeld) return;
+    this.pairingTraceHeld = hold;
+    // runs inside matter.js observers, which rethrow into the pairing
+    try {
+      if (hold) {
+        acquirePairingTrace();
+        this.log.info(
+          "Commissioning failsafe armed, InteractionServer logs at debug until it ends",
+        );
+      } else {
+        releasePairingTrace();
+      }
+    } catch (e) {
+      this.log.warn("Pairing trace switch failed:", e);
+    }
   }
 
   // Start periodic age-based session rotation (#287). Aging out a controller's

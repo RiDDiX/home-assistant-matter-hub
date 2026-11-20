@@ -31,6 +31,35 @@ function missingSince(m: unknown): string | undefined {
   return (m as { missingSince?: string } | undefined)?.missingSince;
 }
 
+it("puts the original mappings back on disk if saving the restored bridge fails", async () => {
+  const storage = new EntityMappingStorage(appStorage);
+  await storage.construction;
+  const original = {
+    bridgeId: "b",
+    entityId: "light.x",
+    customName: "Original",
+  };
+  await storage.setMapping(original);
+  await expect(
+    storage.restoreMappings(
+      "b",
+      [
+        { ...original, customName: "Restored" },
+        { bridgeId: "b", entityId: "light.new", customName: "New" },
+      ],
+      async () => {
+        throw new Error("write failed");
+      },
+    ),
+  ).rejects.toThrow("write failed");
+
+  const reloaded = new EntityMappingStorage(appStorage);
+  await reloaded.construction;
+  expect(storage.getMapping("b", "light.x")?.customName).toBe("Original");
+  expect(reloaded.getMapping("b", "light.x")?.customName).toBe("Original");
+  expect(reloaded.getMapping("b", "light.new")).toBeUndefined();
+});
+
 describe("EntityMappingStorage orphan tombstone", () => {
   it("persists a readiness-only mapping through normalization and reload", async () => {
     const storage = new EntityMappingStorage(appStorage);

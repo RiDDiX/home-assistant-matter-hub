@@ -562,6 +562,7 @@ export class LegacyEndpoint extends EntityEndpoint {
   }
 
   private lastState?: HomeAssistantEntityState;
+  private retriedState?: HomeAssistantEntityState;
   private pendingMappedChange = false;
   private readonly flushUpdate: {
     (state: HomeAssistantEntityState): void;
@@ -630,7 +631,8 @@ export class LegacyEndpoint extends EntityEndpoint {
     // setStateOf, so the entity$Changed event would never fire. Bump
     // last_updated to force a structural difference.
     let effectiveState = withResolvedRooms(state, this.vacuumEffective);
-    if (this.pendingMappedChange) {
+    const mappedChange = this.pendingMappedChange;
+    if (mappedChange) {
       this.pendingMappedChange = false;
       effectiveState = {
         ...effectiveState,
@@ -641,8 +643,21 @@ export class LegacyEndpoint extends EntityEndpoint {
     // otherwise surface as an unhandled rejection without the entity id
     try {
       await updateEntityState(this, effectiveState);
+      this.retriedState = undefined;
     } catch (e) {
       logger.warn(`State update failed for ${this.entityId}:`, e);
+      // the mapped value was not written either, keep its bump for the next flush
+      if (mappedChange) this.pendingMappedChange = true;
+      // let the next replay of this state write once more, events would fire twice
+      if (
+        this.entityId.startsWith("event.") ||
+        this.retriedState === state ||
+        this.lastState !== state
+      ) {
+        return;
+      }
+      this.retriedState = state;
+      this.lastState = undefined;
     }
   }
 }

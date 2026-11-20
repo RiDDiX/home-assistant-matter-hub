@@ -11,6 +11,7 @@ import { Thermostat } from "@matter/main/clusters";
 import { HomeAssistantConfig } from "../../../../../services/home-assistant/home-assistant-config.js";
 import { snapToStep } from "../../../../../utils/converters/snap-to-step.js";
 import { Temperature } from "../../../../../utils/converters/temperature.js";
+import { numericState } from "../../../../../utils/numeric-state.js";
 import { testBit } from "../../../../../utils/test-bit.js";
 import { HomeAssistantEntityBehavior } from "../../../../behaviors/home-assistant-entity-behavior.js";
 import {
@@ -34,9 +35,9 @@ const getTemp = (
     | number
     | null
     | undefined;
-  const unit = getUnit(agent);
-  if (temperature != null) {
-    return Temperature.withUnit(+temperature, unit);
+  const value = numericState(temperature);
+  if (value != null) {
+    return Temperature.withUnit(value, getUnit(agent));
   }
 };
 

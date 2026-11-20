@@ -150,6 +150,7 @@ export class WebApi extends Service {
           this.bridgeService,
           this.props.auth,
           () => this.wsApi.disconnectAll(),
+          (req) => this.allowsAnonymousAdmin(req),
         ),
       )
       .use(
@@ -227,6 +228,10 @@ export class WebApi extends Service {
       this.log.info("Basic authentication enabled (environment variables)");
     } else if (this.settingsStorage.auth) {
       this.log.info("Basic authentication enabled (stored settings)");
+    } else if (!this.isAllowed) {
+      this.log.warn(
+        "No web login is set, so the web UI and API only answer requests from this machine. Set HAMH_HTTP_AUTH_USERNAME and HAMH_HTTP_AUTH_PASSWORD to reach them from other devices.",
+      );
     }
 
     const appRouter = express.Router();
@@ -315,10 +320,32 @@ export class WebApi extends Service {
         return this.skipsEnvAuth(req) ? next() : envMiddleware(req, res, next);
       }
       if (!this.settingsStorage.auth) {
-        return next();
+        if (this.allowsAnonymousAdmin(req)) return next();
+        return res
+          .status(403)
+          .send("Configure HTTP authentication to access HAMH remotely.");
       }
       return storageMiddleware(req, res, next);
     };
+  }
+
+  private allowsAnonymousAdmin(req: http.IncomingMessage): boolean {
+    if (isSupervisorIngress(req.headers, req.socket.remoteAddress)) return true;
+    // An IP whitelist is the access control its owner chose.
+    if (this.isAllowed?.(req.socket.remoteAddress)) return true;
+    // A reverse proxy can connect from loopback on behalf of a remote user.
+    const host = (req.headers.host ?? "").toLowerCase().replace(/:\d+$/, "");
+    return (
+      isLoopback(req.socket.remoteAddress) &&
+      (host === "localhost" || isLoopback(host.replace(/^\[(.*)\]$/, "$1"))) &&
+      !Object.keys(req.headers).some(
+        (name) =>
+          name === "forwarded" ||
+          name.startsWith("x-forwarded-") ||
+          name === "x-ingress-path" ||
+          name === "x-real-ip",
+      )
+    );
   }
 
   // HA already authenticates ingress, the add-on sets env credentials only to
@@ -385,7 +412,9 @@ export class WebApi extends Service {
       this.isAllowed,
       this.props.allowedHosts,
       (header, req) =>
-        this.skipsEnvAuth(req) || this.verifyAuthorization(header),
+        this.props.auth || this.settingsStorage.auth
+          ? this.skipsEnvAuth(req) || this.verifyAuthorization(header)
+          : this.allowsAnonymousAdmin(req),
     );
   }
 }

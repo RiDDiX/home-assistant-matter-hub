@@ -46,6 +46,11 @@ export class Options {
         "HTTP authentication needs both http-auth-username and http-auth-password (HAMH_HTTP_AUTH_USERNAME and HAMH_HTTP_AUTH_PASSWORD), but only one of them is set. Set both to require a login, or neither to run without one.",
       );
     }
+    if (startOptions.httpAuthUsername?.includes(":")) {
+      throw new Error(
+        "The HTTP authentication username cannot contain a colon",
+      );
+    }
   }
 
   get mdns(): MdnsOptions {

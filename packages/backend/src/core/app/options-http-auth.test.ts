@@ -49,4 +49,13 @@ describe("Options HTTP auth", () => {
       buildOptions({ httpAuthUsername: "hamh", httpAuthPassword: "" }),
     ).toThrow(/only one of them is set/);
   });
+
+  it("rejects a colon in the username", () => {
+    expect(() =>
+      buildOptions({
+        httpAuthUsername: "hamh:admin",
+        httpAuthPassword: "pw",
+      }),
+    ).toThrow(/username cannot contain a colon/);
+  });
 });

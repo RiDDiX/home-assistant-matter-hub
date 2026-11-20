@@ -40,6 +40,7 @@ describe("BackupService", () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     vi.restoreAllMocks();
     fs.rmSync(storageLocation, { recursive: true, force: true });
   });
@@ -96,6 +97,27 @@ describe("BackupService", () => {
     const files = fs.readdirSync(backupDir);
     expect(files.filter((f) => f.startsWith("hamh-auto-"))).toHaveLength(5);
     expect(files.filter((f) => f.startsWith("hamh-manual-"))).toHaveLength(2);
+  });
+
+  it("keeps concurrent manual snapshots created in the same second", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-11-20T00:00:00Z"));
+    const service = createService(storageLocation);
+    const snapshots = await Promise.all([
+      service.createBackup(false),
+      service.createBackup(false),
+    ]);
+    expect(snapshots[0].filename).not.toBe(snapshots[1].filename);
+    expect(service.listBackups().map(({ version }) => version)).toEqual([
+      "2.0.56",
+      "2.0.56",
+    ]);
+    for (const { filename } of snapshots) {
+      const backup = await unzipper.Open.file(path.join(backupDir, filename));
+      expect(backup.files.some((file) => file.path === "backup.json")).toBe(
+        true,
+      );
+    }
   });
 
   it("keeps every backup when the stored count is not a positive integer", () => {

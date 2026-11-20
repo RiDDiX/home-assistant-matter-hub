@@ -23,7 +23,8 @@ import { AggregatorEndpoint } from "../aggregator-endpoint.js";
 import { updateEntityState } from "../update-entity-state.js";
 import { ComposedAirPurifierEndpoint } from "./composed-air-purifier-endpoint.js";
 
-vi.mock("../update-entity-state.js", () => ({
+vi.mock("../update-entity-state.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../update-entity-state.js")>()),
   updateEntityState: vi.fn(async () => {}),
 }));
 
@@ -249,6 +250,24 @@ describe("#461 air purifier rebuild loop", () => {
       .mock.calls.map(([ep]) => ep.id)
       .sort();
     expect(flushed).toEqual([endpoint.id, `${endpoint.id}_air_purifier`]);
+  });
+
+  it("names the entity on a failed write and still rejects", async () => {
+    const endpoint = await mountedPurifier();
+    const warn = vi.spyOn(Logger.prototype, "warn");
+    const error = new Error("lock");
+    vi.mocked(updateEntityState).mockRejectedValueOnce(error);
+    const flush = (
+      endpoint as unknown as {
+        flushUpdate(ep: unknown, s: HomeAssistantEntityState): Promise<void>;
+      }
+    ).flushUpdate.bind(endpoint);
+
+    await expect(
+      flush(endpoint, state(FAN, "on", { supported_features: 56 })),
+    ).rejects.toBe(error);
+    expect(warn).toHaveBeenCalledWith(`State update failed for ${FAN}:`, error);
+    warn.mockRestore();
   });
 
   it("drops a queued update when the endpoint is closed", async () => {

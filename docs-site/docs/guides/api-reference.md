@@ -278,11 +278,11 @@ Base path: `/api/backup`
 
 ### GET /api/backup/download
 
-Download a full backup ZIP (bridges + entity mappings).
+Download a backup ZIP with bridge configurations and entity mappings.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `includeIdentity` | boolean | `false` | Include Matter identity files |
+| `includeIdentity` | boolean | `false` | Include Matter pairing files, plugin configuration, and app-wide data. This ZIP can contain plaintext passwords and tokens. |
 
 ### POST /api/backup/restore/preview
 
@@ -291,6 +291,7 @@ Preview a backup restore. Upload as `multipart/form-data` with `file` field.
 ### POST /api/backup/restore
 
 Restore from a backup. Upload as `multipart/form-data` with `file` and `options` fields.
+Set `restoreAppData: true` in the JSON options to restore the app-wide web login, settings, lock credentials, and saved device identities. This can restart the app and affect bridges outside the chosen selection. The option defaults to `false` for both uploads and stored backup restores.
 
 ### POST /api/backup/restart
 

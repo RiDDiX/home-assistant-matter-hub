@@ -1,19 +1,13 @@
 import type { RouteObject } from "react-router";
 import { AppPage } from "./pages/AppPage.tsx";
-import { AreaBridgeSetupPage } from "./pages/area-setup/AreaBridgeSetupPage.tsx";
 import { BridgeDetailsPage } from "./pages/bridge-details/BridgeDetailsPage.tsx";
 import { BridgesPage } from "./pages/bridges/BridgesPage.tsx";
 import { DashboardPage } from "./pages/dashboard/DashboardPage.tsx";
 import { DevicesPage } from "./pages/devices/DevicesPage.tsx";
-import { CreateBridgePage } from "./pages/edit-bridge/CreateBridgePage.tsx";
-import { EditBridgePage } from "./pages/edit-bridge/EditBridgePage.tsx";
 import { HealthPage } from "./pages/health/HealthPage.tsx";
 import { LabelsPage } from "./pages/labels/LabelsPage.tsx";
 import { LockCredentialsPage } from "./pages/lock-credentials/LockCredentialsPage.tsx";
 import { NotFoundPage } from "./pages/NotFoundPage.tsx";
-import { NetworkMapPage } from "./pages/network-map/NetworkMapPage.tsx";
-import { PluginsPage } from "./pages/plugins/PluginsPage.tsx";
-import { SettingsPage } from "./pages/settings/SettingsPage.tsx";
 import { StandaloneDevicesPage } from "./pages/standalone-devices/StandaloneDevicesPage.tsx";
 import { StartupPage } from "./pages/startup/StartupPage.tsx";
 
@@ -54,21 +48,58 @@ export const routes: RouteObject[] = [
         element: <DashboardPage />,
       },
       { path: navigation.bridges, element: <BridgesPage /> },
-      { path: navigation.createBridge, element: <CreateBridgePage /> },
-      { path: navigation.areaSetup, element: <AreaBridgeSetupPage /> },
+      {
+        path: navigation.createBridge,
+        lazy: async () => ({
+          Component: (await import("./pages/edit-bridge/CreateBridgePage.tsx"))
+            .CreateBridgePage,
+        }),
+      },
+      {
+        path: navigation.areaSetup,
+        lazy: async () => ({
+          Component: (
+            await import("./pages/area-setup/AreaBridgeSetupPage.tsx")
+          ).AreaBridgeSetupPage,
+        }),
+      },
       { path: navigation.bridge(":bridgeId"), element: <BridgeDetailsPage /> },
-      { path: navigation.editBridge(":bridgeId"), element: <EditBridgePage /> },
+      {
+        path: navigation.editBridge(":bridgeId"),
+        lazy: async () => ({
+          Component: (await import("./pages/edit-bridge/EditBridgePage.tsx"))
+            .EditBridgePage,
+        }),
+      },
       { path: navigation.devices, element: <DevicesPage /> },
       {
         path: navigation.standaloneDevices,
         element: <StandaloneDevicesPage />,
       },
-      { path: navigation.networkMap, element: <NetworkMapPage /> },
+      {
+        path: navigation.networkMap,
+        lazy: async () => ({
+          Component: (await import("./pages/network-map/NetworkMapPage.tsx"))
+            .NetworkMapPage,
+        }),
+      },
       { path: navigation.health, element: <HealthPage /> },
       { path: navigation.labels, element: <LabelsPage /> },
       { path: navigation.lockCredentials, element: <LockCredentialsPage /> },
-      { path: navigation.plugins, element: <PluginsPage /> },
-      { path: navigation.settings, element: <SettingsPage /> },
+      {
+        path: navigation.plugins,
+        lazy: async () => ({
+          Component: (await import("./pages/plugins/PluginsPage.tsx"))
+            .PluginsPage,
+        }),
+      },
+      {
+        path: navigation.settings,
+        lazy: async () => ({
+          Component: (await import("./pages/settings/SettingsPage.tsx"))
+            .SettingsPage,
+        }),
+      },
       { path: navigation.startup, element: <StartupPage /> },
       { path: "*", element: <NotFoundPage /> },
     ],

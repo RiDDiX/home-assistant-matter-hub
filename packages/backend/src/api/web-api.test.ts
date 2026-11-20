@@ -1,5 +1,6 @@
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import type * as http from "node:http";
+import { request } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -41,7 +42,12 @@ afterEach(async () => {
 // Stored settings auth is user:pass and replaces the env credentials.
 async function serve(
   whitelist?: string[],
-  { dir = mkdtempSync(join(tmpdir(), "hamh-web-api-")), stored = false } = {},
+  {
+    dir = mkdtempSync(join(tmpdir(), "hamh-web-api-")),
+    stored = false,
+    anonymous = false,
+    allowedHosts = [] as string[],
+  } = {},
 ) {
   cleanup.push(async () => rmSync(dir, { recursive: true, force: true }));
   const stub = {} as never;
@@ -66,11 +72,11 @@ async function serve(
     {
       port: 0,
       whitelist,
-      allowedHosts: [],
+      allowedHosts,
       version: "test",
       storageLocation: dir,
       basePath: "/",
-      auth: stored ? undefined : auth,
+      auth: stored || anonymous ? undefined : auth,
     },
   );
   await api.construction;
@@ -109,6 +115,53 @@ function upgrade(
 }
 
 describe("WebApi auth", () => {
+  it("limits unauthenticated administration to local setup and verified ingress", async () => {
+    const host = await serve(undefined, { anonymous: true });
+    const forwarded = { "x-forwarded-for": "192.0.2.1" };
+    expect(await get(host, "/api/settings/auth")).toBe(200);
+    expect(await get(host, "/api/settings/auth", undefined, forwarded)).toBe(
+      403,
+    );
+    expect(await get(host, "/api/plugins", undefined, forwarded)).toBe(403);
+    expect(await upgrade(host, undefined, forwarded)).toBe(401);
+    ingress.forced = true;
+    expect(await get(host, "/api/settings/auth", undefined, forwarded)).toBe(
+      200,
+    );
+    expect(await upgrade(host, undefined, forwarded)).toBe(true);
+  });
+
+  it("refuses a proxied host name on the loopback socket without a login", async () => {
+    const allowedHosts = ["hamh.example.com"];
+    const status = (host: string) =>
+      new Promise<number>((resolve, reject) => {
+        request(
+          `http://${host}/api/settings/auth`,
+          { headers: { host: "hamh.example.com" } },
+          (res) => {
+            res.resume();
+            resolve(res.statusCode ?? 0);
+          },
+        )
+          .on("error", reject)
+          .end();
+      });
+    // 401 with a login: the host guard lets the name through
+    expect(await status(await serve(undefined, { allowedHosts }))).toBe(401);
+    expect(
+      await status(await serve(undefined, { anonymous: true, allowedHosts })),
+    ).toBe(403);
+  });
+
+  it("lets a whitelisted address in without a login", async () => {
+    const host = await serve(["127.0.0.1"], { anonymous: true });
+    const forwarded = { "x-forwarded-for": "192.0.2.1" };
+    expect(await get(host, "/api/settings/auth", undefined, forwarded)).toBe(
+      200,
+    );
+    expect(await upgrade(host, undefined, forwarded)).toBe(true);
+  });
+
   it("requires credentials over http", async () => {
     const host = await serve();
     expect(await get(host, "/api/settings/auth")).toBe(401);

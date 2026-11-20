@@ -40,6 +40,17 @@ export const MATTER_TRAFFIC_FACILITIES = new Set([
   "CameraWebRtcRequestor",
 ]);
 
+// ProtocolService logs invoke arguments at INFO, PINs and keys included.
+const secretFieldPattern =
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: ansi escapes around keys and values
+  /(?<=^|[^A-Za-z0-9]|\x1b\[[0-9;]*m)(pinCode|credentialData|epochKey[012]|ipkValue|pakePasscodeVerifier)((?:\x1b\[[0-9;]*m)*: (?:\x1b\[[0-9;]*m)*)(?:[0-9a-f]{2})+(?![0-9A-Za-z])/g;
+
+export function maskSecrets(text: string): string {
+  return text.replace(secretFieldPattern, "$1$2[redacted]");
+}
+
+const maskedWrite = Symbol("hamh.maskedWrite");
+
 export function categoryFor(facility: string): string | undefined {
   return MATTER_TRAFFIC_FACILITIES.has(facility) ? "matter-traffic" : undefined;
 }
@@ -135,6 +146,18 @@ export class LoggerService {
         });
       },
     });
+    for (const name in Logger.destinations) {
+      const dest = Logger.destinations[name];
+      const write = dest.write as LogDestination["write"] & {
+        [maskedWrite]?: true;
+      };
+      if (write[maskedWrite]) continue;
+      dest.write = Object.assign(
+        (text: string, message: Parameters<typeof write>[1]) =>
+          write.call(dest, maskSecrets(text), message),
+        { [maskedWrite]: true as const },
+      );
+    }
   }
 
   get level(): string {

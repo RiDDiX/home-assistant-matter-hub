@@ -220,7 +220,7 @@ If you already run Alarmo or another alarm integration, keep it as the source of
 | Setting | Description |
 |---------|-------------|
 | `email` | The account you use in the VeSync app. |
-| `password` | Stored in the bridge's plugin storage file. Never sent back to the browser. Not part of backups, so re-enter it after a restore. |
+| `password` | Hidden in the settings dialog and stored in the bridge's plugin configuration file. Full downloads and stored backups include this file with the password in plain text. Keep those backups private. A config-only backup omits the file. |
 | `pollInterval` | Seconds between cloud polls. Default 60, from 30 to 3600. Raised on its own when polling would exceed the daily VeSync request quota of 3200 plus 1500 per device. That quota is shared with every other bridge and integration on the account. |
 | Device switch | One per device found on the account, labeled with the device name. Off by default. |
 

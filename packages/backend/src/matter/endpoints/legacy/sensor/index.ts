@@ -4,7 +4,11 @@ import {
 } from "@home-assistant-matter-hub/common";
 import { Logger } from "@matter/general";
 import type { EndpointType } from "@matter/main";
-import { DeviceTypeId } from "@matter/main/types";
+import {
+  HumiditySensorDevice,
+  PressureSensorDevice,
+  TemperatureSensorDevice,
+} from "@matter/main/devices";
 import { diagnosticEventBus } from "../../../../services/diagnostics/diagnostic-event-bus.js";
 import type { HomeAssistantEntityBehavior } from "../../../behaviors/home-assistant-entity-behavior.js";
 import { AirQualitySensorType } from "./devices/air-quality-sensor.js";
@@ -42,9 +46,18 @@ import { TvocSensorType } from "./devices/tvoc-sensor.js";
 // Device type entries for the descriptor's deviceTypeList.
 // Flat endpoints with multiple sensor clusters need all device types listed
 // so controllers like SmartThings properly display each measurement (#214).
-const tempDt = { deviceType: DeviceTypeId(0x0302), revision: 2 };
-const humidityDt = { deviceType: DeviceTypeId(0x0307), revision: 2 };
-const pressureDt = { deviceType: DeviceTypeId(0x0305), revision: 2 };
+const tempDt = {
+  deviceType: TemperatureSensorDevice.deviceType,
+  revision: TemperatureSensorDevice.deviceRevision,
+};
+const humidityDt = {
+  deviceType: HumiditySensorDevice.deviceType,
+  revision: HumiditySensorDevice.deviceRevision,
+};
+const pressureDt = {
+  deviceType: PressureSensorDevice.deviceType,
+  revision: PressureSensorDevice.deviceRevision,
+};
 
 const logger = Logger.get("SensorDevice");
 

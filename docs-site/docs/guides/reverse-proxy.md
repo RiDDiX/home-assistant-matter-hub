@@ -1,5 +1,7 @@
 # Using a reverse proxy
 
+Configure a HAMH web login before exposing a standalone instance through a reverse proxy. Set `HAMH_HTTP_AUTH_USERNAME` and `HAMH_HTTP_AUTH_PASSWORD`, or visit the app directly on localhost to set a login in Settings. Forward authentication headers for HTTP and WebSocket requests. Set `X-Forwarded-For` so HAMH can distinguish proxied requests from local setup when the proxy runs on the same machine.
+
 ## WebSocket Support
 
 HAMH uses WebSocket connections for real-time bridge status updates and live diagnostics. Your reverse proxy **must** forward WebSocket upgrade requests, otherwise the UI will not receive live updates.
@@ -15,6 +17,7 @@ For `nginx` you could use a config as easy as this:
 location / {
     proxy_pass http://192.168.178.23:8482/;
     proxy_http_version 1.1;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
     proxy_set_header Upgrade $http_upgrade;
     proxy_set_header Connection "upgrade";
 }
@@ -48,6 +51,7 @@ location /hamh/ {
     proxy_pass http://192.168.178.23:8482/;
     proxy_set_header x-ingress-path hamh;
     proxy_http_version 1.1;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
     proxy_set_header Upgrade $http_upgrade;
     proxy_set_header Connection "upgrade";
 }
@@ -65,6 +69,7 @@ location /hamh/ {
     proxy_pass http://192.168.178.23:8482;
     proxy_set_header x-forwarded-prefix hamh;
     proxy_http_version 1.1;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
     proxy_set_header Upgrade $http_upgrade;
     proxy_set_header Connection "upgrade";
 }

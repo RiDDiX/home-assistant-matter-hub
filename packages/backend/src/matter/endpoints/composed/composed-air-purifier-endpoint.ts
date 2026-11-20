@@ -3,7 +3,6 @@ import type {
   FanDeviceAttributes,
   HomeAssistantEntityInformation,
   HomeAssistantEntityState,
-  SensorDeviceAttributes,
 } from "@home-assistant-matter-hub/common";
 import { Logger } from "@matter/general";
 import { Endpoint, type EndpointType } from "@matter/main";
@@ -17,9 +16,7 @@ import { BridgedNodeEndpoint } from "@matter/main/endpoints";
 import debounce from "debounce";
 import type { BridgeRegistry } from "../../../services/bridges/bridge-registry.js";
 import { EntityStateProvider } from "../../../services/bridges/entity-state-provider.js";
-import { HomeAssistantConfig } from "../../../services/home-assistant/home-assistant-config.js";
 import type { HomeAssistantStates } from "../../../services/home-assistant/home-assistant-registry.js";
-import { Temperature } from "../../../utils/converters/temperature.js";
 import { numericState } from "../../../utils/numeric-state.js";
 import { trimToLength } from "../../../utils/trim-to-length.js";
 import { BasicInformationServer } from "../../behaviors/basic-information-server.js";
@@ -35,10 +32,7 @@ import {
 import { IdentifyServer } from "../../behaviors/identify-server.js";
 import { PowerSourceServer } from "../../behaviors/power-source-server.js";
 import { HaPowerTopologyServer } from "../../behaviors/power-topology-server.js";
-import {
-  type TemperatureMeasurementConfig,
-  TemperatureMeasurementServer,
-} from "../../behaviors/temperature-measurement-server.js";
+import { TemperatureMeasurementServer } from "../../behaviors/temperature-measurement-server.js";
 import {
   createEndpointId,
   mappedNonSubStateChanged,
@@ -47,26 +41,15 @@ import { AirPurifierHepaFilterMonitoringServer } from "../legacy/air-purifier/be
 import { FanFanControlServer } from "../legacy/fan/behaviors/fan-fan-control-server.js";
 import { FanOnOffServer } from "../legacy/fan/behaviors/fan-on-off-server.js";
 import { fanControlFeatures } from "../legacy/fan/index.js";
-import { updateEntityState } from "../update-entity-state.js";
+import { temperatureSensorConfig } from "../legacy/sensor/devices/temperature-sensor.js";
+import {
+  updateEntityState,
+  warnOnFailedUpdate,
+} from "../update-entity-state.js";
 
 const logger = Logger.get("ComposedAirPurifierEndpoint");
 
 // --- Direct configs for sensor sub-endpoints (read from own entity state) ---
-
-const temperatureConfig: TemperatureMeasurementConfig = {
-  getValue(entity, agent) {
-    const fallbackUnit =
-      agent.env.get(HomeAssistantConfig).unitSystem.temperature;
-    const state = entity.state;
-    const attributes = entity.attributes as SensorDeviceAttributes;
-    const temperature = numericState(state);
-    if (temperature == null) return undefined;
-    return Temperature.withUnit(
-      temperature,
-      attributes.unit_of_measurement ?? fallbackUnit,
-    );
-  },
-};
 
 const humidityConfig: HumidityMeasurementConfig = {
   getValue({ state }: HomeAssistantEntityState) {
@@ -95,7 +78,7 @@ const batteryConfig = {
 const TemperatureSubType = TemperatureSensorDevice.with(
   IdentifyServer,
   HomeAssistantEntityBehavior,
-  TemperatureMeasurementServer(temperatureConfig),
+  TemperatureMeasurementServer(temperatureSensorConfig),
 );
 
 const HumiditySubType = HumiditySensorDevice.with(
@@ -448,11 +431,11 @@ export class ComposedAirPurifierEndpoint extends Endpoint {
     debouncedFn(endpoint, effectiveState);
   }
 
-  private async flushUpdate(
-    endpoint: Endpoint,
-    state: HomeAssistantEntityState,
-  ) {
-    await updateEntityState(endpoint, state);
+  private flushUpdate(endpoint: Endpoint, state: HomeAssistantEntityState) {
+    return warnOnFailedUpdate(
+      state.entity_id,
+      updateEntityState(endpoint, state),
+    );
   }
 
   // a rebuild goes through close(), the queued flush must not outlive it (#461)

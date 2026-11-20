@@ -44,6 +44,7 @@ function clampRecoveryInterval(ms: number): number {
 const REFRESH_TIMEOUT_MS = 120_000;
 // a paired bridge may legitimately wait that long for HA
 const START_TIMEOUT_MS = HA_READY_WAIT_COMMISSIONED_MS + 60_000;
+const STOP_TIMEOUT_MS = 90_000;
 
 export class BridgeService extends Service {
   private readonly pendingPorts = new Set<number>();
@@ -262,10 +263,13 @@ export class BridgeService extends Service {
     return port;
   }
 
-  async startAll() {
-    const run = ++this.startRun;
+  startAll() {
+    return this.startInOrder(++this.startRun, this.bridges);
+  }
+
+  private async startInOrder(run: number, bridges: Bridge[], notify = false) {
     // Sort bridges by priority (lower = starts first), default priority is 100
-    const sortedBridges = [...this.bridges].sort((a, b) => {
+    const sortedBridges = [...bridges].sort((a, b) => {
       const priorityA = a.data.priority ?? 100;
       const priorityB = b.data.priority ?? 100;
       return priorityA - priorityB;
@@ -273,6 +277,8 @@ export class BridgeService extends Service {
     for (const bridge of sortedBridges) {
       // a stopAll or restartAll since then owns the bridges
       if (run !== this.startRun) return;
+      if (this.deleting.has(bridge.id) || !this.bridges.includes(bridge))
+        continue;
       try {
         const start = bridge.start();
         if (!(await this.settlesWithin(start, START_TIMEOUT_MS))) {
@@ -282,6 +288,8 @@ export class BridgeService extends Service {
           start.catch((e) =>
             this.log.error(`Failed to start bridge ${bridge.id}:`, e),
           );
+        } else if (notify) {
+          this.onBridgeChanged?.(bridge.id);
         }
       } catch (e) {
         // Isolate per-bridge failures so one failing bridge doesn't prevent others from starting
@@ -310,10 +318,14 @@ export class BridgeService extends Service {
     const run = ++this.startRun;
     // Stop in parallel (no ordering requirement), then start sequentially
     // by priority so low-priority bridges always come up first.
-    await Promise.all(
+    const stopped = await Promise.all(
       this.bridges.map(async (bridge) => {
+        if (this.deleting.has(bridge.id)) return;
         try {
-          await bridge.stop();
+          if (await this.settlesWithin(bridge.stop(), STOP_TIMEOUT_MS)) {
+            return bridge;
+          }
+          this.log.warn(`Stop of bridge ${bridge.id} timed out during restart`);
         } catch (e) {
           this.log.error(
             `Failed to stop bridge ${bridge.id} during restart:`,
@@ -322,23 +334,11 @@ export class BridgeService extends Service {
         }
       }),
     );
-    const sortedBridges = [...this.bridges].sort((a, b) => {
-      const priorityA = a.data.priority ?? 100;
-      const priorityB = b.data.priority ?? 100;
-      return priorityA - priorityB;
-    });
-    for (const bridge of sortedBridges) {
-      if (run !== this.startRun) return;
-      try {
-        await bridge.start();
-        this.onBridgeChanged?.(bridge.id);
-      } catch (e) {
-        this.log.error(
-          `Failed to start bridge ${bridge.id} during restart:`,
-          e,
-        );
-      }
-    }
+    await this.startInOrder(
+      run,
+      stopped.filter((bridge) => bridge !== undefined),
+      true,
+    );
   }
 
   async refreshAll(): Promise<boolean> {
@@ -471,19 +471,33 @@ export class BridgeService extends Service {
   }
 
   async update(request: UpdateBridgeRequest): Promise<Bridge | undefined> {
-    if (this.portUsed(request.port, [request.id])) {
-      throw new Error(`Port already in use: ${request.port}`);
-    }
     const bridge = this.get(request.id);
     if (!bridge) {
       return;
     }
-    await bridge.update(request);
-    // a delete that ran meanwhile already removed it from storage
-    if (!this.bridges.includes(bridge)) return;
-    await this.bridgeStorage.add(bridge.data);
-    this.onBridgeChanged?.(bridge.id);
-    return bridge;
+    const previousPort = bridge.data.port;
+    if (
+      this.portUsed(request.port, [request.id]) ||
+      this.pendingPorts.has(previousPort)
+    ) {
+      throw new Error(
+        `Port already in use: ${this.pendingPorts.has(previousPort) ? previousPort : request.port}`,
+      );
+    }
+    // Keep the old port reserved until the node closes its old socket.
+    this.pendingPorts.add(previousPort);
+    this.pendingPorts.add(request.port);
+    try {
+      await bridge.update(request);
+      // a delete that ran meanwhile already removed it from storage
+      if (!this.bridges.includes(bridge)) return;
+      await this.bridgeStorage.add(bridge.data);
+      this.onBridgeChanged?.(bridge.id);
+      return bridge;
+    } finally {
+      this.pendingPorts.delete(previousPort);
+      this.pendingPorts.delete(request.port);
+    }
   }
 
   delete(bridgeId: string): Promise<void> {

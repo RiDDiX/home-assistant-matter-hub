@@ -5,6 +5,7 @@ import type {
 } from "@home-assistant-matter-hub/common";
 import {
   DestroyedDependencyError,
+  Logger,
   TransactionDestroyedError,
 } from "@matter/general";
 import type { Endpoint } from "@matter/main";
@@ -16,6 +17,7 @@ import { HomeAssistantEntityBehavior } from "../behaviors/home-assistant-entity-
 // Plain chain, an endpoint whose construction never settles queues
 // its later updates. Add a timeout around the write if that ever shows up.
 const chains = new WeakMap<Endpoint, Promise<void>>();
+const logger = Logger.get("UpdateEntityState");
 
 /**
  * Errors a closed, rebuilt or not yet attached endpoint throws on a late
@@ -54,6 +56,22 @@ export function updateEntityState(
     next.catch(() => {}),
   );
   return next;
+}
+
+/**
+ * Log a failed state write with its entity id and reject again, so the
+ * unhandled rejection still reaches entity isolation.
+ */
+export async function warnOnFailedUpdate(
+  entityId: string,
+  update: Promise<void>,
+): Promise<void> {
+  try {
+    await update;
+  } catch (e) {
+    logger.warn(`State update failed for ${entityId}:`, e);
+    throw e;
+  }
 }
 
 /**
