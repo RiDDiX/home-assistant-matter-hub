@@ -77,7 +77,7 @@ Enable the `coverSwapOpenClose` feature flag in your bridge settings. This is a 
 
 Alexa sends everything as a lift percentage: open/close hit the 0/100% ends, "set to N%" hits the middle, and Alexa uses opposite polarity for the two. The bridge-level `coverSwapOpenClose` also un-inverts the percentage, so turning it on fixes open/close but flips set-position (off is the reverse), and no single bridge setting gets both right.
 
-Fix: enable `coverSwapOpenClose` on the cover itself in the Entity Mapping dialog and leave the bridge-level flag off. Per cover it swaps only open/close and keeps the default percentage inversion, so open, close and set-to-N% all come out correct. One catch: saying "set to exactly 0%" or "100%" still counts as open/close.
+Fix: enable `coverSwapOpenClose` on the cover itself in the Entity Mapping dialog and leave the bridge-level flag off. Per cover it swaps only open/close and keeps the default percentage inversion, so open, close and set-to-N% all come out correct. One catch: saying "set to exactly 0%" or "100%" still counts as open/close. For a cover without position support, a mid-range percent goes to the same end a position cover would.
 
 ### Close while opening only stops the cover (#512) {#cover-open-close-as-position-512}
 

@@ -58,7 +58,7 @@ If you want a code that a controller sets or clears to also land on the physical
 
 The clear call is derived from the set service (`zwave_js.clear_lock_usercode`, `zha.clear_lock_user_code`). The slot number is passed verbatim; it defaults to `1` when only the service is set. The service targets the lock entity, so no separate target is needed.
 
-The physical program runs before the stored credential changes: a code the lock rejects fails the controller's command instead of being stored, and a clear the lock refuses keeps the credential instead of reporting it gone. This is independent of `disableLockPin`.
+The physical program runs before the stored credential changes: a code the lock rejects fails the controller's command instead of being stored, and a clear the lock refuses keeps the credential instead of reporting it gone. This is independent of `disableLockPin`. Removing a user clears the physical slot also when the PIN was disabled in the web UI, and "clear all PIN credentials" (credential index 0xFFFE) clears the PIN.
 
 ## Unlatch (Unbolting)
 

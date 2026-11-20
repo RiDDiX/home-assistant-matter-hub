@@ -184,7 +184,7 @@ List entities with pagination and filtering.
 
 ### GET /api/home-assistant/entities/:entityId
 
-Get a specific entity. Returns `404` if not found.
+Get a specific entity. Returns `404` if not found. The `access_token` and `entity_picture` attributes of cameras read `[redacted]`, also on the entities list and the device routes.
 
 ### GET /api/home-assistant/devices
 

@@ -155,6 +155,8 @@ Options:
   --home-assistant-access-token  A long-lived access token for your Home Assistant Instance                              [string] [required]
 ```
 
+`--http-auth-username` and `--http-auth-password` go together. Since v2.1.0-alpha.1001 the app stops at start with an error if only one of them is set. Older versions start without a login in that case.
+
 Each of those configuration options can be configured via environment variables, too. Simply prefix them with `HAMH_`
 and write them in capslock with underscores (e.g. `HAMH_MDNS_NETWORK_INTERFACE`).
 
