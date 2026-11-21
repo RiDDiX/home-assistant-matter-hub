@@ -11,6 +11,7 @@ import { VendorId } from "@matter/main";
 import { ServerNode } from "@matter/main/node";
 import { FabricManager } from "@matter/main/protocol";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { LegacyEndpoint } from "../../matter/endpoints/legacy/legacy-endpoint.js";
 import { ServerModeServerNode } from "../../matter/endpoints/server-mode-server-node.js";
 import { PluginManager } from "../../plugins/plugin-manager.js";
 import type { MatterHubPlugin } from "../../plugins/types.js";
@@ -27,6 +28,7 @@ import { BridgeEndpointManager } from "./bridge-endpoint-manager.js";
 import { BridgeRegistry } from "./bridge-registry.js";
 import { EntityStateProvider } from "./entity-state-provider.js";
 import { ServerModeBridge } from "./server-mode-bridge.js";
+import { ServerModeEndpointManager } from "./server-mode-endpoint-manager.js";
 
 // #543 round 4: a start whose first refresh was deferred (HA not running or
 // the registry empty) put the node online with an empty aggregator, and a
@@ -94,7 +96,7 @@ function makeHa(ids: string[]): FakeHa {
     ha.entities[id] = { entity_id: id };
     ha.states[id] = {
       entity_id: id,
-      state: "docked",
+      state: id.startsWith("script.") ? "off" : "docked",
       attributes: { friendly_name: id, supported_features: 4 },
       context: { id: "ctx" },
       last_changed: "2026-01-01T00:00:00",
@@ -110,7 +112,10 @@ function makeProvider(): BridgeDataProvider {
     name: "b",
     port: 0,
     filter: {
-      include: [{ type: HomeAssistantMatcherType.Pattern, value: "vacuum.*" }],
+      include: [
+        { type: HomeAssistantMatcherType.Pattern, value: "vacuum.*" },
+        { type: HomeAssistantMatcherType.Pattern, value: "script.*" },
+      ],
       exclude: [],
       includeMode: "any",
     },
@@ -168,28 +173,33 @@ function fakeSessions() {
   };
 }
 
+function makeEnvironment(ha: FakeHa, provider: BridgeDataProvider) {
+  const env = new Environment("test", Environment.default);
+  env.get(VariableService).set("storage.path", dir);
+  env.set(BridgeDataProvider, provider);
+  env.set(HomeAssistantActions, {
+    call(_action: HomeAssistantAction) {},
+    fireEvent() {},
+    // biome-ignore lint/suspicious/noExplicitAny: test stub
+  } as any);
+  env.set(EntityStateProvider, {
+    getState: () => undefined,
+    getNumericState: () => null,
+    getBatteryPercent: () => null,
+    // biome-ignore lint/suspicious/noExplicitAny: test stub
+  } as any);
+  // biome-ignore lint/suspicious/noExplicitAny: minimal registry stub
+  env.set(HomeAssistantRegistry, ha as any);
+  return env;
+}
+
 describe("bridge start gate (#543 round 4)", () => {
   async function make(
     ha: FakeHa,
     opts: { haRunning?: boolean; plugins?: PluginManager } = {},
   ) {
     const provider = makeProvider();
-    const env = new Environment("test", Environment.default);
-    env.get(VariableService).set("storage.path", dir);
-    env.set(BridgeDataProvider, provider);
-    env.set(HomeAssistantActions, {
-      call(_action: HomeAssistantAction) {},
-      fireEvent() {},
-      // biome-ignore lint/suspicious/noExplicitAny: test stub
-    } as any);
-    env.set(EntityStateProvider, {
-      getState: () => undefined,
-      getNumericState: () => null,
-      getBatteryPercent: () => null,
-      // biome-ignore lint/suspicious/noExplicitAny: test stub
-    } as any);
-    // biome-ignore lint/suspicious/noExplicitAny: minimal registry stub
-    env.set(HomeAssistantRegistry, ha as any);
+    const env = makeEnvironment(ha, provider);
     const node = await ServerNode.create({
       // biome-ignore lint/suspicious/noExplicitAny: env valid at runtime
       environment: env as any,
@@ -204,11 +214,12 @@ describe("bridge start gate (#543 round 4)", () => {
       haRunning: opts.haRunning ?? true,
       runningSince: 0,
     };
+    // biome-ignore lint/suspicious/noExplicitAny: minimal registry stub
+    const registry = new BridgeRegistry(ha as any, provider);
     const bem = new BridgeEndpointManager(
       // biome-ignore lint/suspicious/noExplicitAny: client only used for observing
       client as any,
-      // biome-ignore lint/suspicious/noExplicitAny: minimal registry stub
-      new BridgeRegistry(ha as any, provider),
+      registry,
       noMappings,
       new FakeIdentityStorage() as unknown as EntityIdentityStorage,
       provider.id,
@@ -238,11 +249,14 @@ describe("bridge start gate (#543 round 4)", () => {
       sessions: fakeSessions(),
     });
     bridge = b as Bridge;
-    return { bridge: b as Bridge, bem, client, online, log };
+    return { bridge: b as Bridge, bem, client, online, log, registry };
   }
 
   // the node and the endpoints are built on real timers, the wait on fake ones
-  async function startOnFakeTimers(b: Bridge, steps: () => Promise<void>) {
+  async function startOnFakeTimers(
+    b: Bridge | ServerModeBridge,
+    steps: () => Promise<void>,
+  ) {
     vi.useFakeTimers({
       toFake: [
         "setTimeout",
@@ -363,7 +377,7 @@ describe("bridge start gate (#543 round 4)", () => {
 
   // a host reboot: HA needs longer than 30s, a paired bridge must not go
   // online empty
-  function commission(b: Bridge) {
+  function commission(b: Bridge | ServerModeBridge) {
     vi.spyOn(b.server.env.get(FabricManager), "length", "get").mockReturnValue(
       1,
     );
@@ -387,6 +401,112 @@ describe("bridge start gate (#543 round 4)", () => {
     expect(bridge.data.status).toBe(BridgeStatus.Running);
   });
 
+  it.each([
+    "bridge",
+    "server",
+  ] as const)("a commissioned %s reloads the missing state for a reserved endpoint before starting", async (mode) => {
+    const entityId = "script.clean";
+    const ha = makeHa(["vacuum.a", entityId]);
+    const { bridge, parent, registry } =
+      mode === "bridge"
+        ? await make(ha).then(({ bridge, bem, registry }) => ({
+            bridge,
+            parent: bem.root,
+            registry,
+          }))
+        : await makeServerMode(ha);
+    const previous = await LegacyEndpoint.create(
+      registry,
+      entityId,
+      undefined,
+      undefined,
+      mode === "server",
+    );
+    if (!previous) throw new Error("Script endpoint was not created");
+    await parent.add(previous);
+    const { id, number } = previous;
+    await previous.close();
+    const state = ha.states[entityId];
+    delete ha.states[entityId];
+    let releaseReload!: () => void;
+    const reload = vi.fn(
+      () =>
+        new Promise<boolean>((resolve) => {
+          releaseReload = () => {
+            ha.states[entityId] = state;
+            resolve(true);
+          };
+        }),
+    );
+    Object.assign(ha, { reload });
+    commission(bridge);
+    const online: Map<string, number>[] = [];
+    vi.mocked(bridge.server.start).mockImplementation(async () => {
+      online.push(new Map([...parent.parts].map((p) => [p.id, p.number])));
+    });
+
+    await startOnFakeTimers(bridge, async () => {
+      await vi.waitFor(() =>
+        expect(online.length + reload.mock.calls.length).toBeGreaterThan(0),
+      );
+      expect(online).toEqual([]);
+      await vi.advanceTimersByTimeAsync(6_000);
+      expect(online).toHaveLength(0);
+      expect(reload).toHaveBeenCalledOnce();
+      releaseReload();
+      await vi.advanceTimersByTimeAsync(3000);
+    });
+
+    expect(online).toHaveLength(1);
+    expect([...online[0].keys()].sort()).toEqual([id, "vacuum_a"]);
+    expect(online[0].get(id)).toBe(number);
+  });
+
+  it("a commissioned bridge waits only 30s for a reserved endpoint's state that never arrives", async () => {
+    const entityId = "script.clean";
+    const ha = makeHa(["vacuum.a", entityId]);
+    const { bridge, bem, registry, online, log } = await make(ha);
+    const previous = await LegacyEndpoint.create(registry, entityId);
+    if (!previous) throw new Error("Script endpoint was not created");
+    await bem.root.add(previous);
+    await previous.close();
+    delete ha.states[entityId];
+    // the wait has begun once it reloads, the endpoints build on real I/O
+    let reloaded!: () => void;
+    const waiting = new Promise<void>((r) => (reloaded = r));
+    Object.assign(ha, {
+      reload: async () => {
+        reloaded();
+        return true;
+      },
+    });
+    commission(bridge);
+
+    await startOnFakeTimers(bridge, async () => {
+      await waiting;
+      await vi.advanceTimersByTimeAsync(29_999);
+      expect(online).toHaveLength(0);
+      await vi.advanceTimersByTimeAsync(1);
+    });
+
+    expect(online).toEqual([["vacuum_a"]]);
+    expect(notReady(log)).toBe(1);
+  });
+
+  it("a commissioned bridge starts immediately when a new entity lacks state", async () => {
+    const ha = makeHa(["vacuum.a", "script.clean"]);
+    delete ha.states["script.clean"];
+    const reload = vi.fn();
+    Object.assign(ha, { reload });
+    const { bridge, online } = await make(ha);
+    commission(bridge);
+
+    await startOnFakeTimers(bridge, async () => {});
+
+    expect(online).toEqual([["vacuum_a"]]);
+    expect(reload).not.toHaveBeenCalled();
+  });
+
   it("a stop during a commissioned wait leaves no timer and no start", async () => {
     const { bridge, online } = await make(makeHa(["vacuum.a"]), {
       haRunning: false,
@@ -397,6 +517,9 @@ describe("bridge start gate (#543 round 4)", () => {
       await bridge.stop();
     });
     await vi.advanceTimersByTimeAsync(10 * 60_000);
+    // a LAN mDNS packet can arm a matter.js expiry timer, count only ours
+    await server?.close();
+    server = undefined;
 
     expect(online).toHaveLength(0);
     expect(vi.getTimerCount()).toBe(0);
@@ -554,6 +677,42 @@ describe("bridge start gate (#543 round 4)", () => {
     expect(b.autoForceSyncTimer).toBeNull();
   });
 });
+
+async function makeServerMode(ha: FakeHa) {
+  const provider = makeProvider();
+  const node = new ServerModeServerNode(
+    makeEnvironment(ha, provider),
+    provider,
+  );
+  server = node;
+  await node.construction.ready;
+  // biome-ignore lint/suspicious/noExplicitAny: minimal registry stub
+  const registry = new BridgeRegistry(ha as any, provider);
+  const em = new ServerModeEndpointManager(
+    node,
+    // biome-ignore lint/suspicious/noExplicitAny: minimal client/registry stubs
+    { haRunning: true } as any,
+    registry,
+    noMappings,
+    new FakeIdentityStorage() as unknown as EntityIdentityStorage,
+    provider,
+    makeLog() as unknown as Logger,
+  );
+  vi.spyOn(em, "startObserving").mockResolvedValue();
+  vi.spyOn(node, "start").mockResolvedValue();
+  const b = Object.create(ServerModeBridge.prototype);
+  Object.assign(b, {
+    log: makeLog(),
+    dataProvider: provider,
+    server: node,
+    endpointManager: em,
+    status: { code: BridgeStatus.Stopped },
+    lastSyncedStates: new Map(),
+    sessions: fakeSessions(),
+  });
+  bridge = b as ServerModeBridge;
+  return { bridge, parent: node, registry };
+}
 
 describe("server mode start gate (#543 round 4)", () => {
   it("goes online only once HA runs", async () => {

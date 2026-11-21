@@ -155,10 +155,10 @@ export function matterApi(
     }
     try {
       // A factory reset erases the persisted endpoint numbers, so the frozen
-      // identities no longer map to anything. Drop them BEFORE the erase: the
-      // reset restarts the bridge and refreshes devices internally, and that
+      // identities no longer map to anything. Drop them BEFORE the restart:
+      // the reset restarts the bridge and refreshes devices internally, and that
       // rebuild would otherwise re-seed against the wiped matter.js store (#404).
-      // factoryReset drops them only when it really runs.
+      // factoryReset drops them only once the erase succeeded.
       const ran = await bridge.factoryReset(async () => {
         await identityStorage?.deleteBridgeIdentities(bridgeId);
       });

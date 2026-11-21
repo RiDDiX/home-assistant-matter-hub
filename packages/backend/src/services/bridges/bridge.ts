@@ -1,7 +1,6 @@
 import { BridgeStatus } from "@home-assistant-matter-hub/common";
 import type { Environment } from "@matter/general";
 import type { Endpoint } from "@matter/main";
-import { BasicInformationServer } from "@matter/main/behaviors";
 import type { LoggerService } from "../../core/app/logger.js";
 import { BridgeServerNode } from "../../matter/endpoints/bridge-server-node.js";
 import {
@@ -16,6 +15,7 @@ import { BridgeBase } from "./bridge-base.js";
 import type { BridgeDataProvider } from "./bridge-data-provider.js";
 import type { BridgeEndpointManager } from "./bridge-endpoint-manager.js";
 import { EntityIsolationService } from "./entity-isolation-service.js";
+import { bumpConfigurationVersion } from "./topology-tracker.js";
 
 export class Bridge extends BridgeBase<
   BridgeServerNode,
@@ -126,14 +126,9 @@ export class Bridge extends BridgeBase<
       // holds many devices
       0,
     );
-    this.endpointManager.setTopologyChangeHandler(async (change) => {
-      await this.server.act("topology change", (agent) =>
-        agent.get(BasicInformationServer).increaseConfigurationVersion(change),
-      );
-      this.log.info(
-        `Matter topology changed, ConfigurationVersion is now ${this.server.stateOf(BasicInformationServer).configurationVersion}`,
-      );
-    });
+    this.endpointManager.setTopologyChangeHandler(
+      bumpConfigurationVersion(this.server, this.log),
+    );
     const { basicInformation } = this.dataProvider;
     this.log.debugCtx("Root bridge BasicInformation configured", {
       vendorName: basicInformation.vendorName,

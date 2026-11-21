@@ -46,6 +46,8 @@ export class EntityIdentityStorage extends Service {
   private storage!: StorageContext;
   private identities: Map<string, Map<string, IdentityRecord>> = new Map();
   private persistTimer: ReturnType<typeof setTimeout> | null = null;
+  // The write in flight already cleared dirty, so a flush waits for it.
+  private writing?: Promise<void>;
   // Only a change writes. A newer build's file is never written, and entries
   // this build could not read are written back as they were.
   private dirty = false;
@@ -116,7 +118,15 @@ export class EntityIdentityStorage extends Service {
     }
   }
 
-  private async persist(): Promise<void> {
+  private persist(): Promise<void> {
+    const write = this.write().finally(() => {
+      if (this.writing === write) this.writing = undefined;
+    });
+    this.writing = write;
+    return write;
+  }
+
+  private async write(): Promise<void> {
     if (this.newerFile) return;
     const data: StoredIdentities = {
       version: CURRENT_VERSION,
@@ -172,6 +182,8 @@ export class EntityIdentityStorage extends Service {
 
   // Flush any pending debounced write, used on dispose and by tests.
   async flush(): Promise<void> {
+    // a failed write left dirty set, the persist below retries it
+    while (this.writing) await this.writing.catch(() => {});
     if (this.persistTimer) {
       clearTimeout(this.persistTimer);
       this.persistTimer = null;

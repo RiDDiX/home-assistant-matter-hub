@@ -116,59 +116,73 @@ describe("HomeAssistantActions availability (#446)", () => {
 
 describe("HomeAssistantActions debounce", () => {
   it("keeps explicit commands separate while coalescing adjustments", async () => {
-    const serviceData: unknown[] = [];
-    const sendMessagePromise = async (message: {
-      type: string;
-      [key: string]: unknown;
-    }) => {
-      if (message.type === "call_service") {
-        serviceData.push(message.service_data);
-      }
-      return {};
-    };
-    const { actions } = makeActions(sendMessagePromise);
+    // fake timers: on real ones the two debouncers can fire in either order
+    vi.useFakeTimers();
+    try {
+      const serviceData: unknown[] = [];
+      const sendMessagePromise = async (message: {
+        type: string;
+        [key: string]: unknown;
+      }) => {
+        if (message.type === "call_service") {
+          serviceData.push(message.service_data);
+        }
+        return {};
+      };
+      const { actions } = makeActions(sendMessagePromise);
 
-    actions.call(
-      { action: "light.turn_on", data: { brightness: 100 } },
-      "light.lamp",
-    );
-    actions.call({ action: "light.turn_on" }, "light.lamp");
-    actions.call(
-      { action: "light.turn_on", data: { brightness: 200 } },
-      "light.lamp",
-    );
+      actions.call(
+        { action: "light.turn_on", data: { brightness: 100 } },
+        "light.lamp",
+      );
+      actions.call({ action: "light.turn_on" }, "light.lamp");
+      actions.call(
+        { action: "light.turn_on", data: { brightness: 200 } },
+        "light.lamp",
+      );
 
-    await new Promise((resolve) => setTimeout(resolve, 150));
-    expect(serviceData).toEqual([{ brightness: 200 }, {}]);
+      await vi.advanceTimersByTimeAsync(100);
+      expect(serviceData).toEqual([{ brightness: 200 }, {}]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("keeps only the last color descriptor in a merged turn_on", async () => {
-    const serviceData: unknown[] = [];
-    const { actions } = makeActions(async (message) => {
-      if (message.type === "call_service") {
-        serviceData.push(message.service_data);
-      }
-      return {};
-    });
+    vi.useFakeTimers();
+    try {
+      const serviceData: unknown[] = [];
+      const { actions } = makeActions(async (message) => {
+        if (message.type === "call_service") {
+          serviceData.push(message.service_data);
+        }
+        return {};
+      });
 
-    // HA rejects hs_color together with color_temp_kelvin
-    actions.call(
-      { action: "light.turn_on", data: { hs_color: [10, 80], brightness: 50 } },
-      "light.lamp",
-    );
-    actions.call(
-      { action: "light.turn_on", data: { color_temp_kelvin: 3000 } },
-      "light.lamp",
-    );
-    actions.call(
-      { action: "light.turn_on", data: { transition: 1 } },
-      "light.lamp",
-    );
+      // HA rejects hs_color together with color_temp_kelvin
+      actions.call(
+        {
+          action: "light.turn_on",
+          data: { hs_color: [10, 80], brightness: 50 },
+        },
+        "light.lamp",
+      );
+      actions.call(
+        { action: "light.turn_on", data: { color_temp_kelvin: 3000 } },
+        "light.lamp",
+      );
+      actions.call(
+        { action: "light.turn_on", data: { transition: 1 } },
+        "light.lamp",
+      );
 
-    await new Promise((resolve) => setTimeout(resolve, 150));
-    expect(serviceData).toEqual([
-      { brightness: 50, color_temp_kelvin: 3000, transition: 1 },
-    ]);
+      await vi.advanceTimersByTimeAsync(100);
+      expect(serviceData).toEqual([
+        { brightness: 50, color_temp_kelvin: 3000, transition: 1 },
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

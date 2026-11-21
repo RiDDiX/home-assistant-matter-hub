@@ -84,38 +84,10 @@ describe("POST /bridges/:id/actions/factory-reset", () => {
   });
 
   it("leaves a bridge down that was stopped during the reset", async () => {
-    // prototype fake as in bridge.factory-reset.test.ts
-    const bridge = Object.create(Bridge.prototype);
-    const noop = async () => {};
-    Object.assign(bridge, {
-      log: { debug() {}, info() {}, warn() {}, error() {} },
-      status: { code: BridgeStatus.Running },
-      sessions: { stop() {}, start() {}, closeActiveSessions: noop },
-      endpointManager: {
-        root: { parts: [] },
-        failedEntities: [],
-        stopPlugins: noop,
-        stopObserving() {},
-      },
-      dataProvider: {
-        id: "b1",
-        name: "b",
-        withMetadata: (status: { code: BridgeStatus }) => ({
-          id: "b1",
-          status: status.code,
-        }),
-      },
-      server: {
-        cancel: noop,
-        // the user presses stop while the erase is still running
-        factoryReset: async () => {
-          await new Promise((r) => setTimeout(r, 50));
-          await bridge.stop();
-        },
-      },
-    });
-    bridge.start = vi.fn(async () => {
-      bridge.status = { code: BridgeStatus.Running };
+    const bridge = resettable(async (b) => {
+      // the user presses stop while the erase is still running
+      await new Promise((r) => setTimeout(r, 50));
+      await b.stop();
     });
 
     expect(await post(bridge)).toBe(200);
@@ -123,7 +95,50 @@ describe("POST /bridges/:id/actions/factory-reset", () => {
     expect(bridge.start).not.toHaveBeenCalled();
     expect(bridge.status.code).toBe(BridgeStatus.Stopped);
   });
+
+  it("keeps the identities and fails the bridge when the erase throws", async () => {
+    const bridge = resettable(async () => {
+      throw new Error("erase failed");
+    });
+    const deleteBridgeIdentities = vi.fn();
+
+    expect(await post(bridge, deleteBridgeIdentities)).toBe(500);
+
+    expect(deleteBridgeIdentities).not.toHaveBeenCalled();
+    expect(bridge.start).not.toHaveBeenCalled();
+    expect(bridge.status.code).toBe(BridgeStatus.Failed);
+  });
 });
+
+// prototype fake as in bridge.factory-reset.test.ts
+function resettable(factoryReset: (bridge: Bridge) => Promise<void>) {
+  const bridge = Object.create(Bridge.prototype);
+  const noop = async () => {};
+  Object.assign(bridge, {
+    log: { debug() {}, info() {}, warn() {}, error() {} },
+    status: { code: BridgeStatus.Running },
+    sessions: { stop() {}, start() {}, closeActiveSessions: noop },
+    endpointManager: {
+      root: { parts: [] },
+      failedEntities: [],
+      stopPlugins: noop,
+      stopObserving() {},
+    },
+    dataProvider: {
+      id: "b1",
+      name: "b",
+      withMetadata: (status: { code: BridgeStatus }) => ({
+        id: "b1",
+        status: status.code,
+      }),
+    },
+    server: { cancel: noop, factoryReset: () => factoryReset(bridge) },
+  });
+  bridge.start = vi.fn(async () => {
+    bridge.status = { code: BridgeStatus.Running };
+  });
+  return bridge;
+}
 
 describe("DELETE /bridges/:id", () => {
   // The mapping-only delete route is never called by the UI, so the

@@ -64,15 +64,19 @@ afterEach(async () => {
 
 // Runs the armed settle compare now instead of after TOPOLOGY_SETTLE_MS.
 async function settle(bem: BridgeEndpointManager) {
-  const t = bem as unknown as {
-    topologyTimer?: ReturnType<typeof setTimeout>;
-    enqueueTopology(run: () => Promise<unknown>): Promise<void>;
-    compareTopology(): Promise<void>;
-  };
-  if (t.topologyTimer === undefined) return;
-  clearTimeout(t.topologyTimer);
-  t.topologyTimer = undefined;
-  await t.enqueueTopology(() => t.compareTopology());
+  const t = (
+    bem as unknown as {
+      topology: {
+        timer?: ReturnType<typeof setTimeout>;
+        enqueue(run: () => Promise<unknown>): Promise<void>;
+        compare(): Promise<void>;
+      };
+    }
+  ).topology;
+  if (t.timer === undefined) return;
+  clearTimeout(t.timer);
+  t.timer = undefined;
+  await t.enqueue(() => t.compare());
 }
 
 // What startPlugins and the first HA reconcile leave behind: the endpoint set
@@ -81,13 +85,13 @@ async function asStart(bem: BridgeEndpointManager, run: () => Promise<void>) {
   const live = bem as unknown as {
     pluginsStarted: boolean;
     entitiesReconciled: boolean;
-    settleTopology(): void;
+    topology: { settle(): void };
   };
   live.pluginsStarted = false;
   await run();
   live.pluginsStarted = true;
   live.entitiesReconciled = true;
-  live.settleTopology();
+  live.topology.settle();
   await settle(bem);
 }
 

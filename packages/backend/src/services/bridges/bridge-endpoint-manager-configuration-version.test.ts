@@ -23,6 +23,14 @@ import {
   BridgedDeviceBasicInformation,
   Descriptor,
 } from "@matter/main/clusters";
+import {
+  HumiditySensorDevice,
+  TemperatureSensorDevice,
+} from "@matter/main/devices";
+import {
+  AggregatorEndpoint,
+  BridgedNodeEndpoint,
+} from "@matter/main/endpoints";
 import { ServerNode } from "@matter/main/node";
 import { Read, Subscribe } from "@matter/main/protocol";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -32,12 +40,14 @@ import {
   type HomeAssistantAction,
   HomeAssistantActions,
 } from "../home-assistant/home-assistant-actions.js";
+import { HomeAssistantConfig } from "../home-assistant/home-assistant-config.js";
 import type { EntityIdentityStorage } from "../storage/entity-identity-storage.js";
 import type { EntityMappingStorage } from "../storage/entity-mapping-storage.js";
 import { BridgeDataProvider } from "./bridge-data-provider.js";
 import { BridgeEndpointManager } from "./bridge-endpoint-manager.js";
 import { BridgeRegistry } from "./bridge-registry.js";
 import { EntityStateProvider } from "./entity-state-provider.js";
+import { TopologyTracker } from "./topology-tracker.js";
 
 // The root ConfigurationVersion has to move once whenever the set of bridged
 // endpoints changes, HA entities included, and never for a restart that
@@ -182,6 +192,10 @@ async function startBridge(
   const env = new Environment("test", Environment.default);
   env.get(VariableService).set("storage.path", dir);
   env.set(BridgeDataProvider, provider);
+  env.set(HomeAssistantConfig, {
+    unitSystem: { temperature: "°C" },
+    // biome-ignore lint/suspicious/noExplicitAny: test stub
+  } as any);
   env.set(HomeAssistantActions, {
     call(_action: HomeAssistantAction) {},
     fireEvent() {},
@@ -199,6 +213,11 @@ async function startBridge(
     id: "bem-cv-node",
     network: { port: 0 },
     commissioning: { passcode: 20202021, discriminator: 3840 },
+    // A bridge without accessories needs an explicit device type to pair.
+    productDescription: {
+      name: "b",
+      deviceType: AggregatorEndpoint.deviceType,
+    },
     basicInformation: { vendorId: VendorId(0xfff1), productId: 0x8000 },
   });
   server = node;
@@ -246,30 +265,35 @@ async function stopBridge() {
 const version = () =>
   server!.stateOf(BasicInformationServer).configurationVersion;
 
+const trackerOf = (bem: BridgeEndpointManager) =>
+  (
+    bem as unknown as {
+      topology: {
+        timer?: ReturnType<typeof setTimeout>;
+        enqueue(run: () => Promise<unknown>): Promise<void>;
+        compare(): Promise<void>;
+        signature(): string;
+      };
+    }
+  ).topology;
+
 // Runs the armed settle compare now instead of after TOPOLOGY_SETTLE_MS.
 async function settle(bem: BridgeEndpointManager) {
-  const t = bem as unknown as {
-    topologyTimer?: ReturnType<typeof setTimeout>;
-    enqueueTopology(run: () => Promise<unknown>): Promise<void>;
-    compareTopology(): Promise<void>;
-  };
-  if (t.topologyTimer === undefined) return;
-  clearTimeout(t.topologyTimer);
-  t.topologyTimer = undefined;
-  await t.enqueueTopology(() => t.compareTopology());
+  const t = trackerOf(bem);
+  if (t.timer === undefined) return;
+  clearTimeout(t.timer);
+  t.timer = undefined;
+  await t.enqueue(() => t.compare());
 }
 
 // Runs one compare now, armed timer or not.
 async function compare(bem: BridgeEndpointManager) {
-  const t = bem as unknown as {
-    enqueueTopology(run: () => Promise<unknown>): Promise<void>;
-    compareTopology(): Promise<void>;
-  };
-  await t.enqueueTopology(() => t.compareTopology());
+  const t = trackerOf(bem);
+  await t.enqueue(() => t.compare());
 }
 
 const settleArmed = (bem: BridgeEndpointManager) =>
-  (bem as unknown as { topologyTimer?: unknown }).topologyTimer !== undefined;
+  trackerOf(bem).timer !== undefined;
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "hamh-bem-cv-"));
@@ -467,13 +491,11 @@ describe("root ConfigurationVersion follows the bridged endpoint set", () => {
 
   it("survives a part whose Descriptor state cannot be read", async () => {
     // only the signature read throws, matter.js itself reads the state too
-    const proto = BridgeEndpointManager.prototype as unknown as {
-      topologySignature(): string;
-    };
-    const signature = proto.topologySignature;
+    const proto = TopologyTracker.prototype;
+    const signature = proto.signature;
     let inSignature = false;
-    vi.spyOn(proto, "topologySignature").mockImplementation(function (
-      this: BridgeEndpointManager,
+    vi.spyOn(proto, "signature").mockImplementation(function (
+      this: TopologyTracker,
     ) {
       inSignature = true;
       try {
@@ -512,14 +534,12 @@ describe("root ConfigurationVersion follows the bridged endpoint set", () => {
   // Fails the Descriptor read of vacuum_b inside the signature while
   // failures() says so, matter.js itself reads the state too.
   function unreadableInSignature(failures: () => boolean) {
-    const proto = BridgeEndpointManager.prototype as unknown as {
-      topologySignature(...args: unknown[]): string;
-    };
-    const signature = proto.topologySignature;
+    const proto = TopologyTracker.prototype;
+    const signature = proto.signature;
     let inSignature = false;
-    vi.spyOn(proto, "topologySignature").mockImplementation(function (
-      this: BridgeEndpointManager,
-      ...args: unknown[]
+    vi.spyOn(proto, "signature").mockImplementation(function (
+      this: TopologyTracker,
+      ...args: [boolean?]
     ) {
       inSignature = true;
       try {
@@ -603,9 +623,7 @@ describe("root ConfigurationVersion follows the bridged endpoint set", () => {
     expect(version()).toBe(2);
     await compare(bem);
     expect(version()).toBe(2);
-    const signature = (
-      bem as unknown as { topologySignature(): string }
-    ).topologySignature();
+    const signature = trackerOf(bem).signature();
     expect(await createContext("hamh").get<string>("topology", "")).toBe(
       signature,
     );
@@ -691,8 +709,7 @@ describe("root ConfigurationVersion follows the bridged endpoint set", () => {
     });
     const timeouts = vi.spyOn(globalThis, "setTimeout");
     const armedDelay = () => {
-      const timer = (bem as unknown as { topologyTimer?: unknown })
-        .topologyTimer;
+      const timer = trackerOf(bem).timer;
       const i = timeouts.mock.results.findIndex((r) => r.value === timer);
       return timeouts.mock.calls[i]?.[1];
     };
@@ -926,6 +943,81 @@ describe("controller view of a changed endpoint set", () => {
       expect(value(bdbi.id, bdbi.attributes.reachable.id)).toBe(true);
       expect(value(bdbi.id, bdbi.attributes.uniqueId.id)).toBe(served.uniqueId);
       expect(value(bdbi.id, bdbi.attributes.nodeLabel.id)).toBe("vacuum.b");
+    },
+  );
+
+  function addTemperatureAndHumidity(ha: FakeHa) {
+    ha.devices.climate = { id: "climate", name: "Climate", labels: [] };
+    for (const [deviceClass, state, unit] of [
+      ["temperature", "21", "°C"],
+      ["humidity", "40", "%"],
+    ]) {
+      const id = `sensor.${deviceClass}`;
+      ha.entities[id] = { entity_id: id, device_id: "climate", labels: [] };
+      ha.states[id] = {
+        entity_id: id,
+        state,
+        attributes: { device_class: deviceClass, unit_of_measurement: unit },
+        context: { id: "ctx" },
+        last_changed: "2026-01-01T00:00:00",
+        last_updated: "2026-01-01T00:00:00",
+      };
+    }
+  }
+
+  it.each([
+    { timing: "before commissioning", addBeforeCommissioning: true },
+    { timing: "after commissioning", addBeforeCommissioning: false },
+  ])(
+    "reads current revisions for temperature and auto-claimed humidity added $timing",
+    { timeout: 30_000 },
+    async ({ addBeforeCommissioning }) => {
+      const ha = makeHa([]);
+      if (addBeforeCommissioning) addTemperatureAndHumidity(ha);
+      const { bem } = await startBridge(ha, ["sensor.*"]);
+      const client = await commission();
+      if (!addBeforeCommissioning) {
+        const seen = await subscribe(client, partsOnly(bem));
+        addTemperatureAndHumidity(ha);
+        await bem.refreshDevices();
+        const added = numberOf(bem, "sensor_temperature");
+        for (const ep of [0, bem.root.number]) {
+          await expect
+            .poll(() => partsOf(seen, ep).some((p) => p.includes(added)), poll)
+            .toBe(true);
+        }
+      }
+
+      expect([...bem.root.parts].map((p) => p.id)).toEqual([
+        "sensor_temperature",
+      ]);
+      const added = numberOf(bem, "sensor_temperature");
+      const req = Read(
+        Read.Attribute({
+          endpoint: added,
+          cluster: Descriptor.Complete,
+          attributes: ["deviceTypeList"],
+        }),
+      );
+      const read: Report[] = [];
+      await collect(read)(client.interaction.read(req));
+      expect(read).toEqual([
+        {
+          ep: added,
+          cluster: DESCRIPTOR,
+          attr: Descriptor.Complete.attributes.deviceTypeList.id,
+          value: expect.arrayContaining(
+            [
+              TemperatureSensorDevice,
+              HumiditySensorDevice,
+              BridgedNodeEndpoint,
+            ].map(({ deviceType, deviceRevision }) => ({
+              deviceType,
+              revision: deviceRevision,
+            })),
+          ),
+        },
+      ]);
     },
   );
 

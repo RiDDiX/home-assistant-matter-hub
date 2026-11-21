@@ -64,6 +64,7 @@ export const COMMISSIONING_CHECK_MS = 10 * 60_000;
 interface LifecycleEndpointManager {
   readonly failedEntities: FailedEntity[];
   readonly refreshDeferred: boolean;
+  readonly waitingForAllocatedEndpointState: boolean;
   refreshDevices(): Promise<boolean>;
   startObserving(): Promise<void>;
   stopObserving(): void;
@@ -99,9 +100,11 @@ export abstract class BridgeBase<
   // restartBridge can't race past each other's Starting/Stopping states.
   private startInFlight?: Promise<void>;
   private stopInFlight?: Promise<void>;
-  private resetInFlight?: Promise<void>;
+  private timedOutStartTeardown?: Promise<void>;
   // a stop during a start: the start does not take the node online
-  private stopRequested = false;
+  private stopRequest?: symbol;
+  private startedFor?: symbol;
+  private resetInFlight?: Promise<void>;
   private wakeHaWait?: () => void;
 
   // Tracks the last synced state JSON per entity to avoid pushing unchanged states.
@@ -221,7 +224,17 @@ export abstract class BridgeBase<
     this.onStatusChange?.();
   }
 
+  private get stopRequested() {
+    return this.stopRequest !== this.startedFor;
+  }
+
   async start(): Promise<void> {
+    const stopRequest = this.stopRequest;
+    if (this.stopInFlight || this.timedOutStartTeardown) {
+      await this.stopInFlight;
+      await this.startInFlight;
+      if (this.stopRequest !== stopRequest) return;
+    }
     if (this.status.code === BridgeStatus.Running) {
       return;
     }
@@ -230,13 +243,14 @@ export abstract class BridgeBase<
     }
     this.startInFlight = this.runStart().finally(() => {
       this.startInFlight = undefined;
+      this.timedOutStartTeardown = undefined;
     });
     return this.startInFlight;
   }
 
   protected async runStart(): Promise<void> {
     this.lastSyncedStates.clear();
-    this.stopRequested = false;
+    this.startedFor = this.stopRequest;
     try {
       this.setStatus({
         code: BridgeStatus.Starting,
@@ -275,10 +289,11 @@ export abstract class BridgeBase<
         await this.server.set({ network: { port: this.dataProvider.port } });
       }
       await this.onServerStarting();
-      // a stop that gave up waiting has cancelled the node already
       if (this.stopRequested) return;
       await this.server.start();
+      if (this.stopRequested) return;
       await this.onServerStarted();
+      if (this.stopRequested) return;
       this.setStatus({ code: BridgeStatus.Running });
       this.startAutoForceSyncIfEnabled();
 
@@ -305,33 +320,52 @@ export abstract class BridgeBase<
     } catch (e) {
       const reason = `Failed to start ${this.label.toLowerCase()} due to error:`;
       this.log.error(reason, e);
-      // not stop(), that waits for this very start
-      await this.runStop(BridgeStatus.Failed, `${reason}\n${e?.toString()}`);
+      if (this.stopRequested) return;
+      await this.runStop();
+      if (!this.stopRequested) {
+        this.publishStop(BridgeStatus.Failed, `${reason}\n${e?.toString()}`);
+      }
+    } finally {
+      if (this.timedOutStartTeardown) {
+        // A late start can bring the node back online after the first teardown.
+        this.timedOutStartTeardown = this.timedOutStartTeardown
+          .catch(() => {})
+          .then(() => this.runStop());
+        await this.timedOutStartTeardown;
+      }
     }
   }
 
-  // Only a refresh deferred for HA waits, failed entities or heap pressure
-  // would not pass by waiting here.
   private async waitForHomeAssistant(): Promise<void> {
     const since = Date.now();
+    const commissioned =
+      (this.endpointManager.refreshDeferred ||
+        this.endpointManager.waitingForAllocatedEndpointState) &&
+      this.server.env.get(FabricManager).length > 0;
+    const missingAllocatedState = () =>
+      commissioned && this.endpointManager.waitingForAllocatedEndpointState;
+    const waiting = () =>
+      this.endpointManager.refreshDeferred || missingAllocatedState();
+    // with HA running a missing state is a snapshot race a reload fixes in
+    // seconds, a longer wait only holds back the bridges started after this one
     const bound =
-      this.endpointManager.refreshDeferred &&
-      this.server.env.get(FabricManager).length > 0
+      commissioned && this.endpointManager.refreshDeferred
         ? HA_READY_WAIT_COMMISSIONED_MS
         : HA_READY_WAIT_MS;
     const deadline = since + bound;
     let nextInfo = since + 60_000;
     let reload: Promise<unknown> | undefined;
-    while (this.endpointManager.refreshDeferred && !this.stopRequested) {
+    while (waiting() && !this.stopRequested) {
       const left = deadline - Date.now();
       const gaveUp =
+        this.endpointManager.refreshDeferred &&
         Date.now() - haWaitGaveUpAt < HA_WAIT_GAVE_UP_MS &&
         haWaitGaveUpBound >= bound;
       if (left <= 0 || gaveUp) {
         this.log.warn(
           `Home Assistant data not ready${gaveUp ? "" : ` after ${bound / 1000}s`}, starting with what the bridge has`,
         );
-        if (!gaveUp) {
+        if (!gaveUp && this.endpointManager.refreshDeferred) {
           haWaitGaveUpAt = Date.now();
           haWaitGaveUpBound = bound;
         }
@@ -343,10 +377,13 @@ export abstract class BridgeBase<
         );
         nextInfo += 60_000;
       }
-      // HA not running clears on the client's own poll, an empty registry
-      // only on a reload, and the auto-refresh starts after all bridges
+      // Auto-refresh starts after all bridges, so fetch missing registry data here.
       const registry = this.server.env.maybeGet(HomeAssistantRegistry);
-      if (!reload && registry && Object.keys(registry.entities).length === 0) {
+      if (
+        !reload &&
+        registry &&
+        (missingAllocatedState() || Object.keys(registry.entities).length === 0)
+      ) {
         reload = registry
           .reload()
           .catch((e) => this.log.debug("Registry reload failed:", e))
@@ -364,12 +401,12 @@ export abstract class BridgeBase<
       this.wakeHaWait = undefined;
       if (!this.stopRequested) await this.refreshDevices();
     }
-    if (!this.endpointManager.refreshDeferred) {
+    if (!waiting()) {
       haWaitGaveUpAt = Number.NEGATIVE_INFINITY;
     }
   }
 
-  private async waitForStart(): Promise<void> {
+  private async waitForStart(onTimeout?: () => void): Promise<void> {
     const start = this.startInFlight;
     if (!start) {
       return;
@@ -380,6 +417,7 @@ export abstract class BridgeBase<
     });
     try {
       if ((await Promise.race([start, bound])) === "timeout") {
+        onTimeout?.();
         this.log.warn(
           `${this.id}: start still pending after ${START_WAIT_MS / 1000}s, stopping anyway`,
         );
@@ -393,21 +431,30 @@ export abstract class BridgeBase<
     code: BridgeStatus = BridgeStatus.Stopped,
     reason = "Manually stopped",
   ): Promise<void> {
-    // a stop racing a start would cancel the node mid start, and the start
-    // then finishes and brings it back up
-    this.stopRequested = true;
+    this.stopRequest = Symbol();
     this.wakeHaWait?.();
-    await this.waitForStart();
     if (this.stopInFlight) {
       return this.stopInFlight;
     }
-    this.stopInFlight = this.runStop(code, reason).finally(() => {
-      this.stopInFlight = undefined;
-    });
+    const previousTeardown = this.timedOutStartTeardown;
+    const ready = previousTeardown
+      ? previousTeardown.catch(() => {})
+      : this.waitForStart(() => {
+          this.timedOutStartTeardown = this.stopInFlight;
+        });
+    this.stopInFlight = ready
+      .then(async () => {
+        await this.runStop();
+        this.publishStop(code, reason);
+      })
+      .finally(() => {
+        this.stopInFlight = undefined;
+      });
+    if (previousTeardown) this.timedOutStartTeardown = this.stopInFlight;
     return this.stopInFlight;
   }
 
-  protected async runStop(code: BridgeStatus, reason: string): Promise<void> {
+  protected async runStop(): Promise<void> {
     this.sessions.stop();
     this.stopAutoForceSync();
     if (this.commissioningCheckTimer) {
@@ -430,6 +477,9 @@ export abstract class BridgeBase<
         this.log.warn(`Error stopping ${this.label.toLowerCase()}:`, e);
       }
     }
+  }
+
+  private publishStop(code: BridgeStatus, reason: string): void {
     this.setStatus({ code, reason });
     diagnosticEventBus.emit(
       "bridge_stopped",
@@ -499,8 +549,8 @@ export abstract class BridgeBase<
     }
   }
 
-  // beforeReset runs only once the reset is certain, so a bridge that stopped
-  // after the caller looked keeps what beforeReset would drop.
+  // beforeReset runs only after a successful erase, so a bridge that stopped
+  // after the caller looked or failed to erase keeps what beforeReset drops.
   async factoryReset(beforeReset?: () => Promise<void>): Promise<boolean> {
     // A second request mid reset joins the first, it must not erase again.
     if (this.resetInFlight) {
@@ -522,15 +572,29 @@ export abstract class BridgeBase<
   }
 
   private async runFactoryReset(beforeReset?: () => Promise<void>) {
-    await beforeReset?.();
     const stopped = this.stopRequested;
     // Regular stop first, or the restart rejects every plugin as already
     // registered (#477, #478).
     const stopping = this.stop(BridgeStatus.Stopped, "Factory reset");
     // only a stop or delete from here on keeps the bridge down
-    this.stopRequested = stopped;
+    if (!stopped) this.startedFor = this.stopRequest;
     await stopping;
-    await this.server.factoryReset();
+    try {
+      await this.server.factoryReset();
+      await beforeReset?.();
+    } catch (e) {
+      this.log.error(`${this.id}: factory reset failed:`, e);
+      // auto-recovery restarts only a Failed bridge
+      if (!this.stopRequested) {
+        await this.stop(
+          BridgeStatus.Failed,
+          `Factory reset failed:\n${e?.toString()}`,
+        ).catch((e) =>
+          this.log.error(`${this.id}: stop after failed reset:`, e),
+        );
+      }
+      throw e;
+    }
     if (this.stopRequested) return;
     await this.start();
   }
@@ -545,11 +609,6 @@ export abstract class BridgeBase<
         `${this.id}: factory reset after the last fabric failed:`,
         e,
       );
-      if (this.stopRequested) return;
-      await this.stop(
-        BridgeStatus.Failed,
-        `Factory reset failed:\n${e?.toString()}`,
-      ).catch((e) => this.log.error(`${this.id}: stop after failed reset:`, e));
     }
   }
 

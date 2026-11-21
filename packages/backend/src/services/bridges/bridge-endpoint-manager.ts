@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import {
   classifyController,
   type EntityMappingConfig,
@@ -7,7 +6,6 @@ import {
 } from "@home-assistant-matter-hub/common";
 import { type Logger, Time } from "@matter/general";
 import { Endpoint, type MutableEndpoint, ServerNodeStore } from "@matter/main";
-import { DescriptorServer } from "@matter/main/behaviors";
 import { Descriptor } from "@matter/main/clusters";
 import {
   FabricManager,
@@ -54,8 +52,18 @@ import type { BridgeRegistry } from "./bridge-registry.js";
 import { EntityIsolationService } from "./entity-isolation-service.js";
 import { EntityMappingSync } from "./entity-mapping-sync.js";
 import { IdentityResolver } from "./identity-resolver.js";
+import { TopologyTracker } from "./topology-tracker.js";
 
 const MAX_ENTITY_ID_LENGTH = 150;
+
+export function hasAllocatedEndpoint(parent: Endpoint, id: string): boolean {
+  return (
+    parent.env
+      ?.maybeGet(ServerNodeStore)
+      ?.storeForEndpoint(parent)
+      .existingChildStore(id)?.number !== undefined
+  );
+}
 
 // Keep an endpoint this long after its entity leaves the registry. Slow
 // integrations (zwave-js server updates take minutes) drop their entities
@@ -67,16 +75,6 @@ export const ENDPOINT_REMOVAL_GRACE_MS = 300_000;
 // before moving on. Generous: the writes are only slow when they queue behind
 // pending state writes, and giving up early just defers them to the next poll.
 const REGISTRY_PUSH_TIMEOUT_MS = 10_000;
-
-// Wait for the endpoint set to settle before comparing it. Covers the first
-// registry tick after a start (60 s by default) and its reload, which mounts
-// the entities whose state arrived late.
-const TOPOLOGY_SETTLE_MS = 90_000;
-// Prefix of the stored topology signature, changes with what it covers.
-const TOPOLOGY_FORMAT = "v2:";
-const TOPOLOGY_RETRIES = 3;
-// A failed write retries soon, the set already settled before it.
-const TOPOLOGY_RETRY_MS = 10_000;
 
 // Same count as the registry's INCOMPLETE_REFRESH_RETRIES. Consecutive failed
 // runs with the same reason count up, a registry change does not reset them.
@@ -161,6 +159,7 @@ export class BridgeEndpointManager extends Service {
   private _failedEntities: FailedEntity[] = [];
   private _refreshIncomplete = false;
   private _refreshDeferred = false;
+  private _waitingForAllocatedEndpointState = false;
   // last create or add failure per entity and how often it repeated in a row
   private readonly createFailures = new Map<
     string,
@@ -179,130 +178,12 @@ export class BridgeEndpointManager extends Service {
   private readonly pluginEndpoints = new Map<string, Endpoint>();
   private readonly pluginStateUpdating = new Map<string, number>();
   private readonly pluginListeners = new Map<string, PluginListenerRef[]>();
-  private topologyChangeHandler = async (change: () => Promise<unknown>) => {
-    await change();
-  };
-  // The handler writes the Matter configuration version, which takes a
-  // synchronous lock on the root node. Two overlapping registrations would
-  // make the second one throw and leave its endpoint mounted but untracked,
-  // so plugin device adds, closes and deletes and the compare go through here
-  // one at a time. HA entity changes in a refresh and isolations do not, they
-  // run one at a time on refreshChain.
-  private topologyQueue: Promise<unknown> = Promise.resolve();
+  private readonly topology: TopologyTracker;
   // The endpoint set is only complete once both halves are in: the plugin
   // devices after startPlugins, the HA entities after a trusted reconcile.
   // Comparing earlier would announce a half set on every start.
   private pluginsStarted = false;
   private entitiesReconciled = false;
-  // Last set a reconcile saw, so only a reconcile that moved it re-arms.
-  private reconciledTopology = "";
-  private topologyTimer: ReturnType<typeof setTimeout> | undefined;
-  // a retry after a failed write must not bump the version a second time
-  private announcedTopology = "";
-  private topologyRetries = 0;
-
-  private async enqueueTopology(run: () => Promise<unknown>): Promise<void> {
-    const next = this.topologyQueue.then(run);
-    this.topologyQueue = next.catch(() => undefined);
-    await next;
-  }
-
-  private topologyKnown(): boolean {
-    return this.pluginsStarted && this.entitiesReconciled;
-  }
-
-  private async topologyChange(change: () => Promise<unknown>): Promise<void> {
-    await this.enqueueTopology(change);
-    this.settleTopology();
-  }
-
-  // Every change re-arms the timer, so a start that passes through partial
-  // sets (late states, #450 retry, #498 cleanup, area switches) compares once.
-  private settleTopology(retry = false): void {
-    if (!retry) this.topologyRetries = 0;
-    if (!this.topologyKnown()) return;
-    clearTimeout(this.topologyTimer);
-    this.topologyTimer = setTimeout(
-      () => {
-        this.topologyTimer = undefined;
-        void this.enqueueTopology(() => this.compareTopology());
-      },
-      retry ? TOPOLOGY_RETRY_MS : TOPOLOGY_SETTLE_MS,
-    );
-    this.topologyTimer.unref?.();
-  }
-
-  // Ids and Descriptor device types, child parts included, so a rebuild
-  // under the same id with another device type counts as a change. Strict
-  // throws on an unreadable part, so a compare retries it before hashing it
-  // blank, a passing read failure would bump the version twice otherwise.
-  private topologySignature(strict = false): string {
-    const lines: string[] = [];
-    const walk = (parts: Iterable<Endpoint>, prefix: string) => {
-      for (const part of parts) {
-        const id = `${prefix}${part.id}`;
-        // an uninitialized or crashed part throws here, it must not fail
-        // the whole refresh, so it counts with no device types
-        let types: string[] = [];
-        try {
-          types = part
-            .stateOf(DescriptorServer)
-            .deviceTypeList.map((d) => `${d.deviceType}.${d.revision}`)
-            .sort();
-        } catch (e) {
-          if (strict) throw e;
-        }
-        lines.push(`${id}=${types.join(",")}`);
-        walk(part.parts, `${id}/`);
-      }
-    };
-    walk(this.root.parts, "");
-    const hash = createHash("sha256")
-      .update(lines.sort().join("\n"))
-      .digest("hex")
-      .slice(0, 16);
-    return `${TOPOLOGY_FORMAT}${hash}`;
-  }
-
-  // ConfigurationVersion has to move when the set of bridged endpoints does.
-  // The last announced set lives in the node storage, so a restart with the
-  // same endpoints announces nothing and a changed one announces once (#505).
-  private async compareTopology(): Promise<void> {
-    // a stop that began after the timer fired leaves a half unmounted set
-    if (!this.topologyKnown()) return;
-    try {
-      const signature = this.topologySignature(
-        this.topologyRetries < TOPOLOGY_RETRIES,
-      );
-      const storage = this.root.env
-        .get(ServerNodeStore)
-        .storage.createContext("hamh");
-      const announced = await storage.get<string>("topology", "");
-      if (announced === signature) return;
-      // a first run only records the set, the version starts fresh anyway.
-      // An older format counts as a first run, an upgrade must not bump.
-      if (
-        announced.startsWith(TOPOLOGY_FORMAT) &&
-        this.announcedTopology !== signature
-      ) {
-        await this.topologyChangeHandler(async () => undefined);
-        this.announcedTopology = signature;
-      }
-      await storage.set("topology", signature);
-      this.announcedTopology = "";
-      this.topologyRetries = 0;
-    } catch (e) {
-      this.log.warn("Failed to announce the bridge topology change:", e);
-      if (this.topologyRetries < TOPOLOGY_RETRIES) {
-        this.topologyRetries++;
-        this.settleTopology(true);
-      } else {
-        this.log.warn(
-          "Giving up on the bridge topology announcement until the endpoints change again",
-        );
-      }
-    }
-  }
 
   // Whether each controller held a subscription when the device list moved,
   // one that did not only sees the change when it subscribes again. A held
@@ -442,6 +323,11 @@ export class BridgeEndpointManager extends Service {
   ) {
     super("BridgeEndpointManager");
     this.root = new AggregatorEndpoint("aggregator");
+    this.topology = new TopologyTracker(
+      this.root,
+      () => this.pluginsStarted && this.entitiesReconciled,
+      log,
+    );
     this.identityResolver = new IdentityResolver(
       identityStorage,
       mappingStorage,
@@ -466,7 +352,7 @@ export class BridgeEndpointManager extends Service {
   setTopologyChangeHandler(
     handler: (change: () => Promise<unknown>) => Promise<void>,
   ): void {
-    this.topologyChangeHandler = handler;
+    this.topology.handler = handler;
   }
 
   private wirePluginCallbacks(): void {
@@ -561,7 +447,7 @@ export class BridgeEndpointManager extends Service {
         });
       }
       try {
-        await this.topologyChange(() => this.root.add(endpoint));
+        await this.topology.change(() => this.root.add(endpoint));
         this.pluginEndpoints.set(device.id, endpoint);
         this.wirePluginEndpointEvents(device, endpoint);
         this.log.info(
@@ -600,9 +486,9 @@ export class BridgeEndpointManager extends Service {
             // A reversible stop: close keeps the persisted endpoint number,
             // so a re-enable mounts under the same identity. delete would
             // free the number and renumber every device on the next enable.
-            await this.topologyChange(() => endpoint.close());
+            await this.topology.change(() => endpoint.close());
           } else {
-            await this.topologyChange(() => endpoint.delete());
+            await this.topology.change(() => endpoint.delete());
           }
           this.log.info(`Plugin "${pluginName}": removed device "${deviceId}"`);
         } catch (e) {
@@ -705,7 +591,7 @@ export class BridgeEndpointManager extends Service {
     await this.pluginManager?.startAll();
     await this.pluginManager?.configureAll();
     this.pluginsStarted = true;
-    this.settleTopology();
+    this.topology.settle();
   }
 
   // Built-in plugins ship inside the backend bundle, so they share the same
@@ -750,15 +636,14 @@ export class BridgeEndpointManager extends Service {
     // a stop is no topology change, the devices come back on the next start.
     // A pending compare is dropped, the next start compares against storage.
     this.pluginsStarted = false;
-    clearTimeout(this.topologyTimer);
-    this.topologyRetries = 0;
+    this.topology.stop();
     if (!this.pluginManager) return;
     await this.pluginManager.shutdownAll("Bridge stopping");
     // close() keeps the numbers, so plugin devices survive every bridge stop
     // and restart (#438). Permanent removal goes through onDeviceUnregistered.
     for (const [id, endpoint] of this.pluginEndpoints) {
       try {
-        await this.topologyChange(() => endpoint.close());
+        await this.topology.change(() => endpoint.close());
       } catch (e) {
         this.log.warn(`Failed to close plugin endpoint ${id}:`, e);
       }
@@ -1050,9 +935,7 @@ export class BridgeEndpointManager extends Service {
   stopObserving() {
     this.observingRequested = false;
     this.entitiesReconciled = false;
-    this.reconciledTopology = "";
-    clearTimeout(this.topologyTimer);
-    this.topologyRetries = 0;
+    this.topology.stop();
     this.lifecycle++;
     this.clearSubscription();
     // Bridges stop through this, never through dispose(), so the recheck
@@ -1073,6 +956,10 @@ export class BridgeEndpointManager extends Service {
   // registry empty, unlike the other incomplete runs it mounted nothing.
   get refreshDeferred(): boolean {
     return this._refreshDeferred;
+  }
+
+  get waitingForAllocatedEndpointState(): boolean {
+    return this._waitingForAllocatedEndpointState;
   }
 
   // Resolves false when the run left matching entities unmounted for a reason
@@ -1097,6 +984,7 @@ export class BridgeEndpointManager extends Service {
     this._refreshIncomplete = false;
     const wasDeferred = this._refreshDeferred;
     this._refreshDeferred = false;
+    this._waitingForAllocatedEndpointState = false;
     this.registry.refresh((entityId) => this.getEntityMapping(entityId));
     const lifecycle = this.lifecycle;
     const wasLive = this.entitiesReconciled;
@@ -1258,8 +1146,9 @@ export class BridgeEndpointManager extends Service {
         ].filter((id) => id && id !== e.entityId),
       ),
     );
+    const entityIdSet = new Set(this.entityIds);
     for (const endpoint of endpoints) {
-      const present = this.entityIds.includes(endpoint.entityId);
+      const present = entityIdSet.has(endpoint.entityId);
 
       // Rename: a different current entity now owns this endpoint's id while
       // this endpoint's own entity is gone, or the protected entity renamed off
@@ -1465,12 +1354,14 @@ export class BridgeEndpointManager extends Service {
     // API and from bridge start. One endpoint that never settles must not stall
     // the whole refresh, the next poll pushes the same snapshot again.
     if (registryPushes.length > 0) {
+      let timer: ReturnType<typeof setTimeout> | undefined;
       await Promise.race([
         Promise.all(registryPushes),
-        new Promise<void>((resolve) =>
-          setTimeout(resolve, REGISTRY_PUSH_TIMEOUT_MS).unref?.(),
-        ),
-      ]);
+        new Promise<void>((resolve) => {
+          timer = setTimeout(resolve, REGISTRY_PUSH_TIMEOUT_MS);
+          timer.unref?.();
+        }),
+      ]).finally(() => clearTimeout(timer));
     }
 
     // A stop that landed mid-refresh wins: no timer on a stopped bridge.
@@ -1480,6 +1371,10 @@ export class BridgeEndpointManager extends Service {
 
     let memoryLimitReached = false;
     const waiting: string[] = [];
+    // first endpoint per entity wins
+    const existingByEntity = new Map(
+      existingEndpoints.map((e) => [e.entityId, e] as const).reverse(),
+    );
 
     for (const entityId of this.entityIds) {
       // Check heap pressure before creating a new endpoint.
@@ -1495,7 +1390,7 @@ export class BridgeEndpointManager extends Service {
       }
       if (memoryLimitReached) {
         // Skip existing endpoints that are already loaded
-        if (!existingEndpoints.some((e) => e.entityId === entityId)) {
+        if (!existingByEntity.has(entityId)) {
           this._refreshIncomplete = true;
           this.addFailedEntity(
             entityId,
@@ -1529,7 +1424,7 @@ export class BridgeEndpointManager extends Service {
         continue;
       }
 
-      let endpoint = existingEndpoints.find((e) => e.entityId === entityId);
+      let endpoint = existingByEntity.get(entityId);
       if (!endpoint) {
         // matter.js rejects duplicate endpoint ids, say which entity holds it
         const resolved = resolvedByEntity.get(entityId);
@@ -1605,6 +1500,10 @@ export class BridgeEndpointManager extends Service {
             this.addFailedEntity(entityId, reason);
           }
         } else if (!this.registry.initialState(entityId)) {
+          this._waitingForAllocatedEndpointState ||= hasAllocatedEndpoint(
+            this.root,
+            endpointId,
+          );
           // the registry poll that brings its state mounts it, no retry needed
           const reason = "No state in Home Assistant yet";
           if (this.createFailures.get(entityId)?.reason !== reason) {
@@ -1666,11 +1565,7 @@ export class BridgeEndpointManager extends Service {
     // Not added/removed: an isolation closes endpoints between reconciles.
     if (lifecycle === this.lifecycle) {
       this.entitiesReconciled = true;
-      const topology = this.topologySignature();
-      if (topology !== this.reconciledTopology) {
-        this.reconciledTopology = topology;
-        this.settleTopology();
-      }
+      this.topology.reconciled();
     }
 
     if (this.observingRequested) {

@@ -33,12 +33,17 @@ import type { BridgeDataProvider } from "./bridge-data-provider.js";
 import {
   ENDPOINT_REMOVAL_GRACE_MS,
   ENTITY_FAILURE_RETRIES,
+  hasAllocatedEndpoint,
   type PendingRemoval,
   removalDue,
 } from "./bridge-endpoint-manager.js";
 import type { BridgeRegistry } from "./bridge-registry.js";
 import { EntityMappingSync } from "./entity-mapping-sync.js";
 import { IdentityResolver } from "./identity-resolver.js";
+import {
+  bumpConfigurationVersion,
+  TopologyTracker,
+} from "./topology-tracker.js";
 
 // Hard cap so a wildcard matcher cannot mint dozens of root endpoints (#301).
 export const MAX_SERVER_MODE_DEVICES = 10;
@@ -64,6 +69,7 @@ export class ServerModeEndpointManager extends Service {
   private _failedEntities: FailedEntity[] = [];
   private _refreshIncomplete = false;
   private _refreshDeferred = false;
+  private _waitingForAllocatedEndpointState = false;
   // last create or add failure per entity and how often it repeated in a row
   private readonly createFailures = new Map<
     string,
@@ -85,6 +91,9 @@ export class ServerModeEndpointManager extends Service {
   // Bumped on every stop, so a refresh that was already running cannot arm a
   // timer on a bridge that has since stopped.
   private lifecycle = 0;
+  // the root PartsList moves with the devices, so does ConfigurationVersion
+  private readonly topology: TopologyTracker;
+  private entitiesReconciled = false;
 
   get failedEntities(): FailedEntity[] {
     return this._failedEntities;
@@ -117,6 +126,12 @@ export class ServerModeEndpointManager extends Service {
       log,
       false,
     );
+    this.topology = new TopologyTracker(
+      serverNode,
+      () => this.entitiesReconciled,
+      log,
+    );
+    this.topology.handler = bumpConfigurationVersion(serverNode, log);
   }
 
   private getEntityMapping(entityId: string): EntityMappingConfig | undefined {
@@ -167,6 +182,8 @@ export class ServerModeEndpointManager extends Service {
 
   stopObserving(): void {
     this.observingRequested = false;
+    this.entitiesReconciled = false;
+    this.topology.stop();
     this.lifecycle++;
     this.clearSubscription();
     // Bridges stop through this, never through dispose(), so the recheck
@@ -292,6 +309,10 @@ export class ServerModeEndpointManager extends Service {
     return this._refreshDeferred;
   }
 
+  get waitingForAllocatedEndpointState(): boolean {
+    return this._waitingForAllocatedEndpointState;
+  }
+
   // Resolves false when the run left matching entities unmounted for a reason
   // that only passes with time (HA down, heap pressure, a failed add).
   refreshDevices(): Promise<boolean> {
@@ -314,10 +335,12 @@ export class ServerModeEndpointManager extends Service {
     this._refreshIncomplete = false;
     const wasDeferred = this._refreshDeferred;
     this._refreshDeferred = false;
+    this._waitingForAllocatedEndpointState = false;
     this.registry.refresh((entityId) => this.getEntityMapping(entityId));
 
     const lifecycle = this.lifecycle;
     const fullEntities = this.registry.fullEntities;
+    let reconciled = false;
 
     try {
       // HA restarting or an empty registry means the snapshot cannot be
@@ -370,6 +393,7 @@ export class ServerModeEndpointManager extends Service {
           reason:
             "No Home Assistant entity matched this bridge's filter. Check for typos or renamed/removed entities.",
         });
+        reconciled = true;
         return;
       }
 
@@ -583,9 +607,12 @@ export class ServerModeEndpointManager extends Service {
           );
 
           if (!endpoint) {
+            const hasState = !!this.registry.initialState(entityId);
+            this._waitingForAllocatedEndpointState ||=
+              !hasState && hasAllocatedEndpoint(this.serverNode, endpointId);
             this._failedEntities.push({
               entityId,
-              reason: this.registry.initialState(entityId)
+              reason: hasState
                 ? "Failed to create endpoint - unsupported device type"
                 : "No state in Home Assistant yet",
             });
@@ -730,6 +757,7 @@ export class ServerModeEndpointManager extends Service {
           }
         }
       }
+      reconciled = true;
     } finally {
       // a success or an entity that left the pass starts its count over
       for (const id of this.createFailures.keys()) {
@@ -740,6 +768,10 @@ export class ServerModeEndpointManager extends Service {
       // A stop that landed mid-refresh wins: no timer on a stopped bridge.
       if (lifecycle === this.lifecycle) {
         this.scheduleRemovalRecheck();
+        if (reconciled) {
+          this.entitiesReconciled = true;
+          this.topology.reconciled();
+        }
       }
       this.mappingSync.rebuildCandidates(
         [...this.endpoints].map(

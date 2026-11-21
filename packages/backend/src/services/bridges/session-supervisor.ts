@@ -397,7 +397,7 @@ export class SessionSupervisor {
           },
         );
         if (totalSubs === 0 && sessions.length > 0) {
-          this.log.warn(
+          this.log.info(
             `All subscriptions lost, ${sessions.length} session(s) still active, waiting for controller to re-subscribe`,
           );
           if (!this.deadSessionTimer) {
@@ -734,7 +734,7 @@ export class SessionSupervisor {
           );
           break;
         }
-        this.log.warn(
+        this.log.info(
           `Closing stale session ${s.id} (peer ${s.peerNodeId}, no subscriptions, no traffic for ${idleSec}s)`,
         );
         bridgeClosed.add(s);
@@ -784,7 +784,7 @@ export class SessionSupervisor {
           kept++;
           continue;
         }
-        this.log.warn(
+        this.log.info(
           `Closing dead session ${s.id} (peer ${s.peerNodeId}, no subscriptions, no traffic for ${idleSec}s)`,
         );
         bridgeClosed.add(s);

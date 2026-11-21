@@ -108,6 +108,8 @@ function makeHarness(
   opts?: HarnessOptions,
 ): Harness {
   const serverNode = {
+    // the topology signature walks these
+    parts: [],
     addDevice: vi.fn().mockResolvedValue(undefined),
     forgetDevice: vi.fn(),
     clearDevices: vi.fn(),
