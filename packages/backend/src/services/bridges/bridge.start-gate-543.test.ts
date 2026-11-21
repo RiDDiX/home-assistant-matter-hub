@@ -196,9 +196,13 @@ function makeEnvironment(ha: FakeHa, provider: BridgeDataProvider) {
 describe("bridge start gate (#543 round 4)", () => {
   async function make(
     ha: FakeHa,
-    opts: { haRunning?: boolean; plugins?: PluginManager } = {},
+    opts: {
+      haRunning?: boolean;
+      plugins?: PluginManager;
+      provider?: BridgeDataProvider;
+    } = {},
   ) {
-    const provider = makeProvider();
+    const provider = opts.provider ?? makeProvider();
     const env = makeEnvironment(ha, provider);
     const node = await ServerNode.create({
       // biome-ignore lint/suspicious/noExplicitAny: env valid at runtime
@@ -249,7 +253,15 @@ describe("bridge start gate (#543 round 4)", () => {
       sessions: fakeSessions(),
     });
     bridge = b as Bridge;
-    return { bridge: b as Bridge, bem, client, online, log, registry };
+    return {
+      bridge: b as Bridge,
+      bem,
+      parent: bem.root,
+      client,
+      online,
+      log,
+      registry,
+    };
   }
 
   // the node and the endpoints are built on real timers, the wait on fake ones
@@ -269,6 +281,17 @@ describe("bridge start gate (#543 round 4)", () => {
     const starting = b.start();
     await steps();
     await starting;
+  }
+
+  async function waitForStartupPoll() {
+    const timer = vi.spyOn(globalThis, "setTimeout");
+    try {
+      await vi.waitFor(() =>
+        expect(timer).toHaveBeenCalledWith(expect.any(Function), 3000),
+      );
+    } finally {
+      timer.mockRestore();
+    }
   }
 
   it("goes online only once HA runs, with every device mounted", async () => {
@@ -402,19 +425,20 @@ describe("bridge start gate (#543 round 4)", () => {
   });
 
   it.each([
-    "bridge",
-    "server",
-  ] as const)("a commissioned %s reloads the missing state for a reserved endpoint before starting", async (mode) => {
+    ["bridge", HomeAssistantMatcherType.Pattern, "script.*"],
+    ["server", HomeAssistantMatcherType.Pattern, "script.*"],
+    ["bridge", HomeAssistantMatcherType.DeviceClass, "cleaning"],
+    ["server", HomeAssistantMatcherType.DeviceClass, "cleaning"],
+    ["server", HomeAssistantMatcherType.AnyFieldRegex, "device_class=cleaning"],
+  ] as const)("a commissioned %s reloads a reserved endpoint matching %s before starting", async (mode, type, value) => {
     const entityId = "script.clean";
     const ha = makeHa(["vacuum.a", entityId]);
+    ha.states[entityId].state = "unavailable";
+    const provider = makeProvider();
     const { bridge, parent, registry } =
       mode === "bridge"
-        ? await make(ha).then(({ bridge, bem, registry }) => ({
-            bridge,
-            parent: bem.root,
-            registry,
-          }))
-        : await makeServerMode(ha);
+        ? await make(ha, { provider })
+        : await makeServerMode(ha, provider);
     const previous = await LegacyEndpoint.create(
       registry,
       entityId,
@@ -426,7 +450,10 @@ describe("bridge start gate (#543 round 4)", () => {
     await parent.add(previous);
     const { id, number } = previous;
     await previous.close();
+    provider.filter.include[1] = { type, value };
     const state = ha.states[entityId];
+    state.state = "off";
+    state.attributes.device_class = "cleaning";
     delete ha.states[entityId];
     let releaseReload!: () => void;
     const reload = vi.fn(
@@ -460,6 +487,226 @@ describe("bridge start gate (#543 round 4)", () => {
     expect(online).toHaveLength(1);
     expect([...online[0].keys()].sort()).toEqual([id, "vacuum_a"]);
     expect(online[0].get(id)).toBe(number);
+  });
+
+  it.each([
+    ["bridge", "create"],
+    ["bridge", "attach"],
+    ["server", "create"],
+    ["server", "attach"],
+  ] as const)("a commissioned %s retries a reserved endpoint after a transient %s failure", async (mode, failure) => {
+    const entityId = "script.clean";
+    const ha = makeHa(["vacuum.a", entityId]);
+    const { bridge, parent, registry } =
+      mode === "bridge" ? await make(ha) : await makeServerMode(ha);
+    const previous = await LegacyEndpoint.create(
+      registry,
+      entityId,
+      undefined,
+      undefined,
+      mode === "server",
+    );
+    if (!previous) throw new Error("Script endpoint was not created");
+    await parent.add(previous);
+    const { id, number } = previous;
+    await previous.close();
+
+    let fail = true;
+    const rejected = vi.fn(() => {
+      if (fail) throw new Error("Temporary endpoint failure");
+    });
+    if (failure === "create") {
+      const create = LegacyEndpoint.create.bind(LegacyEndpoint);
+      vi.spyOn(LegacyEndpoint, "create").mockImplementation(async (...args) => {
+        if (args[1] === entityId) rejected();
+        return create(...args);
+      });
+    } else {
+      const add = parent.add.bind(parent);
+      vi.spyOn(parent, "add").mockImplementation(async (endpoint) => {
+        if (endpoint instanceof LegacyEndpoint && endpoint.id === id)
+          rejected();
+        return add(endpoint);
+      });
+    }
+    commission(bridge);
+    const online: Map<string, number>[] = [];
+    vi.mocked(bridge.server.start).mockImplementation(async () => {
+      online.push(new Map([...parent.parts].map((p) => [p.id, p.number])));
+    });
+
+    await startOnFakeTimers(bridge, async () => {
+      await waitForStartupPoll();
+      expect(rejected).toHaveBeenCalled();
+      expect(online).toHaveLength(0);
+      fail = false;
+      await vi.advanceTimersByTimeAsync(3000);
+    });
+
+    expect(online).toHaveLength(1);
+    expect([...online[0].keys()].sort()).toEqual([id, "vacuum_a"]);
+    expect(online[0].get(id)).toBe(number);
+  });
+
+  it("a commissioned bridge waits only 30s for an endpoint that keeps failing", async () => {
+    const entityId = "script.clean";
+    const { bridge, bem, registry, online, log } = await make(
+      makeHa(["vacuum.a", entityId]),
+    );
+    const previous = await LegacyEndpoint.create(registry, entityId);
+    if (!previous) throw new Error("Script endpoint was not created");
+    await bem.root.add(previous);
+    await previous.close();
+    const create = LegacyEndpoint.create.bind(LegacyEndpoint);
+    const fail = vi.fn(() => {
+      throw new Error("Permanent endpoint failure");
+    });
+    vi.spyOn(LegacyEndpoint, "create").mockImplementation(async (...args) => {
+      if (args[1] === entityId) fail();
+      return create(...args);
+    });
+    commission(bridge);
+
+    await startOnFakeTimers(bridge, async () => {
+      await waitForStartupPoll();
+      expect(fail).toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(29_000);
+      expect(online).toHaveLength(0);
+      await vi.advanceTimersByTimeAsync(1_000);
+    });
+
+    expect(online).toEqual([["vacuum_a"]]);
+    expect(log.warn).toHaveBeenCalledWith(
+      "Previously allocated endpoints not ready after 30s, starting with what the bridge has",
+    );
+  });
+
+  it("a commissioned bridge started before HA waits only 30s more for an endpoint that keeps failing", async () => {
+    const entityId = "script.clean";
+    const { bridge, bem, client, registry, online, log } = await make(
+      makeHa(["vacuum.a", entityId]),
+      { haRunning: false },
+    );
+    const previous = await LegacyEndpoint.create(registry, entityId);
+    if (!previous) throw new Error("Script endpoint was not created");
+    await bem.root.add(previous);
+    await previous.close();
+    const create = LegacyEndpoint.create.bind(LegacyEndpoint);
+    vi.spyOn(LegacyEndpoint, "create").mockImplementation(async (...args) => {
+      if (args[1] === entityId) throw new Error("Permanent endpoint failure");
+      return create(...args);
+    });
+    commission(bridge);
+
+    await startOnFakeTimers(bridge, async () => {
+      await vi.advanceTimersByTimeAsync(6_000);
+      client.haRunning = true;
+      // the first poll with HA up builds endpoints on real timers
+      const timer = vi.spyOn(globalThis, "setTimeout");
+      await vi.advanceTimersByTimeAsync(3_000);
+      await vi.waitFor(() =>
+        expect(timer).toHaveBeenCalledWith(expect.any(Function), 3000),
+      );
+      timer.mockRestore();
+      expect(bem.allocatedEndpointFailed).toBe(true);
+      await vi.advanceTimersByTimeAsync(29_000);
+      expect(online).toHaveLength(0);
+      await vi.advanceTimersByTimeAsync(1_000);
+    });
+
+    expect(online).toEqual([["vacuum_a"]]);
+    expect(log.warn).toHaveBeenCalledWith(
+      "Previously allocated endpoints not ready after 39s, starting with what the bridge has",
+    );
+  });
+
+  it.each([
+    "bridge",
+    "server",
+  ] as const)("keeps the %s device class selection across missing snapshots", async (mode) => {
+    const selected = "script.clean";
+    const excluded = "script.skipped";
+    const ha = makeHa(["vacuum.a", selected, excluded]);
+    ha.entities[selected].unique_id = "original";
+    ha.states[selected].attributes.device_class = "cleaning";
+    ha.states[excluded].attributes.device_class = "muted";
+    const provider = makeProvider();
+    const primary = {
+      type: HomeAssistantMatcherType.AnyFieldRegex,
+      value: "device_class=cleaning\\b",
+    };
+    provider.filter.include = [
+      primary,
+      { type: HomeAssistantMatcherType.Pattern, value: "vacuum.a" },
+      { type: HomeAssistantMatcherType.Pattern, value: excluded },
+    ];
+    provider.filter.exclude.push({
+      type: HomeAssistantMatcherType.DeviceClass,
+      value: "muted",
+    });
+    const { bridge, parent, registry } =
+      mode === "bridge"
+        ? await make(ha, { provider })
+        : await makeServerMode(ha, provider);
+
+    await bridge.start();
+    const original = parent.parts.find((p) => p.id === "script_clean");
+    if (!original) throw new Error("Selected script endpoint was not mounted");
+    const number = original.number;
+    expect(parent.parts.find((p) => p.id === "script_skipped")).toBeUndefined();
+
+    const fullEntities = ha.entities;
+    ha.entities = {};
+    await bridge.refreshDevices();
+    expect(parent.parts.find((p) => p.id === original.id)).toBe(original);
+    ha.entities = fullEntities;
+
+    const selectedState = ha.states[selected];
+    const excludedState = ha.states[excluded];
+    delete ha.states[selected];
+    delete ha.states[excluded];
+    for (let i = 0; i < 2; i++) {
+      ha.snapshotGeneration++;
+      await bridge.refreshDevices();
+      const present = parent.parts.find((p) => p.id === original.id);
+      expect(present).toBe(original);
+      expect(present?.number).toBe(number);
+      expect(
+        parent.parts.find((p) => p.id === "script_skipped"),
+      ).toBeUndefined();
+      expect(registry.firstEntityMatching(primary)).toBe(selected);
+      expect(registry.initialState(selected)).toBeUndefined();
+    }
+
+    ha.states[selected] = selectedState;
+    ha.states[excluded] = excludedState;
+    ha.states[selected].state = "unavailable";
+    delete ha.states[selected].attributes.device_class;
+    delete ha.states[excluded].attributes.device_class;
+    await bridge.refreshDevices();
+    expect(registry.firstEntityMatching(primary)).toBe(selected);
+    const classless = parent.parts.find((p) => p.id === "script_skipped");
+    expect(classless).toBeDefined();
+    ha.states[excluded].state = "unavailable";
+    await bridge.refreshDevices();
+    expect(parent.parts.find((p) => p.id === "script_skipped")).toBe(classless);
+
+    ha.states[selected].state = "off";
+    await bridge.refreshDevices();
+    expect(registry.firstEntityMatching(primary)).toBeUndefined();
+
+    expect(parent.parts.find((p) => p.id === original.id)).toBeUndefined();
+
+    ha.states[selected].attributes.device_class = "cleaning";
+    ha.states[excluded].attributes.device_class = "muted";
+    await bridge.refreshDevices();
+    expect(parent.parts.find((p) => p.id === original.id)?.number).toBe(number);
+    expect(parent.parts.find((p) => p.id === "script_skipped")).toBeUndefined();
+
+    delete ha.states[selected];
+    ha.entities[selected].unique_id = "new";
+    await bridge.refreshDevices();
+    expect(parent.parts.find((p) => p.id === original.id)).toBeUndefined();
   });
 
   it("a commissioned bridge waits only 30s for a reserved endpoint's state that never arrives", async () => {
@@ -505,6 +752,107 @@ describe("bridge start gate (#543 round 4)", () => {
 
     expect(online).toEqual([["vacuum_a"]]);
     expect(reload).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    "fresh",
+    "excluded",
+  ] as const)("a commissioned bridge skips startup wait for a %s class candidate", async (candidate) => {
+    const entityId = "script.clean";
+    const ha = makeHa(["vacuum.a", entityId]);
+    ha.states[entityId].state = "unavailable";
+    const provider = makeProvider();
+    const { bridge, parent, registry, online } = await make(ha, { provider });
+    if (candidate === "excluded") {
+      const previous = await LegacyEndpoint.create(registry, entityId);
+      if (!previous) throw new Error("Script endpoint was not created");
+      await parent.add(previous);
+      await previous.close();
+      provider.filter.exclude.push({
+        type: HomeAssistantMatcherType.Pattern,
+        value: entityId,
+      });
+    }
+    provider.filter.include[1] = {
+      type: HomeAssistantMatcherType.DeviceClass,
+      value: "cleaning",
+    };
+    delete ha.states[entityId];
+    const reload = vi.fn();
+    Object.assign(ha, { reload });
+    commission(bridge);
+
+    await startOnFakeTimers(bridge, async () => {});
+
+    expect(online).toEqual([["vacuum_a"]]);
+    expect(reload).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["bridge", "fresh", "unavailable"],
+    ["bridge", "fresh", "unknown"],
+    ["server", "reserved", "unavailable"],
+  ] as const)("mounts a classless %s %s endpoint in state %s at once and follows its class", async (mode, candidate, value) => {
+    const entityId = "script.clean";
+    const ha = makeHa(["vacuum.a", entityId]);
+    ha.entities[entityId].platform = "script";
+    ha.states[entityId].state = value;
+    const provider = makeProvider();
+    const { bridge, parent, registry } =
+      mode === "bridge"
+        ? await make(ha, { provider })
+        : await makeServerMode(ha, provider);
+    let previous: LegacyEndpoint | undefined;
+    if (candidate === "reserved") {
+      previous = await LegacyEndpoint.create(
+        registry,
+        entityId,
+        undefined,
+        undefined,
+        true,
+      );
+      if (!previous) throw new Error("Script endpoint was not created");
+      await parent.add(previous);
+      await previous.close();
+      provider.filter.exclude.push({
+        type: HomeAssistantMatcherType.AnyFieldRegex,
+        value:
+          "^entity_id=script\\.clean\\b(?=.*device_class=\\S)(?!.*device_class=cleaning\\b)",
+      });
+    } else {
+      provider.filter.exclude.push({
+        type: HomeAssistantMatcherType.DeviceClass,
+        value: "muted",
+      });
+    }
+    const reload = vi.fn(async () => true);
+    Object.assign(ha, { reload });
+    commission(bridge);
+    const online: string[][] = [];
+    vi.mocked(bridge.server.start).mockImplementation(async () => {
+      online.push([...parent.parts].map((p) => p.id));
+    });
+
+    await startOnFakeTimers(bridge, async () => {});
+    expect(online.map((ids) => ids.sort())).toEqual([
+      ["script_clean", "vacuum_a"],
+    ]);
+    expect(reload).not.toHaveBeenCalled();
+    if (previous) {
+      const kept = parent.parts.find((p) => p.id === "script_clean");
+      expect(kept?.number).toBe(previous.number);
+    }
+
+    ha.states[entityId].state = "off";
+    ha.states[entityId].attributes.device_class = "muted";
+    await bridge.refreshDevices();
+    expect(parent.parts.find((p) => p.id === "script_clean")).toBeUndefined();
+
+    ha.states[entityId].attributes.device_class = "cleaning";
+    await bridge.refreshDevices();
+    const mounted = parent.parts.find((p) => p.id === "script_clean");
+    expect(mounted).toBeDefined();
+    if (previous) expect(mounted?.number).toBe(previous.number);
   });
 
   it("a stop during a commissioned wait leaves no timer and no start", async () => {
@@ -599,6 +947,7 @@ describe("bridge start gate (#543 round 4)", () => {
       return add(ep);
     }) as typeof add);
     const refresh = vi.spyOn(bem, "refreshDevices");
+    commission(bridge);
     await startOnFakeTimers(bridge, async () => {});
 
     expect(refresh).toHaveBeenCalledOnce();
@@ -678,8 +1027,7 @@ describe("bridge start gate (#543 round 4)", () => {
   });
 });
 
-async function makeServerMode(ha: FakeHa) {
-  const provider = makeProvider();
+async function makeServerMode(ha: FakeHa, provider = makeProvider()) {
   const node = new ServerModeServerNode(
     makeEnvironment(ha, provider),
     provider,

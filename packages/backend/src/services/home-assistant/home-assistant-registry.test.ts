@@ -1,6 +1,13 @@
+import {
+  type BridgeData,
+  type HomeAssistantEntityState,
+  HomeAssistantMatcherType,
+} from "@home-assistant-matter-hub/common";
 import { Logger } from "@matter/general";
 import type { Connection } from "home-assistant-js-websocket";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { BridgeDataProvider } from "../bridges/bridge-data-provider.js";
+import { BridgeRegistry } from "../bridges/bridge-registry.js";
 import type { HomeAssistantClient } from "./home-assistant-client.js";
 import { HomeAssistantRegistry } from "./home-assistant-registry.js";
 
@@ -1098,6 +1105,79 @@ describe("HomeAssistantRegistry", () => {
     await registry.reload();
     expect(registry.states["light.a"]).toBe(merged);
     expect(registry.states["light.b"].state).toBe("on");
+  });
+
+  it("refreshes class filters when a subscription update wins over an unchanged poll", async () => {
+    const fake = makeConnection();
+    const entityId = "sensor.a";
+    const previous: HomeAssistantEntityState = {
+      entity_id: entityId,
+      state: "23",
+      attributes: { device_class: "temperature" },
+      last_changed: "2026-01-01T00:00:01Z",
+      last_updated: "2026-01-01T00:00:01Z",
+      context: { id: "poll" },
+    };
+    let pendingStates: Promise<HomeAssistantEntityState[]> | undefined;
+    const send = vi.fn((message: { type: string }) =>
+      message.type === "get_states"
+        ? (pendingStates ?? Promise.resolve([previous]))
+        : Promise.resolve([]),
+    );
+    fake.connection.sendMessagePromise =
+      send as unknown as Connection["sendMessagePromise"];
+    const registry = new HomeAssistantRegistry(
+      { connection: fake.connection, haRunning: true } as HomeAssistantClient,
+      defaultOptions,
+    );
+    await vi.runAllTimersAsync();
+    await registry.construction;
+    const bridge = new BridgeRegistry(
+      registry,
+      new BridgeDataProvider({
+        filter: {
+          include: [
+            {
+              type: HomeAssistantMatcherType.DeviceClass,
+              value: "temperature",
+            },
+          ],
+          exclude: [],
+          includeMode: "any",
+        },
+      } as unknown as BridgeData),
+    );
+    const onRefresh = vi.fn(() => {
+      bridge.refresh();
+      return true;
+    });
+    registry.enableAutoRefresh(onRefresh);
+    const interval = defaultOptions.refreshInterval * 1000;
+    await vi.advanceTimersByTimeAsync(interval);
+    expect(bridge.entityIds).toEqual([entityId]);
+    onRefresh.mockClear();
+    send.mockClear();
+
+    let finishPoll!: (states: HomeAssistantEntityState[]) => void;
+    pendingStates = new Promise((resolve) => {
+      finishPoll = resolve;
+    });
+    await vi.advanceTimersByTimeAsync(interval);
+    expect(send).toHaveBeenCalledWith({ type: "get_states" });
+    bridge.mergeExternalStates({
+      [entityId]: {
+        ...previous,
+        attributes: { device_class: "humidity" },
+        last_updated: "2026-01-01T00:00:03Z",
+      },
+    });
+    finishPoll([previous]);
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(onRefresh).toHaveBeenCalledOnce();
+    expect(registry.states[entityId].attributes.device_class).toBe("humidity");
+    expect(bridge.entityIds).toEqual([]);
+    registry.disableAutoRefresh();
   });
 
   it("keeps the newer snapshot when an older reload finishes last", async () => {

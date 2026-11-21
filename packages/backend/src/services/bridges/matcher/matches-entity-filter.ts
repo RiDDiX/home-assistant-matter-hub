@@ -20,7 +20,7 @@ export function testMatchers(
   device: HomeAssistantDeviceRegistry | undefined,
   entity: HomeAssistantEntityRegistry,
   mode: HomeAssistantFilterMode = "any",
-  entityState?: HomeAssistantEntityState,
+  entityState?: Pick<HomeAssistantEntityState, "attributes">,
   labels?: HomeAssistantLabel[],
 ) {
   if (mode === "all") {
@@ -37,7 +37,7 @@ export function testMatcher(
   matcher: HomeAssistantMatcher,
   device: HomeAssistantDeviceRegistry | undefined,
   entity: HomeAssistantEntityRegistry,
-  entityState?: HomeAssistantEntityState,
+  entityState?: Pick<HomeAssistantEntityState, "attributes">,
   labels?: HomeAssistantLabel[],
 ): boolean {
   if (matcher.value == null) {
@@ -203,7 +203,7 @@ function testAnyFieldRegex(
   pattern: string,
   entity: HomeAssistantEntityRegistry,
   device: HomeAssistantDeviceRegistry | undefined,
-  entityState: HomeAssistantEntityState | undefined,
+  entityState: Pick<HomeAssistantEntityState, "attributes"> | undefined,
   labels: HomeAssistantLabel[] | undefined,
 ): boolean {
   const regex = compileRegex(pattern);
@@ -216,7 +216,7 @@ function testAnyFieldRegex(
 function buildEntityHaystack(
   entity: HomeAssistantEntityRegistry,
   device: HomeAssistantDeviceRegistry | undefined,
-  entityState: HomeAssistantEntityState | undefined,
+  entityState: Pick<HomeAssistantEntityState, "attributes"> | undefined,
   labels: HomeAssistantLabel[] | undefined,
 ): string {
   const domain = entity.entity_id.split(".")[0];

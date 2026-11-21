@@ -65,7 +65,8 @@ interface LifecycleEndpointManager {
   readonly failedEntities: FailedEntity[];
   readonly refreshDeferred: boolean;
   readonly waitingForAllocatedEndpointState: boolean;
-  refreshDevices(): Promise<boolean>;
+  readonly allocatedEndpointFailed: boolean;
+  refreshDevices(checkFilteredReservations?: boolean): Promise<boolean>;
   startObserving(): Promise<void>;
   stopObserving(): void;
 }
@@ -198,7 +199,10 @@ export abstract class BridgeBase<
   async refreshDevices(tick = false): Promise<boolean> {
     let complete = false;
     try {
-      complete = await this.endpointManager.refreshDevices();
+      complete = await this.endpointManager.refreshDevices(
+        this.status.code === BridgeStatus.Starting &&
+          (this.server.env.maybeGet(FabricManager)?.length ?? 0) > 0,
+      );
     } finally {
       // a start, update or API refresh earns new retries, a tick never does
       if (!complete && !tick) {
@@ -340,30 +344,40 @@ export abstract class BridgeBase<
     const since = Date.now();
     const commissioned =
       (this.endpointManager.refreshDeferred ||
-        this.endpointManager.waitingForAllocatedEndpointState) &&
+        this.endpointManager.waitingForAllocatedEndpointState ||
+        this.endpointManager.allocatedEndpointFailed) &&
       this.server.env.get(FabricManager).length > 0;
     const missingAllocatedState = () =>
       commissioned && this.endpointManager.waitingForAllocatedEndpointState;
     const waiting = () =>
-      this.endpointManager.refreshDeferred || missingAllocatedState();
-    // with HA running a missing state is a snapshot race a reload fixes in
-    // seconds, a longer wait only holds back the bridges started after this one
+      this.endpointManager.refreshDeferred ||
+      missingAllocatedState() ||
+      (commissioned && this.endpointManager.allocatedEndpointFailed);
     const bound =
       commissioned && this.endpointManager.refreshDeferred
         ? HA_READY_WAIT_COMMISSIONED_MS
         : HA_READY_WAIT_MS;
-    const deadline = since + bound;
+    let deadline = since + bound;
     let nextInfo = since + 60_000;
     let reload: Promise<unknown> | undefined;
     while (waiting() && !this.stopRequested) {
+      // Once HA runs, reserved endpoints get the shorter retry window so
+      // one broken endpoint cannot hold back the remaining bridges.
+      if (!this.endpointManager.refreshDeferred) {
+        deadline = Math.min(deadline, Date.now() + HA_READY_WAIT_MS);
+      }
       const left = deadline - Date.now();
       const gaveUp =
         this.endpointManager.refreshDeferred &&
         Date.now() - haWaitGaveUpAt < HA_WAIT_GAVE_UP_MS &&
         haWaitGaveUpBound >= bound;
       if (left <= 0 || gaveUp) {
+        const reason =
+          this.endpointManager.refreshDeferred || missingAllocatedState()
+            ? "Home Assistant data not ready"
+            : "Previously allocated endpoints not ready";
         this.log.warn(
-          `Home Assistant data not ready${gaveUp ? "" : ` after ${bound / 1000}s`}, starting with what the bridge has`,
+          `${reason}${gaveUp ? "" : ` after ${Math.round((deadline - since) / 1000)}s`}, starting with what the bridge has`,
         );
         if (!gaveUp && this.endpointManager.refreshDeferred) {
           haWaitGaveUpAt = Date.now();
@@ -373,7 +387,7 @@ export abstract class BridgeBase<
       }
       if (Date.now() >= nextInfo) {
         this.log.info(
-          `Waiting for Home Assistant data, ${Math.round((Date.now() - since) / 1000)}s of ${bound / 1000}s`,
+          `Waiting for Home Assistant data, ${Math.round((Date.now() - since) / 1000)}s of ${Math.round((deadline - since) / 1000)}s`,
         );
         nextInfo += 60_000;
       }

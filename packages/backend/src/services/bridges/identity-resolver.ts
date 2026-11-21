@@ -69,6 +69,30 @@ export class IdentityResolver {
     private readonly mappingStorage: EntityMappingStorage,
   ) {}
 
+  /** Reads the current endpoint id without seeding or re-keying identity. */
+  peekEndpointId(
+    bridgeId: string,
+    entity: HomeAssistantEntityRegistry,
+    stableIdentity: boolean,
+  ): string | undefined {
+    const entityId = entity.entity_id;
+    const key = stableIdentity
+      ? identityKey({ entity_id: entityId, registry: entity })
+      : null;
+    const record =
+      key == null ? undefined : this.identityStorage.getIdentity(bridgeId, key);
+    const previousEntityId = record?.lastEntityId ?? record?.anchorEntityId;
+    const mapping =
+      this.mappingStorage.getMapping(bridgeId, entityId) ??
+      (previousEntityId && previousEntityId !== entityId
+        ? this.mappingStorage.getMapping(bridgeId, previousEntityId)
+        : undefined);
+    if (mapping?.disabled) return undefined;
+    return (
+      record?.endpointId ?? createEndpointId(entityId, mapping?.customName)
+    );
+  }
+
   // Resolves one build pass in the given order. With the flag on, every id
   // frozen for an entity of this pass is reserved up front (the entity mounted
   // at it wins, else the first record in order), so neither a new key nor a

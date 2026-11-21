@@ -369,28 +369,6 @@ export class HomeAssistantRegistry extends Service {
       return false;
     }
 
-    // Fingerprint structural registry data to detect changes.
-    // State *values* change constantly (handled by WebSocket subscription);
-    // we only check if entity/device/state IDs or key attributes changed.
-    const hash = createHash("md5");
-    for (const e of entityRegistry) {
-      hash.update(
-        `${e.entity_id}\0${e.unique_id ?? ""}\0${e.device_id ?? ""}\0${e.disabled_by ?? ""}\0${e.hidden_by ?? ""}\0${e.area_id ?? ""}\0${(e.labels ?? []).join(",")}\0${e.platform ?? ""}\0${e.entity_category ?? ""}\0${e.name ?? ""}\0${e.original_name ?? ""}\0${JSON.stringify(e.aliases ?? [])}\n`,
-      );
-    }
-    for (const s of statesList) {
-      hash.update(`${s.entity_id}\0${s.attributes?.device_class ?? ""}\n`);
-    }
-    for (const d of deviceRegistry) {
-      hash.update(
-        `${d.id}\0${(d.labels ?? []).join(",")}\0${d.area_id ?? ""}\0${d.name_by_user ?? ""}\0${d.name ?? ""}\0${d.model ?? ""}\0${d.model_id ?? ""}\0${d.manufacturer ?? ""}\0${d.hw_version ?? ""}\0${d.sw_version ?? ""}\0${d.serial_number ?? ""}\0${d.default_name ?? ""}\0${d.default_model ?? ""}\0${d.default_manufacturer ?? ""}\n`,
-      );
-    }
-    // name too: matchers resolve label names to ids, a rename must refresh
-    for (const l of labels) hash.update(`${l.label_id}\0${l.name}\n`);
-    for (const a of areas) hash.update(`${a.area_id}\0${a.name}\n`);
-    const fingerprint = hash.digest("hex");
-
     // A snapshot taken while HA was starting is partial. Publishing it would
     // leave entities missing from the cached registry long after HA is back,
     // and a later removal would confirm against that stale data (#438). Drop
@@ -403,8 +381,6 @@ export class HomeAssistantRegistry extends Service {
       this.lastRegistryFingerprint = "";
       return false;
     }
-    this._snapshotGeneration++;
-    this.lastCommittedReload = seq;
 
     // Always update states (values change via WebSocket, but fresh data
     // is needed for the UI and initial endpoint state)
@@ -417,6 +393,37 @@ export class HomeAssistantRegistry extends Service {
         states[id] = current;
       }
     }
+
+    // Fingerprint structural registry data to detect changes.
+    // State *values* change constantly (handled by WebSocket subscription);
+    // we only check if entity/device/state IDs or key attributes changed.
+    const hash = createHash("md5");
+    for (const e of entityRegistry) {
+      hash.update(
+        `${e.entity_id}\0${e.id ?? ""}\0${e.config_entry_id ?? ""}\0${e.unique_id ?? ""}\0${e.device_id ?? ""}\0${e.disabled_by ?? ""}\0${e.hidden_by ?? ""}\0${e.area_id ?? ""}\0${(e.labels ?? []).join(",")}\0${e.platform ?? ""}\0${e.entity_category ?? ""}\0${e.name ?? ""}\0${e.original_name ?? ""}\0${JSON.stringify(e.aliases ?? [])}\n`,
+      );
+    }
+    // merged states: a class change a subscription brought counts too
+    // shortcut: a class lost while unavailable stays remembered by the bridge
+    // filters after recovery until the next structural change or restart,
+    // hash availability here if that ever matters
+    for (const { entity_id } of statesList) {
+      hash.update(
+        `${entity_id}\0${states[entity_id].attributes?.device_class ?? ""}\n`,
+      );
+    }
+    for (const d of deviceRegistry) {
+      hash.update(
+        `${d.id}\0${(d.labels ?? []).join(",")}\0${d.area_id ?? ""}\0${d.name_by_user ?? ""}\0${d.name ?? ""}\0${d.model ?? ""}\0${d.model_id ?? ""}\0${d.manufacturer ?? ""}\0${d.hw_version ?? ""}\0${d.sw_version ?? ""}\0${d.serial_number ?? ""}\0${d.default_name ?? ""}\0${d.default_model ?? ""}\0${d.default_manufacturer ?? ""}\n`,
+      );
+    }
+    // name too: matchers resolve label names to ids, a rename must refresh
+    for (const l of labels) hash.update(`${l.label_id}\0${l.name}\n`);
+    for (const a of areas) hash.update(`${a.area_id}\0${a.name}\n`);
+    const fingerprint = hash.digest("hex");
+
+    this._snapshotGeneration++;
+    this.lastCommittedReload = seq;
     this._states = states;
 
     if (fingerprint === this.lastRegistryFingerprint) {

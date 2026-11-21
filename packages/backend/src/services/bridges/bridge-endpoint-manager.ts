@@ -160,6 +160,7 @@ export class BridgeEndpointManager extends Service {
   private _refreshIncomplete = false;
   private _refreshDeferred = false;
   private _waitingForAllocatedEndpointState = false;
+  private _allocatedEndpointFailed = false;
   // last create or add failure per entity and how often it repeated in a row
   private readonly createFailures = new Map<
     string,
@@ -958,17 +959,21 @@ export class BridgeEndpointManager extends Service {
     return this._refreshDeferred;
   }
 
+  get allocatedEndpointFailed(): boolean {
+    return this._allocatedEndpointFailed;
+  }
+
   get waitingForAllocatedEndpointState(): boolean {
     return this._waitingForAllocatedEndpointState;
   }
 
   // Resolves false when the run left matching entities unmounted for a reason
   // that only passes with time (HA down, heap pressure, a failed add).
-  refreshDevices(): Promise<boolean> {
+  refreshDevices(checkFilteredReservations = false): Promise<boolean> {
     const next = this.refreshChain.then(async () => {
       let complete = false;
       try {
-        await this.runRefreshDevices();
+        await this.runRefreshDevices(checkFilteredReservations);
         complete = !this._refreshIncomplete;
       } finally {
         // a start, an API refresh or a recheck needs the retry as much as a tick
@@ -980,12 +985,12 @@ export class BridgeEndpointManager extends Service {
     return next;
   }
 
-  private async runRefreshDevices() {
+  private async runRefreshDevices(checkFilteredReservations: boolean) {
     this._refreshIncomplete = false;
     const wasDeferred = this._refreshDeferred;
     this._refreshDeferred = false;
     this._waitingForAllocatedEndpointState = false;
-    this.registry.refresh((entityId) => this.getEntityMapping(entityId));
+    this._allocatedEndpointFailed = false;
     const lifecycle = this.lifecycle;
     const wasLive = this.entitiesReconciled;
 
@@ -1015,6 +1020,20 @@ export class BridgeEndpointManager extends Service {
       return;
     }
 
+    this._waitingForAllocatedEndpointState = this.registry.refresh(
+      (entityId) => this.getEntityMapping(entityId),
+      checkFilteredReservations
+        ? (entity) => {
+            if (entity.entity_id.length > MAX_ENTITY_ID_LENGTH) return false;
+            const id = this.identityResolver.peekEndpointId(
+              this.bridgeId,
+              entity,
+              this.registry.isStableIdentityEnabled(),
+            );
+            return id !== undefined && hasAllocatedEndpoint(this.root, id);
+          }
+        : undefined,
+    );
     this._failedEntities = [];
     this.entityIds = this.registry.entityIds;
     const mountedBefore = new Set([...this.root.parts].map((p) => p.id));
@@ -1443,6 +1462,7 @@ export class BridgeEndpointManager extends Service {
           );
           continue;
         }
+        const allocated = hasAllocatedEndpoint(this.root, endpointId);
         try {
           const domainMappings = this.getPluginDomainMappings();
           endpoint = await LegacyEndpoint.create(
@@ -1455,6 +1475,7 @@ export class BridgeEndpointManager extends Service {
             resolved?.anchorEntityId,
           );
         } catch (e) {
+          this._allocatedEndpointFailed ||= allocated;
           // Handle all endpoint creation errors gracefully to prevent boot crashes
           const reason = this.extractErrorReason(e);
           const message = `Failed to create device ${entityId}: ${reason}`;
@@ -1488,6 +1509,7 @@ export class BridgeEndpointManager extends Service {
           } catch (e) {
             const errorMessage = e instanceof Error ? e.message : String(e);
             const reason = this.extractErrorReason(e);
+            this._allocatedEndpointFailed ||= allocated;
             const message = `Failed to add endpoint for ${entityId}: ${errorMessage}`;
             // Handle all endpoint initialization errors gracefully
             if (this.trackFailure(entityId, reason)) {
@@ -1500,10 +1522,7 @@ export class BridgeEndpointManager extends Service {
             this.addFailedEntity(entityId, reason);
           }
         } else if (!this.registry.initialState(entityId)) {
-          this._waitingForAllocatedEndpointState ||= hasAllocatedEndpoint(
-            this.root,
-            endpointId,
-          );
+          this._waitingForAllocatedEndpointState ||= allocated;
           // the registry poll that brings its state mounts it, no retry needed
           const reason = "No state in Home Assistant yet";
           if (this.createFailures.get(entityId)?.reason !== reason) {

@@ -10,6 +10,7 @@ import type {
   VacuumRoom,
 } from "@home-assistant-matter-hub/common";
 import {
+  HomeAssistantMatcherType,
   SensorDeviceClass,
   VacuumDeviceFeature,
 } from "@home-assistant-matter-hub/common";
@@ -51,6 +52,14 @@ export interface BridgeRegistryProps {
   readonly dataProvider: BridgeDataProvider;
 }
 
+interface FilterDeviceClass {
+  value: string | undefined;
+  identity: Pick<
+    HomeAssistantEntityRegistry,
+    "id" | "unique_id" | "platform" | "config_entry_id"
+  >;
+}
+
 export class BridgeRegistry {
   get entityIds() {
     return keys(this._entities);
@@ -59,6 +68,7 @@ export class BridgeRegistry {
   private _devices: HomeAssistantDevices = {};
   private _entities: HomeAssistantEntities = {};
   private _states: HomeAssistantStates = {};
+  private filterDeviceClasses = new Map<string, FilterDeviceClass>();
 
   // Track battery entities that have been auto-assigned to other devices
   private _usedBatteryEntities: Set<string> = new Set();
@@ -1003,15 +1013,60 @@ export class BridgeRegistry {
     return undefined;
   }
 
-  refresh(mappingOf?: (entityId: string) => EntityMappingConfig | undefined) {
+  private filterDeviceClass(
+    entity: HomeAssistantEntityRegistry,
+    state?: HomeAssistantEntityState,
+  ): FilterDeviceClass | undefined {
+    const current = state?.attributes?.device_class;
+    const value =
+      typeof current === "string" && current.length > 0 ? current : undefined;
+    if (
+      value !== undefined ||
+      (state && state.state !== "unavailable" && state.state !== "unknown")
+    ) {
+      const { id, unique_id, platform, config_entry_id } = entity;
+      return { value, identity: { id, unique_id, platform, config_entry_id } };
+    }
+
+    const previous = this.filterDeviceClasses.get(entity.entity_id);
+    if (
+      previous &&
+      (["id", "unique_id", "platform", "config_entry_id"] as const).every(
+        (key) =>
+          previous.identity[key] == null ||
+          entity[key] == null ||
+          previous.identity[key] === entity[key],
+      )
+    ) {
+      return previous;
+    }
+  }
+
+  refresh(
+    mappingOf?: (entityId: string) => EntityMappingConfig | undefined,
+    hasReservedEndpoint?: (entity: HomeAssistantEntityRegistry) => boolean,
+  ) {
     // filter first: a timeout throws before any cached state is touched
     let entities: HomeAssistantEntities;
+    let waitingForClass = false;
+    const filter = this.dataProvider.filter;
+    const couldDependOnClass = [...filter.include, ...filter.exclude].some(
+      ({ type }) =>
+        type === HomeAssistantMatcherType.DeviceClass ||
+        type === HomeAssistantMatcherType.AnyFieldRegex,
+    );
+    const deviceClasses = new Map<string, FilterDeviceClass>();
     try {
       entities = withinFilterBudget(() =>
         pickBy(this.registry.entities, (entity) => {
           const device = this.registry.devices[entity.device_id];
-          const filter = this.dataProvider.filter;
           const featureFlags = this.dataProvider.featureFlags ?? {};
+
+          const state = this.registry.states[entity.entity_id];
+          const deviceClass = this.filterDeviceClass(entity, state);
+          if (deviceClass) {
+            deviceClasses.set(entity.entity_id, deviceClass);
+          }
 
           // Always exclude disabled entities
           if (entity.disabled_by != null) {
@@ -1024,9 +1079,19 @@ export class BridgeRegistry {
             return false;
           }
 
-          // Check filter matching
-          const state = this.registry.states[entity.entity_id];
-          return this.matchesFilter(filter, entity, device, state);
+          // HA keeps device_class on unavailable states, so a classless state
+          // is really classless. Only a missing state leaves the class open.
+          if (couldDependOnClass && !deviceClass && !state) {
+            const matches = this.matchWithoutClass(filter, entity, device);
+            if (matches === undefined) {
+              waitingForClass ||= hasReservedEndpoint?.(entity) ?? false;
+              return false;
+            }
+            return matches;
+          }
+          return this.matchesFilter(filter, entity, device, {
+            attributes: { device_class: deviceClass?.value },
+          });
         }),
       );
     } catch (e) {
@@ -1048,6 +1113,7 @@ export class BridgeRegistry {
     // rebuilt per refresh too, an in-place edit keeps the map identity
     this._entitiesByDevice = undefined;
 
+    this.filterDeviceClasses = deviceClasses;
     this._entities = entities;
     this._states = pickBy(
       this.registry.states,
@@ -1059,6 +1125,7 @@ export class BridgeRegistry {
     // Pre-calculate auto-assignments before endpoint creation so entities
     // are marked "used" regardless of the order they're processed later.
     this.preCalculateAutoAssignments(mappingOf);
+    return waitingForClass;
   }
 
   /**
@@ -1165,19 +1232,49 @@ export class BridgeRegistry {
     const labels = this.registry.labels;
     for (const entity of values(this._entities)) {
       const device = this.registry.devices[entity.device_id];
-      const state = this.registry.states[entity.entity_id];
-      if (testMatchers([matcher], device, entity, "any", state, labels)) {
+      const deviceClass = this.filterDeviceClasses.get(entity.entity_id)?.value;
+      const filterState = { attributes: { device_class: deviceClass } };
+      if (testMatchers([matcher], device, entity, "any", filterState, labels)) {
         return entity.entity_id;
       }
     }
     return undefined;
   }
 
+  // Undefined when the missing class could decide the outcome.
+  private matchWithoutClass(
+    filter: HomeAssistantFilter,
+    entity: HomeAssistantEntityRegistry,
+    device: HomeAssistantDeviceRegistry,
+  ): boolean | undefined {
+    const rules = [...filter.include, ...filter.exclude].filter(
+      ({ value }) => value != null,
+    );
+    // a regex across all fields can test any class, not just listed ones
+    if (
+      rules.some(({ type }) => type === HomeAssistantMatcherType.AnyFieldRegex)
+    ) {
+      return undefined;
+    }
+    // unlisted classes behave like no class for every exact class rule
+    const classes = rules
+      .filter(({ type }) => type === HomeAssistantMatcherType.DeviceClass)
+      .map(({ value }) => value);
+    const outcomes = new Set(
+      [undefined, ...classes].map((device_class) =>
+        this.matchesFilter(filter, entity, device, {
+          attributes: { device_class },
+        }),
+      ),
+    );
+    return outcomes.size === 1 ? outcomes.has(true) : undefined;
+  }
+
   private matchesFilter(
     filter: HomeAssistantFilter,
     entity: HomeAssistantEntityRegistry,
     device: HomeAssistantDeviceRegistry,
-    entityState?: HomeAssistantEntityState,
+    entityState?: Pick<HomeAssistantEntityState, "attributes">,
   ) {
     const labels = this.registry.labels;
     if (

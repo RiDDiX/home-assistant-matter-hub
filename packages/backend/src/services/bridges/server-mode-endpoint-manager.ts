@@ -70,6 +70,7 @@ export class ServerModeEndpointManager extends Service {
   private _refreshIncomplete = false;
   private _refreshDeferred = false;
   private _waitingForAllocatedEndpointState = false;
+  private _allocatedEndpointFailed = false;
   // last create or add failure per entity and how often it repeated in a row
   private readonly createFailures = new Map<
     string,
@@ -309,17 +310,21 @@ export class ServerModeEndpointManager extends Service {
     return this._refreshDeferred;
   }
 
+  get allocatedEndpointFailed(): boolean {
+    return this._allocatedEndpointFailed;
+  }
+
   get waitingForAllocatedEndpointState(): boolean {
     return this._waitingForAllocatedEndpointState;
   }
 
   // Resolves false when the run left matching entities unmounted for a reason
   // that only passes with time (HA down, heap pressure, a failed add).
-  refreshDevices(): Promise<boolean> {
+  refreshDevices(checkFilteredReservations = false): Promise<boolean> {
     const next = this.refreshChain.then(async () => {
       let complete = false;
       try {
-        await this.runRefreshDevices();
+        await this.runRefreshDevices(checkFilteredReservations);
         complete = !this._refreshIncomplete;
       } finally {
         // a start, an API refresh or a recheck needs the retry as much as a tick
@@ -331,15 +336,36 @@ export class ServerModeEndpointManager extends Service {
     return next;
   }
 
-  private async runRefreshDevices(): Promise<void> {
+  private async runRefreshDevices(
+    checkFilteredReservations: boolean,
+  ): Promise<void> {
     this._refreshIncomplete = false;
     const wasDeferred = this._refreshDeferred;
     this._refreshDeferred = false;
     this._waitingForAllocatedEndpointState = false;
-    this.registry.refresh((entityId) => this.getEntityMapping(entityId));
+    this._allocatedEndpointFailed = false;
 
     const lifecycle = this.lifecycle;
     const fullEntities = this.registry.fullEntities;
+    const deferred =
+      !this.client.haRunning || Object.keys(fullEntities).length === 0;
+    if (!deferred) {
+      this._waitingForAllocatedEndpointState = this.registry.refresh(
+        (entityId) => this.getEntityMapping(entityId),
+        checkFilteredReservations
+          ? (entity) => {
+              const id = this.identityResolver.peekEndpointId(
+                this.dataProvider.id,
+                entity,
+                this.registry.isStableIdentityEnabled(),
+              );
+              return (
+                id !== undefined && hasAllocatedEndpoint(this.serverNode, id)
+              );
+            }
+          : undefined,
+      );
+    }
     let reconciled = false;
 
     try {
@@ -348,7 +374,7 @@ export class ServerModeEndpointManager extends Service {
       // number and controllers re-add it as new, losing groups, and stamping
       // tombstones from it would mark live entities missing (#438). Keep the
       // last good entity list and wait for HA.
-      if (!this.client.haRunning || Object.keys(fullEntities).length === 0) {
+      if (deferred) {
         this.pendingRemovals.clear();
         const message =
           "HA not running or registry empty, deferring server mode reconcile";
@@ -630,6 +656,10 @@ export class ServerModeEndpointManager extends Service {
           });
           fresh.set(entityId, endpointId);
         } catch (e) {
+          this._allocatedEndpointFailed ||= hasAllocatedEndpoint(
+            this.serverNode,
+            endpointId,
+          );
           const reason = e instanceof Error ? e.message : String(e);
           this.logCreateFailure(
             entityId,
@@ -685,6 +715,10 @@ export class ServerModeEndpointManager extends Service {
           if (tag !== undefined) tags.set(endpoint, tag);
           fresh.set(entityId, endpoint.id);
         } catch (e) {
+          this._allocatedEndpointFailed ||= hasAllocatedEndpoint(
+            this.serverNode,
+            entry.endpoint.id,
+          );
           const reason = e instanceof Error ? e.message : String(e);
           this.logCreateFailure(
             entityId,
@@ -699,11 +733,13 @@ export class ServerModeEndpointManager extends Service {
       for (const [entityId, endpointId] of fresh) {
         const entry = this.endpoints.get(entityId);
         if (!entry) continue;
+        const allocated = hasAllocatedEndpoint(this.serverNode, endpointId);
         entry.tag = tags.get(entry.endpoint);
         try {
           if (entry.tag !== undefined) setNumberTag(entry.endpoint, entry.tag);
           await this.serverNode.addDevice(entry.endpoint);
         } catch (e) {
+          this._allocatedEndpointFailed ||= allocated;
           this.endpoints.delete(entityId);
           const reason = e instanceof Error ? e.message : String(e);
           this.logCreateFailure(
