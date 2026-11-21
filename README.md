@@ -39,7 +39,7 @@ of port forwarding etc.
 | Channel | Branch | Current Version | Description |
 |---------|--------|-----------------|-------------|
 | **Stable** | `main` | v2.0.60 | Production-ready, recommended for most users |
-| **Alpha** | `alpha` | v2.1.0-alpha.1002 | Ahead of Stable, carries the additions listed under Alpha Features |
+| **Alpha** | `alpha` | v2.1.0-alpha.1003 | Ahead of Stable, carries the additions listed under Alpha Features |
 | **Testing** | `testing` | v4.1.0-testing.x | ⚠️ **Highly unstable!** Experimental features, may break |
 
 ### Which version should I use?
@@ -549,6 +549,15 @@ Re-assign the affected devices to their rooms after they reconnect. See the [doc
 
 <details>
 <summary><strong>🧪 Alpha Features (v2.1.0-alpha.x)</strong> - Click to expand</summary>
+
+**v2.1.0-alpha.1003:**
+- **Bridge start** ([#543](https://github.com/RiDDiX/home-assistant-matter-hub/issues/543)): a paired bridge no longer goes online without a device whose Home Assistant state is still missing at start. It reloads the registry for up to 30 seconds, then starts. The wait of up to 10 minutes stays for the case that Home Assistant itself is not ready.
+- **Bridge start**: a bridge that is stopped or restarted while it is still starting stays stopped. A start that finishes late no longer brings it back online.
+- **Factory reset**: when the reset fails, the bridge keeps its saved device identities and shows Failed, so auto recovery starts it again, and the API answers `500`. Before, the identities were deleted first and the bridge stayed stopped.
+- **Server mode**: the configuration version goes up when the endpoints of the device change, as it does for bridges since alpha.977.
+- **Device identities**: a stop or shutdown waits for a device identity write that is still running, so the last change is saved.
+- **Logs** ([#543](https://github.com/RiDDiX/home-assistant-matter-hub/issues/543)): "All subscriptions lost", "Closing stale session" and "Closing dead session" are logged at INFO instead of WARN. They are the normal cleanup when a controller drops its session, as older Echo Dots do about 30 minutes after subscribing.
+- **Large bridges**: a device refresh no longer compares every entity with every endpoint.
 
 **v2.1.0-alpha.1002:**
 - **Web login (action needed for Docker and standalone)**: without a login, the web UI and API now only answer requests from the machine running the app (`http://localhost:8482`), through Home Assistant ingress, and from addresses listed in `--http-ip-whitelist`. Every other device gets a `403`, and the log shows a warning at start. Set `HAMH_HTTP_AUTH_USERNAME` and `HAMH_HTTP_AUTH_PASSWORD`, or set a login under Settings from the machine itself. The add-on through Home Assistant is not affected. Before, an install without a login was open to the whole network.
