@@ -9,7 +9,7 @@ import type {
 import { Environment, VariableService } from "@matter/general";
 import { VendorId } from "@matter/main";
 import { ServerNode } from "@matter/main/node";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { BridgeDataProvider } from "../../../../services/bridges/bridge-data-provider.js";
 import { BridgeRegistry } from "../../../../services/bridges/bridge-registry.js";
 import { EntityStateProvider } from "../../../../services/bridges/entity-state-provider.js";
@@ -192,8 +192,11 @@ describe("RoomAirConditioner OnOff mirrors HA", () => {
     expect(onOff(endpoint)).toBe(true);
 
     await endpoint.updateStates({ [CLIMATE]: climateState("off", FAN_ONLY) });
-    await delay(50);
-    expect(onOff(endpoint)).toBe(false);
+    // the update is debounced 50 ms and written async, so a fixed wait races
+    await vi.waitFor(() => expect(onOff(endpoint)).toBe(false), {
+      timeout: 1000,
+      interval: 20,
+    });
   });
 
   it("climateBlockOff keeps Off from HA and still turns on", async () => {
@@ -207,8 +210,10 @@ describe("RoomAirConditioner OnOff mirrors HA", () => {
     await endpoint.updateStates({
       [CLIMATE]: climateState("off", FAN_AND_POWER),
     });
-    await delay(50);
-    expect(onOff(endpoint)).toBe(false);
+    await vi.waitFor(() => expect(onOff(endpoint)).toBe(false), {
+      timeout: 1000,
+      interval: 20,
+    });
     // biome-ignore lint/suspicious/noExplicitAny: invoke the cluster command
     await endpoint.act((agent: any) => agent.onOff.on());
     expect(calls).toEqual(["climate.turn_on"]);
