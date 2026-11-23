@@ -33,7 +33,7 @@ export function useUsedPorts() {
   return useAppSelector(selectUsedPorts);
 }
 
-export function useBridge(bridgeId: string) {
+export function useBridge(bridgeId: string | undefined) {
   const selector = useMemo(() => selectBridge(bridgeId), [bridgeId]);
   return useAppSelector(selector);
 }

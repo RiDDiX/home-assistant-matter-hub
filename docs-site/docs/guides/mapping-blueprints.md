@@ -265,7 +265,7 @@ Exposes the lock without PIN codes, so controllers skip the access code setup.
 
 ## Cover with Swapped Open/Close
 
-For covers where Home Assistant reports inverted position values.
+For covers that move the wrong way on open and close. Swaps only the open and close commands, the percentage stays unchanged.
 
 ```json
 {

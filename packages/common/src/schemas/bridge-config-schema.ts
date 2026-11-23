@@ -152,7 +152,9 @@ const featureFlagSchema: JSONSchema7 = {
     coverDoNotInvertPercentage: {
       title: "Do not invert Percentages for Covers",
       description:
-        "Do not invert the percentage of covers to match Home Assistant (not Matter compliant)",
+        "Report Home Assistant cover percentages without inversion (not Matter compliant). " +
+        'The numbers come out the same as with "Use Home Assistant Percentage for Covers". ' +
+        "Kept for older setups.",
       type: "boolean",
       default: false,
     },
@@ -160,10 +162,10 @@ const featureFlagSchema: JSONSchema7 = {
     coverUseHomeAssistantPercentage: {
       title: "Use Home Assistant Percentage for Covers (Alexa-friendly)",
       description:
-        "Display cover percentages matching Home Assistant values in Matter controllers like Alexa. " +
-        "This makes the displayed percentage match what you see in Home Assistant, but the semantic meaning differs: " +
-        "in HA, higher percentage = more open; in Alexa, higher percentage is typically interpreted as more closed. " +
-        "Open/Close commands will still work correctly.",
+        "Controllers show and accept the same number as Home Assistant, so 80% in Home Assistant reads 80%. " +
+        "Matter counts 100% as closed, so a controller may still label the number as closed. " +
+        "Open and close commands keep working. " +
+        "A request for exactly 0% opens and exactly 100% closes, because controllers such as Alexa send open and close that way.",
       type: "boolean",
       default: false,
     },
@@ -171,8 +173,8 @@ const featureFlagSchema: JSONSchema7 = {
     coverSwapOpenClose: {
       title: "Swap Open/Close for Covers",
       description:
-        "Swap open/close commands and invert position reporting for covers. Enable this if Alexa voice commands " +
-        "are reversed (saying 'close' opens the blinds and vice versa).",
+        "Swap the open and close commands for every cover on this bridge and report positions without inversion, as Home Assistant numbers. " +
+        "To swap the commands of a single cover and leave its percentage alone, use the per-cover option in the entity mapping.",
       type: "boolean",
       default: false,
     },

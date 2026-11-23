@@ -179,6 +179,15 @@ interface AllBridgeFeatureFlags {
 
 export type BridgeFeatureFlags = Partial<AllBridgeFeatureFlags>;
 
+/** Matter cover percent is 100 - HA percent unless one of the cover flags is set. */
+export function isCoverPositionInverted(flags?: BridgeFeatureFlags): boolean {
+  return (
+    flags?.coverDoNotInvertPercentage !== true &&
+    flags?.coverUseHomeAssistantPercentage !== true &&
+    flags?.coverSwapOpenClose !== true
+  );
+}
+
 export type BridgeIconType =
   | "light"
   | "switch"

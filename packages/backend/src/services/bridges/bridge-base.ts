@@ -2,6 +2,7 @@ import {
   BridgeStatus,
   type ExposedDeviceType,
   type FailedEntity,
+  isCoverPositionInverted,
   type UpdateBridgeRequest,
 } from "@home-assistant-matter-hub/common";
 import type { Endpoint } from "@matter/main";
@@ -14,6 +15,7 @@ import {
   SessionManager,
 } from "@matter/main/protocol";
 import type { BetterLogger } from "../../core/app/logger.js";
+import { HomeAssistantEntityBehavior } from "../../matter/behaviors/home-assistant-entity-behavior.js";
 import { updateEntityState } from "../../matter/endpoints/update-entity-state.js";
 import {
   applyLegacySpecSessionParameters,
@@ -542,6 +544,7 @@ export abstract class BridgeBase<
       const rebind =
         update.port !== this.dataProvider.port &&
         (code === BridgeStatus.Running || code === BridgeStatus.Failed);
+      const oldFlags = this.dataProvider.featureFlags;
       this.dataProvider.update(update);
       if (rebind) {
         await this.stop(BridgeStatus.Stopped, "Port changed");
@@ -549,6 +552,12 @@ export abstract class BridgeBase<
         return;
       }
       await this.refreshDevices();
+      if (
+        isCoverPositionInverted(oldFlags) !==
+        isCoverPositionInverted(this.dataProvider.featureFlags)
+      ) {
+        this.reapplyCoverStates();
+      }
       // Re-evaluate auto force sync and session rotation after config update,
       // not on a bridge a stop is taking down, it sets the status last
       if (this.status.code === BridgeStatus.Running && !this.stopInFlight) {
@@ -560,6 +569,36 @@ export abstract class BridgeBase<
       const reason = `Failed to update ${this.label.toLowerCase()} due to error:`;
       this.log.error(reason, e);
       await this.stop(BridgeStatus.Failed, `${reason}\n${e?.toString()}`);
+    }
+  }
+
+  // Every endpoint with an HA entity, composed sub-endpoints included (e.g.
+  // ComposedSensorEndpoint has T/H/P sub-endpoints).
+  private entityEndpoints(): Endpoint[] {
+    const out: Endpoint[] = [];
+    const collect = (ep: Endpoint) => {
+      if (ep.behaviors.has(HomeAssistantEntityBehavior)) out.push(ep);
+      for (const child of ep.parts) collect(child);
+    };
+    for (const ep of this.topLevelEndpoints()) collect(ep);
+    return out;
+  }
+
+  // The cover conversion reads the flags live, but only a changed HA state runs
+  // it again, so a cover space flip re-pushes each cover once (#448). Not
+  // awaited, a cover whose construction never settles must not hold the save.
+  private reapplyCoverStates() {
+    const warn = (e: unknown) =>
+      this.log.warn("Re-applying cover state after a feature flag change:", e);
+    for (const endpoint of this.entityEndpoints()) {
+      try {
+        const { entity } = endpoint.stateOf(HomeAssistantEntityBehavior);
+        if (entity.entity_id.startsWith("cover.")) {
+          updateEntityState(endpoint).catch(warn);
+        }
+      } catch (e) {
+        warn(e);
+      }
     }
   }
 
@@ -689,33 +728,11 @@ export abstract class BridgeBase<
       return 0;
     }
 
-    // Import dynamically to avoid circular dependencies
-    const { HomeAssistantEntityBehavior } = await import(
-      "../../matter/behaviors/home-assistant-entity-behavior.js"
-    );
-
-    // Collect all endpoints recursively to include sub-endpoints
-    // of composed devices (e.g., ComposedSensorEndpoint has T/H/P sub-endpoints)
-    const allEndpoints: Endpoint[] = [];
-    const collect = (ep: Endpoint) => {
-      allEndpoints.push(ep);
-      for (const child of ep.parts) {
-        collect(child);
-      }
-    };
-    for (const ep of this.topLevelEndpoints()) {
-      collect(ep);
-    }
-
     let syncedCount = 0;
     let skippedCount = 0;
 
-    for (const endpoint of allEndpoints) {
+    for (const endpoint of this.entityEndpoints()) {
       try {
-        if (!endpoint.behaviors.has(HomeAssistantEntityBehavior)) {
-          continue;
-        }
-
         const behavior = endpoint.stateOf(HomeAssistantEntityBehavior);
         const currentEntity = behavior.entity;
 

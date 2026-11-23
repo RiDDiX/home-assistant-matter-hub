@@ -142,7 +142,7 @@ Mapped to **WindowCovering** supporting position and tilt control.
 |------|-------------|
 | `coverDoNotInvertPercentage` | Skip percentage inversion (not Matter compliant) |
 | `coverUseHomeAssistantPercentage` | Display HA percentages in Matter (Alexa-friendly) |
-| `coverSwapOpenClose` | Swap open/close commands (fixes reversed Alexa commands) |
+| `coverSwapOpenClose` | Swap open/close commands for all covers and report the HA percentage. Per cover in Entity Mapping it swaps only the commands |
 
 **Supported Device Classes:**
 - `blind`

@@ -1,42 +1,42 @@
 import type { BridgeFeatureFlags } from "@home-assistant-matter-hub/common";
 import { describe, expect, it } from "vitest";
-import {
-  adjustPositionForReading,
-  adjustPositionForWriting,
-} from "./cover-position-utils.js";
+import { adjustPosition } from "./cover-position-utils.js";
 
-describe("adjustPositionForReading", () => {
+describe("adjustPosition", () => {
   it("inverts by default (no flags)", () => {
-    expect(adjustPositionForReading(80, undefined)).toBe(20);
-    expect(adjustPositionForReading(0, undefined)).toBe(100);
-    expect(adjustPositionForReading(100, undefined)).toBe(0);
-    expect(adjustPositionForReading(50, undefined)).toBe(50);
+    expect(adjustPosition(80, undefined)).toBe(20);
+    expect(adjustPosition(20, undefined)).toBe(80);
+    expect(adjustPosition(0, undefined)).toBe(100);
+    expect(adjustPosition(100, undefined)).toBe(0);
+    expect(adjustPosition(50, undefined)).toBe(50);
   });
 
   it("inverts with empty flags", () => {
-    expect(adjustPositionForReading(80, {})).toBe(20);
+    expect(adjustPosition(80, {})).toBe(20);
   });
 
   it("skips inversion with coverDoNotInvertPercentage", () => {
     const flags: BridgeFeatureFlags = { coverDoNotInvertPercentage: true };
-    expect(adjustPositionForReading(80, flags)).toBe(80);
-    expect(adjustPositionForReading(0, flags)).toBe(0);
-    expect(adjustPositionForReading(100, flags)).toBe(100);
+    expect(adjustPosition(80, flags)).toBe(80);
+    expect(adjustPosition(0, flags)).toBe(0);
+    expect(adjustPosition(100, flags)).toBe(100);
   });
 
   it("skips inversion with coverUseHomeAssistantPercentage", () => {
     const flags: BridgeFeatureFlags = {
       coverUseHomeAssistantPercentage: true,
     };
-    expect(adjustPositionForReading(80, flags)).toBe(80);
-    expect(adjustPositionForReading(0, flags)).toBe(0);
+    expect(adjustPosition(80, flags)).toBe(80);
+    expect(adjustPosition(20, flags)).toBe(20);
+    expect(adjustPosition(0, flags)).toBe(0);
   });
 
   it("coverSwapOpenClose skips inversion (position passes through)", () => {
     const flags: BridgeFeatureFlags = { coverSwapOpenClose: true };
-    expect(adjustPositionForReading(80, flags)).toBe(80);
-    expect(adjustPositionForReading(0, flags)).toBe(0);
-    expect(adjustPositionForReading(100, flags)).toBe(100);
+    expect(adjustPosition(80, flags)).toBe(80);
+    expect(adjustPosition(20, flags)).toBe(20);
+    expect(adjustPosition(0, flags)).toBe(0);
+    expect(adjustPosition(100, flags)).toBe(100);
   });
 
   it("coverUseHomeAssistantPercentage takes precedence over coverSwapOpenClose (#148)", () => {
@@ -44,9 +44,9 @@ describe("adjustPositionForReading", () => {
       coverSwapOpenClose: true,
       coverUseHomeAssistantPercentage: true,
     };
-    expect(adjustPositionForReading(80, flags)).toBe(80);
-    expect(adjustPositionForReading(0, flags)).toBe(0);
-    expect(adjustPositionForReading(100, flags)).toBe(100);
+    expect(adjustPosition(80, flags)).toBe(80);
+    expect(adjustPosition(0, flags)).toBe(0);
+    expect(adjustPosition(100, flags)).toBe(100);
   });
 
   it("coverDoNotInvertPercentage takes precedence over coverSwapOpenClose", () => {
@@ -54,43 +54,10 @@ describe("adjustPositionForReading", () => {
       coverSwapOpenClose: true,
       coverDoNotInvertPercentage: true,
     };
-    expect(adjustPositionForReading(80, flags)).toBe(80);
-  });
-});
-
-describe("adjustPositionForWriting", () => {
-  it("inverts by default (no flags)", () => {
-    expect(adjustPositionForWriting(20, undefined)).toBe(80);
-    expect(adjustPositionForWriting(0, undefined)).toBe(100);
-    expect(adjustPositionForWriting(100, undefined)).toBe(0);
+    expect(adjustPosition(80, flags)).toBe(80);
   });
 
-  it("skips inversion with coverUseHomeAssistantPercentage", () => {
-    const flags: BridgeFeatureFlags = {
-      coverUseHomeAssistantPercentage: true,
-    };
-    expect(adjustPositionForWriting(20, flags)).toBe(20);
-    expect(adjustPositionForWriting(0, flags)).toBe(0);
-  });
-
-  it("coverSwapOpenClose skips inversion (position passes through)", () => {
-    const flags: BridgeFeatureFlags = { coverSwapOpenClose: true };
-    expect(adjustPositionForWriting(20, flags)).toBe(20);
-    expect(adjustPositionForWriting(80, flags)).toBe(80);
-    expect(adjustPositionForWriting(0, flags)).toBe(0);
-    expect(adjustPositionForWriting(100, flags)).toBe(100);
-  });
-
-  it("coverUseHomeAssistantPercentage takes precedence over coverSwapOpenClose (#148)", () => {
-    const flags: BridgeFeatureFlags = {
-      coverSwapOpenClose: true,
-      coverUseHomeAssistantPercentage: true,
-    };
-    expect(adjustPositionForWriting(20, flags)).toBe(20);
-    expect(adjustPositionForWriting(80, flags)).toBe(80);
-  });
-
-  it("reading and writing are symmetric", () => {
+  it("is its own inverse, so reading and writing round-trip", () => {
     const flagCombos: (BridgeFeatureFlags | undefined)[] = [
       undefined,
       {},
@@ -102,11 +69,7 @@ describe("adjustPositionForWriting", () => {
 
     for (const flags of flagCombos) {
       for (let pos = 0; pos <= 100; pos += 25) {
-        const read = adjustPositionForReading(pos, flags);
-        if (read != null) {
-          const roundTrip = adjustPositionForWriting(read, flags);
-          expect(roundTrip).toBe(pos);
-        }
+        expect(adjustPosition(adjustPosition(pos, flags), flags)).toBe(pos);
       }
     }
   });

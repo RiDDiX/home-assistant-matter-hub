@@ -402,7 +402,7 @@ describe("#429 optimistic movement bringup", () => {
 // Matter target that matter.js pre-writes (WindowCoveringServer.ts:522/:546), but
 // the stored current is not always in Matter space. Under the Alexa profile flag
 // coverUseHomeAssistantPercentage the read path skips inversion
-// (cover-position-utils.ts:17-20), and a per-entity coverSwapOpenClose sends the
+// (isCoverPositionInverted), and a per-entity coverSwapOpenClose sends the
 // cover to the opposite end without un-inverting the reads
 // (cover-window-covering-server.ts:146-152). Both park the axis nowhere near the
 // target, so the optimistic status stuck until the 120s timer.
@@ -784,7 +784,7 @@ describe("#429 command logs identify the entity and the resolved flags", () => {
 
   it("u2: a per-entity swap moves the dispatch but not the position space", async () => {
     // Only the bridge-level swap flag turns inversion off
-    // (cover-position-utils.ts:22), so a per-entity swap has to log
+    // (isCoverPositionInverted), so a per-entity swap has to log
     // swapDispatch=true together with spaceInverted=true.
     const endpoint = await mount("closed", 0, {
       entityId: "cover.blind",
@@ -1022,5 +1022,131 @@ describe("slider moved back to the current position", () => {
     await goToLift(endpoint, 5000);
 
     expect(cap.ops).toEqual([Closing]);
+  });
+});
+
+// #448: the three bridge cover flags and the tilt fallback, pinned end to end.
+describe("#448 cover percentage flags", () => {
+  // open + close + set_position + set_tilt_position, no open/close tilt
+  const SET_TILT_ONLY = LIFT_WITH_POSITION + 128; // 135
+  const tiltFixture = { supportedFeatures: SET_TILT_ONLY, haTiltPosition: 50 };
+  const sent = () =>
+    calls.map((c) => {
+      const data = c.data as { position?: number; tilt_position?: number };
+      return [c.action, data?.position ?? data?.tilt_position];
+    });
+
+  async function tiltEnds(mapping?: EntityMappingConfig) {
+    const endpoint = await mount("open", 50, mapping, tiltFixture);
+    calls.length = 0;
+    await goToTilt(endpoint, 0);
+    await goToTilt(endpoint, 10000);
+    return sent();
+  }
+
+  it("tilt fallback sends the HA end with default flags", async () => {
+    expect(await tiltEnds()).toEqual([
+      ["cover.set_cover_tilt_position", 100],
+      ["cover.set_cover_tilt_position", 0],
+    ]);
+  });
+
+  it("tilt fallback sends the HA end with the HA-percentage flag", async () => {
+    setFeatureFlags({ coverUseHomeAssistantPercentage: true });
+    expect(await tiltEnds()).toEqual([
+      ["cover.set_cover_tilt_position", 100],
+      ["cover.set_cover_tilt_position", 0],
+    ]);
+  });
+
+  it("HA-percentage flag, a tilt fallback open completes on the HA end", async () => {
+    setFeatureFlags({ coverUseHomeAssistantPercentage: true });
+    const endpoint = await mount("open", 50, undefined, tiltFixture);
+    const cap = subscribe(endpoint, "tilt");
+    calls.length = 0;
+
+    await goToTilt(endpoint, 0); // matter.js pre-writes target 0
+    expect(sent()).toEqual([["cover.set_cover_tilt_position", 100]]);
+    await drive(endpoint, "open", 50, { ...tiltFixture, haTiltPosition: 100 });
+
+    expect(cap.ops).toEqual([Opening, Stopped]);
+    expect(state(endpoint).currentPositionTiltPercent100ths).toBe(10000);
+    expect(state(endpoint).targetPositionTiltPercent100ths).toBe(10000);
+  });
+
+  it("tilt fallback follows the per-entity swap", async () => {
+    const swapped = await tiltEnds({
+      entityId: "cover.blind",
+      coverSwapOpenClose: true,
+    });
+    expect(swapped[0]).toEqual(["cover.set_cover_tilt_position", 0]);
+  });
+
+  it("tilt fallback follows the bridge swap", async () => {
+    setFeatureFlags({ coverSwapOpenClose: true });
+    expect((await tiltEnds())[0]).toEqual(["cover.set_cover_tilt_position", 0]);
+  });
+
+  it("a fractional HA position stores whole 100ths", async () => {
+    const endpoint = await mount("open", 66.7);
+    expect(state(endpoint).currentPositionLiftPercent100ths).toBe(3330);
+    expect(state(endpoint).targetPositionLiftPercent100ths).toBe(3330);
+  });
+
+  it("a fractional Matter target goes out as a whole percent", async () => {
+    const endpoint = await mount("open", 50, undefined, {
+      supportedFeatures: LIFT_AND_TILT_WITH_POSITION,
+      haTiltPosition: 50,
+    });
+    calls.length = 0;
+    await goToLift(endpoint, 3333);
+    await goToTilt(endpoint, 3333);
+    await delay(500); // past the slider debounce
+    expect(sent()).toEqual([
+      ["cover.set_cover_position", 67],
+      ["cover.set_cover_tilt_position", 67],
+    ]);
+  });
+
+  it("HA-percentage flag, the 0/10000 ends still open and close", async () => {
+    setFeatureFlags({ coverUseHomeAssistantPercentage: true });
+    const endpoint = await mount("open", 50, undefined, {
+      supportedFeatures: LIFT_AND_TILT_WITH_POSITION,
+      haTiltPosition: 50,
+    });
+    calls.length = 0;
+    await goToLift(endpoint, 0);
+    await goToLift(endpoint, 10000);
+    await goToTilt(endpoint, 0);
+    await goToTilt(endpoint, 10000);
+    expect(calls.map((c) => c.action)).toEqual([
+      "cover.open_cover",
+      "cover.close_cover",
+      "cover.open_cover_tilt",
+      "cover.close_cover_tilt",
+    ]);
+  });
+
+  it("do-not-invert flag reports and sends HA numbers", async () => {
+    setFeatureFlags({ coverDoNotInvertPercentage: true });
+    const endpoint = await mount("open", 80);
+    expect(state(endpoint).currentPositionLiftPercent100ths).toBe(8000);
+    calls.length = 0;
+    await goToLift(endpoint, 2500);
+    await delay(500); // past the slider debounce
+    expect(sent()).toEqual([["cover.set_cover_position", 25]]);
+  });
+
+  it("bridge swap reports HA numbers and swaps open and close", async () => {
+    setFeatureFlags({ coverSwapOpenClose: true });
+    const endpoint = await mount("open", 80);
+    expect(state(endpoint).currentPositionLiftPercent100ths).toBe(8000);
+    calls.length = 0;
+    await upOrOpen(endpoint);
+    await downOrClose(endpoint);
+    expect(calls.map((c) => c.action)).toEqual([
+      "cover.close_cover",
+      "cover.open_cover",
+    ]);
   });
 });

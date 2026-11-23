@@ -31,9 +31,9 @@ These flags are configured in **Bridge Settings** and apply to all covers on tha
 
 | Flag | Description |
 |------|-------------|
-| `coverDoNotInvertPercentage` | Skip percentage inversion. By default, HAMH inverts the percentage to match the Matter spec (0% = fully open, 100% = fully closed). Enable this if your cover already uses the Matter convention. **Not Matter compliant** when disabled. |
-| `coverUseHomeAssistantPercentage` | Display HA percentages directly in Matter without conversion. Useful for Alexa where percentage display may be confusing otherwise. |
-| `coverSwapOpenClose` | Swap open and close commands. Fixes reversed commands from Alexa where "open" closes the cover and vice versa. At bridge level it also un-inverts the position percentage. Set it per cover in the Entity Mapping dialog to swap only open/close and leave the percentage alone (see [#406 below](#cover-swap-406)). |
+| `coverUseHomeAssistantPercentage` | The controller shows the same number as Home Assistant, so HA 80% open shows as 80. A request for exactly 0% is sent as open and exactly 100% as close, because Alexa sends its spoken "open" and "close" that way. Open and close commands are not swapped. Use this for Alexa. **Not Matter compliant.** |
+| `coverDoNotInvertPercentage` | Same effect on the numbers as `coverUseHomeAssistantPercentage`, kept for older setups. Open and close commands are not swapped. **Not Matter compliant.** |
+| `coverSwapOpenClose` | At bridge level it swaps the open and close commands for all covers on the bridge and also reports the Home Assistant numbers. Set it per cover in the Entity Mapping dialog to swap only open/close and leave the percentage alone (see [#406 below](#cover-swap-406)). |
 
 ## Percentage Mapping
 
@@ -45,6 +45,8 @@ Matter and Home Assistant use opposite percentage conventions:
 | 100% | Fully open | Fully closed |
 
 By default, HAMH inverts the percentage to comply with the Matter specification. Use the feature flags above if your setup requires different behavior.
+
+The position chip on the device cards in the HAMH web UI always shows percent open, like Home Assistant, whichever flags are set. With the default inversion a cover at 80% shows as "80% open" there while Alexa shows 20.
 
 ## Compatibility
 
@@ -71,7 +73,7 @@ Workaround: set `coverExposeAsDimmableLight` per cover in the Entity Mapping dia
 
 ### Alexa commands are reversed (open → close)
 
-Enable the `coverSwapOpenClose` feature flag in your bridge settings. This is a known Alexa behavior where the open/close direction is reversed for Matter WindowCovering devices.
+Enable `coverSwapOpenClose` on the cover itself in the Entity Mapping dialog. It swaps only open and close and leaves the percentage alone (see [#406 below](#cover-swap-406)). The bridge-wide `coverSwapOpenClose` flag swaps the commands for every cover on the bridge and also changes the reported percentage to the Home Assistant number.
 
 ### Alexa: open/close right but "set to a percentage" inverted (#406) {#cover-swap-406}
 
@@ -85,9 +87,18 @@ Some integrations, for example [Cover Time Based](https://github.com/Sese-Schnei
 
 Fix: turn on **Send open/close as position** (`coverOpenCloseAsPosition`) on that cover in the Entity Mapping dialog. Open and close then go out as `set_cover_position` 100 and 0, from every controller, and the swap setting still applies. Covers without `set_position` keep open/close. Note that a cover already at the end gets no extra open/close, so integrations that resync on a repeated open/close will not do that here. On a cover group, turn it on only if every member handles a position at its ends.
 
-### Percentage shows wrong value in Alexa
+### Percentage shows wrong value in Alexa {#alexa-percentage}
 
-Try enabling `coverUseHomeAssistantPercentage` in bridge settings. Alexa may interpret the Matter percentage differently than other controllers.
+Alexa shows and sends the raw Matter number. With the default inversion a cover at 80% in Home Assistant shows as 20 in Alexa, and "set to 25%" moves it to 75%. To make the numbers match:
+
+1. Open the bridge that is paired with Alexa and choose **Edit** in its menu.
+2. In **Feature Flags**, turn on **Use Home Assistant Percentage for Covers** (`coverUseHomeAssistantPercentage`).
+3. Leave both swap options off, the bridge flag `coverSwapOpenClose` and the per-cover swap in the Entity Mapping dialog.
+4. Save. The reported positions change right away, no restart needed.
+
+If Alexa still shows the old number, move the cover once or let Alexa rediscover devices. The Alexa controller profile and the Alexa bridge template only set this flag on a bridge created with them. Picking them later does not change an existing bridge.
+
+With the flag on, exactly 0% still opens the cover and exactly 100% closes it, because Alexa sends its spoken "open" and "close" as 0% and 100% (#240). Any other percentage goes to Home Assistant as is.
 
 ### Cover cannot be used in Google Home Automations
 
