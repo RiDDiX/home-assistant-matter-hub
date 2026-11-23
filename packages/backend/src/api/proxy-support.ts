@@ -28,7 +28,7 @@ export function supportProxyLocation(
   res: express.Response,
   next: express.NextFunction,
 ) {
-  // supportIngress has already applied the prefix.
+  // supportIngress has already applied the prefix via X-Ingress-Path.
   // See https://github.com/home-assistant/core/pull/193747
   if (req.header(ingressPath) || !(forwardedPrefix in req.headers)) {
     return next();
