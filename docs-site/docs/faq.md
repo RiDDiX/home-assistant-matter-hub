@@ -165,15 +165,14 @@ If this happens on a bridge with script/scene/automation/input_button/button ent
 
 See [#423](https://github.com/RiDDiX/home-assistant-matter-hub/issues/423).
 
-## My cover / blinds open and close commands are inverted
+## My cover / blinds show the wrong percentage or open and close are inverted
 
-Matter and Home Assistant use different conventions for cover position percentages. Use the bridge feature flags to fix this:
+These are two different problems with two different fixes:
 
-- **`coverSwapOpenClose`**, Swaps open/close commands (fixes reversed Alexa commands)
-- **`coverDoNotInvertPercentage`**, Skips percentage inversion
-- **`coverUseHomeAssistantPercentage`**, Uses HA percentages directly
+- **Percentage reversed** (Home Assistant shows 80%, Alexa shows 20): turn on **Use Home Assistant Percentage for Covers** (`coverUseHomeAssistantPercentage`) in the Feature Flags of the bridge. `coverDoNotInvertPercentage` does the same to the numbers and is kept for older setups. See [Percentage shows wrong value in Alexa](./devices/cover.md#alexa-percentage).
+- **Open and close reversed**: enable `coverSwapOpenClose` on the cover itself in the Entity Mapping dialog. It swaps only the commands. The bridge-wide `coverSwapOpenClose` flag also changes the reported percentage. See [the cover page](./devices/cover.md#cover-swap-406).
 
-Configure these in your Bridge Settings → Feature Flags. See [#107](https://github.com/RiDDiX/home-assistant-matter-hub/issues/107), [#109](https://github.com/RiDDiX/home-assistant-matter-hub/issues/109).
+See [#107](https://github.com/RiDDiX/home-assistant-matter-hub/issues/107), [#109](https://github.com/RiDDiX/home-assistant-matter-hub/issues/109).
 
 ## Battery shows as a separate device instead of being part of the sensor
 

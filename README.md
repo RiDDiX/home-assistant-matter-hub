@@ -39,7 +39,7 @@ of port forwarding etc.
 | Channel | Branch | Current Version | Description |
 |---------|--------|-----------------|-------------|
 | **Stable** | `main` | v2.0.60 | Production-ready, recommended for most users |
-| **Alpha** | `alpha` | v2.1.0-alpha.1003 | Ahead of Stable, carries the additions listed under Alpha Features |
+| **Alpha** | `alpha` | v2.1.0-alpha.1005 | Ahead of Stable, carries the additions listed under Alpha Features |
 | **Testing** | `testing` | v4.1.0-testing.x | ⚠️ **Highly unstable!** Experimental features, may break |
 
 ### Which version should I use?
@@ -549,6 +549,19 @@ Re-assign the affected devices to their rooms after they reconnect. See the [doc
 
 <details>
 <summary><strong>🧪 Alpha Features (v2.1.0-alpha.x)</strong> - Click to expand</summary>
+
+**v2.1.0-alpha.1005:**
+- **Cover percentage flags** ([#448](https://github.com/RiDDiX/home-assistant-matter-hub/discussions/448)): a changed cover percentage flag reaches the controllers when the bridge is saved. Before, the old number stayed until the cover moved in Home Assistant or the bridge restarted.
+- **Web UI** ([#448](https://github.com/RiDDiX/home-assistant-matter-hub/discussions/448)): the cover chip on the endpoint card follows the cover flags of the bridge. With "Use Home Assistant Percentage for Covers" on, a cover at 80% in Home Assistant was shown as 20% open.
+- **Cover tilt**: open and close tilt on covers that only take a tilt position go to the right end when a cover percentage flag is on, and follow the per-cover open/close swap.
+- **Cover positions**: a fractional Home Assistant position such as 66.7 is rounded before it goes to Matter, and position commands reach Home Assistant as whole percent.
+- **Cover flag texts**: the descriptions of the three cover flags, the wizard option (now "Swap Cover Open/Close") and the cover docs say what each flag does. With "Use Home Assistant Percentage for Covers" on, exactly 0% still opens and exactly 100% still closes, because Alexa sends open and close that way.
+
+**v2.1.0-alpha.1004:**
+- **Bridge start** ([#543](https://github.com/RiDDiX/home-assistant-matter-hub/issues/543)): a paired bridge also waits when a device it already had could not be created or added at start. It retries for up to 30 seconds, then starts without it. alpha.1003 only waited for a device whose Home Assistant state was missing.
+- **Device class filter** ([#543](https://github.com/RiDDiX/home-assistant-matter-hub/issues/543)): a filter on a device class remembers the last class of each entity and uses it while the state is missing, unavailable or unknown. Before, such a device could drop out of the bridge until its state came back.
+- **Bridge refresh**: a refresh while Home Assistant is not running, or with an empty registry, keeps the last good device list.
+- **Home Assistant data**: a changed device class triggers a registry reload, also when it arrives over the live subscription.
 
 **v2.1.0-alpha.1003:**
 - **Bridge start** ([#543](https://github.com/RiDDiX/home-assistant-matter-hub/issues/543)): a paired bridge no longer goes online without a device whose Home Assistant state is still missing at start. It reloads the registry for up to 30 seconds, then starts. The wait of up to 10 minutes stays for the case that Home Assistant itself is not ready.

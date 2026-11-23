@@ -302,9 +302,9 @@ Feature flags control advanced behavior of the bridge. Configure them in the **B
 | `autoHumidityMapping` | Automatically combines humidity sensors with temperature sensors | `true` |
 | `autoPressureMapping` | Automatically combines pressure sensors with temperature sensors | `true` |
 | `autoForceSync` | Periodically push all device states to controllers every 90 seconds. Enable if devices get out of sync. | `false` |
-| `coverSwapOpenClose` | Swap open/close commands for covers (fixes reversed Alexa commands) | `false` |
-| `coverDoNotInvertPercentage` | Skip percentage inversion for covers (not Matter-compliant) | `false` |
-| `coverUseHomeAssistantPercentage` | Use HA percentages directly (Alexa-friendly) | `false` |
+| `coverSwapOpenClose` | Swap open and close commands for all covers on the bridge and report the HA percentage. To swap only the commands, set it per cover in Entity Mapping instead | `false` |
+| `coverDoNotInvertPercentage` | Same effect on the numbers as `coverUseHomeAssistantPercentage`, kept for older setups (not Matter-compliant) | `false` |
+| `coverUseHomeAssistantPercentage` | Controllers show the same percentage as HA. Exactly 0% and 100% act as open and close. Use this for Alexa (not Matter-compliant) | `false` |
 | `includeHiddenEntities` | Include entities marked as hidden in Home Assistant | `false` |
 | `serverMode` | Expose device as standalone Matter device (required for Robot Vacuums with Apple Home/Alexa). Only ONE device per bridge! | `false` |
 | `productNameFromNodeLabel` | Report the node label (custom name / friendly name / entity id) as Matter `productName`. Useful for Aqara controllers that show productName as the device name. A per-entity `customProductName` still wins. | `false` |
