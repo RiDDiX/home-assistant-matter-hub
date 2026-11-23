@@ -28,7 +28,9 @@ export function supportProxyLocation(
   res: express.Response,
   next: express.NextFunction,
 ) {
-  if (!(forwardedPrefix in req.headers)) {
+  // Home Assistant ingress sends both headers with the same value and strips
+  // the prefix from the URL; supportIngress has already applied it.
+  if (req.header(ingressPath) || !(forwardedPrefix in req.headers)) {
     return next();
   }
   const prefix = req.header(forwardedPrefix);
