@@ -6,7 +6,12 @@ import { supportIngress, supportProxyLocation } from "./proxy-support.js";
 const ingress = "/api/hassio_ingress/abc";
 
 describe("proxy support", () => {
-  it.each([
+  it.each<{
+    name: string;
+    path: string;
+    headers: Record<string, string>;
+    expected: { baseUrl: string; url: string };
+  }>([
     {
       name: "Home Assistant ingress with X-Forwarded-Prefix",
       path: "/api/x",
