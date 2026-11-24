@@ -1,6 +1,6 @@
 # Temperature, Humidity & Pressure Sensor
 
-Changed in v2.1.0-alpha.1006. Earlier versions, including Stable up to v2.0.60, report humidity and pressure on the temperature sensor's endpoint.
+Changed in v2.1.0. Earlier versions, up to v2.0.60, report humidity and pressure on the temperature sensor's endpoint.
 
 Home Assistant often reports temperature, humidity, pressure, and battery level from a physical sensor as separate entities. By default, HAMH exposes each measurement on its own Matter endpoint. The temperature endpoint can also report the sensor's battery level.
 
