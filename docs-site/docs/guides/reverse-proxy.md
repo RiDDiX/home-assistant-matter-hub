@@ -73,4 +73,4 @@ location /hamh/ {
 }
 ```
 
-Earlier versions of this guide set `x-forwarded-prefix` here instead. That still works, but `--http-base-path` is preferred, because `x-forwarded-prefix` is meant for a prefix that the proxy removed.
+> **Deprecated:** Earlier versions of this guide set `x-forwarded-prefix` here instead. That still works, but HAMH logs a warning, and it may stop working in a future version. Either add the trailing slash to `proxy_pass` so nginx removes the sub-path, or remove the `x-forwarded-prefix` line and set `--http-base-path` at the same time.

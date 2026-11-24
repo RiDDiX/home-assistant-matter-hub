@@ -206,7 +206,7 @@ export class WebApi extends Service {
     const middlewares: express.Handler[] = [
       this.accessLogger,
       hostGuard(this.props.allowedHosts),
-      supportProxyPrefix,
+      supportProxyPrefix(this.log),
     ];
 
     // Whitelist first, so denied clients never get an auth challenge.
