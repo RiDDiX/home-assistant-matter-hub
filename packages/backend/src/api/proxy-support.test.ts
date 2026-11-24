@@ -25,7 +25,19 @@ describe("proxy support", () => {
       expected: { baseUrl: ingress, url: "/api/x" },
     },
     {
-      name: "reverse proxy with X-Forwarded-Prefix",
+      name: "Home Assistant ingress without X-Ingress-Path",
+      path: "/api/x",
+      headers: { "x-forwarded-prefix": ingress },
+      expected: { baseUrl: ingress, url: "/api/x" },
+    },
+    {
+      name: "X-Forwarded-Prefix over X-Ingress-Path",
+      path: "/api/x",
+      headers: { "x-ingress-path": "/old", "x-forwarded-prefix": ingress },
+      expected: { baseUrl: ingress, url: "/api/x" },
+    },
+    {
+      name: "reverse proxy that keeps X-Forwarded-Prefix in the URL",
       path: "/hamh/api/x",
       headers: { "x-forwarded-prefix": "/hamh" },
       expected: { baseUrl: "/hamh", url: "/api/x" },

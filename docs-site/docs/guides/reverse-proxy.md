@@ -38,7 +38,7 @@ There are two ways of doing that:
 ## Rewriting the URL, excluding the sub-path
 
 When you are using an ingress-like configuration, where the sub-path gets removed from the URL, make sure to add a
-`x-ingress-path` header and pass in the path value. That's what Home Assistant does internally.
+`x-ingress-path` header and pass in the path value. `x-forwarded-prefix` works here too, and takes precedence when both are set.
 
 > **Note on trust:** HAMH uses the `x-ingress-path` and `x-forwarded-prefix` headers verbatim to rebuild URLs for the web UI. If the app is reachable directly (no reverse proxy in front), a client could set these headers themselves. Either run HAMH behind a trusted proxy that strips/overwrites them, or bind HAMH to a local interface only and expose it exclusively via the proxy.
 

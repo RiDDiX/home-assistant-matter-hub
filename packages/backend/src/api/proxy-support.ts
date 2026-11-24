@@ -9,7 +9,9 @@ export function supportIngress(
   _: express.Response,
   next: express.NextFunction,
 ) {
-  if (!(ingressPath in req.headers)) {
+  // Home Assistant sends both headers, supportProxyLocation applies the prefix.
+  // See https://github.com/home-assistant/core/pull/193747
+  if (req.header(forwardedPrefix) || !(ingressPath in req.headers)) {
     return next();
   }
   const prefix = req.header(ingressPath);
@@ -25,12 +27,10 @@ export function supportIngress(
 
 export function supportProxyLocation(
   req: express.Request,
-  res: express.Response,
+  _: express.Response,
   next: express.NextFunction,
 ) {
-  // supportIngress has already applied the prefix via X-Ingress-Path.
-  // See https://github.com/home-assistant/core/pull/193747
-  if (req.header(ingressPath) || !(forwardedPrefix in req.headers)) {
+  if (!(forwardedPrefix in req.headers)) {
     return next();
   }
   const prefix = req.header(forwardedPrefix);
@@ -41,16 +41,14 @@ export function supportProxyLocation(
   if (baseUrl.endsWith("/")) {
     baseUrl = baseUrl.slice(0, -1);
   }
-  if (!req.url.startsWith(`${baseUrl}/`)) {
-    res
-      .status(400)
-      .contentType("text/plain")
-      .send(`URL ${req.url} does not match base url ${baseUrl}`);
-    return;
-  }
+  // Home Assistant ingress removes the prefix from the URL, other proxies may
+  // keep it.
+  const url = req.url.startsWith(`${baseUrl}/`)
+    ? req.url.slice(baseUrl.length)
+    : buildPath(req.url);
   req.baseUrl = baseUrl;
-  req.originalUrl = req.url;
-  req.url = req.url.slice(baseUrl.length);
+  req.originalUrl = `${baseUrl}${url}`;
+  req.url = url;
   next();
 }
 
