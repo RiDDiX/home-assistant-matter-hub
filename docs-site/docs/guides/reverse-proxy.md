@@ -37,6 +37,8 @@ If your proxy cannot remove it, configure the sub-path in HAMH instead.
 
 ## Removing the sub-path from the URL
 
+Do not use `/api` or `/assets` as the sub-path here, because HAMH uses them itself.
+
 For nginx this looks like:
 
 ```nginx

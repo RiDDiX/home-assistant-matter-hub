@@ -6,7 +6,7 @@ import { supportProxyPrefix } from "./proxy-support.js";
 
 const ingress = "/api/hassio_ingress/abc";
 
-describe("proxy support", () => {
+describe("supportProxyPrefix", () => {
   it.each<{
     name: string;
     path: string;
@@ -43,6 +43,18 @@ describe("proxy support", () => {
       path: "/api/x",
       headers: { "x-forwarded-prefix": "hamh/" },
       expected: { baseUrl: "/hamh", url: "/api/x" },
+    },
+    {
+      name: "reverse proxy that leaves two slashes",
+      path: "//api/x",
+      headers: { "x-forwarded-prefix": "/hamh" },
+      expected: { baseUrl: "/hamh", url: "/api/x" },
+    },
+    {
+      name: "query that looks like a path",
+      path: "/api/x?u=a//b/../c",
+      headers: { "x-forwarded-prefix": "/hamh" },
+      expected: { baseUrl: "/hamh", url: "/api/x?u=a//b/../c" },
     },
     {
       name: "reverse proxy that keeps X-Forwarded-Prefix in the URL",
@@ -84,7 +96,9 @@ describe("proxy support", () => {
     const log = { warn: vi.fn() };
     const app = express()
       .use(supportProxyPrefix(log as never as BetterLogger))
-      .use((req, res) => res.json({ baseUrl: req.baseUrl, url: req.url }));
+      .use(({ baseUrl, url, originalUrl }, res) =>
+        res.json({ baseUrl, url, originalUrl }),
+      );
     const server = app.listen(0);
     try {
       await new Promise<void>((resolve) => server.once("listening", resolve));
@@ -93,7 +107,10 @@ describe("proxy support", () => {
       for (let i = 0; i < 2; i++) {
         const res = await fetch(`http://127.0.0.1:${port}${path}`, { headers });
         expect(res.status).toBe(200);
-        expect(await res.json()).toEqual(expected);
+        expect(await res.json()).toEqual({
+          ...expected,
+          originalUrl: expected.baseUrl + expected.url,
+        });
       }
       expect(log.warn).toHaveBeenCalledTimes(warnings);
     } finally {

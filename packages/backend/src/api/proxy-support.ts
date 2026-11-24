@@ -16,16 +16,16 @@ export function supportProxyPrefix(log: BetterLogger): express.RequestHandler {
     if (!prefix) {
       return next();
     }
-    let baseUrl = buildPath(prefix, req.baseUrl);
-    if (baseUrl.endsWith("/")) {
-      baseUrl = baseUrl.slice(0, -1);
-    }
-    let url = buildPath(req.url);
+    const baseUrl = path.posix
+      .join("/", prefix, req.baseUrl)
+      .replace(/\/$/, "");
+    // Removing a prefix without its trailing slash can leave two slashes.
+    let url = req.url.replace(/^\/+/, "/");
     // Deprecated: older versions required X-Forwarded-Prefix to still be in the
     // URL. A sub-path like /api is ambiguous here, as it is also a route of ours.
     // To remove it, also remove shouldHandle in websocket-api.ts.
-    if (forwarded && baseUrl && req.url.startsWith(`${baseUrl}/`)) {
-      url = req.url.slice(baseUrl.length);
+    if (forwarded && baseUrl && url.startsWith(`${baseUrl}/`)) {
+      url = url.slice(baseUrl.length);
       if (!warned) {
         warned = true;
         log.warn(
@@ -38,12 +38,4 @@ export function supportProxyPrefix(log: BetterLogger): express.RequestHandler {
     req.url = url;
     next();
   };
-}
-
-function buildPath(...paths: string[]): string {
-  let result = path.posix.join(...paths);
-  if (!result.startsWith("/")) {
-    result = `/${result}`;
-  }
-  return result;
 }
