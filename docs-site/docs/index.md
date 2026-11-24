@@ -550,6 +550,14 @@ Home, ...) are not placed in the same network segment. Please make sure to revie
 <details>
 <summary><strong>🧪 Alpha (v2.1.0-alpha.x)</strong></summary>
 
+**v2.1.0-alpha.1006:**
+- **Temperature, humidity and pressure sensors** ([#549](https://github.com/RiDDiX/home-assistant-matter-hub/issues/549)): humidity and pressure no longer share the endpoint of the temperature sensor. Each reading is its own device with one device type. Before, the temperature endpoint carried two or three device types. The temperature device keeps its identity, controllers find humidity and pressure as new devices, and no new pairing is needed. With Auto Composed Devices on, the readings stay sub-devices of one device as before.
+- **Auto Humidity Mapping and Auto Pressure Mapping**: with a temperature sensor in the bridge, the humidity and pressure sensors of the same Home Assistant device are added as their own devices, also when the filter does not match them. Exclude rules, hidden entities and "Disable this entity" on the sensor are honored.
+- **Upgrade note**: a humidity or pressure sensor that was disabled in its mapping or excluded to avoid a duplicate device is no longer reported, because the reading now only exists on that sensor's own device. Re-enable it or turn on Auto Composed Devices. The bridge logs one warning per sensor and lists it on the Diagnostics page.
+- **Humidity and pressure sensor in the entity mapping**: the picked sensor needs a humidity or pressure device class, or no device class and a unit of % or a pressure unit. Anything else is ignored with a warning. Before, any sensor was accepted.
+- **Battery**: with Auto Battery Mapping on, the battery of a sensor shows on its temperature device only, not also on its humidity and pressure devices.
+- **Standalone devices**: a standalone device with a temperature sensor gets the humidity and pressure sensors of the same Home Assistant device as separate devices too, within the limit of ten.
+
 **v2.1.0-alpha.1005:**
 - **Cover percentage flags** ([#448](https://github.com/RiDDiX/home-assistant-matter-hub/discussions/448)): a changed cover percentage flag reaches the controllers when the bridge is saved. Before, the old number stayed until the cover moved in Home Assistant or the bridge restarted.
 - **Web UI** ([#448](https://github.com/RiDDiX/home-assistant-matter-hub/discussions/448)): the cover chip on the endpoint card follows the cover flags of the bridge. With "Use Home Assistant Percentage for Covers" on, a cover at 80% in Home Assistant was shown as 20% open.
