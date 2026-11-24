@@ -103,7 +103,10 @@ describe("WebSocketApi", () => {
     expect(messages[0].type).toBe("bridges_update");
   });
 
-  it("rejects a cross-site origin even with proxy headers", async () => {
+  it.each([
+    "x-ingress-path",
+    "x-forwarded-prefix",
+  ])("rejects a cross-site origin even with %s", async (header) => {
     const { base } = await serve([], undefined, ["matter.example.org"]);
     const host = base.slice("ws://".length);
 
@@ -115,7 +118,7 @@ describe("WebSocketApi", () => {
     await expect(
       connect(`${base}/api/ws`, {
         origin: "http://evil.example",
-        "x-ingress-path": "/api/hassio_ingress/abc",
+        [header]: "/api/hassio_ingress/abc",
         "x-forwarded-for": "192.168.1.20",
       }),
     ).rejects.toThrow("403");

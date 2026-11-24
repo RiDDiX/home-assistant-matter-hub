@@ -9,13 +9,14 @@ const ingress = "/api/hassio_ingress/abc";
 describe("supportProxyPrefix", () => {
   it.each<{
     name: string;
+    mount?: string;
     path: string;
     headers: Record<string, string>;
-    expected: { baseUrl: string; url: string };
+    expected: { baseUrl: string; url: string; originalUrl?: string };
     warnings?: number;
   }>([
     {
-      name: "Home Assistant ingress with X-Forwarded-Prefix",
+      name: "ingress path in both headers",
       path: "/api/x",
       headers: { "x-ingress-path": ingress, "x-forwarded-prefix": ingress },
       expected: { baseUrl: ingress, url: "/api/x" },
@@ -27,7 +28,7 @@ describe("supportProxyPrefix", () => {
       expected: { baseUrl: ingress, url: "/api/x" },
     },
     {
-      name: "Home Assistant ingress without X-Ingress-Path",
+      name: "ingress path in X-Forwarded-Prefix only",
       path: "/api/x",
       headers: { "x-forwarded-prefix": ingress },
       expected: { baseUrl: ingress, url: "/api/x" },
@@ -87,18 +88,46 @@ describe("supportProxyPrefix", () => {
       headers: { "x-ingress-path": "/api" },
       expected: { baseUrl: "/api", url: "/api/x" },
     },
+    {
+      name: "empty X-Forwarded-Prefix with X-Ingress-Path",
+      path: "/api/x",
+      headers: { "x-forwarded-prefix": "", "x-ingress-path": "/i" },
+      expected: { baseUrl: "/i", url: "/api/x", originalUrl: "/i/api/x" },
+    },
+    {
+      name: "router mounted under a base path",
+      mount: "/b",
+      path: "/b/api/x",
+      headers: { "x-forwarded-prefix": "/i" },
+      expected: { baseUrl: "/i/b", url: "/api/x", originalUrl: "/i/b/api/x" },
+    },
+    {
+      name: "prefix with % ~ . _ -",
+      path: "/api/x",
+      headers: { "x-forwarded-prefix": "/a%20b/~c.d_e-f" },
+      expected: {
+        baseUrl: "/a%20b/~c.d_e-f",
+        url: "/api/x",
+        originalUrl: "/a%20b/~c.d_e-f/api/x",
+      },
+    },
   ])("resolves the base url for $name", async ({
+    mount = "/",
     path,
     headers,
     expected,
     warnings = 0,
   }) => {
     const log = { warn: vi.fn() };
-    const app = express()
-      .use(supportProxyPrefix(log as never as BetterLogger))
-      .use(({ baseUrl, url, originalUrl }, res) =>
-        res.json({ baseUrl, url, originalUrl }),
-      );
+    const app = express().use(
+      mount,
+      express
+        .Router()
+        .use(supportProxyPrefix(log as never as BetterLogger))
+        .use(({ baseUrl, url, originalUrl }, res) =>
+          res.json({ baseUrl, url, originalUrl }),
+        ),
+    );
     const server = app.listen(0);
     try {
       await new Promise<void>((resolve) => server.once("listening", resolve));
@@ -108,11 +137,38 @@ describe("supportProxyPrefix", () => {
         const res = await fetch(`http://127.0.0.1:${port}${path}`, { headers });
         expect(res.status).toBe(200);
         expect(await res.json()).toEqual({
-          ...expected,
           originalUrl: expected.baseUrl + expected.url,
+          ...expected,
         });
       }
       expect(log.warn).toHaveBeenCalledTimes(warnings);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it.each([
+    "\\evil.example",
+    "/a\t/evil.example",
+    "/a, /b",
+  ])("rejects the prefix %j", async (prefix) => {
+    const reached = vi.fn();
+    const app = express()
+      .use(supportProxyPrefix({ warn: vi.fn() } as never as BetterLogger))
+      .use(reached);
+    const server = app.listen(0);
+    try {
+      await new Promise<void>((resolve) => server.once("listening", resolve));
+      const { port } = server.address() as AddressInfo;
+      const res = await fetch(`http://127.0.0.1:${port}/api/x`, {
+        headers: { "x-forwarded-prefix": prefix },
+      });
+      expect(res.status).toBe(400);
+      expect(res.headers.get("content-type")).toMatch(/^text\/plain/);
+      expect(await res.text()).toBe(
+        "X-Forwarded-Prefix or X-Ingress-Path must be a plain path like /hamh",
+      );
+      expect(reached).not.toHaveBeenCalled();
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }

@@ -38,6 +38,7 @@ If your proxy cannot remove it, configure the sub-path in HAMH instead.
 ## Removing the sub-path from the URL
 
 Do not use `/api` or `/assets` as the sub-path here, because HAMH uses them itself.
+The header value must be a plain path such as `/hamh`. Only letters, digits and `/ - _ . ~ %` are accepted, HAMH answers 400 if it contains any other character.
 
 For nginx this looks like:
 
@@ -54,7 +55,7 @@ location /hamh/ {
 }
 ```
 
-`x-ingress-path` is only there for compatibility with Home Assistant versions older than 2026.12. Use `x-forwarded-prefix` in your own proxy.
+`x-ingress-path` is the header Home Assistant ingress sends. Use `x-forwarded-prefix` in your own proxy.
 
 > **Note on trust:** HAMH uses the `x-forwarded-prefix` and `x-ingress-path` headers verbatim to rebuild URLs for the web UI. If the app is reachable directly (no reverse proxy in front), a client could set these headers themselves. Either run HAMH behind a trusted proxy that strips/overwrites them, or bind HAMH to a local interface only and expose it exclusively via the proxy.
 

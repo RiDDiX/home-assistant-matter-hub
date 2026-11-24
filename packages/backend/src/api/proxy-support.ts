@@ -3,18 +3,28 @@ import type express from "express";
 import type { BetterLogger } from "../core/app/logger.js";
 
 const forwardedPrefix = "x-forwarded-prefix";
-// Only for Home Assistant versions older than 2026.12, newer ones also send
-// X-Forwarded-Prefix. See https://github.com/home-assistant/core/pull/193747
+// Home Assistant ingress sends this, X-Forwarded-Prefix is proposed to replace
+// it. See https://github.com/home-assistant/core/pull/193747
 const ingressPath = "x-ingress-path";
 
 // Both headers carry the path prefix that the proxy removed from the URL.
 export function supportProxyPrefix(log: BetterLogger): express.RequestHandler {
   let warned = false;
-  return (req, _, next) => {
+  return (req, res, next) => {
     const forwarded = req.header(forwardedPrefix);
     const prefix = forwarded || req.header(ingressPath);
     if (!prefix) {
       return next();
+    }
+    // A backslash or tab can make the base href another origin, a comma is two values.
+    if (!/^[\w.~%/-]+$/.test(prefix)) {
+      res
+        .status(400)
+        .contentType("text/plain")
+        .send(
+          "X-Forwarded-Prefix or X-Ingress-Path must be a plain path like /hamh",
+        );
+      return;
     }
     const baseUrl = path.posix
       .join("/", prefix, req.baseUrl)

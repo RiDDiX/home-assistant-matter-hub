@@ -1,4 +1,5 @@
 import type * as http from "node:http";
+import path from "node:path";
 import express from "express";
 import basicAuth from "express-basic-auth";
 import AccessControl from "express-ip-access-control";
@@ -203,10 +204,11 @@ export class WebApi extends Service {
         ),
       );
 
+    const proxyPrefix = supportProxyPrefix(this.log);
     const middlewares: express.Handler[] = [
       this.accessLogger,
       hostGuard(this.props.allowedHosts),
-      supportProxyPrefix(this.log),
+      proxyPrefix,
     ];
 
     // Whitelist first, so denied clients never get an auth challenge.
@@ -243,7 +245,9 @@ export class WebApi extends Service {
     const basePath = this.props.basePath;
     if (basePath !== "/") {
       this.log.info(`Base path configured: ${basePath}`);
-      this.app.get("/", (_req, res) => res.redirect(basePath));
+      this.app.get("/", proxyPrefix, (req, res) =>
+        res.redirect(path.posix.join("/", req.baseUrl, basePath)),
+      );
     }
     this.app.use(basePath, appRouter);
     // Express' default handler answers with the stack trace outside production.

@@ -47,6 +47,7 @@ async function serve(
     stored = false,
     anonymous = false,
     allowedHosts = [] as string[],
+    basePath = "/",
   } = {},
 ) {
   cleanup.push(async () => rmSync(dir, { recursive: true, force: true }));
@@ -75,7 +76,7 @@ async function serve(
       allowedHosts,
       version: "test",
       storageLocation: dir,
-      basePath: "/",
+      basePath,
       auth: stored || anonymous ? undefined : auth,
     },
   );
@@ -242,6 +243,16 @@ describe("WebApi auth", () => {
     const headers = { [header]: "/api/hassio_ingress/abc" };
     expect(await get(host, "/api/settings/auth", undefined, headers)).toBe(401);
     expect(await upgrade(host, undefined, headers)).toBe(401);
+  });
+
+  it("redirects the root to the base path under the proxy prefix", async () => {
+    const host = await serve(undefined, { basePath: "/b" });
+    const location = (headers?: Record<string, string>) =>
+      fetch(`http://${host}/`, { headers, redirect: "manual" }).then((res) =>
+        res.headers.get("location"),
+      );
+    expect(await location()).toBe("/b");
+    expect(await location({ "x-forwarded-prefix": "/i" })).toBe("/i/b");
   });
 
   it("still challenges ingress with stored settings auth", async () => {
