@@ -32,15 +32,14 @@ So a proxy on `matter.example.org` needs `--http-allowed-hosts=matter.example.or
 
 ## Running in a sub-path
 
-If you want to run the application in a sub-location, we need tell the application that it's run under that path.
-There are two ways of doing that:
+If you want to run the application in a sub-location, set the `x-forwarded-prefix` header to that path in your proxy.
+It works whether or not your proxy removes the sub-path from the URL.
+
+`x-ingress-path` is only there for compatibility with Home Assistant versions older than 2026.12.
+
+> **Note on trust:** HAMH uses the `x-forwarded-prefix` and `x-ingress-path` headers verbatim to rebuild URLs for the web UI. If the app is reachable directly (no reverse proxy in front), a client could set these headers themselves. Either run HAMH behind a trusted proxy that strips/overwrites them, or bind HAMH to a local interface only and expose it exclusively via the proxy.
 
 ## Rewriting the URL, excluding the sub-path
-
-When you are using an ingress-like configuration, where the sub-path gets removed from the URL, make sure to add a
-`x-ingress-path` header and pass in the path value. `x-forwarded-prefix` works here too, and takes precedence when both are set.
-
-> **Note on trust:** HAMH uses the `x-ingress-path` and `x-forwarded-prefix` headers verbatim to rebuild URLs for the web UI. If the app is reachable directly (no reverse proxy in front), a client could set these headers themselves. Either run HAMH behind a trusted proxy that strips/overwrites them, or bind HAMH to a local interface only and expose it exclusively via the proxy.
 
 For nginx this looks like:
 
@@ -49,7 +48,7 @@ location /hamh/ {
     # it is important to have a trailing slash,
     # otherwise nginx will not remove the "hamh" prefix
     proxy_pass http://192.168.178.23:8482/;
-    proxy_set_header x-ingress-path hamh;
+    proxy_set_header x-forwarded-prefix hamh;
     proxy_http_version 1.1;
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
     proxy_set_header Upgrade $http_upgrade;
@@ -58,8 +57,6 @@ location /hamh/ {
 ```
 
 ## Not rewriting the URL, including the path
-
-If you cannot (or don't want to) configure your proxy to remove the prefix, set `x-forwarded-prefix` instead.
 
 For nginx this looks like:
 

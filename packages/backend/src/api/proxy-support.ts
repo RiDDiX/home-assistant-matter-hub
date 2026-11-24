@@ -9,7 +9,8 @@ export function supportIngress(
   _: express.Response,
   next: express.NextFunction,
 ) {
-  // Home Assistant sends both headers, supportProxyLocation applies the prefix.
+  // X-Ingress-Path is only for Home Assistant versions older than 2026.12, newer
+  // ones send X-Forwarded-Prefix too, which supportProxyLocation applies.
   // See https://github.com/home-assistant/core/pull/193747
   if (req.header(forwardedPrefix) || !(ingressPath in req.headers)) {
     return next();
