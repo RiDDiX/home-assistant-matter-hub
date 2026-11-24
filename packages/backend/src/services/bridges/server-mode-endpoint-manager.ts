@@ -364,6 +364,7 @@ export class ServerModeEndpointManager extends Service {
               );
             }
           : undefined,
+        true,
       );
     }
     let reconciled = false;

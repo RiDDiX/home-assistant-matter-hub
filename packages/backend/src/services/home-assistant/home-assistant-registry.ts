@@ -408,8 +408,15 @@ export class HomeAssistantRegistry extends Service {
     // filters after recovery until the next structural change or restart,
     // hash availability here if that ever matters
     for (const { entity_id } of statesList) {
+      const attributes = states[entity_id].attributes;
+      const deviceClass = attributes?.device_class;
+      // A manual humidity or pressure source can derive its type from its unit.
+      const unit =
+        !deviceClass && entity_id.startsWith("sensor.")
+          ? attributes?.unit_of_measurement
+          : undefined;
       hash.update(
-        `${entity_id}\0${states[entity_id].attributes?.device_class ?? ""}\n`,
+        `${entity_id}\0${deviceClass ?? ""}\0${typeof unit === "string" ? unit : ""}\n`,
       );
     }
     for (const d of deviceRegistry) {

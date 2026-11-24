@@ -487,6 +487,32 @@ describe("HomeAssistantRegistry", () => {
     expect(registry.devices.d1?.default_model).toBe("New");
   });
 
+  it("reconciles when a classless sensor first reports a measurement unit", async () => {
+    const fake = makeConnection();
+    const entity_id = "sensor.template_humidity";
+    let value = "unavailable";
+    let attributes: Record<string, string> = {};
+    fake.connection.sendMessagePromise = vi.fn((message: { type: string }) =>
+      Promise.resolve(
+        message.type === "get_states"
+          ? [{ entity_id, state: value, attributes }]
+          : [],
+      ),
+    ) as unknown as Connection["sendMessagePromise"];
+    const registry = new HomeAssistantRegistry(
+      { connection: fake.connection, haRunning: true } as HomeAssistantClient,
+      defaultOptions,
+    );
+    await vi.runAllTimersAsync();
+    await registry.construction;
+
+    value = "48";
+    attributes = { unit_of_measurement: "%" };
+    await expect(registry.reload()).resolves.toBe(true);
+    value = "54";
+    await expect(registry.reload()).resolves.toBe(false);
+  });
+
   // identity-resolver keys endpoints on it
   it("picks up an entity unique_id change on its own", async () => {
     const fake = makeConnection();

@@ -100,8 +100,9 @@ export class EntityMappingSync {
     if (entityId.startsWith("binary_sensor.")) return false;
     if (
       entityId.startsWith("sensor.") &&
-      this.registry.initialState(entityId)?.attributes?.device_class ===
-        "battery"
+      (this.registry.initialState(entityId)?.attributes?.device_class ===
+        "battery" ||
+        this.registry.isTemperatureCompanionSharingBattery(entityId))
     ) {
       return false;
     }
@@ -136,49 +137,35 @@ export class EntityMappingSync {
     return JSON.stringify(tuple);
   }
 
-  // #505: auto-resolved sensors that decide the endpoint shape, mirrors
-  // LegacyEndpoint.create: an air purifier composes over its device's
-  // temperature and humidity, a temperature sensor merges or composes its
-  // humidity and pressure (a user composite still merges them into its
-  // primary). A null slot is not resolvable right now, null = no companions.
+  // #505: composed children are part of the endpoint shape. A mapped
+  // measurement with no state has no child until its payload arrives.
   private companions(
     mapping: EntityMappingConfig | undefined,
     entityId: string,
   ): (string | null)[] | null {
     const r = this.registry;
+    if (!this.composes || !r.isAutoComposedDevicesEnabled?.()) return null;
+    if (entityId.startsWith("sensor.")) {
+      const companions = r.composedTemperatureCompanions(entityId);
+      return companions
+        ? [companions.humidityEntityId, companions.pressureEntityId].map(
+            (id) => (id && r.initialStateIncludingUnfiltered(id) ? id : null),
+          )
+        : null;
+    }
     const deviceId = r.entity(entityId)?.device_id;
-    if (!deviceId) return null;
-    let slots: (string | undefined)[];
-    if (entityId.startsWith("fan.")) {
-      if (
-        !this.composes ||
-        !r.isAutoComposedDevicesEnabled?.() ||
-        !!mapping?.composedEntities?.length ||
-        (mapping?.matterDeviceType ?? "fan") !== "air_purifier"
-      ) {
-        return null;
-      }
-      slots = [
-        mapping?.temperatureEntity ||
-          r.findTemperatureEntityForDevice(deviceId),
-        mapping?.humidityEntity || r.findHumidityEntityForDevice(deviceId),
-      ];
-    } else if (
-      entityId.startsWith("sensor.") &&
-      r.initialState(entityId)?.attributes?.device_class === "temperature"
+    if (
+      !deviceId ||
+      !entityId.startsWith("fan.") ||
+      !!mapping?.composedEntities?.length ||
+      (mapping?.matterDeviceType ?? "fan") !== "air_purifier"
     ) {
-      slots = [
-        !mapping?.humidityEntity && r.isAutoHumidityMappingEnabled?.()
-          ? r.findHumidityEntityForDevice(deviceId)
-          : undefined,
-        !mapping?.pressureEntity && r.isAutoPressureMappingEnabled?.()
-          ? r.findPressureEntityForDevice(deviceId)
-          : undefined,
-      ];
-    } else {
       return null;
     }
-    return slots.map((id) => (id && id !== entityId ? id : null));
+    return [
+      mapping?.temperatureEntity || r.findTemperatureEntityForDevice(deviceId),
+      mapping?.humidityEntity || r.findHumidityEntityForDevice(deviceId),
+    ].map((id) => (id && id !== entityId ? id : null));
   }
 
   // A mapped sensor whose state is missing right now (HA restart) still
@@ -230,9 +217,10 @@ export class EntityMappingSync {
       }
     }
     const deviceId = this.registry.entity(entityId)?.device_id;
-    // #505: a stored companion stays until it leaves the device or is
-    // disabled, a vanished state or a second same-class sensor never rebuilds
-    const at = entityId.startsWith("fan.") ? 3 : 2;
+    // #505: keep children through a temporary missing state. For temperature
+    // sensors the registry still checks the current mapping and ownership.
+    const isFan = entityId.startsWith("fan.");
+    const at = isFan ? 3 : 2;
     const storedCompanions = storedFingerprint
       ? parseTuple(storedFingerprint)[at]
       : undefined;
@@ -240,11 +228,17 @@ export class EntityMappingSync {
       ? this.companions(mapping, entityId)
       : null;
     if (Array.isArray(storedCompanions) && slots) {
-      const kept = storedCompanions.map((id, i) =>
-        typeof id === "string" && this.stillOnDevice(id, deviceId)
-          ? id
-          : slots[i],
-      );
+      const grouped = isFan
+        ? undefined
+        : this.registry.composedTemperatureCompanions(entityId);
+      const sources = [grouped?.humidityEntityId, grouped?.pressureEntityId];
+      const kept = storedCompanions.map((id, i) => {
+        if (typeof id !== "string") return slots[i];
+        const keep = isFan
+          ? this.stillOnDevice(id, deviceId)
+          : slots[i] == null && id === sources[i];
+        return keep ? id : slots[i];
+      });
       if (kept.some((id) => id != null)) {
         const live = parseTuple(fingerprint);
         live[at] = kept;

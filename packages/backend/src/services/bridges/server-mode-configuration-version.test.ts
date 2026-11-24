@@ -1,13 +1,22 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type {
-  BridgeData,
-  HomeAssistantEntityState,
+import {
+  type BridgeData,
+  type HomeAssistantEntityState,
+  HomeAssistantMatcherType,
 } from "@home-assistant-matter-hub/common";
 import { Environment, Logger, VariableService } from "@matter/general";
 import { ServerNodeStore } from "@matter/main";
-import { BasicInformationServer } from "@matter/main/behaviors";
+import {
+  BasicInformationServer,
+  DescriptorServer,
+  RelativeHumidityMeasurementServer,
+} from "@matter/main/behaviors";
+import {
+  HumiditySensorDevice,
+  TemperatureSensorDevice,
+} from "@matter/main/devices";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ServerModeServerNode } from "../../matter/endpoints/server-mode-server-node.js";
 import { HomeAssistantActions } from "../home-assistant/home-assistant-actions.js";
@@ -70,7 +79,7 @@ let node: ServerModeServerNode | undefined;
 let manager: ServerModeEndpointManager | undefined;
 
 // One node process: same storage dir and node id across restarts.
-async function start(ha: HomeAssistantRegistry) {
+async function start(ha: HomeAssistantRegistry, config = bridgeData) {
   const env = new Environment("sm-cv", Environment.default);
   env.get(VariableService).set("storage.path", dir);
   env.set(HomeAssistantActions, {
@@ -80,10 +89,10 @@ async function start(ha: HomeAssistantRegistry) {
   env.set(HomeAssistantConfig, {
     unitSystem: { temperature: "°C" },
   } as unknown as HomeAssistantConfig);
-  const data = new BridgeDataProvider(bridgeData);
+  const data = new BridgeDataProvider(config);
   env.set(BridgeDataProvider, data);
   env.set(EntityStateProvider, new EntityStateProvider(ha));
-  node = new ServerModeServerNode(env, bridgeData);
+  node = new ServerModeServerNode(env, config);
   await node.construction.ready;
   manager = new ServerModeEndpointManager(
     node,
@@ -175,6 +184,68 @@ describe("server mode ConfigurationVersion follows the device set", () => {
     await settle(m);
     expect(version()).toBe(2);
     await m.refreshDevices();
+    await settle(m);
+    expect(version()).toBe(2);
+  });
+
+  it("adds a separate live humidity endpoint without replacing the temperature endpoint", async () => {
+    const tempId = "sensor.temperature";
+    const humidityId = "sensor.humidity";
+    const ha = haRegistry([tempId]);
+    ha.entities[tempId].device_id = "multi";
+    ha.states[tempId].state = "21";
+    ha.states[tempId].attributes = {
+      device_class: "temperature",
+      unit_of_measurement: "°C",
+    };
+    const m = await start(ha, {
+      ...bridgeData,
+      filter: {
+        ...bridgeData.filter,
+        include: [{ type: HomeAssistantMatcherType.Pattern, value: tempId }],
+      },
+      featureFlags: { ...bridgeData.featureFlags, autoComposedDevices: true },
+    });
+    const [temperature] = m.devices;
+    const temperatureNumber = temperature.number;
+    await settle(m);
+
+    addSwitch(ha, humidityId);
+    ha.entities[humidityId].device_id = "multi";
+    ha.states[humidityId].state = "40";
+    ha.states[humidityId].attributes = {
+      device_class: "humidity",
+      unit_of_measurement: "%",
+    };
+    await m.refreshDevices();
+    expect(m.devices).toHaveLength(2);
+    const [retained, humidity] = m.devices;
+    expect(retained).toBe(temperature);
+    expect(retained.number).toBe(temperatureNumber);
+    expect(node!.parts.get(humidity.id)).toBe(humidity);
+    expect(humidity.number).not.toBe(temperatureNumber);
+    expect(temperature.stateOf(DescriptorServer).deviceTypeList).toEqual([
+      {
+        deviceType: TemperatureSensorDevice.deviceType,
+        revision: TemperatureSensorDevice.deviceRevision,
+      },
+    ]);
+    expect(humidity.stateOf(DescriptorServer).deviceTypeList).toEqual([
+      {
+        deviceType: HumiditySensorDevice.deviceType,
+        revision: HumiditySensorDevice.deviceRevision,
+      },
+    ]);
+    expect(
+      humidity.stateOf(RelativeHumidityMeasurementServer).measuredValue,
+    ).toBe(4000);
+    ha.states[humidityId] = { ...ha.states[humidityId], state: "55" };
+    await m.updateStates(ha.states, new Set([humidityId]));
+    await expect
+      .poll(
+        () => humidity.stateOf(RelativeHumidityMeasurementServer).measuredValue,
+      )
+      .toBe(5500);
     await settle(m);
     expect(version()).toBe(2);
   });

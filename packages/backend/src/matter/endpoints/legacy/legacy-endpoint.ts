@@ -78,24 +78,6 @@ export class LegacyEndpoint extends EntityEndpoint {
       return;
     }
     if (
-      registry.isAutoHumidityMappingEnabled() &&
-      registry.isHumidityEntityUsed(entityId)
-    ) {
-      logger.debug(
-        `Skipping ${entityId} - already auto-assigned as humidity to a temperature sensor`,
-      );
-      return;
-    }
-    if (
-      registry.isAutoPressureMappingEnabled() &&
-      registry.isPressureEntityUsed(entityId)
-    ) {
-      logger.debug(
-        `Skipping ${entityId} - already auto-assigned as pressure to a temperature sensor`,
-      );
-      return;
-    }
-    if (
       registry.isAutoComposedDevicesEnabled() &&
       registry.isComposedSubEntityUsed(entityId)
     ) {
@@ -105,71 +87,22 @@ export class LegacyEndpoint extends EntityEndpoint {
       return;
     }
 
-    // Auto-assign related entities if not manually set and device has them
-    // Order matters: Humidity first, then Pressure, then Battery - so battery only goes to the
-    // combined sensor, not to both Temperature AND Humidity/Pressure separately
+    const isTemperature =
+      entityId.startsWith("sensor.") &&
+      (state.attributes as SensorDeviceAttributes).device_class ===
+        SensorDeviceClass.temperature;
+    // The registry mounts humidity and pressure as separate endpoints.
+    // Neither source is subscribed through a standalone temperature endpoint.
     let effectiveMapping = mapping;
+    if (isTemperature && (mapping?.humidityEntity || mapping?.pressureEntity)) {
+      effectiveMapping = {
+        ...mapping,
+        humidityEntity: undefined,
+        pressureEntity: undefined,
+      };
+    }
     if (entity.device_id) {
-      // 1. Auto-assign humidity entity to temperature sensors FIRST
-      // Only applies when autoHumidityMapping feature flag is enabled (default: true)
-      if (registry.isAutoHumidityMappingEnabled()) {
-        const attrs = state.attributes as SensorDeviceAttributes;
-        if (
-          !mapping?.humidityEntity &&
-          entityId.startsWith("sensor.") &&
-          attrs.device_class === SensorDeviceClass.temperature
-        ) {
-          const humidityEntityId = registry.findHumidityEntityForDevice(
-            entity.device_id,
-          );
-          if (
-            humidityEntityId &&
-            humidityEntityId !== entityId &&
-            !registry.isHumidityEntityClaimedByOther(humidityEntityId, entityId)
-          ) {
-            effectiveMapping = {
-              ...effectiveMapping,
-              entityId: effectiveMapping?.entityId ?? entityId,
-              humidityEntity: humidityEntityId,
-            };
-            registry.markHumidityEntityUsed(humidityEntityId, entityId);
-            logger.debug(
-              `Auto-assigned humidity ${humidityEntityId} to ${entityId}`,
-            );
-          }
-        }
-      }
-
-      // 2. Auto-assign pressure entity to temperature sensors
-      if (registry.isAutoPressureMappingEnabled()) {
-        const attrs = state.attributes as SensorDeviceAttributes;
-        if (
-          !mapping?.pressureEntity &&
-          entityId.startsWith("sensor.") &&
-          attrs.device_class === SensorDeviceClass.temperature
-        ) {
-          const pressureEntityId = registry.findPressureEntityForDevice(
-            entity.device_id,
-          );
-          if (
-            pressureEntityId &&
-            pressureEntityId !== entityId &&
-            !registry.isPressureEntityClaimedByOther(pressureEntityId, entityId)
-          ) {
-            effectiveMapping = {
-              ...effectiveMapping,
-              entityId: effectiveMapping?.entityId ?? entityId,
-              pressureEntity: pressureEntityId,
-            };
-            registry.markPressureEntityUsed(pressureEntityId, entityId);
-            logger.debug(
-              `Auto-assigned pressure ${pressureEntityId} to ${entityId}`,
-            );
-          }
-        }
-      }
-
-      // 3. Auto-assign battery entity AFTER humidity and pressure
+      // Auto-assign battery when it was not mapped explicitly.
       // For most entities: only when autoBatteryMapping feature flag is enabled
       // For vacuum entities: always auto-map because many HA integrations freeze
       // battery_level on the vacuum entity when docked, while the standalone
@@ -178,6 +111,7 @@ export class LegacyEndpoint extends EntityEndpoint {
       const isVacuum = entityId.startsWith("vacuum.");
       if (
         (registry.isAutoBatteryMappingEnabled() || isVacuum) &&
+        !registry.isTemperatureCompanionSharingBattery(entityId) &&
         !mapping?.batteryEntity &&
         !mapping?.disableBatteryMapping
       ) {
@@ -365,23 +299,16 @@ export class LegacyEndpoint extends EntityEndpoint {
       );
     }
 
-    // When autoComposedDevices is enabled and this is a temperature sensor
-    // with auto-mapped humidity/pressure, build a real Matter Composed Device
-    // instead of a flat endpoint with extra clusters, Apple Home, Google
-    // Home, and Alexa then render each sub-endpoint with its own device type.
     if (!standalone && registry.isAutoComposedDevicesEnabled()) {
-      const attrs = state.attributes as SensorDeviceAttributes;
-      if (
-        entityId.startsWith("sensor.") &&
-        attrs.device_class === SensorDeviceClass.temperature &&
-        (effectiveMapping?.humidityEntity || effectiveMapping?.pressureEntity)
-      ) {
+      const temperatureCompanions = isTemperature
+        ? registry.composedTemperatureCompanions(entityId)
+        : undefined;
+      if (temperatureCompanions) {
         const composedAreaName = registry.getAreaName(entityId);
         const composed = await ComposedSensorEndpoint.create({
           registry,
           primaryEntityId: entityId,
-          humidityEntityId: effectiveMapping?.humidityEntity,
-          pressureEntityId: effectiveMapping?.pressureEntity,
+          ...temperatureCompanions,
           batteryEntityId: effectiveMapping?.disableBatteryMapping
             ? undefined
             : effectiveMapping?.batteryEntity,

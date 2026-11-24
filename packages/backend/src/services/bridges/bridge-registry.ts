@@ -17,8 +17,10 @@ import {
 import { Logger } from "@matter/general";
 import { callService } from "home-assistant-js-websocket";
 import { keys, pickBy, values } from "lodash-es";
+import { convertPressureToHpa } from "../../utils/converters/pressure.js";
 import { sendHaMessage } from "../../utils/send-ha-message.js";
 import { pairingIndex } from "../../utils/trailing-index.js";
+import { diagnosticEventBus } from "../diagnostics/diagnostic-event-bus.js";
 import type { HomeAssistantClient } from "../home-assistant/home-assistant-client.js";
 import type {
   HomeAssistantDevices,
@@ -60,6 +62,29 @@ interface FilterDeviceClass {
   >;
 }
 
+type TemperatureCompanions = {
+  humidityEntityId?: string;
+  pressureEntityId?: string;
+};
+
+type TemperatureSource = {
+  entity: HomeAssistantEntityRegistry;
+  mapping: EntityMappingConfig | undefined;
+  compose: boolean;
+};
+
+// What one refresh collects while it resolves companions.
+type CompanionPass = {
+  mappingOf?: (entityId: string) => EntityMappingConfig | undefined;
+  deviceClasses: Map<string, FilterDeviceClass>;
+  selected: HomeAssistantEntities;
+  claimed: Set<string>;
+  manualHumidity: Set<string>;
+  manualPressure: Set<string>;
+  sharingBattery: Set<string>;
+  inferredClasses: Map<string, SensorDeviceClass>;
+};
+
 export class BridgeRegistry {
   get entityIds() {
     return keys(this._entities);
@@ -76,10 +101,14 @@ export class BridgeRegistry {
   private _batteryEntityCache: Map<string, string | null> = new Map();
   // Cache for problem entity lookups (deviceId -> entityId or null) (#408)
   private _problemEntityCache: Map<string, string | null> = new Map();
-  // Humidity entities auto-assigned to a temperature sensor, mapped to it
-  private _usedHumidityEntities: Map<string, string> = new Map();
-  // Pressure entities auto-assigned to a temperature sensor, mapped to it
-  private _usedPressureEntities: Map<string, string> = new Map();
+  private _temperatureCompanions = new Map<string, TemperatureCompanions>();
+  private _temperatureCompanionsSharingBattery = new Set<string>();
+  private _inferredTemperatureCompanionClasses = new Map<
+    string,
+    SensorDeviceClass
+  >();
+  // Every refresh resolves again, so name an ignored mapping only once.
+  private readonly reportedCompanions = new Set<string>();
   // Track entities consumed by composed devices (e.g., sensors/climate grouped under air purifier)
   private _usedComposedSubEntities: Set<string> = new Set();
   // The find*ForDevice lookups scanned the whole HA registry per call. Index
@@ -168,6 +197,7 @@ export class BridgeRegistry {
     // sensor.* endpoints auto-map the device battery too (composed temperature
     // sensor), so they need the catch-up as well (#498)
     if (entityId.startsWith("binary_sensor.")) return "";
+    if (this.isTemperatureCompanionSharingBattery(entityId)) return "";
     if (
       !this.isAutoBatteryMappingEnabled() &&
       !entityId.startsWith("vacuum.")
@@ -371,11 +401,7 @@ export class BridgeRegistry {
 
   /**
    * Check if auto composed devices mode is enabled.
-   * When enabled, temperature sensors with auto-mapped humidity/pressure/battery
-   * build real Matter Composed Devices (BridgedNodeEndpoint with sub-endpoints)
-   * rather than stacking extra clusters onto a flat TemperatureSensor.
-   * Apple Home, Google Home, and Alexa render each sub-endpoint using its
-   * own device type.
+   * Groups temperature, humidity and pressure under a BridgedNodeEndpoint.
    */
   isAutoComposedDevicesEnabled(): boolean {
     return this.dataProvider.featureFlags?.autoComposedDevices === true;
@@ -390,19 +416,10 @@ export class BridgeRegistry {
     return this.dataProvider.featureFlags?.composedPrimaryOnParent === true;
   }
 
-  /**
-   * Check if auto humidity mapping is enabled for this bridge.
-   * Default: true (enabled by default).
-   * When enabled, humidity sensors on the same device as a temperature sensor
-   * are combined into a single TemperatureHumiditySensor endpoint.
-   * Note: Apple Home does not display humidity on TemperatureSensorDevice
-   * endpoints, so users on Apple Home should explicitly disable this.
-   * See: https://github.com/RiDDiX/home-assistant-matter-hub/issues/133
-   */
   isAutoHumidityMappingEnabled(): boolean {
     return (
       this.dataProvider.featureFlags?.autoHumidityMapping !== false ||
-      this.dataProvider.featureFlags?.autoComposedDevices === true
+      this.isAutoComposedDevicesEnabled()
     );
   }
 
@@ -460,39 +477,20 @@ export class BridgeRegistry {
     return this._usedComposedSubEntities.has(entityId);
   }
 
-  /**
-   * Mark a humidity entity as used (auto-assigned to a temperature sensor).
-   */
-  markHumidityEntityUsed(entityId: string, temperatureEntityId: string): void {
-    this._usedHumidityEntities.set(entityId, temperatureEntityId);
-  }
-
-  /** True when another temperature sensor already claimed this humidity entity. */
-  isHumidityEntityClaimedByOther(
+  composedTemperatureCompanions(
     entityId: string,
-    temperatureEntityId: string,
-  ): boolean {
-    const claimant = this._usedHumidityEntities.get(entityId);
-    return claimant !== undefined && claimant !== temperatureEntityId;
+  ): TemperatureCompanions | undefined {
+    return this._temperatureCompanions.get(entityId);
   }
 
-  /**
-   * Check if a humidity entity has been auto-assigned to a temperature sensor.
-   */
-  isHumidityEntityUsed(entityId: string): boolean {
-    return this._usedHumidityEntities.has(entityId);
+  isTemperatureCompanionSharingBattery(entityId: string): boolean {
+    return this._temperatureCompanionsSharingBattery.has(entityId);
   }
 
-  /**
-   * Check if auto pressure mapping is enabled for this bridge.
-   * Default: true (enabled by default).
-   * When enabled, pressure sensors on the same device as a temperature sensor
-   * are combined into a single endpoint with PressureMeasurement cluster.
-   */
   isAutoPressureMappingEnabled(): boolean {
     return (
       this.dataProvider.featureFlags?.autoPressureMapping !== false ||
-      this.dataProvider.featureFlags?.autoComposedDevices === true
+      this.isAutoComposedDevicesEnabled()
     );
   }
 
@@ -859,51 +857,6 @@ export class BridgeRegistry {
   }
 
   /**
-   * Find a pressure sensor entity that belongs to the same HA device.
-   * Returns the entity_id of the pressure sensor, or undefined if none found.
-   */
-  findPressureEntityForDevice(deviceId: string): string | undefined {
-    for (const entity of this.entitiesOfDevice(deviceId)) {
-      if (!entity.entity_id.startsWith("sensor.")) continue;
-
-      const state = this.registry.states[entity.entity_id];
-      if (!state) continue;
-
-      const attrs = state.attributes as SensorDeviceAttributes;
-      if (
-        attrs.device_class === SensorDeviceClass.pressure ||
-        attrs.device_class === SensorDeviceClass.atmospheric_pressure
-      ) {
-        return entity.entity_id;
-      }
-    }
-    return undefined;
-  }
-
-  /**
-   * Mark a pressure entity as used (auto-assigned to a temperature sensor).
-   */
-  markPressureEntityUsed(entityId: string, temperatureEntityId: string): void {
-    this._usedPressureEntities.set(entityId, temperatureEntityId);
-  }
-
-  /** True when another temperature sensor already claimed this pressure entity. */
-  isPressureEntityClaimedByOther(
-    entityId: string,
-    temperatureEntityId: string,
-  ): boolean {
-    const claimant = this._usedPressureEntities.get(entityId);
-    return claimant !== undefined && claimant !== temperatureEntityId;
-  }
-
-  /**
-   * Check if a pressure entity has been auto-assigned to a temperature sensor.
-   */
-  isPressureEntityUsed(entityId: string): boolean {
-    return this._usedPressureEntities.has(entityId);
-  }
-
-  /**
    * Sensor with this device_class on the same HA device.
    * Pair by index (`switch_2` -> `power_2`) when a strip has one
    * sensor per outlet. Otherwise the first match (#488).
@@ -1045,9 +998,9 @@ export class BridgeRegistry {
   refresh(
     mappingOf?: (entityId: string) => EntityMappingConfig | undefined,
     hasReservedEndpoint?: (entity: HomeAssistantEntityRegistry) => boolean,
+    standalone = false,
   ) {
-    // filter first: a timeout throws before any cached state is touched
-    let entities: HomeAssistantEntities;
+    // Filter first: a timeout leaves the current entity list and claims intact.
     let waitingForClass = false;
     const filter = this.dataProvider.filter;
     const couldDependOnClass = [...filter.include, ...filter.exclude].some(
@@ -1056,31 +1009,29 @@ export class BridgeRegistry {
         type === HomeAssistantMatcherType.AnyFieldRegex,
     );
     const deviceClasses = new Map<string, FilterDeviceClass>();
+    const grouped = new Map<string, TemperatureCompanions>();
+    const claimed = new Set<string>();
+    const sharingBattery = new Set<string>();
+    const inferredClasses = new Map<string, SensorDeviceClass>();
+    // Rebuild on every refresh, even when HA edits the registry in place.
+    this._entitiesByDevice = undefined;
+    let entities: HomeAssistantEntities;
     try {
-      entities = withinFilterBudget(() =>
-        pickBy(this.registry.entities, (entity) => {
+      entities = withinFilterBudget(() => {
+        const selected = pickBy(this.registry.entities, (entity) => {
           const device = this.registry.devices[entity.device_id];
-          const featureFlags = this.dataProvider.featureFlags ?? {};
-
           const state = this.registry.states[entity.entity_id];
           const deviceClass = this.filterDeviceClass(entity, state);
           if (deviceClass) {
             deviceClasses.set(entity.entity_id, deviceClass);
           }
 
-          // Always exclude disabled entities
-          if (entity.disabled_by != null) {
+          if (!this.isVisibleEntity(entity)) {
             return false;
           }
 
-          // Hidden entities are only included if includeHiddenEntities feature flag is enabled
-          const isHidden = entity.hidden_by != null;
-          if (isHidden && !featureFlags.includeHiddenEntities) {
-            return false;
-          }
-
-          // HA keeps device_class on unavailable states, so a classless state
-          // is really classless. Only a missing state leaves the class open.
+          // HA keeps device_class on unavailable states. Only a missing
+          // state leaves the class open.
           if (couldDependOnClass && !deviceClass && !state) {
             const matches = this.matchWithoutClass(filter, entity, device);
             if (matches === undefined) {
@@ -1092,8 +1043,65 @@ export class BridgeRegistry {
           return this.matchesFilter(filter, entity, device, {
             attributes: { device_class: deviceClass?.value },
           });
-        }),
-      );
+        });
+
+        const temperatures = values(selected).flatMap((entity) => {
+          const entityId = entity.entity_id;
+          if (
+            !entityId.startsWith("sensor.") ||
+            deviceClasses.get(entityId)?.value !== SensorDeviceClass.temperature
+          ) {
+            return [];
+          }
+          const mapping = mappingOf?.(entityId);
+          if (mapping?.disabled) return [];
+          return [
+            {
+              entity,
+              mapping,
+              compose:
+                !standalone &&
+                this.isAutoComposedDevicesEnabled() &&
+                !mapping?.composedEntities?.length,
+            },
+          ];
+        });
+        const pass: CompanionPass = {
+          mappingOf,
+          deviceClasses,
+          selected,
+          claimed,
+          manualHumidity: new Set(),
+          manualPressure: new Set(),
+          sharingBattery,
+          inferredClasses,
+        };
+        for (const { mapping, compose } of temperatures) {
+          if (!compose) continue;
+          if (mapping?.humidityEntity)
+            pass.manualHumidity.add(mapping.humidityEntity);
+          if (mapping?.pressureEntity)
+            pass.manualPressure.add(mapping.pressureEntity);
+        }
+        // Add companions after filter matches so server mode caps those last.
+        for (const temperature of temperatures) {
+          const entityId = temperature.entity.entity_id;
+          const humidityEntityId = this.resolveCompanion(
+            temperature,
+            SensorDeviceClass.humidity,
+            pass,
+          );
+          const pressureEntityId = this.resolveCompanion(
+            temperature,
+            SensorDeviceClass.pressure,
+            pass,
+          );
+          if (temperature.compose && (humidityEntityId || pressureEntityId)) {
+            grouped.set(entityId, { humidityEntityId, pressureEntityId });
+          }
+        }
+        return selected;
+      });
     } catch (e) {
       if (e instanceof FilterTimeoutError) {
         BridgeRegistry.filterLogger.error(
@@ -1102,90 +1110,207 @@ export class BridgeRegistry {
       }
       throw e;
     }
-    // Clear used entities on refresh to allow re-assignment
     this._usedBatteryEntities.clear();
-    this._usedHumidityEntities.clear();
-    this._usedPressureEntities.clear();
-    this._usedComposedSubEntities.clear();
-    // Clear lookup caches
+    this._usedComposedSubEntities = claimed;
     this._batteryEntityCache.clear();
     this._problemEntityCache.clear();
-    // rebuilt per refresh too, an in-place edit keeps the map identity
-    this._entitiesByDevice = undefined;
 
     this.filterDeviceClasses = deviceClasses;
+    this._temperatureCompanions = grouped;
+    this._temperatureCompanionsSharingBattery = sharingBattery;
+    this._inferredTemperatureCompanionClasses = inferredClasses;
     this._entities = entities;
     this._states = pickBy(
       this.registry.states,
       (e) => !!this._entities[e.entity_id],
     );
+    for (const [id, device_class] of inferredClasses) {
+      const state = this._states[id];
+      if (!state) continue;
+      this._states[id] = {
+        ...state,
+        attributes: { ...state.attributes, device_class },
+      };
+    }
     const deviceIds = new Set(values(this._entities).map((e) => e.device_id));
     this._devices = pickBy(this.registry.devices, (d) => deviceIds.has(d.id));
 
-    // Pre-calculate auto-assignments before endpoint creation so entities
-    // are marked "used" regardless of the order they're processed later.
-    this.preCalculateAutoAssignments(mappingOf);
+    this.preCalculateBatteryAssignments(mappingOf);
     return waitingForClass;
   }
 
-  /**
-   * Pre-calculate which entities will be auto-assigned to other devices.
-   * This must run BEFORE endpoint creation to ensure correct "used" marking
-   * regardless of the order entities are processed.
-   */
-  private preCalculateAutoAssignments(
+  // The humidity or pressure sensor that goes with one temperature sensor.
+  // Composed claims it as a child, separate adds it to the bridge entities.
+  private resolveCompanion(
+    { entity, mapping, compose }: TemperatureSource,
+    expected: SensorDeviceClass.humidity | SensorDeviceClass.pressure,
+    pass: CompanionPass,
+  ): string | undefined {
+    const entityId = entity.entity_id;
+    const isHumidity = expected === SensorDeviceClass.humidity;
+    const manualId = isHumidity
+      ? mapping?.humidityEntity
+      : mapping?.pressureEntity;
+    const auto = isHumidity
+      ? this.isAutoHumidityMappingEnabled()
+      : this.isAutoPressureMappingEnabled();
+    const previous = this._temperatureCompanions.get(entityId);
+    const previousId = isHumidity
+      ? previous?.humidityEntityId
+      : previous?.pressureEntityId;
+    const prior = previousId ? this.registry.entities[previousId] : undefined;
+    const sameDevice =
+      !manualId && auto && entity.device_id
+        ? this.entitiesOfDevice(entity.device_id)
+        : [];
+    const candidates = manualId
+      ? [this.registry.entities[manualId]]
+      : auto && prior && prior.device_id === entity.device_id
+        ? [prior, ...sameDevice]
+        : sameDevice;
+    let blocked: string | undefined;
+    for (const source of candidates) {
+      if (!source || source.disabled_by != null) continue;
+      const id = source.entity_id;
+      if (id === entityId || !id.startsWith("sensor.")) continue;
+      const state = this.registry.states[id];
+      const actualClass = pass.deviceClasses.get(id)?.value;
+      const unit = (state?.attributes as SensorDeviceAttributes | undefined)
+        ?.unit_of_measurement;
+      const matchesClass =
+        actualClass === expected ||
+        (expected === SensorDeviceClass.pressure &&
+          actualClass === SensorDeviceClass.atmospheric_pressure) ||
+        (manualId &&
+          expected === SensorDeviceClass.humidity &&
+          actualClass === SensorDeviceClass.moisture);
+      // Manual template sensors may report units without a device class.
+      const inferClass =
+        manualId &&
+        !actualClass &&
+        ((expected === SensorDeviceClass.humidity
+          ? unit === "%"
+          : convertPressureToHpa(1, unit, false) !== undefined) ||
+          (unit == null &&
+            (!state ||
+              state.state === "unavailable" ||
+              state.state === "unknown") &&
+            this._inferredTemperatureCompanionClasses.get(id) === expected));
+      const pending = compose && manualId && !state && !actualClass;
+      if (!matchesClass && !inferClass && !pending) continue;
+      if (compose) {
+        const manual = isHumidity ? pass.manualHumidity : pass.manualPressure;
+        if (!manualId && (pass.claimed.has(id) || manual.has(id))) continue;
+        pass.claimed.add(id);
+      } else {
+        const sourceMapping = pass.mappingOf?.(id);
+        if (
+          !this.isVisibleEntity(source) ||
+          sourceMapping?.disabled ||
+          (sourceMapping?.matterDeviceType &&
+            sourceMapping.matterDeviceType !== `${expected}_sensor`) ||
+          testMatchers(
+            this.dataProvider.filter.exclude,
+            this.registry.devices[source.device_id],
+            source,
+            "any",
+            { attributes: { device_class: actualClass ?? expected } },
+            this.registry.labels,
+          )
+        ) {
+          blocked ??= id;
+          continue;
+        }
+        pass.selected[id] = source;
+        if (entity.device_id && source.device_id === entity.device_id) {
+          pass.sharingBattery.add(id);
+        }
+      }
+      if (
+        inferClass ||
+        (state && !state.attributes?.device_class && matchesClass)
+      ) {
+        pass.inferredClasses.set(id, expected);
+      }
+      return id;
+    }
+    const ignored = blocked ?? manualId;
+    if (ignored) {
+      this.reportIgnoredCompanion(
+        entityId,
+        ignored,
+        expected,
+        blocked !== undefined,
+        !manualId,
+      );
+    }
+    return undefined;
+  }
+
+  // A reading the user expects would otherwise vanish silently.
+  private reportIgnoredCompanion(
+    entityId: string,
+    sourceId: string,
+    expected: SensorDeviceClass.humidity | SensorDeviceClass.pressure,
+    blocked: boolean,
+    auto: boolean,
+  ): void {
+    if (!blocked) {
+      const source = this.registry.entities[sourceId];
+      const state = this.registry.states[sourceId];
+      // No usable state yet, a later refresh decides.
+      if (
+        source &&
+        source.disabled_by == null &&
+        (!state || state.state === "unavailable" || state.state === "unknown")
+      ) {
+        return;
+      }
+    }
+    const key = `${expected}:${entityId}:${sourceId}`;
+    if (this.reportedCompanions.has(key)) return;
+    this.reportedCompanions.add(key);
+    const flag =
+      expected === SensorDeviceClass.humidity
+        ? "Auto Humidity Mapping"
+        : "Auto Pressure Mapping";
+    const message = blocked
+      ? `The ${expected} sensor ${sourceId} that goes with ${entityId} is not exposed. ` +
+        "It is hidden, excluded by the filter, or disabled or set to another device type in its own mapping." +
+        (auto ? ` Turn off ${flag} if that is intended.` : "")
+      : `Mapped ${expected} source ${sourceId} of ${entityId} is ignored. ` +
+        `It must be an enabled sensor that reports ${expected}.`;
+    BridgeRegistry.filterLogger.warn(message);
+    diagnosticEventBus.emit("entity_warning", message, {
+      bridgeName: this.dataProvider.name,
+      entityId,
+      details: { sourceId, expected },
+    });
+  }
+
+  private isVisibleEntity(entity: HomeAssistantEntityRegistry): boolean {
+    return (
+      entity.disabled_by == null &&
+      (entity.hidden_by == null ||
+        this.dataProvider.featureFlags?.includeHiddenEntities === true)
+    );
+  }
+
+  // Claim before endpoint creation, regardless of registry order.
+  private preCalculateBatteryAssignments(
     mappingOf?: (entityId: string) => EntityMappingConfig | undefined,
   ): void {
     const entities = values(this._entities);
-
-    // First pass: Find all temperature sensors and mark their humidity + pressure entities
-    for (const entity of entities) {
-      if (!entity.device_id) continue;
-      if (!entity.entity_id.startsWith("sensor.")) continue;
-
-      const state = this._states[entity.entity_id];
-      if (!state) continue;
-
-      const attrs = state.attributes as SensorDeviceAttributes;
-      if (attrs.device_class === SensorDeviceClass.temperature) {
-        // Same conditions as LegacyEndpoint.create, first sensor of a device wins
-        const mapping = mappingOf?.(entity.entity_id);
-        if (mapping?.disabled) continue;
-        if (this.isAutoHumidityMappingEnabled() && !mapping?.humidityEntity) {
-          const humidityEntityId = this.findHumidityEntityForDevice(
-            entity.device_id,
-          );
-          if (
-            humidityEntityId &&
-            humidityEntityId !== entity.entity_id &&
-            !this._usedHumidityEntities.has(humidityEntityId)
-          ) {
-            this._usedHumidityEntities.set(humidityEntityId, entity.entity_id);
-          }
-        }
-        if (this.isAutoPressureMappingEnabled() && !mapping?.pressureEntity) {
-          const pressureEntityId = this.findPressureEntityForDevice(
-            entity.device_id,
-          );
-          if (
-            pressureEntityId &&
-            pressureEntityId !== entity.entity_id &&
-            !this._usedPressureEntities.has(pressureEntityId)
-          ) {
-            this._usedPressureEntities.set(pressureEntityId, entity.entity_id);
-          }
-        }
-      }
-    }
-
-    // Second pass: Find all "main" entities and mark their battery entities
-    // A "main" entity is any entity that is NOT already marked as used
     if (this.isAutoBatteryMappingEnabled()) {
       for (const entity of entities) {
         if (!entity.device_id) continue;
 
-        // Skip entities that are already marked as used (e.g., humidity sensors)
-        if (this._usedHumidityEntities.has(entity.entity_id)) continue;
+        if (
+          this.isComposedSubEntityUsed(entity.entity_id) ||
+          this.isTemperatureCompanionSharingBattery(entity.entity_id)
+        ) {
+          continue;
+        }
 
         // Skip battery sensors themselves (numeric and binary)
         if (entity.entity_id.startsWith("sensor.")) {

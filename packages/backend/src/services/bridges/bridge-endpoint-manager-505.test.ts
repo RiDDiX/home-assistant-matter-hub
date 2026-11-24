@@ -352,12 +352,12 @@ describe("composed air purifier shape (#505)", () => {
   });
 });
 
-describe("temperature sensor humidity merge (#505)", () => {
+describe("temperature sensor humidity discovery (#505)", () => {
   it.each([
-    ["flat", {}],
+    ["separate", {}],
     ["composed", { autoComposedDevices: true }],
   ])("picks up a humidity sensor that arrives late, %s", async (_label, flags) => {
-    const clean = await buildManager(makeHa(true), "sensor.*", flags);
+    const clean = await buildManager(makeHa(true), TEMP, flags);
 
     const ha = makeHa(false);
     ha.states[TEMP] = st(TEMP, "21.5", {
@@ -365,26 +365,75 @@ describe("temperature sensor humidity merge (#505)", () => {
       unit_of_measurement: "°C",
       state_class: "measurement",
     });
-    const late = await buildManager(ha, "sensor.*", flags);
+    const late = await buildManager(ha, TEMP, flags);
     const first = part(late.manager, TEMP);
 
     setSensorStates(ha);
     await late.manager.refreshDevices();
     const rebuilt = part(late.manager, TEMP);
-    expect(rebuilt).not.toBe(first);
+    if (_label === "composed") {
+      expect(rebuilt).not.toBe(first);
+    } else {
+      expect(rebuilt).toBe(first);
+      expect(part(late.manager, HUM).number).not.toBe(first.number);
+    }
     expect(rebuilt.number).toBe(first.number);
     expect(shape(late.manager)).toEqual(shape(clean.manager));
   });
 
-  it("keeps the merged humidity when its state vanishes", async () => {
+  it("keeps both separate endpoints when the humidity state vanishes", async () => {
     const ha = makeHa(true);
-    const { manager, logs } = await buildManager(ha, "sensor.*", {});
+    const { manager, logs } = await buildManager(ha, TEMP, {});
     const first = part(manager, TEMP);
+    const humidity = part(manager, HUM);
 
     delete ha.states[HUM];
     await manager.refreshDevices();
     expect(part(manager, TEMP)).toBe(first);
+    expect(part(manager, HUM)).toBe(humidity);
     expect(logs.filter((l) => l.startsWith("Mapping changed"))).toEqual([]);
+  });
+
+  it("moves an existing humidity endpoint into the composition on the same refresh", async () => {
+    const ha = makeHa(true);
+    ha.entities[HUM].device_id = "dev2";
+    const mapping = { entityId: TEMP, humidityEntity: "" };
+    const { manager } = await buildManager(
+      ha,
+      "sensor.*",
+      { autoComposedDevices: true },
+      mapping,
+    );
+    const temperatureNumber = part(manager, TEMP).number;
+    expect(part(manager, HUM)).toBeDefined();
+
+    mapping.humidityEntity = HUM;
+    await manager.refreshDevices();
+    const [parent] = manager.root.parts;
+    expect(manager.root.parts.size).toBe(1);
+    expect(parent.number).toBe(temperatureNumber);
+    expect(parent.parts.size).toBe(2);
+  });
+
+  it("adds a manually mapped child when humidity first has state", async () => {
+    const ha = makeHa(false);
+    ha.states[TEMP] = SENSOR[TEMP]();
+    const { manager } = await buildManager(
+      ha,
+      TEMP,
+      { autoComposedDevices: true },
+      { entityId: TEMP, humidityEntity: HUM },
+    );
+    const first = part(manager, TEMP);
+    expect([...first.parts]).toHaveLength(1);
+
+    ha.states[HUM] = SENSOR[HUM]();
+    await manager.refreshDevices();
+    const parent = part(manager, TEMP);
+    expect(parent.number).toBe(first.number);
+    expect([...parent.parts]).toHaveLength(2);
+    await manager.refreshDevices();
+    expect(part(manager, TEMP)).toBe(parent);
   });
 });
 

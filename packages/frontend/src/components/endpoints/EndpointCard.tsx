@@ -175,7 +175,6 @@ interface HomeAssistantEntityState {
   mapping?: {
     batteryEntity?: string;
     humidityEntity?: string;
-    pressureEntity?: string;
     powerEntity?: string;
     energyEntity?: string;
     voltageEntity?: string;
@@ -312,7 +311,6 @@ export const EndpointCard = ({
     const set = new Set<string>();
     if (mapping?.batteryEntity) set.add("powerSource");
     if (mapping?.humidityEntity) set.add("relativeHumidityMeasurement");
-    if (mapping?.pressureEntity) set.add("pressureMeasurement");
     if (mapping?.powerEntity) set.add("electricalPowerMeasurement");
     if (mapping?.energyEntity) set.add("electricalEnergyMeasurement");
     if (mapping?.voltageEntity) set.add("electricalPowerMeasurement");

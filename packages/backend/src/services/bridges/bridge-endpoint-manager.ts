@@ -831,16 +831,6 @@ export class BridgeEndpointManager extends Service {
     return result;
   }
 
-  // battery, humidity and pressure skips from LegacyEndpoint.create
-  private isAutoAssigned(entityId: string): boolean {
-    const r = this.registry;
-    return (
-      (r.isAutoBatteryMappingEnabled() && r.isBatteryEntityUsed(entityId)) ||
-      (r.isAutoHumidityMappingEnabled() && r.isHumidityEntityUsed(entityId)) ||
-      (r.isAutoPressureMappingEnabled() && r.isPressureEntityUsed(entityId))
-    );
-  }
-
   private getEntityMapping(entityId: string): EntityMappingConfig | undefined {
     return this.mappingStorage.getMapping(this.bridgeId, entityId);
   }
@@ -1286,7 +1276,8 @@ export class BridgeEndpointManager extends Service {
         this.mappingFingerprints.delete(endpoint.entityId);
       } else if (
         carriedElsewhere.has(endpoint.entityId) &&
-        this.isAutoAssigned(endpoint.entityId)
+        this.registry.isAutoBatteryMappingEnabled() &&
+        this.registry.isBatteryEntityUsed(endpoint.entityId)
       ) {
         // A refresh that saw the battery sensor unavailable built it its own
         // endpoint, which nothing removed once the sensor came back. Its

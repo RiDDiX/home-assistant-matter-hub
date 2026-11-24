@@ -391,7 +391,6 @@
     "linked": {
       "batteryEntity": "Battery",
       "humidityEntity": "Humidity",
-      "pressureEntity": "Pressure",
       "powerEntity": "Power",
       "energyEntity": "Energy",
       "voltageEntity": "Voltage",
@@ -603,8 +602,8 @@
       "cleanedAreaEntityHelp": "Sensor reporting cumulative cleaned area in m². With a Size (m²) set on each area, advances room progress for batch vacuums that report area but not the current room.",
       "valetudoIdentifierHelp": "Exact identifier from Valetudo Connectivity > MQTT. Only needed if it differs from the lowercase entity ID.",
       "roomButtonsHelp": "Select button entities that trigger room cleaning (e.g., button.roborock_clean_kitchen). These appear as rooms in Apple Home.",
-      "humiditySensorHelp": "Combine with a humidity sensor to create a single Temperature+Humidity device",
-      "pressureSensorHelp": "Combine with a pressure sensor to create a single Temperature+Pressure device",
+      "humiditySensorHelp": "Select the sensor that supplies the associated humidity endpoint",
+      "pressureSensorHelp": "Select the sensor that supplies the associated pressure endpoint",
       "batterySensorHelp": "Include battery level from a separate sensor entity",
       "purifierTemperatureHelp": "Add temperature measurement to this air purifier from a separate sensor entity",
       "purifierHumidityHelp": "Add humidity measurement to this air purifier from a separate sensor entity",

@@ -271,13 +271,13 @@ Various sensor types mapped based on `device_class` and `unit_of_measurement`.
 
 #### Auto Sensor Grouping
 
-HAMH can automatically combine related sensors from the same HA device into a single Matter endpoint:
+HAMH can automatically expose related readings from the same Home Assistant device. Each measurement has its own Matter endpoint.
 
 | Feature Flag | Description |
 |--------------|-------------|
 | `autoBatteryMapping` | Combines battery sensor with the primary sensor (default: disabled) |
-| `autoHumidityMapping` | Combines humidity sensor with temperature sensor (default: enabled) |
-| `autoPressureMapping` | Combines pressure sensor with temperature sensor (default: enabled) |
+| `autoHumidityMapping` | Includes a separate humidity endpoint (default: enabled) |
+| `autoPressureMapping` | Includes a separate pressure endpoint (default: enabled) |
 
 You can also manually assign sensors via **Entity Mapping**:
 - `batteryEntity`, Battery sensor entity ID

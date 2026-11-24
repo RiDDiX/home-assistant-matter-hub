@@ -49,7 +49,6 @@ const ignoredBehaviors = [ClusterId.homeAssistantEntity];
 const LINKED_ENTITY_FIELDS = [
   "batteryEntity",
   "humidityEntity",
-  "pressureEntity",
   "powerEntity",
   "energyEntity",
   "voltageEntity",
@@ -317,7 +316,6 @@ const EntityDiagnosticsPanel = ({ endpoint }: { endpoint: EndpointData }) => {
 const autoMappedClusterNames: Record<string, string> = {
   powerSource: "batteryEntity",
   relativeHumidityMeasurement: "humidityEntity",
-  pressureMeasurement: "pressureEntity",
   electricalPowerMeasurement: "powerEntity",
   electricalEnergyMeasurement: "energyEntity",
 };

@@ -22,9 +22,13 @@ import {
   BasicInformation,
   BridgedDeviceBasicInformation,
   Descriptor,
+  PressureMeasurement,
+  RelativeHumidityMeasurement,
+  TemperatureMeasurement,
 } from "@matter/main/clusters";
 import {
   HumiditySensorDevice,
+  PressureSensorDevice,
   TemperatureSensorDevice,
 } from "@matter/main/devices";
 import {
@@ -150,7 +154,10 @@ function makeHa(ids: string[]): FakeHa {
   return ha;
 }
 
-function makeProvider(patterns: string[]): BridgeDataProvider {
+function makeProvider(
+  patterns: string[],
+  featureFlags: Record<string, boolean>,
+): BridgeDataProvider {
   return new BridgeDataProvider({
     id: BRIDGE_ID,
     name: "b",
@@ -163,7 +170,7 @@ function makeProvider(patterns: string[]): BridgeDataProvider {
       exclude: [],
       includeMode: "any",
     },
-    featureFlags: {},
+    featureFlags,
     basicInformation: {
       vendorId: 0xfff1,
       vendorName: "t",
@@ -187,8 +194,9 @@ async function startBridge(
   ha: FakeHa,
   patterns = ["vacuum.*"],
   plugins?: PluginManager,
+  featureFlags: Record<string, boolean> = {},
 ) {
-  const provider = makeProvider(patterns);
+  const provider = makeProvider(patterns, featureFlags);
   const env = new Environment("test", Environment.default);
   env.get(VariableService).set("storage.path", dir);
   env.set(BridgeDataProvider, provider);
@@ -946,11 +954,12 @@ describe("controller view of a changed endpoint set", () => {
     },
   );
 
-  function addTemperatureAndHumidity(ha: FakeHa) {
+  function addSensorMeasurements(ha: FakeHa) {
     ha.devices.climate = { id: "climate", name: "Climate", labels: [] };
     for (const [deviceClass, state, unit] of [
       ["temperature", "21", "°C"],
       ["humidity", "40", "%"],
+      ["pressure", "1013", "hPa"],
     ]) {
       const id = `sensor.${deviceClass}`;
       ha.entities[id] = { entity_id: id, device_id: "climate", labels: [] };
@@ -966,58 +975,152 @@ describe("controller view of a changed endpoint set", () => {
   }
 
   it.each([
-    { timing: "before commissioning", addBeforeCommissioning: true },
-    { timing: "after commissioning", addBeforeCommissioning: false },
+    {
+      scenario: "separate endpoints before commissioning",
+      addBeforeCommissioning: true,
+      composed: false,
+      include: "sensor.*",
+    },
+    {
+      scenario: "out-of-filter siblings after commissioning",
+      addBeforeCommissioning: false,
+      composed: false,
+      include: "sensor.temperature",
+    },
+    {
+      scenario: "explicit composition",
+      addBeforeCommissioning: true,
+      composed: true,
+      include: "sensor.temperature",
+    },
   ])(
-    "reads current revisions for temperature and auto-claimed humidity added $timing",
+    "reads one measurement type per endpoint for $scenario",
     { timeout: 30_000 },
-    async ({ addBeforeCommissioning }) => {
+    async ({ addBeforeCommissioning, composed, include }) => {
       const ha = makeHa([]);
-      if (addBeforeCommissioning) addTemperatureAndHumidity(ha);
-      const { bem } = await startBridge(ha, ["sensor.*"]);
+      if (addBeforeCommissioning) addSensorMeasurements(ha);
+      const { bem } = await startBridge(ha, [include], undefined, {
+        autoComposedDevices: composed,
+      });
       const client = await commission();
       if (!addBeforeCommissioning) {
         const seen = await subscribe(client, partsOnly(bem));
-        addTemperatureAndHumidity(ha);
+        addSensorMeasurements(ha);
         await bem.refreshDevices();
-        const added = numberOf(bem, "sensor_temperature");
+        const siblings = [...bem.root.parts].map((p) => p.number);
+        expect(siblings).toHaveLength(3);
         for (const ep of [0, bem.root.number]) {
           await expect
-            .poll(() => partsOf(seen, ep).some((p) => p.includes(added)), poll)
+            .poll(
+              () =>
+                partsOf(seen, ep).some((p) =>
+                  siblings.every((n) => p.includes(n)),
+                ),
+              poll,
+            )
             .toBe(true);
         }
       }
 
-      expect([...bem.root.parts].map((p) => p.id)).toEqual([
-        "sensor_temperature",
-      ]);
-      const added = numberOf(bem, "sensor_temperature");
-      const req = Read(
-        Read.Attribute({
-          endpoint: added,
-          cluster: Descriptor.Complete,
-          attributes: ["deviceTypeList"],
-        }),
-      );
+      const parent = bem.root.parts.get("sensor_temperature")!;
+      expect(parent).toBeDefined();
+      const endpoints = composed ? parent.parts : bem.root.parts;
+      expect(bem.root.parts.size).toBe(composed ? 1 : 3);
+      const temp = composed
+        ? endpoints.get("sensor_temperature_temp")!
+        : parent;
+      const hum = endpoints.get(
+        composed ? "sensor_temperature_humidity" : "sensor_humidity",
+      )!;
+      const press = endpoints.get(
+        composed ? "sensor_temperature_pressure" : "sensor_pressure",
+      )!;
+      expect(new Set([temp.number, hum.number, press.number]).size).toBe(3);
+
       const read: Report[] = [];
-      await collect(read)(client.interaction.read(req));
-      expect(read).toEqual([
-        {
-          ep: added,
-          cluster: DESCRIPTOR,
-          attr: Descriptor.Complete.attributes.deviceTypeList.id,
-          value: expect.arrayContaining(
-            [
-              TemperatureSensorDevice,
-              HumiditySensorDevice,
-              BridgedNodeEndpoint,
-            ].map(({ deviceType, deviceRevision }) => ({
-              deviceType,
-              revision: deviceRevision,
-            })),
+      await collect(read)(
+        client.interaction.read(
+          Read(
+            Read.Attribute({
+              cluster: Descriptor.Complete,
+              attributes: ["deviceTypeList", "partsList", "serverList"],
+            }),
+            Read.Attribute({
+              endpoint: temp.number,
+              cluster: TemperatureMeasurement.Complete,
+              attributes: ["measuredValue"],
+            }),
+            Read.Attribute({
+              endpoint: hum.number,
+              cluster: RelativeHumidityMeasurement.Complete,
+              attributes: ["measuredValue"],
+            }),
+            Read.Attribute({
+              endpoint: press.number,
+              cluster: PressureMeasurement.Complete,
+              attributes: ["measuredValue"],
+            }),
           ),
-        },
-      ]);
+        ),
+      );
+      const attribute = (ep: number, cluster: number, attr: number) =>
+        read.find(
+          (r) => r.ep === ep && r.cluster === cluster && r.attr === attr,
+        )?.value;
+      const descriptor = Descriptor.Complete.attributes;
+      const typeEntry = ({
+        deviceType,
+        deviceRevision,
+      }: {
+        deviceType: number;
+        deviceRevision: number;
+      }) => ({ deviceType, revision: deviceRevision });
+      for (const [endpoint, type, measurement, raw] of [
+        [temp, TemperatureSensorDevice, TemperatureMeasurement.Complete, 2100],
+        [hum, HumiditySensorDevice, RelativeHumidityMeasurement.Complete, 4000],
+        [press, PressureSensorDevice, PressureMeasurement.Complete, 1013],
+      ] as const) {
+        const types = attribute(
+          endpoint.number,
+          DESCRIPTOR,
+          descriptor.deviceTypeList.id,
+        );
+        const expected = composed
+          ? [typeEntry(type)]
+          : [typeEntry(type), typeEntry(BridgedNodeEndpoint)];
+        expect(types).toEqual(expect.arrayContaining(expected));
+        expect(types).toHaveLength(expected.length);
+        expect(attribute(endpoint.number, DESCRIPTOR, PARTS)).toEqual([]);
+        const servers = attribute(
+          endpoint.number,
+          DESCRIPTOR,
+          descriptor.serverList.id,
+        ) as number[];
+        expect(
+          servers.filter((id) =>
+            [
+              TemperatureMeasurement.Complete.id,
+              RelativeHumidityMeasurement.Complete.id,
+              PressureMeasurement.Complete.id,
+            ].some((measurementId) => measurementId === id),
+          ),
+        ).toEqual([measurement.id]);
+        expect(
+          attribute(
+            endpoint.number,
+            measurement.id,
+            measurement.attributes.measuredValue.id,
+          ),
+        ).toBe(raw);
+      }
+      if (composed) {
+        expect(
+          attribute(parent.number, DESCRIPTOR, descriptor.deviceTypeList.id),
+        ).toEqual([typeEntry(BridgedNodeEndpoint)]);
+        expect(attribute(parent.number, DESCRIPTOR, PARTS)).toEqual(
+          expect.arrayContaining([temp.number, hum.number, press.number]),
+        );
+      }
     },
   );
 

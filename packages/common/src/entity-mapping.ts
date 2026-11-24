@@ -130,14 +130,14 @@ export interface EntityMappingConfig {
    */
   readonly temperatureEntity?: string;
   /**
-   * Optional: Entity ID of a humidity sensor to combine with a temperature sensor
-   * or a fan/air purifier. Creates a combined device in Matter controllers.
+   * Optional: Entity ID supplying the humidity endpoint associated with a
+   * temperature sensor or the humidity reading on a fan/air purifier.
    * Example: "sensor.h_t_bad_humidity"
    */
   readonly humidityEntity?: string;
   /**
-   * Optional: Entity ID of a pressure sensor to combine with a temperature sensor.
-   * Creates a combined Temperature+Pressure sensor in Matter instead of separate devices.
+   * Optional: Entity ID supplying the pressure endpoint associated with a
+   * temperature sensor.
    * Example: "sensor.h_t_bad_pressure"
    */
   readonly pressureEntity?: string;

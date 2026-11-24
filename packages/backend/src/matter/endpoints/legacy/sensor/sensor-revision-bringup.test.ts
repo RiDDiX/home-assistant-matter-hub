@@ -22,8 +22,8 @@ import { HomeAssistantConfig } from "../../../../services/home-assistant/home-as
 import { AggregatorEndpoint } from "../../aggregator-endpoint.js";
 import { createLegacyEndpointType } from "../create-legacy-endpoint-type.js";
 
-// Merged sensors list their device types explicitly (#214), so the revisions
-// must follow the matter.js model like a plain sensor on the same bridge.
+// Temperature endpoint descriptors use the matter.js model revision even
+// with legacy mappings that named humidity and pressure sources.
 
 const temp = {
   deviceType: Number(TemperatureSensorDevice.deviceType),
@@ -103,7 +103,7 @@ function tempEntity(): HomeAssistantEntityInformation {
   return { entity_id: "sensor.temp", state: state as any };
 }
 
-// Mount a composed temperature sensor and return its runtime descriptor
+// Mount a temperature sensor and return its runtime descriptor
 // deviceTypeList.
 async function mountedDeviceTypes(
   mapping: EntityMappingConfig,
@@ -141,15 +141,10 @@ async function mountedDeviceTypes(
   return list;
 }
 
-describe("merged sensor device type revisions", () => {
+describe("temperature sensor device type revisions", () => {
   it.each([
-    ["humidity", { humidityEntity: "sensor.hum" }, [temp, humidity]],
-    ["pressure", { pressureEntity: "sensor.press" }, [temp, pressure]],
-    [
-      "humidity and pressure",
-      { humidityEntity: "sensor.hum", pressureEntity: "sensor.press" },
-      [temp, humidity, pressure],
-    ],
+    ["humidity", { humidityEntity: "sensor.hum" }],
+    ["pressure", { pressureEntity: "sensor.press" }],
     [
       "humidity, pressure and battery",
       {
@@ -157,9 +152,8 @@ describe("merged sensor device type revisions", () => {
         pressureEntity: "sensor.press",
         batteryEntity: "sensor.bat",
       },
-      [temp, humidity, pressure],
     ],
-  ])("temperature with %s uses the model revisions", async (_, extra, expected) => {
+  ])("temperature with %s advertises only its own measurement type", async (_, extra) => {
     const list = await mountedDeviceTypes({
       entityId: "sensor.temp",
       ...extra,
@@ -169,7 +163,7 @@ describe("merged sensor device type revisions", () => {
       (d) => d.deviceType,
     );
     const listed = list.filter((d) => sensorTypes.includes(d.deviceType));
-    expect(listed).toEqual(expect.arrayContaining([...expected, bridged]));
-    expect(listed).toHaveLength(expected.length + 1);
+    expect(listed).toEqual(expect.arrayContaining([temp, bridged]));
+    expect(listed).toHaveLength(2);
   });
 });

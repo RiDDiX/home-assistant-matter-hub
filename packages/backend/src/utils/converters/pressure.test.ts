@@ -2,6 +2,12 @@ import { describe, expect, it } from "vitest";
 import { convertPressureToHpa } from "./pressure.js";
 
 describe("convertPressureToHpa", () => {
+  it("requires a recognized unit when inferring a pressure sensor", () => {
+    expect(convertPressureToHpa(1, "kPa", false)).toBe(10);
+    expect(convertPressureToHpa(1, "unknown", false)).toBeUndefined();
+    expect(convertPressureToHpa(1, 7, false)).toBeUndefined();
+  });
+
   it("should pass through hPa", () => {
     expect(convertPressureToHpa(1013, "hPa")).toBe(1013);
   });

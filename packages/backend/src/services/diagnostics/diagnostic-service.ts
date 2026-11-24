@@ -55,8 +55,6 @@ export class DiagnosticService {
             autoMappings.push(`Battery: ${mapping.batteryEntity}`);
           if (typeof mapping.humidityEntity === "string")
             autoMappings.push(`Humidity: ${mapping.humidityEntity}`);
-          if (typeof mapping.pressureEntity === "string")
-            autoMappings.push(`Pressure: ${mapping.pressureEntity}`);
           if (typeof mapping.powerEntity === "string")
             autoMappings.push(`Power: ${mapping.powerEntity}`);
           if (typeof mapping.energyEntity === "string")

@@ -209,8 +209,7 @@ const featureFlagSchema: JSONSchema7 = {
     autoHumidityMapping: {
       title: "Auto Humidity Mapping",
       description:
-        "Automatically combine humidity sensors with temperature sensors from the same Home Assistant device. " +
-        "When enabled, humidity sensors will be merged into temperature sensors to create combined TemperatureHumiditySensor devices.",
+        "Automatically include a humidity endpoint from the same Home Assistant device as a selected temperature sensor.",
       type: "boolean",
       default: true,
     },
@@ -218,8 +217,7 @@ const featureFlagSchema: JSONSchema7 = {
     autoPressureMapping: {
       title: "Auto Pressure Mapping",
       description:
-        "Automatically combine pressure sensors with temperature sensors from the same Home Assistant device. " +
-        "When enabled, pressure sensors will be merged into temperature sensors to create combined sensor devices.",
+        "Automatically include a pressure endpoint from the same Home Assistant device as a selected temperature sensor.",
       type: "boolean",
       default: true,
     },
@@ -228,7 +226,7 @@ const featureFlagSchema: JSONSchema7 = {
       title: "Auto Composed Devices",
       description:
         "A temperature sensor with its humidity and pressure sensors becomes one device with a sub-device per reading, " +
-        "battery on the parent. Off, they share one endpoint and Apple Home shows no humidity. Also forces battery, " +
+        "battery on the parent. With this flag off, the readings use separate endpoints. Also forces battery, " +
         "humidity and pressure auto-mapping on and unlocks Composed Sub-Entities and air purifier grouping. " +
         "Controllers see new devices; existing ones change shape after a bridge restart.",
       type: "boolean",

@@ -136,6 +136,7 @@ function makeHarness(
     initialState: vi.fn((): object | undefined => ({ state: "on" })),
     mergeExternalStates: vi.fn(),
     batteryFingerprintFor: vi.fn(() => ""),
+    isTemperatureCompanionSharingBattery: vi.fn(() => false),
     forgetBatteryCacheForDevice: vi.fn(),
     fullEntities,
     snapshotGeneration: 1,
@@ -1145,11 +1146,11 @@ describe("ServerModeEndpointManager (#301)", () => {
       0,
     ],
     [
-      "a temperature sensor rebuilds once for a late humidity merge",
+      "a temperature sensor stays mounted when a separate humidity source arrives",
       "sensor.purifier_temperature",
       undefined,
       { state: "21.5", attributes: { device_class: "temperature" } },
-      1,
+      0,
     ],
   ])("%s, server mode never composes (#505)", async (_l, entityId, mapping, state, rebuilds) => {
     const h = makeHarness([entityId], entityId, {
