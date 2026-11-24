@@ -21,7 +21,8 @@ export function isSupervisorIngress(
 ): boolean {
   return Boolean(
     (process.env.SUPERVISOR_TOKEN || process.env.HASSIO_TOKEN) &&
-      "x-ingress-path" in headers &&
+      // Home Assistant versions older than 2026.12 only send X-Ingress-Path.
+      ("x-forwarded-prefix" in headers || "x-ingress-path" in headers) &&
       AccessControl.ipMatch(remoteAddress ?? "", ["172.30.32.2"]),
   );
 }

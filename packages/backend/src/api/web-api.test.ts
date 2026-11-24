@@ -233,10 +233,13 @@ describe("WebApi auth", () => {
     expect(loopback).toContain(ingress.addresses[1]);
   });
 
-  it("keeps the env credentials for a spoofed ingress header", async () => {
+  it.each([
+    "x-forwarded-prefix",
+    "x-ingress-path",
+  ])("keeps the env credentials for a spoofed %s", async (header) => {
     vi.stubEnv("SUPERVISOR_TOKEN", "token");
     const host = await serve(["127.0.0.1", "::1"]);
-    const headers = { "x-ingress-path": "/api/hassio_ingress/abc" };
+    const headers = { [header]: "/api/hassio_ingress/abc" };
     expect(await get(host, "/api/settings/auth", undefined, headers)).toBe(401);
     expect(await upgrade(host, undefined, headers)).toBe(401);
   });

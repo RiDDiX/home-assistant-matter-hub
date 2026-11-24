@@ -70,9 +70,11 @@ describe("ipWhitelist", () => {
 });
 
 describe("isSupervisorIngress", () => {
-  const headers = { "x-ingress-path": "/api/hassio_ingress/abc" };
-
-  it("needs the token, the header and the supervisor address", () => {
+  it.each([
+    "x-forwarded-prefix",
+    "x-ingress-path",
+  ])("needs the token, %s and the supervisor address", (header) => {
+    const headers = { [header]: "/api/hassio_ingress/abc" };
     try {
       vi.stubEnv("HASSIO_TOKEN", "");
       vi.stubEnv("SUPERVISOR_TOKEN", "token");

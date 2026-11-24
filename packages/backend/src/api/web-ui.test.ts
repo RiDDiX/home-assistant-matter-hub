@@ -3,8 +3,9 @@ import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import express from "express";
-import { afterAll, describe, expect, it } from "vitest";
-import { supportIngress } from "./proxy-support.js";
+import { afterAll, describe, expect, it, vi } from "vitest";
+import type { BetterLogger } from "../core/app/logger.js";
+import { supportProxyPrefix } from "./proxy-support.js";
 import { webUi } from "./web-ui.js";
 
 const dist = mkdtempSync(join(tmpdir(), "hamh-web-ui-"));
@@ -13,7 +14,8 @@ writeFileSync(join(dist, "index.html"), "<!-- BASE --><!-- /BASE -->");
 
 describe("webUi", () => {
   it("escapes the base href taken from the ingress path", async () => {
-    const app = express().use(supportIngress, webUi(dist));
+    const log = { warn: vi.fn() } as never as BetterLogger;
+    const app = express().use(supportProxyPrefix(log), webUi(dist));
     const server = app.listen(0);
     try {
       await new Promise<void>((resolve) => server.once("listening", resolve));

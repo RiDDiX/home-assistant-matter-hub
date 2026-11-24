@@ -71,6 +71,7 @@ export class WebSocketApi {
       },
     });
     // A proxy that keeps its x-forwarded-prefix in the URL sends /<prefix>/api/ws.
+    // Deprecated, see proxy-support.ts.
     this.wss.shouldHandle = (req) =>
       (req.url ?? "").split("?")[0].endsWith(wsPath);
 
