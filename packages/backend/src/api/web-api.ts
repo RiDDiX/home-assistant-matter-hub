@@ -32,7 +32,7 @@ import { matterApi } from "./matter-api.js";
 import { metricsApi } from "./metrics-api.js";
 import { networkDiagnosticApi } from "./network-diagnostic-api.js";
 import { pluginApi } from "./plugin-api.js";
-import { supportIngress, supportProxyLocation } from "./proxy-support.js";
+import { supportProxyPrefix } from "./proxy-support.js";
 import { settingsApi } from "./settings-api.js";
 import { systemApi } from "./system-api.js";
 import { webUi } from "./web-ui.js";
@@ -206,8 +206,7 @@ export class WebApi extends Service {
     const middlewares: express.Handler[] = [
       this.accessLogger,
       hostGuard(this.props.allowedHosts),
-      supportIngress,
-      supportProxyLocation,
+      supportProxyPrefix,
     ];
 
     // Whitelist first, so denied clients never get an auth challenge.

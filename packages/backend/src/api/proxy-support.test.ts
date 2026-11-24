@@ -1,7 +1,7 @@
 import type { AddressInfo } from "node:net";
 import express from "express";
 import { describe, expect, it } from "vitest";
-import { supportIngress, supportProxyLocation } from "./proxy-support.js";
+import { supportProxyPrefix } from "./proxy-support.js";
 
 const ingress = "/api/hassio_ingress/abc";
 
@@ -37,6 +37,12 @@ describe("proxy support", () => {
       expected: { baseUrl: ingress, url: "/api/x" },
     },
     {
+      name: "reverse proxy that removes X-Forwarded-Prefix from the URL",
+      path: "/api/x",
+      headers: { "x-forwarded-prefix": "hamh/" },
+      expected: { baseUrl: "/hamh", url: "/api/x" },
+    },
+    {
       name: "reverse proxy that keeps X-Forwarded-Prefix in the URL",
       path: "/hamh/api/x",
       headers: { "x-forwarded-prefix": "/hamh" },
@@ -44,7 +50,7 @@ describe("proxy support", () => {
     },
   ])("resolves the base url for $name", async ({ path, headers, expected }) => {
     const app = express()
-      .use(supportIngress, supportProxyLocation)
+      .use(supportProxyPrefix)
       .use((req, res) => res.json({ baseUrl: req.baseUrl, url: req.url }));
     const server = app.listen(0);
     try {
