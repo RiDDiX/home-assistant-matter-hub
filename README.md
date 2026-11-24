@@ -39,7 +39,7 @@ of port forwarding etc.
 | Channel | Branch | Current Version | Description |
 |---------|--------|-----------------|-------------|
 | **Stable** | `main` | v2.0.60 | Production-ready, recommended for most users |
-| **Alpha** | `alpha` | v2.1.0-alpha.1006 | Ahead of Stable, carries the additions listed under Alpha Features |
+| **Alpha** | `alpha` | v2.1.0-alpha.1008 | Ahead of Stable, carries the additions listed under Alpha Features |
 | **Testing** | `testing` | v4.1.0-testing.x | ⚠️ **Highly unstable!** Experimental features, may break |
 
 ### Which version should I use?
@@ -549,6 +549,16 @@ Re-assign the affected devices to their rooms after they reconnect. See the [doc
 
 <details>
 <summary><strong>🧪 Alpha Features (v2.1.0-alpha.x)</strong> - Click to expand</summary>
+
+**v2.1.0-alpha.1008:**
+- **Sub-path header value** ([#557](https://github.com/RiDDiX/home-assistant-matter-hub/pull/557)): the sub-path header must be a plain path such as `/hamh`. Only letters, digits and `/ - _ . ~ %` are accepted, anything else gets a 400. Before, a backslash or a tab in the header could point the page's base URL at another host.
+- **Base path behind a proxy** ([#557](https://github.com/RiDDiX/home-assistant-matter-hub/pull/557)): with `--http-base-path` behind a proxy that removes a sub-path, opening `/` redirects inside the proxy's sub-path. Before, it redirected to the bare base path.
+
+**v2.1.0-alpha.1007:**
+- **Sub-path header**: behind a reverse proxy that removes a sub-path from the URL, `X-Forwarded-Prefix` is now the header for that sub-path. `X-Ingress-Path`, the header Home Assistant ingress sends, keeps working. When both arrive, `X-Forwarded-Prefix` wins, thanks [@felipecrs](https://github.com/felipecrs) ([#557](https://github.com/RiDDiX/home-assistant-matter-hub/pull/557))
+- **Removed sub-path** ([#557](https://github.com/RiDDiX/home-assistant-matter-hub/pull/557)): a request with `X-Forwarded-Prefix` for a sub-path the proxy had already removed got a 400 "URL ... does not match base url ...", also when both headers were present. Home Assistant has an open proposal to send `X-Forwarded-Prefix` on ingress ([home-assistant/core#193747](https://github.com/home-assistant/core/pull/193747)). With it, every add-on page would have failed.
+- **Query strings through ingress** ([#557](https://github.com/RiDDiX/home-assistant-matter-hub/pull/557)): query strings of requests through ingress are no longer rewritten. Before, `?u=a//b` arrived as `?u=a/b`.
+- **Sub-path kept in the URL (deprecated)** ([#557](https://github.com/RiDDiX/home-assistant-matter-hub/pull/557)): the setup of the old guide, where the proxy keeps the sub-path in the URL and also sets `X-Forwarded-Prefix`, still works, and HAMH logs a warning once. Use `--http-base-path` for a kept sub-path, or let the proxy remove it.
 
 **v2.1.0-alpha.1006:**
 - **Temperature, humidity and pressure sensors** ([#549](https://github.com/RiDDiX/home-assistant-matter-hub/issues/549)): humidity and pressure no longer share the endpoint of the temperature sensor. Each reading is its own device with one device type. Before, the temperature endpoint carried two or three device types. The temperature device keeps its identity, controllers find humidity and pressure as new devices, and no new pairing is needed. With Auto Composed Devices on, the readings stay sub-devices of one device as before.

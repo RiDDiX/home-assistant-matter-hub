@@ -32,6 +32,8 @@ So a proxy on `matter.example.org` needs `--http-allowed-hosts=matter.example.or
 
 ## Running in a sub-path
 
+Changed in v2.1.0-alpha.1007. Earlier versions, including Stable up to v2.0.60, expect `x-ingress-path` when the proxy removes the sub-path and `x-forwarded-prefix` when it keeps it.
+
 If you want to run the application in a sub-location, let your proxy remove the sub-path from the URL and send it in the `x-forwarded-prefix` header.
 If your proxy cannot remove it, configure the sub-path in HAMH instead.
 
