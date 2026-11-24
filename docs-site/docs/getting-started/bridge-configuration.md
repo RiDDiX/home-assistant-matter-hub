@@ -297,10 +297,10 @@ Feature flags control advanced behavior of the bridge. Configure them in the **B
 
 | Feature Flag | Description | Default |
 |--------------|-------------|---------|
-| `autoComposedDevices` | A temperature sensor with its humidity and pressure sensors becomes one device with a sub-device per reading, battery on the parent (off: one endpoint, no humidity in Apple Home). Forces battery, humidity and pressure auto-mapping on, unlocks Composed Sub-Entities and air purifier grouping. **WARNING: Breaking change - see above.** | `false` |
+| `autoComposedDevices` | A temperature sensor with its humidity and pressure sensors becomes one device with a sub-device per reading, battery on the parent. With the flag off, the measurements use separate endpoints. Forces battery, humidity and pressure auto-mapping on, unlocks Composed Sub-Entities and air purifier grouping. **WARNING: Breaking change - see above.** | `false` |
 | `autoBatteryMapping` | Automatically combines battery sensors with their parent device | `false` |
-| `autoHumidityMapping` | Automatically combines humidity sensors with temperature sensors | `true` |
-| `autoPressureMapping` | Automatically combines pressure sensors with temperature sensors | `true` |
+| `autoHumidityMapping` | Automatically includes a humidity sensor from the same Home Assistant device as a selected temperature sensor | `true` |
+| `autoPressureMapping` | Automatically includes a pressure sensor from the same Home Assistant device as a selected temperature sensor | `true` |
 | `autoForceSync` | Periodically push all device states to controllers every 90 seconds. Enable if devices get out of sync. | `false` |
 | `coverSwapOpenClose` | Swap open and close commands for all covers on the bridge and report the HA percentage. To swap only the commands, set it per cover in Entity Mapping instead | `false` |
 | `coverDoNotInvertPercentage` | Same effect on the numbers as `coverUseHomeAssistantPercentage`, kept for older setups (not Matter-compliant) | `false` |

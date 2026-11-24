@@ -1,139 +1,42 @@
 # Temperature, Humidity & Pressure Sensor
 
-Many Zigbee-based sensors (like Xiaomi Aqara WSDCGQ11LM, Sonoff SNZB-02, etc.) report temperature, humidity, pressure, and battery level as **separate entities** in Home Assistant. This can result in multiple individual devices appearing in your Matter controller instead of one unified device.
+Changed in v2.1.0-alpha.1006. Earlier versions, including Stable up to v2.0.60, report humidity and pressure on the temperature sensor's endpoint.
 
-With **Auto Sensor Grouping** and **Entity Mapping**, you can combine these into a **single Matter device** that shows temperature, humidity, pressure, and battery status together.
+Home Assistant often reports temperature, humidity, pressure, and battery level from a physical sensor as separate entities. By default, HAMH exposes each measurement on its own Matter endpoint. The temperature endpoint can also report the sensor's battery level.
 
-## Features
+| Feature Flag | Default | Effect |
+|--------------|---------|--------|
+| `autoHumidityMapping` | Enabled | Includes a humidity reading from the same Home Assistant device as a selected temperature sensor. |
+| `autoPressureMapping` | Enabled | Includes a pressure reading from the same Home Assistant device as a selected temperature sensor. |
+| `autoBatteryMapping` | Disabled | Adds a battery reading from the same device to the temperature endpoint. |
+| `autoComposedDevices` | Disabled | Groups the measurements under one bridged device with a child endpoint per reading and battery on the parent. This enables all three automatic mappings. |
 
-- **Combined Device** - Single device in Apple Home, Google Home, Alexa instead of 3-4 separate ones
-- **Temperature** - Primary measurement from your temperature sensor
-- **Humidity** - Linked from a separate humidity sensor entity
-- **Pressure** - Linked from a separate pressure sensor entity
-- **Battery Level** - Optional battery status from a separate battery sensor entity
-- **Auto Grouping** - HAMH automatically combines sensors from the same HA device (no manual config needed)
-- **Device Name** - Uses your Home Assistant entity name (e.g., "H&T Bad")
+## Automatic and manual mapping
 
-## How It Works
+Select the temperature entity in the bridge filter. Automatic humidity and pressure mapping can include related entities that do not match the include rules. The filter preview shows direct matches. For separate endpoints, HAMH honors exclude rules and the source's **Disable this entity** setting. Home Assistant must enable the source in either layout. Separate endpoints for hidden sources require the bridge's **Include Hidden Entities** setting.
 
-### Automatic Grouping (Recommended)
+To use a particular source or a source on another Home Assistant device, edit the temperature entity's mapping. Select **Humidity Sensor**, **Pressure Sensor**, or **Battery Sensor** and save. Humidity and pressure sources normally use the corresponding Home Assistant device class. Manual links also accept template sensors with no device class that report humidity in percent or pressure in a recognized unit.
 
-Since v2.0.17, HAMH automatically detects related sensors on the same HA device and combines them. This is controlled by three feature flags in Bridge Settings:
+If the source also matches the bridge filter, it has one endpoint. With **Auto Composed Devices** enabled on a bridge, the readings appear as child endpoints of the composed device. You can exclude a mapped companion from standalone exposure and still use its reading in the composition. Server mode exposes separate endpoints and applies its ten-device limit.
 
-| Feature Flag | Default | Description |
-|--------------|---------|-------------|
-| `autoHumidityMapping` | Enabled | Combines humidity with temperature |
-| `autoPressureMapping` | Enabled | Combines pressure with temperature |
-| `autoBatteryMapping` | Enabled | Adds battery to any primary sensor |
+## Existing bridges
 
-With auto grouping, you don't need to configure anything manually. The sensors are combined automatically based on their HA device assignment.
+The default temperature endpoint keeps its identity. Humidity and pressure readings that previously shared that endpoint now have separate endpoint IDs. Your controller may discover them as new devices.
 
-### Manual Mapping
+Earlier versions of this page suggested ticking **Disable this entity** on the humidity and pressure entities, or excluding them, to avoid duplicates. With separate endpoints that setting now hides the reading. Re-enable the entity, or turn on **Auto Composed Devices**, to get it back. When such a setting keeps a humidity or pressure reading out, or a mapped source cannot be used, HAMH logs one warning that names the sensor and lists it on the Diagnostics page.
 
-You can also manually configure which sensors to combine using Entity Mapping.
+If a reading is missing, check that its source is enabled and reports a numeric value. For a separate endpoint, check its filter exclusions and mapping settings.
 
-Instead of exposing each sensor entity separately:
+## Matter clusters
 
-| Without Mapping | With Mapping |
-|-----------------|------------|
-| H&T Bad Temperature | **H&T Bad** (combined) |
-| H&T Bad Humidity |, (still gets its own standalone endpoint) |
-| H&T Bad Pressure |, (auto-assigned to temperature) |
-| H&T Bad Battery |, (auto-assigned to temperature) |
+| Reading | Cluster |
+|---------|---------|
+| Temperature | TemperatureMeasurement |
+| Humidity | RelativeHumidityMeasurement |
+| Pressure | PressureMeasurement |
+| Battery | PowerSource |
 
-The combined device reports all values in one place.
-
-> **Note:** Humidity entities still create their own standalone endpoint even when auto-assigned to a temperature sensor, because Apple Home only displays humidity on dedicated HumiditySensor endpoints.
-
-## Configuration
-
-### Step 1: Identify Your Entities
-
-In Home Assistant, find your related sensor entities. For example, a typical Zigbee H&T sensor creates:
-
-- `sensor.h_t_bad_temperature` - Temperature measurement
-- `sensor.h_t_bad_humidity` - Humidity measurement  
-- `sensor.h_t_bad_pressure` - Pressure measurement
-- `sensor.h_t_bad_battery` - Battery percentage
-
-### Step 2: Configure Entity Mapping
-
-1. Go to your **Bridge** in the Dashboard
-2. Find your **temperature** sensor entity (e.g., `sensor.h_t_bad_temperature`)
-3. Click **Edit Mapping**
-4. Fill in the optional fields:
-   - **Humidity Sensor**: `sensor.h_t_bad_humidity`
-   - **Pressure Sensor**: `sensor.h_t_bad_pressure`
-   - **Battery Sensor**: `sensor.h_t_bad_battery`
-5. Click **Save**
-
-> **Tip:** If auto grouping is enabled (default), you typically don't need to do this manually. Only use manual mapping if your sensors are on different HA devices or if auto grouping doesn't detect them correctly.
-
-### Step 3: Exclude the Individual Entities
-
-To prevent duplicate devices in your Matter controller:
-
-1. Find the humidity entity (`sensor.h_t_bad_humidity`)
-2. Click **Edit Mapping** → Enable **"Disable this entity"**
-3. Repeat for the battery entity (`sensor.h_t_bad_battery`)
-
-Or simply don't include them in your bridge's entity filter.
-
-### Step 4: Re-pair (if necessary)
-
-If your devices were already paired, you may need to remove and re-add them in your Matter controller because the device capabilities have changed.
-
-## Example Configuration
-
-For a sensor named "H&T Bad" with these entities:
-
-| Entity | Mapping |
-|--------|--------|
-| `sensor.h_t_bad_temperature` | **Primary** - Set `humidityEntity`, `pressureEntity`, and `batteryEntity` |
-| `sensor.h_t_bad_humidity` | Keeps its own endpoint (Apple Home needs standalone HumiditySensor) |
-| `sensor.h_t_bad_pressure` | Auto-assigned or **Disabled** / excluded from bridge |
-| `sensor.h_t_bad_battery` | Auto-assigned or **Disabled** / excluded from bridge |
-
-Result: One combined device "H&T Bad" showing temperature, humidity, pressure, and battery.
-
-## Compatibility
-
-| Controller | Temperature | Humidity | Pressure | Battery |
-|------------|-------------|----------|----------|----------|
-| Apple Home | ✅ | ✅ | ✅ | ✅ |
-| Google Home | ✅ | ✅ | ✅ | ✅ |
-| Amazon Alexa | ✅ | ✅ | ✅ | ⚠️ Limited |
-
-## Technical Details
-
-The combined sensor uses these Matter clusters:
-
-- **TemperatureMeasurement** - From the primary temperature entity
-- **RelativeHumidityMeasurement** - From the linked humidity entity
-- **PressureMeasurement** - From the linked pressure entity (in dPa)
-- **PowerSource** - Battery level from the linked battery entity
-
-Pressure values are converted to deciPascals (dPa) for Matter. Supported HA units: hPa, mbar, kPa, Pa.
-
-## Troubleshooting
-
-### Humidity/Battery not showing
-
-1. Verify the entity IDs are correct (check spelling, case sensitivity)
-2. Confirm the linked sensors provide numeric values
-3. Remove and re-add the device in your Matter controller
-
-### Device shows incorrect name
-
-The Matter device name comes from your primary temperature entity's `friendly_name` in Home Assistant. Customize it there or use the **Custom Name** field in Entity Mapping.
-
-### Old individual devices still appear
-
-After configuring the combined sensor:
-
-1. Disable or exclude the individual humidity/battery entities
-2. Remove old devices from your Matter controller
-3. Re-pair the bridge if necessary
+Matter pressure is reported in units of 0.1 kPa, numerically equal to hPa.
 
 ## Example Home Assistant Entities
 
@@ -148,7 +51,7 @@ sensor.h_t_bad_temperature:
     unit_of_measurement: "°C"
     friendly_name: "H&T Bad"
 
-# Humidity sensor  
+# Humidity sensor
 sensor.h_t_bad_humidity:
   state: "58"
   attributes:

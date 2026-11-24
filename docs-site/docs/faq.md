@@ -94,7 +94,7 @@ Currently supported sensor types:
 - Illuminance (Light)
 - Air Quality (AQI, PM2.5, PM10, CO2, TVOC)
 
-See [Temperature & Humidity Sensor](./devices/temperature-humidity-sensor.md) for details on combining temperature, humidity, pressure, and battery into a single device.
+See [Temperature & Humidity Sensor](./devices/temperature-humidity-sensor.md) for how temperature, humidity, pressure, and battery readings of one sensor are exposed.
 
 ## The app keeps crashing or restarting on my HA Yellow / Raspberry Pi / VM
 
@@ -385,7 +385,7 @@ Refreshes every 15 seconds.
 **Auto Composed Devices** (`autoComposedDevices`, since v2.0.20) changes the shape of a temperature sensor that has
 humidity or pressure sensors on the same device:
 
-- Off: one endpoint carries all readings. Apple Home shows no humidity on that shape.
+- Off: each reading has its own endpoint, so controllers show separate devices. Up to v2.1.0-alpha.1005 and Stable v2.0.60, one endpoint carried all readings and Apple Home showed no humidity on it.
 - On: a parent device with a sub-device per reading, battery on the parent. Apple Home shows humidity; pressure only
   where the compatibility matrix lists it; SmartThings does not look into sub-devices.
 - On also forces battery, humidity and pressure auto-mapping on and unlocks Composed Sub-Entities and air purifier
