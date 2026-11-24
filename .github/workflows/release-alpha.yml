@@ -51,17 +51,18 @@ jobs:
       - name: Calculate Next Alpha Version
         id: version
         run: |
-          # Get latest alpha tag (only 2.1.0-alpha.X pattern)
-          LATEST_ALPHA=$(git tag -l "v2.1.0-alpha.*" --sort=-v:refname | head -n1)
+          # Alpha runs ahead of Stable v2.1.x; the alpha number keeps counting across lines
+          ALPHA_BASE="2.2.0"
+          LATEST_ALPHA=$(git tag -l "v2.*-alpha.*" --sort=-v:refname | head -n1)
           echo "Latest alpha tag: $LATEST_ALPHA"
-          
+
           if [ -z "$LATEST_ALPHA" ]; then
             # No alpha tag exists, start with alpha.1
-            NEXT_VERSION="2.1.0-alpha.1"
+            NEXT_VERSION="$ALPHA_BASE-alpha.1"
           else
             # Parse existing alpha version and increment only the alpha number
             ALPHA_NUM=${LATEST_ALPHA##*-alpha.}
-            NEXT_VERSION="2.1.0-alpha.$((ALPHA_NUM + 1))"
+            NEXT_VERSION="$ALPHA_BASE-alpha.$((ALPHA_NUM + 1))"
           fi
           
           echo "Next version: $NEXT_VERSION"
@@ -108,7 +109,7 @@ jobs:
         run: |
           VERSION="${{ steps.version.outputs.release-version }}"
           # Get commits since last alpha tag
-          LATEST_ALPHA=$(git tag -l "v2.1.0-alpha.*" --sort=-v:refname | grep -v "v$VERSION" | head -n1)
+          LATEST_ALPHA=$(git tag -l "v2.*-alpha.*" --sort=-v:refname | grep -v "v$VERSION" | head -n1)
           
           if [ -n "$LATEST_ALPHA" ]; then
             echo "Generating changelog from $LATEST_ALPHA to HEAD"
