@@ -8,7 +8,7 @@ import {
 } from "@home-assistant-matter-hub/common";
 import { Environment, VariableService } from "@matter/general";
 import type { ServerNode } from "@matter/main/node";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AggregatorEndpoint } from "../../matter/endpoints/aggregator-endpoint.js";
 import { BridgeServerNode } from "../../matter/endpoints/bridge-server-node.js";
 import { ServerModeServerNode } from "../../matter/endpoints/server-mode-server-node.js";
@@ -58,6 +58,7 @@ beforeEach(() => {
 });
 
 afterEach(async () => {
+  vi.useRealTimers();
   await bridge?.stop().catch(() => {});
   await server?.close().catch(() => {});
   blocker?.close();
@@ -142,7 +143,18 @@ describe.each(Object.entries(modes))("port edit, %s", (_, mode) => {
       port: p,
       filter: data.filter,
     });
-    return { bridge: b as Bridge, node, update };
+    return {
+      bridge: b as Bridge,
+      node,
+      update,
+      sessions: b.sessions,
+      activeTimers: () =>
+        [
+          b.autoForceSyncTimer,
+          b.commissioningCheckTimer,
+          b.warmStartTimer,
+        ].filter(Boolean),
+    };
   }
 
   it("rebinds a running bridge on the new port", async () => {
@@ -197,6 +209,82 @@ describe.each(Object.entries(modes))("port edit, %s", (_, mode) => {
 
     expect(bridge.data.status).toBe(BridgeStatus.Stopped);
     expect(await inUse(a)).toBe(false);
+  });
+
+  it.each([
+    "node start",
+    "node error",
+    "post-start hook",
+  ])("preserves a timed-out stop after a delayed %s", async (delayed) => {
+    const [port] = await freePorts();
+    const { bridge, node, sessions, activeTimers } = await make(port);
+    const sessionStart = vi.spyOn(sessions, "start");
+    const statuses: BridgeStatus[] = [];
+    bridge.onStatusChange = () => statuses.push(bridge.data.status);
+    let markEntered!: () => void;
+    const entered = new Promise<void>((resolve) => {
+      markEntered = resolve;
+    });
+    let release!: () => void;
+    const released = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const nodeStart = node.start.bind(node);
+    const hooks = bridge as unknown as { onServerStarted(): Promise<void> };
+    const onStarted = hooks.onServerStarted.bind(bridge);
+    const hook = vi.spyOn(hooks, "onServerStarted");
+    if (delayed === "post-start hook") {
+      hook.mockImplementationOnce(async () => {
+        markEntered();
+        await released;
+        await onStarted();
+      });
+    } else {
+      vi.spyOn(node, "start").mockImplementationOnce(async () => {
+        markEntered();
+        await released;
+        if (delayed === "node error") throw new Error("late start failure");
+        await nodeStart();
+      });
+    }
+
+    const starting = bridge.start();
+    await entered;
+    vi.useFakeTimers();
+    const stopping = bridge.stop(BridgeStatus.Stopped, "Requested stop");
+    await vi.advanceTimersByTimeAsync(60_000);
+    await stopping;
+    vi.useRealTimers();
+    expect(bridge.data.statusReason).toBe("Requested stop");
+
+    const cancel = vi.spyOn(node, "cancel");
+    const restarting = delayed === "node start" ? bridge.start() : undefined;
+    release();
+    await starting;
+    expect(cancel).toHaveBeenCalledOnce();
+    expect(statuses.slice(0, 2)).toEqual([
+      BridgeStatus.Starting,
+      BridgeStatus.Stopped,
+    ]);
+    if (!restarting) {
+      expect(bridge.data.status).toBe(BridgeStatus.Stopped);
+      expect(bridge.data.statusReason).toBe("Requested stop");
+      expect(sessionStart).not.toHaveBeenCalled();
+      expect(activeTimers()).toEqual([]);
+      expect(await inUse(port)).toBe(false);
+    } else {
+      expect(hook).toHaveBeenCalledTimes(0);
+    }
+
+    await (restarting ?? bridge.start());
+    expect(statuses).toEqual([
+      BridgeStatus.Starting,
+      BridgeStatus.Stopped,
+      BridgeStatus.Starting,
+      BridgeStatus.Running,
+    ]);
+    expect(sessionStart).toHaveBeenCalledOnce();
+    expect(await inUse(port)).toBe(true);
   });
 
   it("a port edit issued during start ends on the new port", async () => {

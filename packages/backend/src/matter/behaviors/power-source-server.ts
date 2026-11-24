@@ -196,10 +196,28 @@ namespace PowerSourceServerBase {
 export function PowerSourceServer(config: PowerSourceConfig) {
   return PowerSourceServerBase.set({
     config,
-    // Set order to ensure PowerSource is on endpoint 0 or appropriate position
-    order: PowerSource.Cluster.id,
+    // Order is the source priority, the single source of an endpoint is 0
+    order: 0,
   });
 }
+
+/**
+ * Reads the mapped battery entity only, no attribute fallback.
+ */
+export const mappedBatteryConfig: PowerSourceConfig = {
+  getBatteryPercent: (_entity, agent) => {
+    const homeAssistant = agent.get(HomeAssistantEntityBehavior);
+    const batteryEntity = homeAssistant.state.mapping?.batteryEntity;
+    if (batteryEntity) {
+      const stateProvider = agent.env.get(EntityStateProvider);
+      const battery = stateProvider.getBatteryPercent(batteryEntity);
+      if (battery != null) {
+        return Math.max(0, Math.min(100, battery));
+      }
+    }
+    return null;
+  },
+};
 
 /**
  * Default battery config shared by all domain endpoints.
@@ -215,13 +233,9 @@ export const defaultBatteryConfig: PowerSourceConfig = {
     if (homeAssistant.state.mapping?.disableBatteryMapping) {
       return null;
     }
-    const batteryEntity = homeAssistant.state.mapping?.batteryEntity;
-    if (batteryEntity) {
-      const stateProvider = agent.env.get(EntityStateProvider);
-      const battery = stateProvider.getBatteryPercent(batteryEntity);
-      if (battery != null) {
-        return Math.max(0, Math.min(100, battery));
-      }
+    const mapped = mappedBatteryConfig.getBatteryPercent(entity, agent);
+    if (mapped != null) {
+      return mapped;
     }
 
     const attrs = entity.attributes as {

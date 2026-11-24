@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import type { BridgeData } from "@home-assistant-matter-hub/common";
@@ -31,6 +32,9 @@ export const APP_BACKUP_FILES = [
   "lock-credentials.data",
   "entity-identities.data",
 ];
+
+export const FULL_BACKUP_WARNING =
+  "WARNING: This backup contains sensitive Matter pairing data and may include plugin passwords and tokens, lock credentials, and web login data. Store it securely and do not share it.";
 
 // Secrets that only go into a backup with identity data: the files above and
 // every plugin-<bridgeId>-<plugin>.json config of the given bridges.
@@ -92,7 +96,7 @@ export class BackupService {
       .replace(/:/g, "-")
       .replace(/\.\d+Z$/, "");
     const prefix = auto ? "auto" : "manual";
-    const filename = `hamh-${prefix}-${version}-${dateStr}.zip`;
+    const filename = `hamh-${prefix}-${version}-${dateStr}_${randomUUID()}.zip`;
     const filepath = path.join(this.backupDir, filename);
     // Write under a temporary name so a killed shutdown leaves no half-written
     // archive behind that the backup list would treat as restorable (#483).
@@ -130,7 +134,10 @@ export class BackupService {
     };
 
     await new Promise<void>((resolve, reject) => {
-      const output = fs.createWriteStream(tmpPath);
+      const output = fs.createWriteStream(tmpPath, {
+        flags: "wx",
+        mode: 0o600,
+      });
       const archive = archiver("zip", { zlib: { level: 9 } });
 
       output.on("close", () => resolve());
@@ -151,7 +158,7 @@ export class BackupService {
           `Includes Identity: true`,
           `Includes Icons: ${includesIcons}`,
           "",
-          "WARNING: This backup contains sensitive Matter identity data (keypairs, fabric credentials). Keep it secure!",
+          FULL_BACKUP_WARNING,
           "",
         ].join("\n"),
         { name: "README.txt" },
@@ -324,7 +331,7 @@ export class BackupService {
       .replace(/\.zip$/, "");
     // version is everything before the date pattern (YYYY-MM-DD_HH-mm-ss)
     const dateMatch = withoutPrefix.match(
-      /^(.+)-(\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2})$/,
+      /^(.+)-\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}(?:_[\da-f-]{36})?$/,
     );
     const version = dateMatch ? dateMatch[1] : withoutPrefix;
     return { version, auto };

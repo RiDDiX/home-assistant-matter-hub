@@ -17,11 +17,7 @@ describe("selectMdnsInterface", () => {
       hassio: [v4("172.30.32.1")],
       veth0: [v6("fe80::1")],
     });
-    expect(choice.selected).toBe("end0");
-    expect(choice.suspicious).toBe(true);
-    expect(choice.dockerLike).toEqual(
-      expect.arrayContaining(["docker0", "hassio", "veth0"]),
-    );
+    expect(choice.candidates.map((i) => i.name)).toEqual(["end0"]);
   });
 
   it("prefers the non-Docker-range NIC on a plain bridged container (mwdle)", () => {
@@ -31,19 +27,15 @@ describe("selectMdnsInterface", () => {
       eth1: [v4("192.168.0.4"), v6("fe80::1775:a8db:7db:e108")],
     });
     // eth0 sits on the Docker range, so eth1 is the only LAN candidate (#482)
-    expect(choice.selected).toBe("eth1");
-    expect(choice.suspicious).toBe(true);
-    expect(choice.external.map((i) => i.name)).toEqual(["eth0", "eth1"]);
+    expect(choice.candidates.map((i) => i.name)).toEqual(["eth1"]);
   });
 
-  it("does not flag a clean single-NIC host", () => {
+  it("picks the only NIC on a clean host", () => {
     const choice = selectMdnsInterface({
       lo: [v4("127.0.0.1", true)],
       eth0: [v4("192.168.1.5"), v6("fe80::5")],
     });
-    expect(choice.selected).toBe("eth0");
-    expect(choice.suspicious).toBe(false);
-    expect(choice.dockerLike).toEqual([]);
+    expect(choice.candidates.map((i) => i.name)).toEqual(["eth0"]);
   });
 
   it("drops a compose bridge on a Docker range from the candidates (#482)", () => {
@@ -55,9 +47,7 @@ describe("selectMdnsInterface", () => {
       vethdda556c: [v6("fe80::8cda:6eff:feb0:d620")],
       veth78b8287: [v6("fe80::684d:46ff:fe46:664c")],
     });
-    expect(choice.selected).toBe("eth0");
     expect(choice.candidates.map((i) => i.name)).toEqual(["eth0"]);
-    expect(choice.suspicious).toBe(true);
   });
 
   it("lists the Docker interfaces when nothing else exists", () => {
@@ -66,7 +56,6 @@ describe("selectMdnsInterface", () => {
       hassio: [v4("172.30.32.1")],
       docker0: [v4("172.17.0.1")],
     });
-    expect(choice.selected).toBeUndefined();
     expect(choice.candidates.map((i) => i.name)).toEqual(["hassio", "docker0"]);
   });
 
@@ -76,8 +65,7 @@ describe("selectMdnsInterface", () => {
       eth0: [v4("192.168.1.5")],
       eth1: [v4("10.0.0.5")],
     });
-    expect(choice.selected).toBeUndefined();
-    expect(choice.suspicious).toBe(false);
+    expect(choice.candidates.map((i) => i.name)).toEqual(["eth0", "eth1"]);
   });
 
   it("suggests a genuine 172.x single-NIC LAN", () => {
@@ -85,8 +73,7 @@ describe("selectMdnsInterface", () => {
       lo: [v4("127.0.0.1", true)],
       eth0: [v4("172.20.5.5")],
     });
-    expect(choice.selected).toBe("eth0");
-    expect(choice.suspicious).toBe(true);
+    expect(choice.candidates.map((i) => i.name)).toEqual(["eth0"]);
   });
 
   it("never suggests a VPN tunnel beside a 172.x LAN NIC", () => {
@@ -95,7 +82,7 @@ describe("selectMdnsInterface", () => {
       eth0: [v4("172.16.3.10")],
       tailscale0: [v4("100.101.1.2")],
     });
-    expect(choice.selected).toBe("eth0");
+    expect(choice.candidates.map((i) => i.name)).toEqual(["eth0"]);
   });
 
   it("ignores link-local-only interfaces when suggesting", () => {
@@ -104,8 +91,7 @@ describe("selectMdnsInterface", () => {
       awdl0: [v6("fe80::aaaa")],
       eth0: [v4("192.168.1.5")],
     });
-    expect(choice.selected).toBe("eth0");
-    expect(choice.external.map((i) => i.name)).toEqual(["eth0"]);
+    expect(choice.candidates.map((i) => i.name)).toEqual(["eth0"]);
   });
 
   it("treats br-* as a real LAN bridge, not Docker", () => {
@@ -113,8 +99,7 @@ describe("selectMdnsInterface", () => {
       lo: [v4("127.0.0.1", true)],
       "br-lan": [v4("192.168.1.5")],
     });
-    expect(choice.selected).toBe("br-lan");
-    expect(choice.dockerLike).toEqual([]);
+    expect(choice.candidates.map((i) => i.name)).toEqual(["br-lan"]);
   });
 
   it("flags a global IPv6 advertised on the LAN interface", () => {
@@ -144,12 +129,10 @@ describe("selectMdnsInterface", () => {
       wpan0: [v6("fd11::1"), v6("fe80::aaaa")],
     });
     expect(choice.hasThreadInterface).toBe(true);
-    // A Thread mesh-local ULA is not global and not Docker, so the existing
-    // gates miss it on their own.
+    // A Thread mesh-local ULA is not global, so the IPv6 gate misses it.
     expect(choice.hasGlobalIpv6).toBe(false);
-    expect(choice.suspicious).toBe(false);
-    // wpan0 must not dilute the LAN suggestion.
-    expect(choice.selected).toBe("eth0");
+    // wpan0 is never a LAN candidate.
+    expect(choice.candidates.map((i) => i.name)).toEqual(["eth0"]);
   });
 
   it("does not flag a host without a Thread interface", () => {

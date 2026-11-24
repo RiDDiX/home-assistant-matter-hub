@@ -197,8 +197,11 @@ export function diagnosticApi(
   router.get("/export", async (req, res) => {
     const anonymize = req.query.anonymize !== "false";
     const logLimit = Math.min(
-      500,
-      Math.max(1, parseInt(req.query.logLimit as string, 10) || 200),
+      logBuffer.maxSize,
+      Math.max(
+        1,
+        parseInt(req.query.logLimit as string, 10) || logBuffer.maxSize,
+      ),
     );
 
     const memUsage = process.memoryUsage();

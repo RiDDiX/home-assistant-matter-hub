@@ -5,7 +5,7 @@ import {
   BridgeStatus,
   type EntityMappingConfig,
 } from "@home-assistant-matter-hub/common";
-import { StorageBackendMemory, StorageContext } from "@matter/general";
+import { Logger, StorageBackendMemory, StorageContext } from "@matter/general";
 import archiver from "archiver";
 import type { Request } from "express";
 import express from "express";
@@ -16,7 +16,9 @@ import {
   APP_BACKUP_FILES,
   archiveSecretFiles,
   type BackupService,
+  FULL_BACKUP_WARNING,
 } from "../services/backup/backup-service.js";
+import type { Bridge } from "../services/bridges/bridge.js";
 import type { BridgeService } from "../services/bridges/bridge-service.js";
 import type {
   AppSettingsStorage,
@@ -43,6 +45,18 @@ const archiveTotals = new WeakMap<unzipper.File, { bytes: number }>();
 // Bridge ids become directory names below the storage location on restore.
 // Imported legacy bridges keep dashed UUIDs or their old id.
 const BRIDGE_ID = /^[\w-]+$/;
+const RESERVED_BRIDGE_IDS = new Set([
+  "app",
+  "backups",
+  "bridge-icons",
+  "device-images",
+  "ids",
+  "plugin-packages",
+  "version",
+]);
+const log = Logger.get("BackupApi");
+// mkdtemp names of withStagedFiles. Kept recovery files get another name.
+const STALE_RESTORE_DIR = /^\.restore-[A-Za-z0-9]{6}$/;
 // Bridge schema in use when backups were introduced, for backups that predate
 // bridgeVersion.
 const FIRST_BACKUP_BRIDGE_VERSION = 5;
@@ -56,6 +70,7 @@ interface RestoreOptions {
   overwriteExisting?: boolean;
   includeMappings?: boolean;
   restoreIdentity?: boolean;
+  restoreAppData?: boolean;
 }
 
 export interface BackupData {
@@ -78,13 +93,50 @@ export function backupApi(
   identityStorage: EntityIdentityStorage,
 ): express.Router {
   const router = express.Router();
+  // A kill in the middle of a restore leaves staged keys and passwords behind.
+  try {
+    for (const name of fs.readdirSync(storageLocation)) {
+      if (STALE_RESTORE_DIR.test(name)) {
+        fs.rmSync(path.join(storageLocation, name), {
+          recursive: true,
+          force: true,
+        });
+      }
+    }
+  } catch (e) {
+    log.warn("Could not remove stale restore files:", e);
+  }
+  let restoring = false;
+  let restartPending = false;
 
   // The graceful shutdown path disposes bridges, HA client and storage in
   // reverse order before the process exits.
-  const scheduleRestart = () =>
+  const scheduleRestart = () => {
+    if (restartPending) return;
+    restartPending = true;
     setTimeout(() => process.kill(process.pid, "SIGTERM"), 500);
+  };
 
   async function restore(
+    buffer: Buffer,
+    options: RestoreOptions,
+    res: express.Response,
+  ) {
+    if (restoring || restartPending) {
+      res
+        .status(409)
+        .json({ error: "A restore or restart is already in progress" });
+      return;
+    }
+    restoring = true;
+    try {
+      await restoreArchive(buffer, options, res);
+    } finally {
+      restoring = false;
+    }
+  }
+
+  async function restoreArchive(
     buffer: Buffer,
     options: RestoreOptions,
     res: express.Response,
@@ -94,7 +146,7 @@ export function backupApi(
 
     const bridgeIds = options.bridgeIds;
     const bridgesToRestore = bridgeIds
-      ? backupData.bridges.filter((b) => bridgeIds.includes(b.id))
+      ? backupData.bridges.filter((b) => bridgeIds.includes(b?.id))
       : backupData.bridges;
     const restoreIdentity =
       options.restoreIdentity !== false && !!backupData.includesIdentity;
@@ -110,8 +162,19 @@ export function backupApi(
 
     for (const bridge of bridgesToRestore) {
       try {
-        if (!BRIDGE_ID.test(bridge.id)) {
-          throw new Error(`Invalid bridge id: ${bridge.id}`);
+        if (
+          typeof bridge?.id !== "string" ||
+          !BRIDGE_ID.test(bridge.id) ||
+          RESERVED_BRIDGE_IDS.has(bridge.id)
+        ) {
+          throw new Error(`Invalid bridge id: ${bridge?.id}`);
+        }
+        // boot reads basicInformation of every stored bridge
+        if (
+          typeof bridge.basicInformation !== "object" ||
+          bridge.basicInformation === null
+        ) {
+          throw new Error(`Invalid basic information for bridge ${bridge.id}`);
         }
         const exists = existingIds.has(bridge.id);
         if (exists && !options.overwriteExisting) {
@@ -128,63 +191,86 @@ export function backupApi(
           throw new Error(`Invalid entity mappings for bridge ${bridge.id}`);
         }
 
-        // A running bridge keeps writing its old fabrics and sessions over
-        // the restored files until the restart.
+        const requests = Array.isArray(mappings)
+          ? mappings.flatMap((mapping: EntityMappingConfig) =>
+              typeof mapping?.entityId === "string"
+                ? [{ ...mapping, bridgeId: bridge.id }]
+                : [],
+            )
+          : [];
+        const data = await migrateBridge(bridge, bridgeVersion);
         const live = bridgeService.get(bridge.id);
-        if (live && live.data.status !== BridgeStatus.Stopped) {
-          await live.stop();
-        }
-
-        await bridgeStorage.add(await migrateBridge(bridge, bridgeVersion));
-        bridgesRestored++;
-
-        if (Array.isArray(mappings)) {
-          for (const mapping of mappings) {
-            const config = mapping as EntityMappingConfig;
-            if (typeof config?.entityId !== "string") continue;
-            // setMapping sanitizes field by field, no list here to drift
-            await mappingStorage.setMapping({
-              ...config,
-              bridgeId: bridge.id,
-            });
-            mappingsRestored++;
-          }
-        }
-
-        if (restoreIdentity) {
-          const identityRestored = await restoreIdentityFiles(
-            zipDirectory,
-            bridge.id,
+        const wasActive = live && isActive(live);
+        try {
+          const { identity, icon } = await withStagedFiles(
             storageLocation,
+            async (dir) => {
+              const identity =
+                restoreIdentity &&
+                (await restoreIdentityFiles(zipDirectory, bridge.id, dir));
+              if (restoreIdentity) {
+                await restorePluginConfigs(
+                  zipDirectory,
+                  bridge.id,
+                  dir,
+                  backupData.bridges,
+                );
+              }
+              const icon =
+                !!backupData.includesIcons &&
+                (await restoreBridgeIcon(zipDirectory, bridge.id, dir));
+              await restorePluginState(zipDirectory, bridge.id, dir);
+              return { identity, icon };
+            },
+            async (install) => {
+              // Stop existing Matter and plugin writers before touching their files.
+              if (live && live.data.status !== BridgeStatus.Stopped) {
+                await live.stop();
+                if (isActive(live))
+                  throw new Error(`Bridge ${bridge.id} did not stop`);
+              }
+              install();
+              const saveBridge = () => bridgeStorage.add(data);
+              if (requests.length > 0) {
+                await mappingStorage.restoreMappings(
+                  bridge.id,
+                  requests,
+                  saveBridge,
+                );
+              } else {
+                await saveBridge();
+              }
+            },
           );
-          if (identityRestored) {
-            identitiesRestored++;
-          }
-          await restorePluginConfigs(zipDirectory, bridge.id, storageLocation);
+          existingIds.add(bridge.id);
+          bridgesRestored++;
+          mappingsRestored += requests.length;
+          if (identity) identitiesRestored++;
+          if (icon) iconsRestored++;
+        } catch (error) {
+          if (wasActive && !(error instanceof AggregateError))
+            resumeBridge(live);
+          throw error;
         }
-
-        if (backupData.includesIcons) {
-          const iconRestored = await restoreBridgeIcon(
-            zipDirectory,
-            bridge.id,
-            storageLocation,
-          );
-          if (iconRestored) {
-            iconsRestored++;
-          }
-        }
-
-        await restorePluginState(zipDirectory, bridge.id, storageLocation);
       } catch (e) {
         errors.push({
-          bridgeId: bridge.id,
+          bridgeId: bridge?.id,
           error: e instanceof Error ? e.message : "Unknown error",
         });
       }
     }
 
     let appRestored = false;
-    if (restoreIdentity) {
+    const wantsAppData =
+      options.restoreAppData === true && !!backupData.includesIdentity;
+    if (wantsAppData && errors.length > 0) {
+      if (appEntries(zipDirectory).length > 0) {
+        errors.push({
+          bridgeId: "app",
+          error: "App-wide data was not restored because a bridge failed",
+        });
+      }
+    } else if (wantsAppData) {
       try {
         appRestored = await restoreAppFiles(
           zipDirectory,
@@ -268,7 +354,7 @@ export function backupApi(
         name: "backup.json",
       });
       archive.append(
-        `Home Assistant Matter Hub Backup\nCreated: ${backupData.createdAt}\nBridges: ${bridges.length}\nIncludes Identity: ${includeIdentity}\nIncludes Icons: ${includesIcons}\n\nWARNING: ${includeIdentity ? "This backup contains sensitive Matter identity data (keypairs, fabric credentials). Keep it secure!" : "This backup does NOT include Matter identity data. Bridges will need to be re-commissioned after restore."}\n`,
+        `Home Assistant Matter Hub Backup\nCreated: ${backupData.createdAt}\nBridges: ${bridges.length}\nIncludes Identity: ${includeIdentity}\nIncludes Icons: ${includesIcons}\n\n${includeIdentity ? FULL_BACKUP_WARNING : "WARNING: This backup does NOT include Matter identity data. Bridges will need to be re-commissioned after restore."}\n`,
         { name: "README.txt" },
       );
 
@@ -326,13 +412,18 @@ export function backupApi(
           return;
         }
 
-        const { backupData } = await extractBackupData(req.file.buffer);
+        const { backupData, zipDirectory } = await extractBackupData(
+          req.file.buffer,
+        );
         const existingIds = new Set(bridgeStorage.bridges.map((b) => b.id));
 
         const preview = {
           version: backupData.version,
           createdAt: backupData.createdAt,
           includesIdentity: backupData.includesIdentity ?? false,
+          includesAppData:
+            !!backupData.includesIdentity &&
+            appEntries(zipDirectory).length > 0,
           bridges: backupData.bridges.map((bridge: BridgeData) => {
             const mappings = ownMappings(backupData, bridge.id);
             return {
@@ -378,6 +469,10 @@ export function backupApi(
   );
 
   router.post("/restart", async (_, res) => {
+    if (restoring) {
+      res.status(409).json({ error: "A restore is already in progress" });
+      return;
+    }
     res.json({ message: "Restarting application..." });
     scheduleRestart();
   });
@@ -626,13 +721,130 @@ function resolveWithin(baseDir: string, relative: string): string | null {
   }
   const resolvedBase = path.resolve(baseDir);
   const resolvedTarget = path.resolve(resolvedBase, relative);
-  if (
-    resolvedTarget !== resolvedBase &&
-    !resolvedTarget.startsWith(resolvedBase + path.sep)
-  ) {
+  if (!resolvedTarget.startsWith(resolvedBase + path.sep)) {
     return null;
   }
   return resolvedTarget;
+}
+
+function validateRestoreTarget(base: string, relative: string): void {
+  const parts = relative.split(path.sep);
+  let target = base;
+  for (const [index, name] of parts.entries()) {
+    target = path.join(target, name);
+    const stat = fs.lstatSync(target, { throwIfNoEntry: false });
+    if (
+      stat &&
+      !(index === parts.length - 1 ? stat.isFile() : stat.isDirectory())
+    ) {
+      throw new Error(
+        `Cannot restore over non-file or unsafe path: ${relative}`,
+      );
+    }
+  }
+}
+
+async function withStagedFiles<T>(
+  storageLocation: string,
+  stage: (dir: string) => Promise<T>,
+  apply: (install: () => void) => Promise<void>,
+): Promise<T> {
+  const work = fs.mkdtempSync(path.join(storageLocation, ".restore-"));
+  const incoming = path.join(work, "incoming");
+  const previous = path.join(work, "previous");
+  const undo: Array<() => void> = [];
+  let keepWork = false;
+  try {
+    fs.mkdirSync(incoming, { mode: 0o700 });
+    fs.mkdirSync(previous, { mode: 0o700 });
+    const staged = await stage(incoming);
+    const files = fs
+      .readdirSync(incoming, { recursive: true, withFileTypes: true })
+      .filter((entry) => entry.isFile())
+      .map((entry) =>
+        path.relative(incoming, path.join(entry.parentPath, entry.name)),
+      );
+    for (const file of files) validateRestoreTarget(storageLocation, file);
+    await apply(() => {
+      for (const file of files) {
+        validateRestoreTarget(storageLocation, file);
+        const target = path.join(storageLocation, file);
+        const saved = path.join(previous, file);
+        fs.mkdirSync(path.dirname(target), { recursive: true });
+        const exists = fs.existsSync(target);
+        // Keep the old inode so rollback needs no additional disk space for its contents.
+        if (exists) {
+          fs.mkdirSync(path.dirname(saved), { recursive: true });
+          try {
+            fs.linkSync(target, saved);
+          } catch {
+            // exFAT and some network shares have no hard links
+            fs.copyFileSync(target, saved);
+          }
+        }
+        fs.renameSync(path.join(incoming, file), target);
+        undo.push(() => {
+          if (exists) fs.renameSync(saved, target);
+          else fs.unlinkSync(target);
+        });
+      }
+    });
+    return staged;
+  } catch (error) {
+    const rollbackErrors: unknown[] = [];
+    for (const revert of undo.reverse()) {
+      try {
+        revert();
+      } catch (e) {
+        rollbackErrors.push(e);
+      }
+    }
+    if (rollbackErrors.length > 0) {
+      keepWork = true;
+      // out of reach of the stale sweep at the next start
+      let kept = path.join(
+        storageLocation,
+        path.basename(work).replace(".restore-", ".restore-failed-"),
+      );
+      try {
+        fs.renameSync(work, kept);
+      } catch {
+        kept = work;
+      }
+      throw new AggregateError(
+        [error, ...rollbackErrors],
+        `Restore rollback failed. Recovery files remain in ${kept}`,
+      );
+    }
+    throw error;
+  } finally {
+    if (!keepWork) {
+      try {
+        fs.rmSync(work, { recursive: true, force: true });
+      } catch (e) {
+        log.warn("Could not remove staged restore files:", e);
+      }
+    }
+  }
+}
+
+function isActive(bridge: Bridge): boolean {
+  return (
+    bridge.data.status === BridgeStatus.Running ||
+    bridge.data.status === BridgeStatus.Starting
+  );
+}
+
+function resumeBridge(bridge: Bridge): void {
+  if (isActive(bridge)) return;
+  void bridge
+    .start()
+    .catch((error) =>
+      log.error(
+        `Could not resume bridge ${bridge.id} after restore failed:`,
+        error,
+      ),
+    );
 }
 
 async function restoreIdentityFiles(
@@ -665,7 +877,7 @@ async function restoreIdentityFiles(
 
     fs.mkdirSync(targetDirPath, { recursive: true });
 
-    fs.writeFileSync(targetPath, await readEntry(file));
+    fs.writeFileSync(targetPath, await readEntry(file), { mode: 0o600 });
   }
 
   return true;
@@ -677,12 +889,20 @@ async function restorePluginConfigs(
   zipDirectory: unzipper.CentralDirectory,
   bridgeId: string,
   storageLocation: string,
+  bridges: BridgeData[],
 ): Promise<void> {
+  const prefix = `plugins/plugin-${bridgeId}-`;
+  const otherPrefixes = bridges.flatMap((bridge) =>
+    typeof bridge?.id === "string" && bridge.id.startsWith(`${bridgeId}-`)
+      ? [`plugins/plugin-${bridge.id}-`]
+      : [],
+  );
   for (const file of zipDirectory.files) {
     const name = file.path.slice("plugins/".length);
     if (
       file.type !== "File" ||
-      !file.path.startsWith(`plugins/plugin-${bridgeId}-`) ||
+      !file.path.startsWith(prefix) ||
+      otherPrefixes.some((otherPrefix) => file.path.startsWith(otherPrefix)) ||
       !name.endsWith(".json")
     ) {
       continue;
@@ -695,8 +915,16 @@ async function restorePluginConfigs(
         `Refusing to restore plugin file with unsafe path: ${file.path}`,
       );
     }
-    fs.writeFileSync(targetPath, await readEntry(file));
+    fs.writeFileSync(targetPath, await readEntry(file), { mode: 0o600 });
   }
+}
+
+function appEntries(zipDirectory: unzipper.CentralDirectory): unzipper.File[] {
+  return zipDirectory.files.filter(
+    (file) =>
+      file.type === "File" &&
+      APP_BACKUP_FILES.some((name) => file.path === `app/${name}`),
+  );
 }
 
 // Lock PINs, login and entity identities live in the app namespace that the
@@ -708,37 +936,46 @@ async function restoreAppFiles(
   bridgeService: BridgeService,
   identityStorage: EntityIdentityStorage,
 ): Promise<boolean> {
-  const entries = zipDirectory.files.filter(
-    (f: { path: string; type: string }) =>
-      f.type === "File" && APP_BACKUP_FILES.some((n) => f.path === `app/${n}`),
-  );
+  const entries = appEntries(zipDirectory);
   if (entries.length === 0) {
     return false;
   }
-  // read up front so a bad entry leaves the bridges running
-  const contents: Buffer[] = [];
-  for (const entry of entries) contents.push(await readEntry(entry));
-  const active = () =>
-    bridgeService.bridges.filter(
-      (b) =>
-        b.data.status === BridgeStatus.Running ||
-        b.data.status === BridgeStatus.Starting,
+  const stopped: Bridge[] = [];
+  try {
+    await withStagedFiles(
+      storageLocation,
+      async (dir) => {
+        fs.mkdirSync(path.join(dir, "app"));
+        for (const entry of entries) {
+          fs.writeFileSync(path.join(dir, entry.path), await readEntry(entry), {
+            mode: 0o600,
+          });
+        }
+      },
+      async (install) => {
+        const active = bridgeService.bridges.filter(isActive);
+        stopped.push(...active);
+        const results = await Promise.allSettled(
+          active.map((bridge) => bridge.stop()),
+        );
+        if (
+          bridgeService.bridges.some(isActive) ||
+          results.some((result) => result.status === "rejected")
+        ) {
+          throw new Error(
+            "Lock PINs, login and entity identities were not restored because a bridge did not stop. Stop all bridges and restore again.",
+          );
+        }
+        await identityStorage.flush();
+        install();
+      },
     );
-  await Promise.allSettled(active().map((b) => b.stop()));
-  if (active().length > 0) {
-    throw new Error(
-      "Lock PINs, login and entity identities were not restored because a bridge did not stop. Stop all bridges and restore again.",
-    );
+  } catch (error) {
+    if (!(error instanceof AggregateError)) {
+      for (const bridge of stopped) resumeBridge(bridge);
+    }
+    throw error;
   }
-  await identityStorage.flush();
-  const appDir = path.join(storageLocation, "app");
-  fs.mkdirSync(appDir, { recursive: true });
-  entries.forEach((entry, i) => {
-    fs.writeFileSync(
-      path.join(appDir, entry.path.slice("app/".length)),
-      contents[i],
-    );
-  });
   return true;
 }
 
@@ -760,6 +997,7 @@ async function restorePluginState(
   fs.writeFileSync(
     pluginStateFilePath(storageLocation, bridgeId),
     await readEntry(entry),
+    { mode: 0o600 },
   );
   return true;
 }
@@ -786,14 +1024,16 @@ async function restoreBridgeIcon(
 
   for (const file of iconFiles) {
     const fileName = file.path.substring(iconPrefix.length);
-    const targetPath = resolveWithin(iconsDir, fileName);
+    const targetPath = fileName.includes("/")
+      ? null
+      : resolveWithin(iconsDir, fileName);
     if (!targetPath) {
       throw new Error(
         `Refusing to restore bridge icon with unsafe path: ${file.path}`,
       );
     }
 
-    fs.writeFileSync(targetPath, await readEntry(file));
+    fs.writeFileSync(targetPath, await readEntry(file), { mode: 0o600 });
   }
 
   return true;

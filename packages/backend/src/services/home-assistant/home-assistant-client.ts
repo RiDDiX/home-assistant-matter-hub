@@ -4,13 +4,12 @@ import {
   createLongLivedTokenAuth,
   ERR_CANNOT_CONNECT,
   ERR_INVALID_AUTH,
-  getConfig,
   getUser,
+  type HassConfig,
   type HaWebSocket,
 } from "home-assistant-js-websocket";
 import type { BetterLogger, LoggerService } from "../../core/app/logger.js";
 import { Service } from "../../core/ioc/service.js";
-import { withRetry } from "../../utils/retry.js";
 import { sendHaMessage } from "../../utils/send-ha-message.js";
 
 // Treat DNS / routing / TLS hiccups the same as ERR_CANNOT_CONNECT: log and
@@ -53,6 +52,7 @@ export class HomeAssistantClient extends Service {
   static Options = Symbol.for("HomeAssistantClientProps");
 
   private _connection!: Connection;
+  private _initialConfig!: HassConfig;
   private readonly log: BetterLogger;
   private _haRunning = false;
   private _runningSince = 0;
@@ -64,6 +64,10 @@ export class HomeAssistantClient extends Service {
 
   get connection(): Connection {
     return this._connection;
+  }
+
+  get initialConfig(): HassConfig {
+    return this._initialConfig;
   }
 
   // False during HA's own startup and after any WS drop, true only once
@@ -286,7 +290,12 @@ export class HomeAssistantClient extends Service {
             props.accessToken,
           ),
         });
-        await this.waitForHomeAssistantToBeUpAndRunning(connection);
+        try {
+          await this.waitForHomeAssistantToBeUpAndRunning(connection);
+        } catch (e) {
+          connection.close();
+          throw e;
+        }
         return connection;
       } catch (reason: unknown) {
         if (reason === ERR_INVALID_AUTH) {
@@ -325,36 +334,35 @@ export class HomeAssistantClient extends Service {
       message: "Application will be available once connection is established",
     });
 
-    const getState = async () => {
-      const state = await withRetry(
-        () => getConfig(connection).then((config) => config.state),
-        {
-          maxAttempts: 3,
-          baseDelayMs: 1000,
-          onRetry: (attempt, error) => {
-            this.log.debugCtx("Retrying Home Assistant state check", {
-              attempt,
-              error: error instanceof Error ? error.message : String(error),
-            });
-          },
-        },
-      );
-      this.log.debugCtx("Home Assistant state update", { state });
-      return state;
-    };
-
-    const maxWaitAttempts = 120; // 10 minutes with 5s delay
+    const deadline = Date.now() + 10 * 60_000;
     let state: string | undefined;
-    let waitAttempt = 0;
-    while (state !== "RUNNING") {
-      if (++waitAttempt > maxWaitAttempts) {
-        throw new Error(
-          `Home Assistant did not reach RUNNING state within 10 minutes (last state: ${state ?? "unknown"})`,
+    while (Date.now() < deadline) {
+      await new Promise((resolve) =>
+        setTimeout(resolve, Math.min(5000, deadline - Date.now())),
+      );
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) break;
+      try {
+        const config = await sendHaMessage<HassConfig>(
+          connection,
+          { type: "get_config" },
+          Math.min(this.options.messageTimeoutMs, remaining),
         );
+        state = config.state;
+        this.log.debugCtx("Home Assistant state update", { state });
+        if (state === "RUNNING") {
+          this._initialConfig = config;
+          this.log.infoCtx("Home Assistant is up and running", { state });
+          return;
+        }
+      } catch (error) {
+        this.log.debugCtx("Retrying Home Assistant state check", {
+          error: error instanceof Error ? error.message : String(error),
+        });
       }
-      await new Promise((resolve) => setTimeout(resolve, 5000));
-      state = await getState();
     }
-    this.log.infoCtx("Home Assistant is up and running", { state });
+    throw new Error(
+      `Home Assistant did not reach RUNNING state within 10 minutes (last state: ${state ?? "unknown"})`,
+    );
   }
 }

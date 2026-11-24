@@ -774,6 +774,130 @@ describe("SecurityPlugin", () => {
     await plugin.onShutdown();
   });
 
+  describe("alerts across a connection gap", () => {
+    function harness(config: Record<string, unknown>) {
+      vi.useFakeTimers();
+      const conn = fakeConnection();
+      const listeners: Record<string, () => void> = {};
+      conn.addEventListener = vi.fn((event: string, cb: () => void) => {
+        listeners[event] = cb;
+      });
+      const seen: ServiceMessage[] = [];
+      const fail = { off: false };
+      conn.sendMessagePromise = vi.fn(async (msg: ServiceMessage) => {
+        if (msg.type === "call_service") seen.push(msg);
+        if (fail.off && msg.service === "turn_off") throw new Error("boom");
+        return msg.type === "get_states" ? [] : {};
+      });
+      const storage = makeStorage();
+      const { ctx, devices } = createMockContext({
+        storage: storage as unknown as PluginStorage,
+        homeAssistant: ha,
+      });
+      const plugin = new SecurityPlugin(
+        {
+          exitDelaySeconds: 0,
+          entryDelaySeconds: 0,
+          triggerTimeSeconds: 0,
+          awayTriggers: "binary_sensor.door",
+          awayAlerts: "siren.a",
+          ...config,
+        },
+        { connect: async () => conn as unknown as Connection },
+      );
+      const calls = (service: string) =>
+        seen
+          .filter((m) => m.service === service)
+          .map((m) => m.target?.entity_id);
+      const start = async () => {
+        await plugin.onStart(ctx);
+        await vi.advanceTimersByTimeAsync(0);
+        await armVia(devices, "mode_away");
+        await vi.advanceTimersByTimeAsync(0);
+      };
+      const disarm = async () => {
+        await devices
+          .get("mode_away")
+          ?.onAttributeWrite?.("onOff", "onOff", false);
+        await vi.advanceTimersByTimeAsync(0);
+      };
+      const reconnect = async () => {
+        conn.connected = true;
+        listeners.ready?.();
+        await vi.advanceTimersByTimeAsync(0);
+      };
+      return {
+        conn,
+        plugin,
+        devices,
+        storage,
+        fail,
+        calls,
+        start,
+        disarm,
+        reconnect,
+      };
+    }
+
+    it("keeps a live siren on when an older failed silence is still pending", async () => {
+      const h = harness({});
+      await h.start();
+      h.plugin.handleTriggerEvent("binary_sensor.door", "on", "motion");
+      await vi.advanceTimersByTimeAsync(0);
+      h.fail.off = true;
+      await h.disarm();
+      expect(h.storage.data.get("pendingSilence")).toEqual(["siren.a"]);
+      h.fail.off = false;
+      await armVia(h.devices, "mode_away");
+      h.plugin.handleTriggerEvent("binary_sensor.door", "on", "motion");
+      await vi.advanceTimersByTimeAsync(0);
+      expect(h.calls("turn_on")).toEqual(["siren.a", "siren.a"]);
+      await h.reconnect();
+      expect(h.calls("turn_off")).toEqual(["siren.a"]);
+      expect(h.storage.data.has("pendingSilence")).toBe(false);
+      await h.plugin.onShutdown();
+    });
+
+    it("fires the alerts of a trip in a gap once the socket is back", async () => {
+      const h = harness({ entryDelaySeconds: 30 });
+      await h.start();
+      h.plugin.handleTriggerEvent("binary_sensor.door", "on", "door");
+      h.conn.connected = false;
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(h.calls("turn_on")).toEqual([]);
+      expect(h.storage.data.get("pendingAlerts")).toEqual(["siren.a"]);
+      await h.reconnect();
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(h.calls("turn_on")).toEqual(["siren.a"]);
+      expect(h.storage.data.has("pendingAlerts")).toBe(false);
+      await h.plugin.onShutdown();
+    });
+
+    it("does not fire the alerts of a trip in a gap after a disarm in the same gap", async () => {
+      const h = harness({});
+      await h.start();
+      h.conn.connected = false;
+      h.plugin.handleTriggerEvent("binary_sensor.door", "on", "motion");
+      await vi.advanceTimersByTimeAsync(0);
+      await h.disarm();
+      await h.reconnect();
+      expect(h.calls("turn_on")).toEqual([]);
+      expect(h.storage.data.has("pendingAlerts")).toBe(false);
+      await h.plugin.onShutdown();
+    });
+
+    it("does not run a fired alert script again on reconnect", async () => {
+      const h = harness({ awayAlerts: "siren.a,script.b" });
+      await h.start();
+      h.plugin.handleTriggerEvent("binary_sensor.door", "on", "motion");
+      await vi.advanceTimersByTimeAsync(0);
+      expect(h.calls("turn_on")).toEqual(["siren.a", "script.b"]);
+      await h.reconnect();
+      expect(h.calls("turn_on")).toEqual(["siren.a", "script.b"]);
+      await h.plugin.onShutdown();
+    });
+  });
+
   it("holds mode setters through a connection gap and dispatches them on reconnect", async () => {
     const conn = fakeConnection();
     let resolveDial!: (c: Connection) => void;

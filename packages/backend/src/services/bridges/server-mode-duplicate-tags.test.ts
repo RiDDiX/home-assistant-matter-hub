@@ -162,6 +162,6 @@ describe("server mode duplicate TagList (#301)", () => {
       list.filter((v) => v.requirement.includes("TAGLIST")),
     );
     expect(tagList).toEqual([]);
-    await manager.dispose();
+    manager.stopObserving();
   });
 });

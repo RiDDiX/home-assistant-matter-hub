@@ -1,4 +1,8 @@
-import type { EndpointData } from "@home-assistant-matter-hub/common";
+import {
+  type BridgeFeatureFlags,
+  type EndpointData,
+  isCoverPositionInverted,
+} from "@home-assistant-matter-hub/common";
 import type { SvgIconComponent } from "@mui/icons-material";
 import BatteryAlertIcon from "@mui/icons-material/BatteryAlert";
 import BatteryChargingFullIcon from "@mui/icons-material/BatteryChargingFull";
@@ -50,6 +54,7 @@ import {
   getDeviceImageUrl,
   uploadDeviceImage,
 } from "../../api/device-images";
+import { useBridge } from "../../hooks/data/bridges";
 import { useNotifications } from "../notifications/use-notifications";
 import { getEndpointName } from "./EndpointName";
 import { linkedEntities } from "./EndpointState";
@@ -170,7 +175,6 @@ interface HomeAssistantEntityState {
   mapping?: {
     batteryEntity?: string;
     humidityEntity?: string;
-    pressureEntity?: string;
     powerEntity?: string;
     energyEntity?: string;
     voltageEntity?: string;
@@ -227,8 +231,16 @@ export const formatTemperature = (
 };
 
 // Matter lift position is percent closed, 10000 is fully closed (#495).
-export const coverOpenPercent = (liftPercent100ths: number): number =>
-  Math.round((10000 - liftPercent100ths) / 100);
+// The bridge cover flags report the HA percent open as is (#448).
+export const coverOpenPercent = (
+  liftPercent100ths: number,
+  flags?: BridgeFeatureFlags,
+): number =>
+  Math.round(
+    (isCoverPositionInverted(flags)
+      ? 10000 - liftPercent100ths
+      : liftPercent100ths) / 100,
+  );
 
 // global attributes every cluster carries, noise in the card details
 const hiddenClusterKeys = new Set([
@@ -270,6 +282,7 @@ export const EndpointCard = ({
     isDark,
   );
   const detailsId = useId();
+  const bridgeFlags = useBridge(bridgeId).content?.featureFlags;
 
   const basicInfo = useMemo(() => {
     const state = endpoint.state as {
@@ -298,7 +311,6 @@ export const EndpointCard = ({
     const set = new Set<string>();
     if (mapping?.batteryEntity) set.add("powerSource");
     if (mapping?.humidityEntity) set.add("relativeHumidityMeasurement");
-    if (mapping?.pressureEntity) set.add("pressureMeasurement");
     if (mapping?.powerEntity) set.add("electricalPowerMeasurement");
     if (mapping?.energyEntity) set.add("electricalEnergyMeasurement");
     if (mapping?.voltageEntity) set.add("electricalPowerMeasurement");
@@ -521,7 +533,10 @@ export const EndpointCard = ({
     if (cover?.currentPositionLiftPercent100ths != null) {
       chips.push({
         label: t("endpoints.state.percentOpen", {
-          percent: coverOpenPercent(cover.currentPositionLiftPercent100ths),
+          percent: coverOpenPercent(
+            cover.currentPositionLiftPercent100ths,
+            bridgeFlags,
+          ),
         }),
       });
     }
@@ -561,7 +576,7 @@ export const EndpointCard = ({
     }
 
     return chips;
-  }, [endpoint.state, endpoint.type.name, t]);
+  }, [endpoint.state, endpoint.type.name, t, bridgeFlags]);
 
   return (
     <Card

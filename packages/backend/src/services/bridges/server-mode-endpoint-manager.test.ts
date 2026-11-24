@@ -92,7 +92,13 @@ interface HarnessOptions {
   flags?: Record<string, unknown>;
   entities?: Record<
     string,
-    { unique_id?: string; platform?: string; device_id?: string; name?: string }
+    {
+      unique_id?: string;
+      platform?: string;
+      device_id?: string;
+      name?: string;
+      aliases?: (string | null)[];
+    }
   >;
 }
 
@@ -102,6 +108,8 @@ function makeHarness(
   opts?: HarnessOptions,
 ): Harness {
   const serverNode = {
+    // the topology signature walks these
+    parts: [],
     addDevice: vi.fn().mockResolvedValue(undefined),
     forgetDevice: vi.fn(),
     clearDevices: vi.fn(),
@@ -128,6 +136,7 @@ function makeHarness(
     initialState: vi.fn((): object | undefined => ({ state: "on" })),
     mergeExternalStates: vi.fn(),
     batteryFingerprintFor: vi.fn(() => ""),
+    isTemperatureCompanionSharingBattery: vi.fn(() => false),
     forgetBatteryCacheForDevice: vi.fn(),
     fullEntities,
     snapshotGeneration: 1,
@@ -218,7 +227,7 @@ const managers: ServerModeEndpointManager[] = [];
 afterEach(async () => {
   // the removal recheck timer must not outlive its test
   for (const m of managers.splice(0)) {
-    await m.dispose().catch(() => {});
+    m.stopObserving();
   }
   vi.restoreAllMocks();
   vi.useRealTimers();
@@ -323,6 +332,35 @@ describe("ServerModeEndpointManager (#301)", () => {
     await plain.manager.refreshDevices();
     expect(plain.serverNode.updateDeviceIdentity.mock.calls[0][3]).toBe(
       "Friendly",
+    );
+  });
+
+  // #555: the alias reaches the root node and an alias edit pushes once
+  it("hands the entity alias to the root node with preferEntityAlias", async () => {
+    const entities = { "light.one": { aliases: [null, "Desk Lamp"] } };
+    const h = makeHarness(["light.one"], undefined, {
+      flags: { preferEntityAlias: true },
+      entities,
+    });
+    h.registry.initialState.mockReturnValue({
+      attributes: { friendly_name: "Friendly" },
+    });
+    await h.manager.refreshDevices();
+    expect(h.serverNode.updateDeviceIdentity).toHaveBeenCalledTimes(1);
+    expect(h.serverNode.updateDeviceIdentity.mock.calls[0][3]).toBe(
+      "Desk Lamp",
+    );
+
+    h.serverNode.updateDeviceIdentity.mockClear();
+    await h.manager.refreshDevices();
+    expect(h.serverNode.updateDeviceIdentity).not.toHaveBeenCalled();
+
+    entities["light.one"] = { aliases: ["Reading Lamp"] };
+    await h.manager.refreshDevices();
+    await h.manager.refreshDevices();
+    expect(h.serverNode.updateDeviceIdentity).toHaveBeenCalledTimes(1);
+    expect(h.serverNode.updateDeviceIdentity.mock.calls[0][3]).toBe(
+      "Reading Lamp",
     );
   });
 
@@ -913,6 +951,30 @@ describe("ServerModeEndpointManager (#301)", () => {
     expect(h.manager.devices.map((d) => d.entityId)).toEqual(["light.a"]);
   });
 
+  it("logs the endpoint number before a grace delete (#423)", async () => {
+    const h = makeHarness(["light.a", "light.b"], "light.a");
+    // biome-ignore lint/suspicious/noExplicitAny: reach the private logger
+    const log = (h.manager as any).log as Logger;
+    await h.manager.refreshDevices();
+    const endpointB = h.serverNode.addDevice.mock.calls
+      .map((c) => c[0] as EntityEndpoint)
+      .find((e) => e.entityId === "light.b");
+    Object.assign(endpointB as object, { number: 7 });
+
+    h.registry.entityIds = ["light.a"];
+    delete h.registry.fullEntities["light.b"];
+    await h.manager.refreshDevices();
+    passGrace(h);
+    vi.mocked(log.info).mockClear();
+    await h.manager.refreshDevices();
+
+    expect(endpointB?.delete).toHaveBeenCalledTimes(1);
+    expect(log.info).toHaveBeenCalledTimes(1);
+    expect(log.info).toHaveBeenCalledWith(
+      "Removing endpoint light.b (ep 7) after the grace window, controllers will see a new number if it returns",
+    );
+  });
+
   it("keeps an absent endpoint when no fresh reload confirmed it (#438)", async () => {
     const h = makeHarness(["light.a", "light.b"], "light.a");
     await h.manager.refreshDevices();
@@ -1075,20 +1137,102 @@ describe("ServerModeEndpointManager (#301)", () => {
     expect(refresh).toHaveBeenCalled();
   });
 
-  it("closes every endpoint on dispose without deleting", async () => {
-    const h = makeHarness(["light.a", "light.b"], "light.a");
-    await h.manager.refreshDevices();
-    const endpoints = h.serverNode.addDevice.mock.calls.map(
-      (c) => c[0] as EntityEndpoint,
+  it.each([
+    [
+      "an air purifier keeps its flat shape when its sensors arrive late",
+      "fan.purifier",
+      { matterDeviceType: "air_purifier" },
+      { state: "off", attributes: { supported_features: 57 } },
+      0,
+    ],
+    [
+      "a temperature sensor stays mounted when a separate humidity source arrives",
+      "sensor.purifier_temperature",
+      undefined,
+      { state: "21.5", attributes: { device_class: "temperature" } },
+      0,
+    ],
+  ])("%s, server mode never composes (#505)", async (_l, entityId, mapping, state, rebuilds) => {
+    const h = makeHarness([entityId], entityId, {
+      flags: { autoComposedDevices: true },
+      entities: { [entityId]: { device_id: "dev505" } },
+    });
+    h.mappingStorage.getMapping.mockReturnValue(
+      mapping && { entityId, ...mapping },
     );
+    h.registry.initialState.mockReturnValue(state);
+    let late: Record<string, string | undefined> = {};
+    Object.assign(h.registry, {
+      isAutoComposedDevicesEnabled: () => true,
+      isAutoHumidityMappingEnabled: () => true,
+      isAutoPressureMappingEnabled: () => true,
+      findTemperatureEntityForDevice: () => late.temperature,
+      findHumidityEntityForDevice: () => late.humidity,
+      findPressureEntityForDevice: () => undefined,
+    });
+    h.registry.fullEntities["sensor.purifier_temperature"] = {
+      entity_id: "sensor.purifier_temperature",
+      device_id: "dev505",
+    };
+    h.registry.fullEntities["sensor.purifier_humidity"] = {
+      entity_id: "sensor.purifier_humidity",
+      device_id: "dev505",
+    };
+    await h.manager.refreshDevices();
 
-    await h.manager.dispose();
+    late = {
+      temperature: entityId.startsWith("fan.")
+        ? "sensor.purifier_temperature"
+        : undefined,
+      humidity: "sensor.purifier_humidity",
+    };
+    await h.manager.refreshDevices();
+    await h.manager.refreshDevices();
 
-    for (const endpoint of endpoints) {
-      expect(endpoint.close).toHaveBeenCalledTimes(1);
-      expect(endpoint.delete).not.toHaveBeenCalled();
-    }
-    expect(h.manager.devices).toEqual([]);
+    expect(legacyCreate).toHaveBeenCalledTimes(1 + rebuilds);
+  });
+
+  it("upgrades a light mounted unavailable once, a drop in modes keeps it", async () => {
+    const light = "light.desk";
+    let state: object = { state: "unavailable", attributes: {} };
+    const h = makeHarness([light]);
+    h.registry.initialState.mockImplementation(() => state);
+    // LegacyEndpoint is mocked, mirror the factory's pick from the modes
+    legacyCreate.mockImplementation(async (_registry, entityId) => {
+      const modes =
+        // biome-ignore lint/suspicious/noExplicitAny: state stub
+        ((state as any).attributes.supported_color_modes as string[]) ?? [];
+      return fakeEndpoint(entityId as string, {
+        deviceType: modes.includes("xy") ? 0x010d : 0x0100,
+      }) as unknown as LegacyEndpoint;
+    });
+    await h.manager.refreshDevices();
+    const first = h.serverNode.addDevice.mock.calls[0][0] as EntityEndpoint;
+    expect(first.type.deviceType).toBe(0x0100);
+    // biome-ignore lint/suspicious/noExplicitAny: the retry only runs while observing
+    (h.manager as any).observingRequested = true;
+
+    state = {
+      state: "off",
+      attributes: { supported_color_modes: ["color_temp", "xy"] },
+    };
+    await h.manager.updateStates({ [light]: state } as never, new Set([light]));
+    await vi.waitFor(() => expect(legacyCreate).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() =>
+      // biome-ignore lint/suspicious/noExplicitAny: reach the retry flag
+      expect((h.manager as any).mappingSync.retryPending).toBe(false),
+    );
+    const rebuilt = h.serverNode.addDevice.mock.calls[1][0] as EntityEndpoint;
+    expect(rebuilt.type.deviceType).toBe(0x010d);
+    expect(rebuilt.id).toBe(first.id);
+    expect(first.close).toHaveBeenCalledTimes(1);
+
+    state = { state: "on", attributes: { supported_color_modes: ["onoff"] } };
+    await h.manager.updateStates({ [light]: state } as never, new Set([light]));
+    await new Promise((r) => setTimeout(r, 50));
+    await h.manager.refreshDevices();
+    expect(legacyCreate).toHaveBeenCalledTimes(2);
+    expect(rebuilt.close).not.toHaveBeenCalled();
   });
 
   it("renames via close() to keep the device number, root identity untouched (#404)", async () => {

@@ -1,8 +1,14 @@
 import type {
   EntityMappingConfig,
   HomeAssistantEntityState,
+  VacuumDeviceAttributes,
 } from "@home-assistant-matter-hub/common";
 import type { Logger } from "@matter/general";
+import { lightShape } from "../../matter/endpoints/legacy/light/index.js";
+import {
+  parseVacuumRooms,
+  toAreaId,
+} from "../../matter/endpoints/legacy/vacuum/utils/parse-vacuum-rooms.js";
 import type { HomeAssistantStates } from "../home-assistant/home-assistant-registry.js";
 import { type BridgeRegistry, fingerprintBattery } from "./bridge-registry.js";
 
@@ -22,6 +28,32 @@ function fanCapabilities(
     ? [...attributes.preset_modes].sort()
     : [];
   return JSON.stringify([attributes.supported_features, presets]);
+}
+
+// A light picks OnOff/Dimmable/ExtendedColor once from supported_color_modes,
+// whatever its state. One mounted while unavailable has none and stays
+// on/off. null = no modes to rank.
+function lightRank(state: HomeAssistantEntityState | undefined): number | null {
+  const modes = (state?.attributes as Record<string, unknown> | undefined)
+    ?.supported_color_modes;
+  return Array.isArray(modes) ? lightShape(modes).rank : null;
+}
+
+// A vacuum picks its ServiceArea areas once from the room attributes. One
+// mounted while unavailable gets the single Home area and keeps it. null =
+// no rooms in the attributes, where injected Roborock/Valetudo rooms never are.
+function vacuumAreaIds(
+  state: HomeAssistantEntityState | undefined,
+): string | null {
+  if (!state || state.state === "unavailable" || state.state === "unknown") {
+    return null;
+  }
+  const ids = parseVacuumRooms(
+    (state.attributes ?? {}) as VacuumDeviceAttributes,
+  )
+    .map((room) => toAreaId(room.id))
+    .sort((a, b) => a - b);
+  return ids.length > 0 ? JSON.stringify(ids) : null;
 }
 
 function parseTuple(fingerprint: string): unknown[] {
@@ -44,6 +76,10 @@ export class EntityMappingSync {
   private readonly candidates = new Map<string, string>();
   // fan entityId -> as-built capability element of its fingerprint (#515)
   private readonly fanCaps = new Map<string, string | null>();
+  // light entityId -> as-built shape rank, null = built without color modes
+  private readonly lightRanks = new Map<string, number | null>();
+  // vacuum entityId -> as-built area id element, null = built without rooms
+  private readonly vacuumAreas = new Map<string, string | null>();
 
   constructor(
     private readonly registry: BridgeRegistry,
@@ -51,6 +87,8 @@ export class EntityMappingSync {
       entityId: string,
     ) => EntityMappingConfig | undefined,
     private readonly log: Logger,
+    // server mode builds every entity flat (#301)
+    private readonly composes = true,
   ) {}
 
   // Only endpoints the auto-mapping applies to belong in the candidates: a
@@ -62,8 +100,9 @@ export class EntityMappingSync {
     if (entityId.startsWith("binary_sensor.")) return false;
     if (
       entityId.startsWith("sensor.") &&
-      this.registry.initialState(entityId)?.attributes?.device_class ===
-        "battery"
+      (this.registry.initialState(entityId)?.attributes?.device_class ===
+        "battery" ||
+        this.registry.isTemperatureCompanionSharingBattery(entityId))
     ) {
       return false;
     }
@@ -83,13 +122,59 @@ export class EntityMappingSync {
     const battery = entityId
       ? this.registry.batteryFingerprintFor(entityId, mapping)
       : "";
-    // fans carry a third capability element (#515); other domains keep the
-    // two-element tuple so their stored fingerprints stay valid
+    const tuple: unknown[] = [mapping ?? null, battery || null];
+    // fans, lights and vacuums carry a third capability element (#515); other
+    // domains keep the two-element tuple so their stored fingerprints stay valid
     if (entityId?.startsWith("fan.")) {
-      const caps = fanCapabilities(this.registry.initialState(entityId));
-      return JSON.stringify([mapping ?? null, battery || null, caps]);
+      tuple.push(fanCapabilities(this.registry.initialState(entityId)));
+    } else if (entityId?.startsWith("light.")) {
+      tuple.push(lightRank(this.registry.initialState(entityId)));
+    } else if (entityId?.startsWith("vacuum.")) {
+      tuple.push(vacuumAreaIds(this.registry.initialState(entityId)));
     }
-    return JSON.stringify([mapping ?? null, battery || null]);
+    const companions = entityId ? this.companions(mapping, entityId) : null;
+    if (companions?.some((id) => id != null)) tuple.push(companions);
+    return JSON.stringify(tuple);
+  }
+
+  // #505: composed children are part of the endpoint shape. A mapped
+  // measurement with no state has no child until its payload arrives.
+  private companions(
+    mapping: EntityMappingConfig | undefined,
+    entityId: string,
+  ): (string | null)[] | null {
+    const r = this.registry;
+    if (!this.composes || !r.isAutoComposedDevicesEnabled?.()) return null;
+    if (entityId.startsWith("sensor.")) {
+      const companions = r.composedTemperatureCompanions(entityId);
+      return companions
+        ? [companions.humidityEntityId, companions.pressureEntityId].map(
+            (id) => (id && r.initialStateIncludingUnfiltered(id) ? id : null),
+          )
+        : null;
+    }
+    const deviceId = r.entity(entityId)?.device_id;
+    if (
+      !deviceId ||
+      !entityId.startsWith("fan.") ||
+      !!mapping?.composedEntities?.length ||
+      (mapping?.matterDeviceType ?? "fan") !== "air_purifier"
+    ) {
+      return null;
+    }
+    return [
+      mapping?.temperatureEntity || r.findTemperatureEntityForDevice(deviceId),
+      mapping?.humidityEntity || r.findHumidityEntityForDevice(deviceId),
+    ].map((id) => (id && id !== entityId ? id : null));
+  }
+
+  // A mapped sensor whose state is missing right now (HA restart) still
+  // belongs to the endpoint while it exists on the same device, enabled.
+  private stillOnDevice(id: string, deviceId: string | undefined): boolean {
+    const entity = this.registry.fullEntities[id];
+    return (
+      !!deviceId && entity?.device_id === deviceId && entity.disabled_by == null
+    );
   }
 
   // Live fingerprint for reconcile compares: when the resolver finds nothing
@@ -104,7 +189,11 @@ export class EntityMappingSync {
     let fingerprint = this.computeFingerprint(mapping, entityId);
     // #515: unknown live capabilities (unavailable snapshot, integrations
     // stripping attributes) must not rebuild the fan, keep the stored element.
-    if (entityId.startsWith("fan.") && storedFingerprint) {
+    // Same for a vacuum whose rooms are gone for now.
+    if (
+      (entityId.startsWith("fan.") || entityId.startsWith("vacuum.")) &&
+      storedFingerprint
+    ) {
       const live = parseTuple(fingerprint);
       const stored = parseTuple(storedFingerprint);
       if (live[2] == null && stored.length > 2 && stored[2] != null) {
@@ -112,15 +201,55 @@ export class EntityMappingSync {
         fingerprint = JSON.stringify(live);
       }
     }
+    // a light only rebuilds to a richer shape, a group whose members dropped
+    // out or an unavailable flap keeps the endpoint it has. A null stored
+    // rank was built from no color modes, an on/off light.
+    if (entityId.startsWith("light.") && storedFingerprint) {
+      const live = parseTuple(fingerprint);
+      const stored = parseTuple(storedFingerprint);
+      const built = typeof stored[2] === "number" ? stored[2] : 0;
+      if (
+        stored.length > 2 &&
+        (typeof live[2] !== "number" || live[2] <= built)
+      ) {
+        live[2] = stored[2];
+        fingerprint = JSON.stringify(live);
+      }
+    }
+    const deviceId = this.registry.entity(entityId)?.device_id;
+    // #505: keep children through a temporary missing state. For temperature
+    // sensors the registry still checks the current mapping and ownership.
+    const isFan = entityId.startsWith("fan.");
+    const at = isFan ? 3 : 2;
+    const storedCompanions = storedFingerprint
+      ? parseTuple(storedFingerprint)[at]
+      : undefined;
+    const slots = Array.isArray(storedCompanions)
+      ? this.companions(mapping, entityId)
+      : null;
+    if (Array.isArray(storedCompanions) && slots) {
+      const grouped = isFan
+        ? undefined
+        : this.registry.composedTemperatureCompanions(entityId);
+      const sources = [grouped?.humidityEntityId, grouped?.pressureEntityId];
+      const kept = storedCompanions.map((id, i) => {
+        if (typeof id !== "string") return slots[i];
+        const keep = isFan
+          ? this.stillOnDevice(id, deviceId)
+          : slots[i] == null && id === sources[i];
+        return keep ? id : slots[i];
+      });
+      if (kept.some((id) => id != null)) {
+        const live = parseTuple(fingerprint);
+        live[at] = kept;
+        fingerprint = JSON.stringify(live);
+      }
+    }
     if (fingerprintBattery(fingerprint) != null || !storedFingerprint)
       return fingerprint;
     if (!this.eligible(entityId)) return fingerprint;
     const battery = fingerprintBattery(storedFingerprint);
-    if (!battery) return fingerprint;
-    const deviceId = this.registry.entity(entityId)?.device_id;
-    const stillSameDevice =
-      !!deviceId && this.registry.fullEntities[battery]?.device_id === deviceId;
-    if (!stillSameDevice) return fingerprint;
+    if (!battery || !this.stillOnDevice(battery, deviceId)) return fingerprint;
     const merged = parseTuple(fingerprint);
     merged[1] = battery;
     return JSON.stringify(merged);
@@ -146,6 +275,8 @@ export class EntityMappingSync {
   rebuildCandidates(entries: Iterable<[string, string]>): void {
     this.candidates.clear();
     this.fanCaps.clear();
+    this.lightRanks.clear();
+    this.vacuumAreas.clear();
     for (const [entityId, fingerprint] of entries) {
       // track the as-built capability element of every fan endpoint (#515)
       if (entityId.startsWith("fan.")) {
@@ -153,6 +284,20 @@ export class EntityMappingSync {
         this.fanCaps.set(
           entityId,
           tuple.length > 2 && typeof tuple[2] === "string" ? tuple[2] : null,
+        );
+      }
+      if (entityId.startsWith("light.")) {
+        const tuple = parseTuple(fingerprint);
+        this.lightRanks.set(
+          entityId,
+          typeof tuple[2] === "number" ? tuple[2] : null,
+        );
+      }
+      if (entityId.startsWith("vacuum.")) {
+        const tuple = parseTuple(fingerprint);
+        this.vacuumAreas.set(
+          entityId,
+          typeof tuple[2] === "string" ? tuple[2] : null,
         );
       }
       if (fingerprintBattery(fingerprint) != null) continue;
@@ -204,7 +349,10 @@ export class EntityMappingSync {
     if (
       !observing ||
       this.retryScheduled ||
-      (this.candidates.size === 0 && this.fanCaps.size === 0)
+      (this.candidates.size === 0 &&
+        this.fanCaps.size === 0 &&
+        this.lightRanks.size === 0 &&
+        this.vacuumAreas.size === 0)
     ) {
       return;
     }
@@ -219,6 +367,30 @@ export class EntityMappingSync {
         this.fanCaps.set(id, live);
         this.scheduleRefresh(
           `Fan capabilities changed for ${id}, rebuilding`,
+          refresh,
+        );
+        return;
+      }
+      if (id.startsWith("light.")) {
+        const stored = this.lightRanks.get(id);
+        if (stored === undefined) continue;
+        const live = lightRank(states[id]);
+        if (live == null || live <= (stored ?? 0)) continue;
+        this.lightRanks.set(id, live);
+        this.scheduleRefresh(
+          `Light color modes grew for ${id}, rebuilding`,
+          refresh,
+        );
+        return;
+      }
+      if (id.startsWith("vacuum.")) {
+        const stored = this.vacuumAreas.get(id);
+        if (stored === undefined) continue;
+        const live = vacuumAreaIds(states[id]);
+        if (live == null || live === stored) continue;
+        this.vacuumAreas.set(id, live);
+        this.scheduleRefresh(
+          `Vacuum rooms changed for ${id}, rebuilding`,
           refresh,
         );
         return;

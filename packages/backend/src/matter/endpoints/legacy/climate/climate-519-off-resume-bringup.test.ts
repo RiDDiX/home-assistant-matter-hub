@@ -503,6 +503,49 @@ describe("thermostat off setpoint, #547 fixture", { timeout: 30_000 }, () => {
       { action: "climate.set_temperature", data: { temperature: 11 } },
     ]);
   });
+
+  it("setpointRaiseLower stops at max_temp", async () => {
+    const { endpoint, client } = await mount("heat", ["off", "heat"], {
+      max_temp: 30,
+      temperature: 29.5,
+    });
+    calls = [];
+    await raiseLower(
+      client,
+      endpoint.number,
+      Thermostat.SetpointRaiseLowerMode.Heat,
+      20,
+    );
+    expect(calls).toEqual([
+      { action: "climate.set_temperature", data: { temperature: 30 } },
+    ]);
+  });
+
+  it("setpointRaiseLower keeps low at or below high in range mode", async () => {
+    const { endpoint, client } = await mount(
+      "heat_cool",
+      ["off", "heat_cool"],
+      {
+        // TARGET_TEMPERATURE | TARGET_TEMPERATURE_RANGE | TURN_OFF | TURN_ON
+        supported_features: 387,
+        target_temp_low: 20,
+        target_temp_high: 21,
+      },
+    );
+    calls = [];
+    await raiseLower(
+      client,
+      endpoint.number,
+      Thermostat.SetpointRaiseLowerMode.Heat,
+      30,
+    );
+    expect(tempCalls()).toEqual([
+      {
+        action: "climate.set_temperature",
+        data: { target_temp_low: 23, target_temp_high: 23 },
+      },
+    ]);
+  });
 });
 
 // One node and commissioned controller per case, a loop of three overran the

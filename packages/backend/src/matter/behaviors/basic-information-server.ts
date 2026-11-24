@@ -5,6 +5,7 @@ import { VendorId } from "@matter/main";
 import { BridgedDeviceBasicInformationServer as Base } from "@matter/main/behaviors";
 import { BridgeDataProvider } from "../../services/bridges/bridge-data-provider.js";
 import { applyPatchState } from "../../utils/apply-patch-state.js";
+import { resolveNodeLabel } from "../../utils/node-label.js";
 import { sanitizeMatterString } from "../../utils/sanitize-matter-string.js";
 import { serialNumberWithSuffix } from "../../utils/serial-number.js";
 import { trimToLength } from "../../utils/trim-to-length.js";
@@ -39,17 +40,16 @@ export class BasicInformationServer extends Base {
     // Frozen identity anchor: read from state (stable across transactions), never
     // an instance field. Falls back to the live entity_id when unset (#404).
     const anchor = homeAssistant.state.identityAnchor ?? entity.entity_id;
-    const registryName = featureFlags?.preferEntityRegistryName
-      ? (entity.registry?.name ?? entity.registry?.original_name)
-      : undefined;
-    const nodeLabel =
-      ellipse(32, homeAssistant.state.customName) ??
-      ellipse(32, registryName) ??
-      ellipse(32, entity.state?.attributes?.friendly_name) ??
-      ellipse(32, entity.entity_id);
+    const nodeLabel = resolveNodeLabel(
+      homeAssistant.state.customName,
+      entity.registry,
+      entity.state?.attributes?.friendly_name,
+      entity.entity_id,
+      featureFlags,
+    );
     const productNameFromNodeLabel =
       featureFlags?.productNameFromNodeLabel === true
-        ? (ellipse(32, sanitizeMatterString(nodeLabel ?? "")) ?? undefined)
+        ? (ellipse(32, sanitizeMatterString(nodeLabel)) ?? undefined)
         : undefined;
     const serialNumber = serialNumberWithSuffix(
       this.env.get(BridgeDataProvider).serialNumberSuffix,

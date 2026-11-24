@@ -140,3 +140,65 @@ describe("SessionSupervisor stale session re-arm", () => {
     expect(s.initiateClose).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("SessionSupervisor force close fallback", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  function failingSession() {
+    return {
+      id: 11,
+      peerNodeId: 1n,
+      isClosing: false,
+      isPeerActive: false,
+      timestamp: Date.now(),
+      subscriptions: { size: 0 },
+      closeSubscriptions: vi.fn(async () => 0),
+      initiateClose: vi.fn().mockRejectedValue(new Error("x")),
+      initiateForceClose: vi.fn(async () => {}),
+    };
+  }
+
+  async function run(drive: (s: ReturnType<typeof failingSession>) => void) {
+    const unhandled = vi.fn();
+    process.on("unhandledRejection", unhandled);
+    try {
+      vi.useFakeTimers();
+      const s = failingSession();
+      drive(s);
+      await vi.advanceTimersByTimeAsync(10 * 60_000);
+      expect(s.initiateClose).toHaveBeenCalledTimes(1);
+      expect(s.initiateForceClose).toHaveBeenCalledTimes(1);
+      expect(unhandled).not.toHaveBeenCalled();
+    } finally {
+      process.off("unhandledRejection", unhandled);
+    }
+  }
+
+  const sup = (s: ReturnType<typeof failingSession>) =>
+    supervisor(0, 1, {
+      get: () => ({ sessions: [s] }),
+    } as unknown as Environment).sup as unknown as {
+      closeStaleSession(id: number): void;
+      closeDeadSessions(): void;
+      sessionStartedAt: Map<number, number>;
+      maxSessionAgeMs: number;
+      rotateAgedSessions(): void;
+    };
+
+  it("a stale session whose close fails is forced", () =>
+    run((s) => sup(s).closeStaleSession(s.id)));
+
+  it("a dead session whose close fails is forced", () =>
+    run((s) => sup(s).closeDeadSessions()));
+
+  it("a rotated session whose close fails is forced", () =>
+    run((s) => {
+      s.subscriptions.size = 1;
+      const r = sup(s);
+      r.maxSessionAgeMs = 60_000;
+      r.sessionStartedAt.set(s.id, Date.now() - 120_000);
+      r.rotateAgedSessions();
+    }));
+});

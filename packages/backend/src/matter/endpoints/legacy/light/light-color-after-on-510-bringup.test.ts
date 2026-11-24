@@ -291,3 +291,26 @@ describe("#510 color right after On on an off light", () => {
     expect(turnOns()).toEqual([{ service: "light.turn_on", data: {} }]);
   });
 });
+
+describe("xy color write", () => {
+  it("keeps currentX/Y when a stale HA state lands right after the write", async () => {
+    const endpoint = await mount(colorLight("light.lxy", true));
+
+    await endpoint.act((a: Agent) =>
+      a.colorControl.moveToColor({
+        colorX: 9830,
+        colorY: 3932,
+        transitionTime: 0,
+        ...options(false),
+      }),
+    );
+    // HA has not applied the call yet and still reports red
+    await setHa(endpoint, colorLight("light.lxy", true, "2026-01-01T00:01:00"));
+
+    // biome-ignore lint/suspicious/noExplicitAny: read cluster state
+    const cc = (endpoint.state as any).colorControl;
+    expect(cc.currentX).toBe(9830);
+    expect(cc.currentY).toBe(3932);
+    await settle();
+  });
+});

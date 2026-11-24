@@ -124,7 +124,6 @@ export function climateFanOffMode(
 export const climateFanControlConfig: FanControlServerConfig = {
   getPercentage: () => undefined,
   getStepSize: () => undefined,
-  getAirflowDirection: () => undefined,
   isInAutoMode: (entity) => {
     const fanMode = attributes(entity).fan_mode;
     return fanMode?.toLowerCase() === "auto";
@@ -161,10 +160,6 @@ export const climateFanControlConfig: FanControlServerConfig = {
     }
     return setting;
   },
-  // Climate devices don't typically support wind modes
-  getWindMode: () => undefined,
-  supportsWind: () => false,
-
   // A controller writing percentSetting 0 lands here. An air conditioner's fan
   // cannot stop independently of the compressor, and HA climate entities almost
   // never declare an "off" fan mode - sending the literal "off" just fails the
@@ -197,9 +192,6 @@ export const climateFanControlConfig: FanControlServerConfig = {
       data: { fan_mode: fanMode },
     };
   },
-  setAirflowDirection: () => ({
-    action: "homeassistant.turn_on",
-  }),
   setPresetMode: (presetMode) => ({
     action: "climate.set_fan_mode",
     data: { fan_mode: presetMode },
@@ -229,9 +221,6 @@ export const climateFanControlConfig: FanControlServerConfig = {
       data: { swing_mode: swingMode },
     };
   },
-  setWindMode: () => ({
-    action: "homeassistant.turn_on",
-  }),
 };
 
 const baseFeatures: ("MultiSpeed" | "Step")[] = ["MultiSpeed", "Step"];

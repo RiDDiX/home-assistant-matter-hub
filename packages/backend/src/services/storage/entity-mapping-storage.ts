@@ -163,7 +163,47 @@ export class EntityMappingStorage extends Service {
       bridgeMap = new Map();
       this.mappings.set(request.bridgeId, bridgeMap);
     }
+    const config = this.applyMapping(request, bridgeMap);
+    await this.persist();
+    return config;
+  }
 
+  async restoreMappings(
+    bridgeId: string,
+    requests: EntityMappingRequest[],
+    saveBridge: () => Promise<void>,
+  ): Promise<void> {
+    const previous = this.mappings.get(bridgeId);
+    const next = new Map(previous);
+    for (const request of requests) this.applyMapping(request, next);
+
+    this.mappings.set(bridgeId, next);
+    let saved = false;
+    try {
+      await this.persist();
+      saved = true;
+      await saveBridge();
+    } catch (error) {
+      if (previous) this.mappings.set(bridgeId, previous);
+      else this.mappings.delete(bridgeId);
+      if (saved) {
+        try {
+          await this.persist();
+        } catch (rollbackError) {
+          throw new AggregateError(
+            [error, rollbackError],
+            "Bridge restore failed and its previous mappings could not be written back",
+          );
+        }
+      }
+      throw error;
+    }
+  }
+
+  private applyMapping(
+    request: EntityMappingRequest,
+    bridgeMap: Map<string, StoredMapping>,
+  ): EntityMappingConfig {
     // Filter roomEntities to only include non-empty strings
     const roomEntities = request.roomEntities?.filter((e) => e?.trim()) || [];
 
@@ -330,7 +370,6 @@ export class EntityMappingStorage extends Service {
       bridgeMap.set(request.entityId, config);
     }
 
-    await this.persist();
     return config;
   }
 

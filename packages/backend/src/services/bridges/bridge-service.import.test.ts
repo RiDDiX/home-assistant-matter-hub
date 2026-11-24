@@ -134,6 +134,20 @@ describe("BridgeService.updatePriorities", () => {
 });
 
 describe("BridgeService.update", () => {
+  it("reserves both ports while an edit is in flight", async () => {
+    const { svc } = await makeService([bridgeData("a", 5540)]);
+    const update = svc.update({ ...bridgeData("a", 5541) });
+    await expect(
+      svc.create({
+        name: "b",
+        filter: { include: [], exclude: [] },
+        port: 5541,
+      }),
+    ).rejects.toThrow("Port already in use");
+    await update;
+    expect(svc.getNextAvailablePort()).toBe(5540);
+  });
+
   it("does not store a bridge a delete removed while it updated", async () => {
     const { svc, add } = await makeService([bridgeData("a", 5540)]);
     const bridge = svc.get("a");

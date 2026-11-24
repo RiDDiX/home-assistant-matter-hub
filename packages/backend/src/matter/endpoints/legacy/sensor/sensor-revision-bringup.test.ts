@@ -7,6 +7,12 @@ import type {
 } from "@home-assistant-matter-hub/common";
 import { Environment, VariableService } from "@matter/general";
 import { Endpoint, VendorId } from "@matter/main";
+import {
+  HumiditySensorDevice,
+  PressureSensorDevice,
+  TemperatureSensorDevice,
+} from "@matter/main/devices";
+import { BridgedNodeEndpoint } from "@matter/main/endpoints";
 import { ServerNode } from "@matter/main/node";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { BridgeDataProvider } from "../../../../services/bridges/bridge-data-provider.js";
@@ -16,20 +22,31 @@ import { HomeAssistantConfig } from "../../../../services/home-assistant/home-as
 import { AggregatorEndpoint } from "../../aggregator-endpoint.js";
 import { createLegacyEndpointType } from "../create-legacy-endpoint-type.js";
 
-// #214: a composed sensor lists every measurement device type in the descriptor
-// so controllers like SmartThings show each value. That override only lands when
-// a Descriptor behavior is part of the endpoint, otherwise only the primary
-// type plus BridgedNode reach the controller.
+// Temperature endpoint descriptors use the matter.js model revision even
+// with legacy mappings that named humidity and pressure sources.
 
-const TEMP = 0x0302;
-const HUMIDITY = 0x0307;
-const PRESSURE = 0x0305;
+const temp = {
+  deviceType: Number(TemperatureSensorDevice.deviceType),
+  revision: TemperatureSensorDevice.deviceRevision,
+};
+const humidity = {
+  deviceType: Number(HumiditySensorDevice.deviceType),
+  revision: HumiditySensorDevice.deviceRevision,
+};
+const pressure = {
+  deviceType: Number(PressureSensorDevice.deviceType),
+  revision: PressureSensorDevice.deviceRevision,
+};
+const bridged = {
+  deviceType: Number(BridgedNodeEndpoint.deviceType),
+  revision: BridgedNodeEndpoint.deviceRevision,
+};
 
 let dir: string;
 let env: Environment;
 
 beforeEach(() => {
-  dir = mkdtempSync(join(tmpdir(), "hamh-sensor-214-"));
+  dir = mkdtempSync(join(tmpdir(), "hamh-sensor-revision-"));
   env = new Environment("test", Environment.default);
   env.get(VariableService).set("storage.path", dir);
   env.set(HomeAssistantActions, {
@@ -86,11 +103,11 @@ function tempEntity(): HomeAssistantEntityInformation {
   return { entity_id: "sensor.temp", state: state as any };
 }
 
-// Mount a composed temperature sensor and return the device types the
-// controller actually sees (the runtime descriptor deviceTypeList).
+// Mount a temperature sensor and return its runtime descriptor
+// deviceTypeList.
 async function mountedDeviceTypes(
   mapping: EntityMappingConfig,
-): Promise<number[]> {
+): Promise<Array<{ deviceType: number; revision: number }>> {
   const type = createLegacyEndpointType(tempEntity(), mapping);
   if (!type) {
     throw new Error("no endpoint type");
@@ -98,7 +115,7 @@ async function mountedDeviceTypes(
   const server = await ServerNode.create({
     // biome-ignore lint/suspicious/noExplicitAny: env valid at runtime
     environment: env as any,
-    id: "sensor-214-node",
+    id: "sensor-revision-node",
     network: { port: 0 },
     commissioning: { passcode: 20202021, discriminator: 3840 },
     basicInformation: { vendorId: VendorId(0xfff1), productId: 0x8000 },
@@ -108,34 +125,45 @@ async function mountedDeviceTypes(
   const endpoint = new Endpoint(type, { id: "sensor" });
   await aggregator.add(endpoint);
 
-  let list: number[] = [];
+  let list: Array<{ deviceType: number; revision: number }> = [];
   await endpoint.act((agent) => {
     // biome-ignore lint/suspicious/noExplicitAny: read descriptor state
     const dtl = (agent as any).descriptor.state.deviceTypeList as Array<{
       deviceType: number;
+      revision: number;
     }>;
-    list = dtl.map((d) => Number(d.deviceType));
+    list = dtl.map((d) => ({
+      deviceType: Number(d.deviceType),
+      revision: d.revision,
+    }));
   });
   await server.close().catch(() => {});
   return list;
 }
 
-describe("composed sensor device types (#214)", () => {
-  it("lists temperature and humidity", async () => {
-    const types = await mountedDeviceTypes({
+describe("temperature sensor device type revisions", () => {
+  it.each([
+    ["humidity", { humidityEntity: "sensor.hum" }],
+    ["pressure", { pressureEntity: "sensor.press" }],
+    [
+      "humidity, pressure and battery",
+      {
+        humidityEntity: "sensor.hum",
+        pressureEntity: "sensor.press",
+        batteryEntity: "sensor.bat",
+      },
+    ],
+  ])("temperature with %s advertises only its own measurement type", async (_, extra) => {
+    const list = await mountedDeviceTypes({
       entityId: "sensor.temp",
-      humidityEntity: "sensor.hum",
+      ...extra,
     });
-    expect(types).toContain(TEMP);
-    expect(types).toContain(HUMIDITY);
-  });
-
-  it("lists temperature and pressure", async () => {
-    const types = await mountedDeviceTypes({
-      entityId: "sensor.temp",
-      pressureEntity: "sensor.press",
-    });
-    expect(types).toContain(TEMP);
-    expect(types).toContain(PRESSURE);
+    // The battery shape also lists PowerSource, which is not under test here.
+    const sensorTypes = [temp, humidity, pressure, bridged].map(
+      (d) => d.deviceType,
+    );
+    const listed = list.filter((d) => sensorTypes.includes(d.deviceType));
+    expect(listed).toEqual(expect.arrayContaining([temp, bridged]));
+    expect(listed).toHaveLength(2);
   });
 });

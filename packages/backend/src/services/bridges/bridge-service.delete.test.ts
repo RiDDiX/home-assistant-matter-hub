@@ -116,6 +116,17 @@ describe("BridgeService initialize", () => {
     expect(svc.bridges.map((b) => b.id)).toEqual(["a", "c"]);
   });
 
+  it("skips a stored record without basic information and keeps its port", async () => {
+    const factory = {
+      create: vi.fn(async (data: BridgeData) => fakeBridge(data)),
+    } as unknown as BridgeFactory;
+    const broken = { id: "a", name: "a", port: 5540 } as unknown as BridgeData;
+    const svc = await makeService([broken, storedBridge("b", 5541)], factory);
+
+    expect(svc.bridges.map((b) => b.id)).toEqual(["b"]);
+    expect(svc.getNextAvailablePort()).toBe(5542);
+  });
+
   it("drops a stored country code that is not two letters", async () => {
     const factory = {
       create: vi.fn(async (data: BridgeData) => fakeBridge(data)),

@@ -6,6 +6,7 @@ import { ModeBase } from "@matter/main/clusters/mode-base";
 import { RvcCleanMode } from "@matter/main/clusters/rvc-clean-mode";
 import { applyPatchState } from "../../utils/apply-patch-state.js";
 import { HomeAssistantEntityBehavior } from "./home-assistant-entity-behavior.js";
+import { clampCurrentMode } from "./utils/clamp-current-mode.js";
 import type { ValueGetter, ValueSetter } from "./utils/cluster-config.js";
 
 const logger = Logger.get("RvcCleanModeServerBase");
@@ -29,7 +30,8 @@ function withTwoModes(
 }
 
 export interface RvcCleanModeServerConfig {
-  getCurrentMode: ValueGetter<number>;
+  // undefined means the live mode is unknown right now, keep the current one
+  getCurrentMode: ValueGetter<number | undefined>;
   getSupportedModes: ValueGetter<RvcCleanMode.ModeOption[]>;
   setCleanMode: (
     value: number,
@@ -50,6 +52,7 @@ class RvcCleanModeServerBase extends Base {
   private static readonly PENDING_MODE_TIMEOUT_MS = 10000;
 
   override async initialize() {
+    clampCurrentMode(this.state, this.state.supportedModes[0]?.mode ?? 0);
     await super.initialize();
     const homeAssistant = await this.agent.load(HomeAssistantEntityBehavior);
     this.update(homeAssistant.entity);
@@ -83,15 +86,28 @@ class RvcCleanModeServerBase extends Base {
         currentMode = internal.pendingMode;
       }
     }
+    currentMode ??= this.state.currentMode;
+
+    const supportedModes = withTwoModes(
+      this.state.config.getSupportedModes(entity.state, this.agent),
+    );
+    // matter.js throws on a mode outside the list, which fails the endpoint.
+    if (!supportedModes.some((m) => m.mode === currentMode)) {
+      if (internal.unsupportedMode !== currentMode) {
+        internal.unsupportedMode = currentMode;
+        logger.warn(
+          `${entity.entity_id}: mode ${currentMode} is not supported, ` +
+            `using ${supportedModes[0].mode}`,
+        );
+      }
+      currentMode = supportedModes[0].mode;
+    } else {
+      internal.unsupportedMode = undefined;
+    }
 
     applyPatchState(
       this.state,
-      {
-        currentMode,
-        supportedModes: withTwoModes(
-          this.state.config.getSupportedModes(entity.state, this.agent),
-        ),
-      },
+      { currentMode, supportedModes },
       { force: true },
     );
   }
@@ -127,16 +143,19 @@ class RvcCleanModeServerBase extends Base {
         `for ${homeAssistant.entityId}`,
     );
 
-    this.internal.pendingMode = newMode;
-    this.internal.pendingModeTimestamp = Date.now();
     this.state.currentMode = newMode;
 
     const action = this.state.config.setCleanMode(newMode, this.agent);
     if (action) {
+      // Nothing sent means no HA update will confirm it, so do not hold it.
+      this.internal.pendingMode = newMode;
+      this.internal.pendingModeTimestamp = Date.now();
       logger.info(
         `changeToMode: dispatching action ${action.action} → ${action.target ?? homeAssistant.entityId}`,
       );
       homeAssistant.callAction(action);
+    } else {
+      this.internal.pendingMode = undefined;
     }
 
     return {
@@ -153,6 +172,7 @@ namespace RvcCleanModeServerBase {
   export class Internal extends Base.Internal {
     pendingMode?: number;
     pendingModeTimestamp = 0;
+    unsupportedMode?: number;
   }
   export class State extends Base.State {
     config!: RvcCleanModeServerConfig;

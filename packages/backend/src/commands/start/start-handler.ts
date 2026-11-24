@@ -13,6 +13,7 @@ import { HomeAssistantClient } from "../../services/home-assistant/home-assistan
 import { HomeAssistantRegistry } from "../../services/home-assistant/home-assistant-registry.js";
 import { AppSettingsStorage } from "../../services/storage/app-settings-storage.js";
 import { logStartupMemoryGuard } from "../../utils/log-memory.js";
+import { registerShutdown, type ShutdownTargets } from "./graceful-shutdown.js";
 import {
   isIsolatableError,
   shouldSuppressError,
@@ -93,6 +94,10 @@ export async function startHandler(
   logStartupMemoryGuard(Logger.get("Startup"));
 
   const appEnvironment = await AppEnvironment.create(rootEnv, options);
+  // before any service load, a crash while bridges are built must still end
+  // the process
+  const shutdownTargets: ShutdownTargets = { appEnvironment };
+  const gracefulShutdown = registerShutdown(rootEnv.runtime, shutdownTargets);
 
   // Register final error handlers AFTER Matter.js initialization
   // This overrides Matter.js's crash handlers that would otherwise call process.exit(1)
@@ -111,6 +116,7 @@ export async function startHandler(
     webApi$,
     backupService$,
   ]);
+  Object.assign(shutdownTargets, { bridgeService, backupService });
   bridgeService.onBridgeChanged = (bridgeId) => {
     webApi.websocket.broadcastBridgeUpdate(bridgeId);
   };
@@ -130,43 +136,6 @@ export async function startHandler(
   // Register graceful shutdown handlers.
   // When the process receives SIGTERM (Docker stop) or SIGINT (Ctrl+C),
   // stop all bridges cleanly so matter.js persists fabric/subscription state.
-  let shuttingDown = false;
-  const gracefulShutdown = async (signal: string) => {
-    if (shuttingDown) return;
-    shuttingDown = true;
-    console.log(`Received ${signal}, shutting down gracefully...`);
-    try {
-      // Stop bridges first so each one closes its Matter sessions cleanly and
-      // persists fabric/subscription state before the backup runs and the
-      // container is torn down. Capped so a slow bridge can't block shutdown.
-      await Promise.race([
-        bridgeService.stopAll(),
-        new Promise((resolve) => setTimeout(resolve, 10_000)),
-      ]);
-    } catch (e) {
-      console.warn("Stopping bridges during shutdown failed:", e);
-    }
-    try {
-      await Promise.race([
-        backupService.createAutoBackup(),
-        new Promise((resolve) => setTimeout(resolve, 5_000)),
-      ]);
-    } catch (e) {
-      console.warn("Auto-backup during shutdown failed:", e);
-    }
-    try {
-      // Dispose the whole IoC container so WebApi (releases the HTTP port),
-      // HomeAssistantClient (closes the WS), and every storage service tear
-      // down in reverse creation order before the process exits.
-      await Promise.race([
-        appEnvironment.dispose(),
-        new Promise((resolve) => setTimeout(resolve, 15_000)),
-      ]);
-    } catch (e) {
-      console.warn("Error during graceful shutdown:", e);
-    }
-    process.exit(0);
-  };
   process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
   process.on("SIGINT", () => gracefulShutdown("SIGINT"));
 

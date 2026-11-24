@@ -1,4 +1,4 @@
-import {
+import fs, {
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -39,7 +39,7 @@ afterAll(() => kill.mockRestore());
 
 const ID = "0123456789abcdef0123456789abcdef";
 const bridgeStorage = {
-  bridges: [{ id: ID, name: "Bridge One", port: 5540 }],
+  bridges: [{ id: ID, name: "Bridge One", port: 5540, basicInformation: {} }],
   add: async () => {},
 } as unknown as BridgeStorage;
 const noBridges = {
@@ -108,7 +108,10 @@ describe("plugin state in backup and restore (#439 review)", () => {
 
       const form = new FormData();
       form.append("file", new Blob([zip]), "backup.zip");
-      form.append("options", JSON.stringify({ overwriteExisting: true }));
+      form.append(
+        "options",
+        JSON.stringify({ overwriteExisting: true, restoreAppData: true }),
+      );
       const restore = await fetch(`${base}/backup/restore`, {
         method: "POST",
         body: form,
@@ -189,8 +192,13 @@ describe("mapping restore keeps every field", () => {
     const restored: unknown[] = [];
     const storage = {
       getMappingsForBridge: () => [mapping],
-      setMapping: async (req: unknown) => {
-        restored.push(req);
+      restoreMappings: async (
+        _id: string,
+        requests: unknown[],
+        save: () => Promise<void>,
+      ) => {
+        await save();
+        restored.push(...requests);
       },
     } as unknown as EntityMappingStorage;
     const zipPath = join(dir, `mappings-${path}.zip`);
@@ -252,10 +260,13 @@ async function zipOf(entries: Record<string, string>): Promise<Blob> {
   return new Blob([Buffer.concat(chunks)]);
 }
 
-function restoreForm(zip: Blob) {
+function restoreForm(zip: Blob, options: object = {}) {
   const form = new FormData();
   form.append("file", zip, "backup.zip");
-  form.append("options", JSON.stringify({ overwriteExisting: true }));
+  form.append(
+    "options",
+    JSON.stringify({ overwriteExisting: true, ...options }),
+  );
   return { method: "POST", body: form };
 }
 
@@ -269,7 +280,7 @@ describe("restore input checks", () => {
         version: 2,
         bridges: [
           { id: "../../x", name: "Evil", port: 5540 },
-          { id: legacyId, name: "Legacy", port: 5541 },
+          { id: legacyId, name: "Legacy", port: 5541, basicInformation: {} },
         ],
         entityMappings: {},
         includesIdentity: true,
@@ -313,6 +324,7 @@ describe("restore input checks", () => {
             id: ID,
             name: "Old",
             port: 5540,
+            basicInformation: {},
             featureFlags: {
               omitEventsInPriming: true,
               autoBatteryMapping: true,
@@ -334,6 +346,43 @@ describe("restore input checks", () => {
     expect(added.map((b) => b.featureFlags)).toEqual([
       { autoBatteryMapping: true },
     ]);
+  });
+
+  it("refuses a bridge without basic information and a null entry", async () => {
+    const added: BridgeData[] = [];
+    const storage = {
+      bridges: [],
+      add: async (bridge: BridgeData) => {
+        added.push(bridge);
+      },
+    } as unknown as BridgeStorage;
+    const zip = await zipOf({
+      "backup.json": JSON.stringify({
+        version: 2,
+        bridges: [
+          { id: "handmade", name: "Hand", port: 5540 },
+          { id: "nulled", name: "N", port: 5541, basicInformation: null },
+          null,
+          { id: ID, name: "Bridge One", port: 5542, basicInformation: {} },
+        ],
+        entityMappings: {},
+      }),
+    });
+    await withRouter(
+      async (base) => {
+        const res = await fetch(`${base}/backup/restore`, restoreForm(zip));
+        expect(res.status).toBe(200);
+        const body = await res.json();
+        expect(body.bridgesRestored).toBe(1);
+        expect(
+          body.errors.map((e: { bridgeId?: string }) => e.bridgeId),
+        ).toEqual(["handmade", "nulled", undefined]);
+      },
+      undefined,
+      undefined,
+      storage,
+    );
+    expect(added.map((b) => b.id)).toEqual([ID]);
   });
 
   it("rejects a backup.json larger than 50 MB", async () => {
@@ -383,7 +432,9 @@ describe("restore input checks", () => {
   it("rejects entries that inflate together past the archive cap", async () => {
     const backupJson = JSON.stringify({
       version: 2,
-      bridges: [{ id: ID, name: "Bridge One", port: 5540 }],
+      bridges: [
+        { id: ID, name: "Bridge One", port: 5540, basicInformation: {} },
+      ],
       entityMappings: {},
       includesIdentity: true,
     });
@@ -431,7 +482,9 @@ describe("restore input checks", () => {
     } as unknown as BridgeStorage;
     const backupJson = JSON.stringify({
       version: 2,
-      bridges: [{ id: ID, name: "Bridge One", port: 5540 }],
+      bridges: [
+        { id: ID, name: "Bridge One", port: 5540, basicInformation: {} },
+      ],
       entityMappings: {},
       includesIdentity: true,
     });
@@ -477,7 +530,7 @@ describe("restore input checks", () => {
     } as unknown as BridgeStorage;
     // raw JSON, an object literal would set the prototype instead of a key
     const zip = await zipOf({
-      "backup.json": `{"version":2,"bridges":[{"id":"__proto__","name":"P","port":5540},{"id":"constructor","name":"C","port":5541}],"entityMappings":{"__proto__":{"entityId":"light.x"}}}`,
+      "backup.json": `{"version":2,"bridges":[{"id":"__proto__","name":"P","port":5540},{"id":"constructor","name":"C","port":5541,"basicInformation":{}}],"entityMappings":{"__proto__":{"entityId":"light.x"}}}`,
     });
     await withRouter(
       async (base) => {
@@ -509,7 +562,9 @@ describe("restore input checks", () => {
         await zipOf({
           "backup.json": JSON.stringify({
             version: 2,
-            bridges: [{ id: ID, name: "Bridge One", port: 5540 }],
+            bridges: [
+              { id: ID, name: "Bridge One", port: 5540, basicInformation: {} },
+            ],
             entityMappings: {},
             includesIdentity: true,
           }),
@@ -557,7 +612,9 @@ describe("restore input checks", () => {
     } as unknown as BridgeStorage;
     const backupJson = JSON.stringify({
       version: 2,
-      bridges: [{ id: ID, name: "Bridge One", port: 5540 }],
+      bridges: [
+        { id: ID, name: "Bridge One", port: 5540, basicInformation: {} },
+      ],
       entityMappings: {},
       includesIdentity: true,
     });
@@ -620,7 +677,206 @@ describe("restore input checks", () => {
   });
 });
 
+describe("restore staging", () => {
+  const backupJson = JSON.stringify({
+    version: 2,
+    bridges: bridgeStorage.bridges,
+    entityMappings: {},
+    includesIdentity: true,
+  });
+
+  it("removes stale staging folders at start and keeps recovery files", async () => {
+    const storageLocation = join(dir, "sweep");
+    const stale = join(storageLocation, ".restore-Ab12Cd");
+    const kept = join(storageLocation, ".restore-failed-Ab12Cd");
+    mkdirSync(join(stale, "previous"), { recursive: true });
+    writeFileSync(join(stale, "previous", "keys"), "secret");
+    mkdirSync(kept, { recursive: true });
+    await withRouter(
+      async () => {},
+      undefined,
+      undefined,
+      undefined,
+      storageLocation,
+    );
+    expect(existsSync(stale)).toBe(false);
+    expect(existsSync(kept)).toBe(true);
+  });
+
+  it("replaces a file where hard links are not supported", async () => {
+    const storageLocation = join(dir, "no-links");
+    const keys = join(storageLocation, ID, "keys");
+    mkdirSync(join(storageLocation, ID), { recursive: true });
+    writeFileSync(keys, "original");
+    const link = vi.spyOn(fs, "linkSync").mockImplementation(() => {
+      throw new Error("EPERM: operation not permitted, link");
+    });
+    const zip = await zipOf({
+      "backup.json": backupJson,
+      [`identity/${ID}/keys`]: "replacement",
+    });
+    try {
+      await withRouter(
+        async (base) => {
+          const res = await fetch(`${base}/backup/restore`, restoreForm(zip));
+          expect(await res.json()).toMatchObject({
+            bridgesRestored: 1,
+            errors: [],
+          });
+        },
+        undefined,
+        undefined,
+        undefined,
+        storageLocation,
+      );
+      expect(link).toHaveBeenCalled();
+    } finally {
+      link.mockRestore();
+    }
+    expect(readFileSync(keys, "utf-8")).toBe("replacement");
+  });
+
+  it("reports app-wide data as not restored when a bridge fails", async () => {
+    const storageLocation = join(dir, "app-skipped");
+    mkdirSync(join(storageLocation, "app"), { recursive: true });
+    const settingsFile = join(storageLocation, "app", "settings.data");
+    writeFileSync(settingsFile, '{"current":true}');
+    const storage = {
+      ...bridgeStorage,
+      add: vi.fn().mockRejectedValue(new Error("cannot save bridge")),
+    } as unknown as BridgeStorage;
+    const zip = await zipOf({
+      "backup.json": backupJson,
+      "app/settings.data": "{}",
+    });
+    await withRouter(
+      async (base) => {
+        const res = await fetch(
+          `${base}/backup/restore`,
+          restoreForm(zip, { restoreAppData: true }),
+        );
+        expect(await res.json()).toMatchObject({
+          restarting: false,
+          errors: [
+            { bridgeId: ID, error: "cannot save bridge" },
+            {
+              bridgeId: "app",
+              error: "App-wide data was not restored because a bridge failed",
+            },
+          ],
+        });
+      },
+      undefined,
+      undefined,
+      storage,
+      storageLocation,
+    );
+    expect(readFileSync(settingsFile, "utf-8")).toBe('{"current":true}');
+  });
+});
+
 describe("restore while the bridge runs", () => {
+  it("leaves app-wide data alone when the selected bridge is skipped", async () => {
+    const storageLocation = join(dir, "selective");
+    mkdirSync(join(storageLocation, "app"), { recursive: true });
+    const settingsFile = join(storageLocation, "app", "settings.data");
+    writeFileSync(settingsFile, '{"current":true}');
+    const live = { data: { status: "running" }, stop: vi.fn() };
+    const bridgeService = {
+      bridges: [live],
+      get: () => live,
+    } as unknown as BridgeService;
+    const zip = await zipOf({
+      "backup.json": JSON.stringify({
+        version: 2,
+        bridges: bridgeStorage.bridges,
+        entityMappings: {},
+        includesIdentity: true,
+      }),
+      "app/settings.data": "{}",
+    });
+    await withRouter(
+      async (base) => {
+        const res = await fetch(
+          `${base}/backup/restore`,
+          restoreForm(zip, { bridgeIds: [ID], overwriteExisting: false }),
+        );
+        expect(await res.json()).toMatchObject({
+          bridgesRestored: 0,
+          bridgesSkipped: 1,
+          restarting: false,
+        });
+      },
+      undefined,
+      bridgeService,
+      undefined,
+      storageLocation,
+    );
+    expect(live.stop).not.toHaveBeenCalled();
+    expect(readFileSync(settingsFile, "utf-8")).toBe('{"current":true}');
+  });
+
+  it("stages files before stopping a bridge and rolls them back if storage fails", async () => {
+    const storageLocation = join(dir, "rollback");
+    const identityDir = join(storageLocation, ID);
+    const original = join(identityDir, "keys");
+    const added = join(identityDir, "new-keys");
+    mkdirSync(added, { recursive: true });
+    writeFileSync(original, "original");
+    const data = { status: "running" };
+    const live = {
+      data,
+      stop: vi.fn(async () => {
+        data.status = "stopped";
+      }),
+      start: vi.fn(async () => {
+        data.status = "running";
+      }),
+    };
+    const bridgeService = {
+      bridges: [live],
+      get: () => live,
+    } as unknown as BridgeService;
+    const add = vi.fn().mockRejectedValue(new Error("cannot save bridge"));
+    const storage = { ...bridgeStorage, add } as unknown as BridgeStorage;
+    const zip = await zipOf({
+      "backup.json": JSON.stringify({
+        version: 2,
+        bridges: storage.bridges,
+        entityMappings: {},
+        includesIdentity: true,
+      }),
+      [`identity/${ID}/keys`]: "replacement",
+      [`identity/${ID}/new-keys`]: "new",
+    });
+    await withRouter(
+      async (base) => {
+        const restore = () => fetch(`${base}/backup/restore`, restoreForm(zip));
+        expect(await (await restore()).json()).toMatchObject({
+          bridgesRestored: 0,
+          restartRequired: false,
+        });
+        expect(live.stop).not.toHaveBeenCalled();
+        expect(add).not.toHaveBeenCalled();
+
+        rmSync(added, { recursive: true });
+        expect(await (await restore()).json()).toMatchObject({
+          bridgesRestored: 0,
+          restartRequired: false,
+          errors: [{ bridgeId: ID, error: "cannot save bridge" }],
+        });
+        expect(live.stop).toHaveBeenCalledOnce();
+        expect(live.start).toHaveBeenCalledOnce();
+        expect(readFileSync(original, "utf-8")).toBe("original");
+        expect(existsSync(added)).toBe(false);
+      },
+      undefined,
+      bridgeService,
+      storage,
+      storageLocation,
+    );
+  });
+
   it("stops every running bridge, restores the app files and restarts", async () => {
     kill.mockClear();
     const storageLocation = join(dir, "running-all");
@@ -652,7 +908,10 @@ describe("restore while the bridge runs", () => {
     });
     await withRouter(
       async (base) => {
-        const res = await fetch(`${base}/backup/restore`, restoreForm(zip));
+        const res = await fetch(
+          `${base}/backup/restore`,
+          restoreForm(zip, { restoreAppData: true }),
+        );
         const body = await res.json();
         expect(body.errors).toEqual([]);
         expect(body.restartRequired).toBe(true);
@@ -684,10 +943,12 @@ describe("restore while the bridge runs", () => {
     };
     const bridgeService = {
       bridges: [live],
-      get: (id: string) => (id === ID ? live : undefined),
+      get: () => undefined,
     } as unknown as BridgeService;
     const storage = {
-      bridges: [{ id: ID, name: "Bridge One", port: 5540 }],
+      bridges: [
+        { id: ID, name: "Bridge One", port: 5540, basicInformation: {} },
+      ],
       add: async () => {
         order.push("add");
       },
@@ -695,7 +956,9 @@ describe("restore while the bridge runs", () => {
     const zip = await zipOf({
       "backup.json": JSON.stringify({
         version: 2,
-        bridges: [{ id: ID, name: "Bridge One", port: 5540 }],
+        bridges: [
+          { id: ID, name: "Bridge One", port: 5540, basicInformation: {} },
+        ],
         entityMappings: {},
         includesIdentity: true,
       }),
@@ -703,7 +966,10 @@ describe("restore while the bridge runs", () => {
     });
     await withRouter(
       async (base) => {
-        const res = await fetch(`${base}/backup/restore`, restoreForm(zip));
+        const res = await fetch(
+          `${base}/backup/restore`,
+          restoreForm(zip, { restoreAppData: true }),
+        );
         expect(res.status).toBe(200);
         const body = await res.json();
         expect(body.bridgesRestored).toBe(1);
@@ -716,7 +982,7 @@ describe("restore while the bridge runs", () => {
       storage,
       storageLocation,
     );
-    expect(order).toEqual(["stop", "add", "stop"]);
+    expect(order).toEqual(["add", "stop"]);
     expect(existsSync(join(storageLocation, "app", "settings.data"))).toBe(
       false,
     );

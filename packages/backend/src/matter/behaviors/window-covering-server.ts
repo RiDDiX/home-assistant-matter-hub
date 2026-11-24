@@ -198,10 +198,16 @@ function haRestEnd(action: HomeAssistantAction): "open" | "close" | null {
   if (action.action.includes("close_cover")) {
     return "close";
   }
-  // coverOpenCloseAsPosition sends the ends as a position (#512)
-  if (action.action === "cover.set_cover_position") {
-    const position = (action.data as { position?: number } | undefined)
-      ?.position;
+  // coverOpenCloseAsPosition (#512) and a cover without open_tilt (#405) send
+  // the ends as a position
+  if (
+    action.action === "cover.set_cover_position" ||
+    action.action === "cover.set_cover_tilt_position"
+  ) {
+    const data = action.data as
+      | { position?: number; tilt_position?: number }
+      | undefined;
+    const position = data?.position ?? data?.tilt_position;
     if (position === 100) return "open";
     if (position === 0) return "close";
   }
@@ -402,11 +408,14 @@ export class WindowCoveringServerBase extends FeaturedBase {
     const currentLift = normalize(
       config.getCurrentLiftPosition(state, this.agent),
     );
-    const currentLift100ths = currentLift != null ? currentLift * 100 : null;
+    // HA can report fractions (66.7), the 100ths attributes are uint16
+    const currentLift100ths =
+      currentLift != null ? Math.round(currentLift * 100) : null;
     const currentTilt = normalize(
       config.getCurrentTiltPosition(state, this.agent),
     );
-    const currentTilt100ths = currentTilt != null ? currentTilt * 100 : null;
+    const currentTilt100ths =
+      currentTilt != null ? Math.round(currentTilt * 100) : null;
 
     // Overlay optimistic movement (#429). A Matter command may have written an
     // Opening/Closing that HA cannot confirm with a transitional state (SONOFF
@@ -825,7 +834,8 @@ export class WindowCoveringServerBase extends FeaturedBase {
     // directly to open/close handlers regardless of the direction computed
     // by matter.js. The direction computation relies on currentPosition which
     // can be in HA semantics (non-inverted) when coverUseHomeAssistantPercentage
-    // is enabled, causing matter.js to derive the wrong direction.
+    // is enabled, causing matter.js to derive the wrong direction. Alexa sends
+    // its spoken open/close as these two targets (#199, #240).
     if (type === MovementType.Lift) {
       this.lastLiftMovementMs = Date.now();
       this.lastLiftMovementDirection = direction;
@@ -970,7 +980,8 @@ export class WindowCoveringServerBase extends FeaturedBase {
     // Capture EVERYTHING needed for the debounced callback NOW while context is valid
     // The agent context expires after the command handler returns, so we must not
     // access any behavior properties (including entityId) inside setTimeout
-    const targetPosition = targetPercent100ths / 100;
+    // HA truncates a fractional percent, send it rounded
+    const targetPosition = Math.round(targetPercent100ths / 100);
     const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);
     const action = config.setLiftPosition(targetPosition, this.agent);
     const entityId = homeAssistant.entityId;
@@ -1101,7 +1112,8 @@ export class WindowCoveringServerBase extends FeaturedBase {
     // Capture EVERYTHING needed for the debounced callback NOW while context is valid
     // The agent context expires after the command handler returns, so we must not
     // access any behavior properties (including entityId) inside setTimeout
-    const targetPosition = targetPercent100ths / 100;
+    // HA truncates a fractional percent, send it rounded
+    const targetPosition = Math.round(targetPercent100ths / 100);
     const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);
     const action = config.setTiltPosition(targetPosition, this.agent);
     const entityId = homeAssistant.entityId;

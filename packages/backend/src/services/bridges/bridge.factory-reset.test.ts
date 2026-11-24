@@ -95,7 +95,8 @@ describe.each([
     expect(beforeReset).not.toHaveBeenCalled();
   });
 
-  it("runs beforeReset ahead of the stop", async () => {
+  // a failed erase must keep what beforeReset drops, the restart re-seeds it
+  it("runs beforeReset after the erase and before the restart", async () => {
     const calls: string[] = [];
     const bridge = Object.create(Ctor.prototype);
     prepare(bridge, calls);
@@ -105,8 +106,10 @@ describe.each([
     });
 
     expect(ran).toBe(true);
-    expect(calls.indexOf("beforeReset")).toBe(0);
-    expect(calls).toContain("server.factoryReset");
+    expect(calls.indexOf("beforeReset")).toBe(
+      calls.indexOf("server.factoryReset") + 1,
+    );
+    expect(calls.indexOf("beforeReset")).toBeLessThan(calls.indexOf("start"));
   });
 });
 

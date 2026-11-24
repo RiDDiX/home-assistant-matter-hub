@@ -13,27 +13,9 @@ import {
   ServiceAreaServer,
   ServiceAreaServerWithMaps,
 } from "../../../../behaviors/service-area-server.js";
-import { parseVacuumRooms } from "../utils/parse-vacuum-rooms.js";
+import { parseVacuumRooms, toAreaId } from "../utils/parse-vacuum-rooms.js";
 
 const logger = Logger.get("VacuumServiceAreaServer");
-
-/**
- * Convert vacuum room ID to a Matter-compatible area ID.
- * Room IDs from HA can be strings or numbers, but Matter requires uint32.
- */
-function toAreaId(roomId: string | number): number {
-  if (typeof roomId === "number") {
-    return roomId;
-  }
-  // For string IDs, use a simple hash
-  let hash = 0;
-  for (let i = 0; i < roomId.length; i++) {
-    const char = roomId.charCodeAt(i);
-    hash = (hash << 5) - hash + char;
-    hash |= 0; // Convert to 32bit integer
-  }
-  return Math.abs(hash);
-}
 
 /**
  * Extract unique maps (floors) from rooms that have mapName set.
@@ -408,8 +390,3 @@ export function getVacuumServiceAreas(
 
   return [];
 }
-
-/**
- * Export toAreaId for use by RvcRunModeServer to convert area IDs back to room IDs
- */
-export { toAreaId };

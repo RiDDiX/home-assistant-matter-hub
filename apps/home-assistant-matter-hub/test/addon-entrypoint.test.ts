@@ -1,5 +1,11 @@
 import { spawnSync } from "node:child_process";
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -18,7 +24,9 @@ bashio::config() {
   elif [ -n "\${2:-}" ]; then printf '%s\\n' "$2"
   else echo null; fi
 }
+bashio::config.true() { [ "$(bashio::config "$1")" = "true" ]; }
 bashio::log.info() { echo "LOG: $*" >&2; }
+bashio::log.warning() { echo "WARN: $*" >&2; }
 bashio::addon.version() { echo 1.0.0; }
 bashio::addon.ingress_port() { echo 8482; }
 `;
@@ -35,7 +43,7 @@ describe.skipIf(process.platform === "win32")(
       const bin = join(dir, "home-assistant-matter-hub");
       writeFileSync(
         bin,
-        '#!/bin/sh\nfor a in "$@"; do echo "$a"; done\necho "TOKEN=$HAMH_HOME_ASSISTANT_ACCESS_TOKEN"\n',
+        '#!/bin/sh\nfor a in "$@"; do echo "$a"; done\necho "TOKEN=$HAMH_HOME_ASSISTANT_ACCESS_TOKEN"\necho "AUTH=$HAMH_HTTP_AUTH_USERNAME:$HAMH_HTTP_AUTH_PASSWORD"\n',
       );
       chmodSync(bin, 0o755);
     });
@@ -64,12 +72,18 @@ describe.skipIf(process.platform === "win32")(
       );
       expect(result.status, result.stderr).toBe(0);
       const lines = result.stdout.split("\n");
-      const args = lines.filter((a) => !a.startsWith("TOKEN="));
+      const args = lines.filter(
+        (a) => !a.startsWith("TOKEN=") && !a.startsWith("AUTH="),
+      );
       const arg = (name: string) =>
         args.find((a) => a.startsWith(`--${name}=`))?.slice(name.length + 3);
       return {
         url: arg("home-assistant-url"),
         token: lines.find((a) => a.startsWith("TOKEN="))?.slice(6),
+        auth: lines.find((a) => a.startsWith("AUTH="))?.slice(5),
+        whitelist: args
+          .filter((a) => a.startsWith("--http-ip-whitelist="))
+          .map((a) => a.slice(20)),
         args,
         stderr: result.stderr,
       };
@@ -125,6 +139,19 @@ describe.skipIf(process.platform === "win32")(
       expect(r.url).toBe("http://127.0.0.1:8123");
     });
 
+    it("leaves the mDNS interface unset without the option", () => {
+      for (const options of [{}, { mdns_network_interface: "" }]) {
+        const r = run(options);
+        expect(r.args).toContain("--mdns-network-interface=");
+        expect(r.args).not.toContain("--mdns-network-interface=null");
+      }
+    });
+
+    it("passes a set mDNS interface", () => {
+      const r = run({ mdns_network_interface: " end0 \n" });
+      expect(r.args).toContain("--mdns-network-interface=end0");
+    });
+
     it("keeps the token out of argv", () => {
       const user = run({ access_token: "user-token" });
       expect(user.token).toBe("user-token");
@@ -143,6 +170,105 @@ describe.skipIf(process.platform === "win32")(
         "LOG: Home Assistant: using the configured access token at http://ha:1",
       );
       expect(r.stderr).not.toContain("user-token");
+    });
+
+    const closedWarning =
+      "WARN: local_api_password is set but allow_local_access is off, the local API stays closed";
+    const openWarning =
+      "WARN: Local API: http://127.0.0.1:8482 without a password, every process on this host has full control";
+
+    it("keeps the API to the Supervisor while local access is off", () => {
+      for (const options of [{}, { allow_local_access: "false" }]) {
+        const r = run(options);
+        expect(r.args).toContain("--web-port=8482");
+        expect(r.whitelist).toEqual(["172.30.32.2"]);
+        expect(r.auth).toBe(":");
+        expect(r.args.join("\n")).not.toContain("auth");
+        expect(r.stderr).not.toContain("Local API");
+        expect(r.stderr).not.toContain(closedWarning);
+      }
+    });
+
+    it("warns about a password while local access is off", () => {
+      const r = run({
+        allow_local_access: "false",
+        local_api_password: "local-secret",
+      });
+      expect(r.args).toContain("--web-port=8482");
+      expect(r.whitelist).toEqual(["172.30.32.2"]);
+      expect(r.auth).toBe(":");
+      expect(r.args.join("\n")).not.toContain("local-secret");
+      expect(r.stderr).toContain(closedWarning);
+      expect(r.stderr).not.toContain("local-secret");
+    });
+
+    it("opens the API to loopback without a password", () => {
+      for (const password of [undefined, "", "   "]) {
+        const r = run({
+          allow_local_access: "true",
+          ...(password === undefined ? {} : { local_api_password: password }),
+        });
+        expect(r.args).toContain("--web-port=8482");
+        expect(r.whitelist).toEqual(["172.30.32.2", "127.0.0.1", "::1"]);
+        expect(r.auth).toBe(":");
+        expect(r.stderr).toContain(openWarning);
+      }
+    });
+
+    it("opens the API to loopback with a local password", () => {
+      const r = run({
+        allow_local_access: "true",
+        local_api_password: "local-secret",
+      });
+      expect(r.args).toContain("--web-port=8482");
+      expect(r.whitelist).toEqual(["172.30.32.2", "127.0.0.1", "::1"]);
+      expect(r.auth).toBe("hamh:local-secret");
+      expect(r.stderr).not.toContain(openWarning);
+      expect(r.args.join("\n")).not.toContain("local-secret");
+      expect(r.stderr).toContain(
+        "LOG: Local API: http://127.0.0.1:8482 with user name hamh",
+      );
+      expect(r.stderr).not.toContain("local-secret");
+    });
+
+    describe("anonymous /config guard", () => {
+      const guard = readFileSync(entrypoint, "utf8").match(
+        /^config_on_anonymous_volume\(\) \{[\s\S]*?^\}$/m,
+      )?.[0];
+
+      function onAnonymousVolume(mountinfo: string) {
+        const file = join(dir, "mountinfo");
+        writeFileSync(file, mountinfo);
+        const result = spawnSync(
+          "bash",
+          ["-c", `${guard}\nconfig_on_anonymous_volume "$1"`, "bash", file],
+          { encoding: "utf8", timeout: 15_000 },
+        );
+        return result.status === 0;
+      }
+
+      const root = "1026 1017 259:2 / / rw - ext4 /dev/sda1 rw\n";
+
+      it("fails on an anonymous volume", () => {
+        expect(guard).toBeDefined();
+        expect(
+          onAnonymousVolume(
+            `${root}1027 1017 259:2 /var/lib/docker/volumes/${"d7".repeat(32)}/_data /config rw,relatime master:1 - ext4 /dev/sda1 rw\n`,
+          ),
+        ).toBe(true);
+      });
+
+      it("passes on a Supervisor bind", () => {
+        expect(
+          onAnonymousVolume(
+            `${root}1027 1017 259:2 /supervisor/addon_configs/abc_hamh /config rw,relatime master:1 - ext4 /dev/sda1 rw\n`,
+          ),
+        ).toBe(false);
+      });
+
+      it("passes without a /config mount", () => {
+        expect(onAnonymousVolume(root)).toBe(false);
+      });
     });
   },
 );

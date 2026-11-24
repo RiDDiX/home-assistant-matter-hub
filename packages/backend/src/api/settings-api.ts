@@ -18,6 +18,7 @@ export function settingsApi(
   bridgeService: BridgeService,
   envAuth?: { username: string; password: string },
   onAuthChange?: () => void,
+  allowedWithoutLogin?: (req: Request) => boolean,
 ): Router {
   const router = Router();
 
@@ -52,9 +53,18 @@ export function settingsApi(
         });
         return;
       }
-      const { username, password } = req.body;
-      if (!username?.trim() || !password?.trim()) {
+      const { username, password } = req.body ?? {};
+      if (
+        typeof username !== "string" ||
+        typeof password !== "string" ||
+        !username.trim() ||
+        !password.trim()
+      ) {
         res.status(400).json({ error: "Username and password are required" });
+        return;
+      }
+      if (username.includes(":")) {
+        res.status(400).json({ error: "The username cannot contain a colon" });
         return;
       }
       await settingsStorage.setAuth({
@@ -73,13 +83,21 @@ export function settingsApi(
   router.delete(
     "/auth",
     async (
-      _req: Request,
+      req: Request,
       res: Response<SettingsAuthResponse | { error: string }>,
     ) => {
       if (envAuth) {
         res.status(409).json({
           error:
             "Auth is configured via environment variables and cannot be changed from the UI",
+        });
+        return;
+      }
+      // Without a login this client would get a 403 on its next request.
+      if (allowedWithoutLogin && !allowedWithoutLogin(req)) {
+        res.status(409).json({
+          error:
+            "Removing the login from this machine would lock you out. Remove it on the machine running HAMH, or set a new login instead.",
         });
         return;
       }

@@ -535,6 +535,14 @@ export class ColorControlServerBase extends FeaturedBase {
       colorMode: ColorControl.ColorMode.CurrentXAndCurrentY,
       enhancedColorMode: ColorControl.EnhancedColorMode.CurrentXAndCurrentY,
     });
+    // HA gets hs_color and update() skips xy together with hue/sat, so the
+    // hue/sat guard keeps a stale HA state from reverting currentX/Y
+    const [currentHue, currentSaturation] = ColorConverter.toMatterHS(color);
+    optimisticColorState.set(homeAssistant.entityId, {
+      currentHue,
+      currentSaturation,
+      timestamp: Date.now(),
+    });
 
     if (this.isLightOff()) {
       pendingColorStaging.set(homeAssistant.entityId, action.data ?? {});

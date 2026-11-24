@@ -24,8 +24,12 @@ const EventEndpointTypeSimple = GenericSwitchDevice.with(
   HaGenericSwitchServerSimple,
 );
 
+// some integrations list null among event_types, skip what is not a string
 export function detectMultiPressMax(eventTypes: string[]): number {
-  return Math.max(1, ...eventTypes.map(pressCountOf));
+  return Math.max(
+    1,
+    ...eventTypes.filter((t) => typeof t === "string").map(pressCountOf),
+  );
 }
 
 export function EventDevice(

@@ -2,9 +2,10 @@ import type { EndpointData } from "@home-assistant-matter-hub/common";
 import type { Endpoint } from "@matter/main";
 
 // plugin objects land in behavior state, never echo their credentials
-const SECRET_KEY = /token|secret|password/i;
+// entity_picture is a proxy URL with the access token in its query
+const SECRET_KEY = /token|secret|password|entity_picture/i;
 
-function safeClone(value: unknown, depth = 0): unknown {
+export function safeClone(value: unknown, depth = 0): unknown {
   if (value === null || value === undefined) return value;
   if (typeof value === "bigint") return Number(value);
   if (typeof value !== "object") return value;

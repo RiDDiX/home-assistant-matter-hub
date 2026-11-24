@@ -17,6 +17,7 @@ import { LegacyEndpoint } from "../../matter/endpoints/legacy/legacy-endpoint.js
 import type { ServerModeServerNode } from "../../matter/endpoints/server-mode-server-node.js";
 import { ServerModeVacuumEndpoint } from "../../matter/endpoints/server-mode-vacuum-endpoint.js";
 import { isHeapUnderPressure } from "../../utils/log-memory.js";
+import { resolveNodeLabel } from "../../utils/node-label.js";
 import { subscribeEntities } from "../home-assistant/api/subscribe-entities.js";
 import type { HomeAssistantClient } from "../home-assistant/home-assistant-client.js";
 import type { HomeAssistantStates } from "../home-assistant/home-assistant-registry.js";
@@ -32,12 +33,17 @@ import type { BridgeDataProvider } from "./bridge-data-provider.js";
 import {
   ENDPOINT_REMOVAL_GRACE_MS,
   ENTITY_FAILURE_RETRIES,
+  hasAllocatedEndpoint,
   type PendingRemoval,
   removalDue,
 } from "./bridge-endpoint-manager.js";
 import type { BridgeRegistry } from "./bridge-registry.js";
 import { EntityMappingSync } from "./entity-mapping-sync.js";
 import { IdentityResolver } from "./identity-resolver.js";
+import {
+  bumpConfigurationVersion,
+  TopologyTracker,
+} from "./topology-tracker.js";
 
 // Hard cap so a wildcard matcher cannot mint dozens of root endpoints (#301).
 export const MAX_SERVER_MODE_DEVICES = 10;
@@ -63,6 +69,8 @@ export class ServerModeEndpointManager extends Service {
   private _failedEntities: FailedEntity[] = [];
   private _refreshIncomplete = false;
   private _refreshDeferred = false;
+  private _waitingForAllocatedEndpointState = false;
+  private _allocatedEndpointFailed = false;
   // last create or add failure per entity and how often it repeated in a row
   private readonly createFailures = new Map<
     string,
@@ -84,6 +92,9 @@ export class ServerModeEndpointManager extends Service {
   // Bumped on every stop, so a refresh that was already running cannot arm a
   // timer on a bridge that has since stopped.
   private lifecycle = 0;
+  // the root PartsList moves with the devices, so does ConfigurationVersion
+  private readonly topology: TopologyTracker;
+  private entitiesReconciled = false;
 
   get failedEntities(): FailedEntity[] {
     return this._failedEntities;
@@ -114,35 +125,18 @@ export class ServerModeEndpointManager extends Service {
       registry,
       (entityId) => this.getEntityMapping(entityId),
       log,
+      false,
     );
+    this.topology = new TopologyTracker(
+      serverNode,
+      () => this.entitiesReconciled,
+      log,
+    );
+    this.topology.handler = bumpConfigurationVersion(serverNode, log);
   }
 
   private getEntityMapping(entityId: string): EntityMappingConfig | undefined {
     return this.mappingStorage.getMapping(this.dataProvider.id, entityId);
-  }
-
-  override async dispose(): Promise<void> {
-    this.stopObserving();
-    if (this.removalRecheckTimer) {
-      clearTimeout(this.removalRecheckTimer);
-      this.removalRecheckTimer = null;
-    }
-    this.pendingRemovals.clear();
-
-    // Close endpoints to free memory while preserving stored endpoint
-    // numbers. Using delete() here would erase persisted endpoint numbers,
-    // causing controllers to treat the device as new on the next restart.
-    for (const [entityId, entry] of this.endpoints) {
-      try {
-        await entry.endpoint.close();
-      } catch (e) {
-        this.log.warn(
-          `Failed to close endpoint ${entityId} during dispose:`,
-          e,
-        );
-      }
-    }
-    this.endpoints.clear();
   }
 
   async startObserving(): Promise<void> {
@@ -189,6 +183,8 @@ export class ServerModeEndpointManager extends Service {
 
   stopObserving(): void {
     this.observingRequested = false;
+    this.entitiesReconciled = false;
+    this.topology.stop();
     this.lifecycle++;
     this.clearSubscription();
     // Bridges stop through this, never through dispose(), so the recheck
@@ -314,13 +310,21 @@ export class ServerModeEndpointManager extends Service {
     return this._refreshDeferred;
   }
 
+  get allocatedEndpointFailed(): boolean {
+    return this._allocatedEndpointFailed;
+  }
+
+  get waitingForAllocatedEndpointState(): boolean {
+    return this._waitingForAllocatedEndpointState;
+  }
+
   // Resolves false when the run left matching entities unmounted for a reason
   // that only passes with time (HA down, heap pressure, a failed add).
-  refreshDevices(): Promise<boolean> {
+  refreshDevices(checkFilteredReservations = false): Promise<boolean> {
     const next = this.refreshChain.then(async () => {
       let complete = false;
       try {
-        await this.runRefreshDevices();
+        await this.runRefreshDevices(checkFilteredReservations);
         complete = !this._refreshIncomplete;
       } finally {
         // a start, an API refresh or a recheck needs the retry as much as a tick
@@ -332,14 +336,38 @@ export class ServerModeEndpointManager extends Service {
     return next;
   }
 
-  private async runRefreshDevices(): Promise<void> {
+  private async runRefreshDevices(
+    checkFilteredReservations: boolean,
+  ): Promise<void> {
     this._refreshIncomplete = false;
     const wasDeferred = this._refreshDeferred;
     this._refreshDeferred = false;
-    this.registry.refresh();
+    this._waitingForAllocatedEndpointState = false;
+    this._allocatedEndpointFailed = false;
 
     const lifecycle = this.lifecycle;
     const fullEntities = this.registry.fullEntities;
+    const deferred =
+      !this.client.haRunning || Object.keys(fullEntities).length === 0;
+    if (!deferred) {
+      this._waitingForAllocatedEndpointState = this.registry.refresh(
+        (entityId) => this.getEntityMapping(entityId),
+        checkFilteredReservations
+          ? (entity) => {
+              const id = this.identityResolver.peekEndpointId(
+                this.dataProvider.id,
+                entity,
+                this.registry.isStableIdentityEnabled(),
+              );
+              return (
+                id !== undefined && hasAllocatedEndpoint(this.serverNode, id)
+              );
+            }
+          : undefined,
+        true,
+      );
+    }
+    let reconciled = false;
 
     try {
       // HA restarting or an empty registry means the snapshot cannot be
@@ -347,7 +375,7 @@ export class ServerModeEndpointManager extends Service {
       // number and controllers re-add it as new, losing groups, and stamping
       // tombstones from it would mark live entities missing (#438). Keep the
       // last good entity list and wait for HA.
-      if (!this.client.haRunning || Object.keys(fullEntities).length === 0) {
+      if (deferred) {
         this.pendingRemovals.clear();
         const message =
           "HA not running or registry empty, deferring server mode reconcile";
@@ -392,6 +420,7 @@ export class ServerModeEndpointManager extends Service {
           reason:
             "No Home Assistant entity matched this bridge's filter. Check for typos or renamed/removed entities.",
         });
+        reconciled = true;
         return;
       }
 
@@ -468,6 +497,13 @@ export class ServerModeEndpointManager extends Service {
         removed.length > genuinelyRemoved.length ||
         genuinelyRemoved.length > absent.length ||
         confirmedRemoved.length > 0;
+      for (const id of confirmedRemoved) {
+        const entry = this.endpoints.get(id);
+        if (!entry) continue;
+        this.log.info(
+          `Removing endpoint ${id} (ep ${entry.endpoint.number}) after the grace window, controllers will see a new number if it returns`,
+        );
+      }
       await this.removeEndpoints(confirmedRemoved);
 
       // Reserve every disabled entity's id up front: an active entity that
@@ -598,9 +634,12 @@ export class ServerModeEndpointManager extends Service {
           );
 
           if (!endpoint) {
+            const hasState = !!this.registry.initialState(entityId);
+            this._waitingForAllocatedEndpointState ||=
+              !hasState && hasAllocatedEndpoint(this.serverNode, endpointId);
             this._failedEntities.push({
               entityId,
-              reason: this.registry.initialState(entityId)
+              reason: hasState
                 ? "Failed to create endpoint - unsupported device type"
                 : "No state in Home Assistant yet",
             });
@@ -618,6 +657,10 @@ export class ServerModeEndpointManager extends Service {
           });
           fresh.set(entityId, endpointId);
         } catch (e) {
+          this._allocatedEndpointFailed ||= hasAllocatedEndpoint(
+            this.serverNode,
+            endpointId,
+          );
           const reason = e instanceof Error ? e.message : String(e);
           this.logCreateFailure(
             entityId,
@@ -673,6 +716,10 @@ export class ServerModeEndpointManager extends Service {
           if (tag !== undefined) tags.set(endpoint, tag);
           fresh.set(entityId, endpoint.id);
         } catch (e) {
+          this._allocatedEndpointFailed ||= hasAllocatedEndpoint(
+            this.serverNode,
+            entry.endpoint.id,
+          );
           const reason = e instanceof Error ? e.message : String(e);
           this.logCreateFailure(
             entityId,
@@ -687,11 +734,13 @@ export class ServerModeEndpointManager extends Service {
       for (const [entityId, endpointId] of fresh) {
         const entry = this.endpoints.get(entityId);
         if (!entry) continue;
+        const allocated = hasAllocatedEndpoint(this.serverNode, endpointId);
         entry.tag = tags.get(entry.endpoint);
         try {
           if (entry.tag !== undefined) setNumberTag(entry.endpoint, entry.tag);
           await this.serverNode.addDevice(entry.endpoint);
         } catch (e) {
+          this._allocatedEndpointFailed ||= allocated;
           this.endpoints.delete(entityId);
           const reason = e instanceof Error ? e.message : String(e);
           this.logCreateFailure(
@@ -727,9 +776,7 @@ export class ServerModeEndpointManager extends Service {
         const identity = JSON.stringify({
           primary,
           device: this.registry.deviceOf(primary),
-          friendlyName:
-            this.registry.initialState(primary)?.attributes?.friendly_name,
-          registryName: this.registryName(primary),
+          nodeLabel: this.nodeLabel(primary, primaryMapping),
           mapping: primaryMapping,
           deviceType: primaryEndpoint?.type?.deviceType,
         });
@@ -747,6 +794,7 @@ export class ServerModeEndpointManager extends Service {
           }
         }
       }
+      reconciled = true;
     } finally {
       // a success or an entity that left the pass starts its count over
       for (const id of this.createFailures.keys()) {
@@ -757,6 +805,10 @@ export class ServerModeEndpointManager extends Service {
       // A stop that landed mid-refresh wins: no timer on a stopped bridge.
       if (lifecycle === this.lifecycle) {
         this.scheduleRemovalRecheck();
+        if (reconciled) {
+          this.entitiesReconciled = true;
+          this.topology.reconciled();
+        }
       }
       this.mappingSync.rebuildCandidates(
         [...this.endpoints].map(
@@ -797,13 +849,18 @@ export class ServerModeEndpointManager extends Service {
     }
   }
 
-  // bridge mode reads the flag in BasicInformationServer, server mode did not (#276)
-  private registryName(entityId: string): string | undefined {
-    if (this.dataProvider.featureFlags?.preferEntityRegistryName !== true) {
-      return undefined;
-    }
-    const entry = this.registry.entity(entityId);
-    return entry?.name ?? entry?.original_name ?? undefined;
+  // same chain as BasicInformationServer in bridge mode (#276)
+  private nodeLabel(
+    entityId: string,
+    mapping: EntityMappingConfig | undefined,
+  ): string {
+    return resolveNodeLabel(
+      mapping?.customName,
+      this.registry.entity(entityId),
+      this.registry.initialState(entityId)?.attributes?.friendly_name,
+      entityId,
+      this.dataProvider.featureFlags,
+    );
   }
 
   private async updateServerNodeIdentity(
@@ -811,14 +868,11 @@ export class ServerModeEndpointManager extends Service {
     mapping: EntityMappingConfig | undefined,
     endpoint: EntityEndpoint | undefined,
   ): Promise<boolean> {
-    const device = this.registry.deviceOf(entityId);
-    const state = this.registry.initialState(entityId);
-    const friendlyName = state?.attributes?.friendly_name as string | undefined;
     let ok = await this.serverNode.updateDeviceIdentity(
       entityId,
-      device,
+      this.registry.deviceOf(entityId),
       mapping,
-      this.registryName(entityId) ?? friendlyName,
+      this.nodeLabel(entityId, mapping),
     );
     const deviceType = endpoint?.type?.deviceType;
     if (deviceType != null) {

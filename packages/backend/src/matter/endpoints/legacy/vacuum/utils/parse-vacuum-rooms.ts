@@ -2,7 +2,14 @@ import type {
   VacuumDeviceAttributes,
   VacuumRoom,
 } from "@home-assistant-matter-hub/common";
+import { Logger } from "@matter/general";
 import { startCase } from "lodash-es";
+import {
+  isRoomMode,
+  ROOM_MODE_BASE,
+} from "../../../../behaviors/rvc-run-mode-server.js";
+
+const logger = Logger.get("ParseVacuumRooms");
 
 /**
  * Format a room name from snake_case to Title Case.
@@ -158,6 +165,31 @@ export function isUnnamedRoom(roomName: string): boolean {
   return UNNAMED_ROOM_PATTERN.test(roomName.trim());
 }
 
+const loggedRoomDrops = new Set<string>();
+
+// A negative area id fails ServiceArea, a repeated one makes the room modes,
+// areas and lookups disagree on the room. The first one in parse order stays.
+function dropBadRoomIds(rooms: VacuumRoom[]): VacuumRoom[] {
+  const used = new Set<number>();
+  const dropped: string[] = [];
+  const kept = rooms.filter((room) => {
+    const areaId = toAreaId(room.id);
+    if (areaId < 0 || used.has(areaId)) {
+      dropped.push(`${room.name} (id ${room.id})`);
+      return false;
+    }
+    used.add(areaId);
+    return true;
+  });
+  const dropLog = dropped.join(", ");
+  // Parsed on every HA update, log each drop list once
+  if (dropLog && !loggedRoomDrops.has(dropLog)) {
+    loggedRoomDrops.add(dropLog);
+    logger.warn(`Rooms dropped, room id negative or repeated: ${dropLog}`);
+  }
+  return kept;
+}
+
 /**
  * Parse vacuum rooms from various attribute formats.
  * Different integrations store rooms in different formats:
@@ -184,48 +216,43 @@ export function parseVacuumRooms(
   const sources = [attributes.rooms, attributes.segments, attributes.room_list];
 
   for (const source of sources) {
-    let rooms = parseRoomData(source);
+    const rooms = parseRoomData(source);
     if (rooms.length > 0) {
+      // Drop bad ids first so every caller keeps the same room per id
+      const kept = dropBadRoomIds(rooms);
       // Filter out unnamed/generic rooms unless explicitly included
-      if (!includeUnnamedRooms) {
-        rooms = rooms.filter((room) => !isUnnamedRoom(room.name));
-      }
-      return rooms;
+      return includeUnnamedRooms
+        ? kept
+        : kept.filter((room) => !isUnnamedRoom(room.name));
     }
   }
 
   // Try room_mapping (Xiaomi Miot / Roborock format: [[segmentId, cloudId, name], ...])
-  let mappingRooms = parseRoomMapping(attributes.room_mapping);
+  const mappingRooms = parseRoomMapping(attributes.room_mapping);
   if (mappingRooms.length > 0) {
-    if (!includeUnnamedRooms) {
-      mappingRooms = mappingRooms.filter((room) => !isUnnamedRoom(room.name));
-    }
-    return mappingRooms;
+    const kept = dropBadRoomIds(mappingRooms);
+    return includeUnnamedRooms
+      ? kept
+      : kept.filter((room) => !isUnnamedRoom(room.name));
   }
 
   return [];
 }
 
 /**
- * Base mode value for room-specific cleaning modes.
- * Room modes start at 100 to avoid conflicts with standard modes (Idle=1, Cleaning=2).
+ * Convert vacuum room ID to a Matter-compatible area ID.
+ * Room IDs from HA can be strings or numbers, but Matter requires uint32.
  */
-export const ROOM_MODE_BASE = 100;
-
-/**
- * Convert a room ID to a numeric mode-compatible value so ServiceArea
- * and RvcRunMode address the same room under the same number.
- */
-function roomIdToNumeric(roomId: string | number): number {
+export function toAreaId(roomId: string | number): number {
   if (typeof roomId === "number") {
     return roomId;
   }
-  // For string IDs, use a simple hash (same logic as toAreaId in service-area-server)
+  // For string IDs, use a simple hash
   let hash = 0;
   for (let i = 0; i < roomId.length; i++) {
     const char = roomId.charCodeAt(i);
     hash = (hash << 5) - hash + char;
-    hash |= 0;
+    hash |= 0; // Convert to 32bit integer
   }
   return Math.abs(hash);
 }
@@ -237,16 +264,7 @@ function roomIdToNumeric(roomId: string | number): number {
  * @returns The mode value for this room
  */
 export function getRoomModeValue(room: VacuumRoom): number {
-  return ROOM_MODE_BASE + roomIdToNumeric(room.id);
-}
-
-/**
- * Check if a mode value represents a room-specific cleaning mode.
- * @param mode - The mode value to check
- * @returns True if this is a room mode, false otherwise
- */
-export function isRoomMode(mode: number): boolean {
-  return mode >= ROOM_MODE_BASE;
+  return ROOM_MODE_BASE + toAreaId(room.id);
 }
 
 /**

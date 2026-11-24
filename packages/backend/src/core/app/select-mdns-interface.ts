@@ -1,8 +1,6 @@
-// matter.js advertises Matter mDNS on every non-loopback interface and bakes
-// each interface address into the operational records. On Docker hosts that
-// lets controllers latch onto an unreachable Docker-internal address and show
-// devices as offline (#361). This classifies the interfaces so HAMH can warn
-// and suggest the LAN interface; it never decides binding on its own.
+// Classifies the host interfaces so HAMH can warn about addresses controllers
+// cannot reach; it never decides binding on its own. matter.js answers each
+// interface with that interface's addresses only.
 
 export interface MdnsInterfaceAddrs {
   readonly name: string;
@@ -11,19 +9,10 @@ export interface MdnsInterfaceAddrs {
 }
 
 export interface MdnsInterfaceChoice {
-  // The likely LAN interface, when exactly one candidate is left. Only a
-  // suggestion for the warning, never bound automatically.
-  readonly selected?: string;
   // LAN candidates: external interfaces that are not Docker, Thread or a VPN
   // tunnel by name; with more than one, those on a Docker IPv4 range drop out
   // (#482). Falls back to every external interface when nothing else is left.
   readonly candidates: readonly MdnsInterfaceAddrs[];
-  // Routable (non-loopback, non-link-local) external interfaces.
-  readonly external: readonly MdnsInterfaceAddrs[];
-  // Interfaces whose name looks Docker-internal.
-  readonly dockerLike: readonly string[];
-  // True when a Docker-internal interface name or a Docker IPv4 range is seen.
-  readonly suspicious: boolean;
   // True when an external interface carries a global IPv6 that mDNS would
   // advertise but a controller may not reach on the LAN (#361).
   readonly hasGlobalIpv6: boolean;
@@ -47,11 +36,11 @@ export const DOCKER_NAME = /^(docker\d*|hassio|veth|cni)/;
 const THREAD_NAME = /^(wpan|otbr)/;
 
 // VPN tunnels carry no LAN multicast, so they are never the LAN interface. Left
-// in, a tunnel beside a 172.x LAN NIC would become the suggestion.
+// in, a tunnel beside a 172.x LAN NIC would count as the LAN.
 const TUNNEL_NAME = /^(tailscale|wg|tun|utun|zt)/;
 
 // 172.16.0.0/12 is the default Docker bridge range.
-function inDockerRange(ipv4: string): boolean {
+export function inDockerRange(ipv4: string): boolean {
   const parts = ipv4.split(".");
   const second = Number(parts[1]);
   return parts[0] === "172" && second >= 16 && second <= 31;
@@ -77,13 +66,11 @@ export function describeInterface(i: MdnsInterfaceAddrs): string {
 
 export function selectMdnsInterface(raw: RawInterfaces): MdnsInterfaceChoice {
   const external: MdnsInterfaceAddrs[] = [];
-  const dockerLike: string[] = [];
   const threadLike: string[] = [];
   for (const [name, addrs] of Object.entries(raw)) {
     if (!addrs) continue;
     const usable = addrs.filter((a) => !a.internal);
     if (usable.length === 0) continue;
-    if (DOCKER_NAME.test(name)) dockerLike.push(name);
     if (THREAD_NAME.test(name)) threadLike.push(name);
     const ipv4 = usable
       .filter((a) => a.family === "IPv4")
@@ -110,20 +97,9 @@ export function selectMdnsInterface(raw: RawInterfaces): MdnsInterfaceChoice {
       : lan.length > 0
         ? lan
         : external;
-  const selected = candidates.length === 1 ? candidates[0].name : undefined;
-  const suspicious =
-    dockerLike.length > 0 || external.some((i) => i.ipv4.some(inDockerRange));
   const hasGlobalIpv6 = external.some((i) =>
     i.ipv6.some((a) => !isLinkLocalOrUla(a)),
   );
   const hasThreadInterface = threadLike.length > 0;
-  return {
-    selected,
-    candidates,
-    external,
-    dockerLike,
-    suspicious,
-    hasGlobalIpv6,
-    hasThreadInterface,
-  };
+  return { candidates, hasGlobalIpv6, hasThreadInterface };
 }

@@ -1,5 +1,17 @@
 #!/usr/bin/with-contenv bashio
 
+# A Supervisor older than 2026.07.1 skips the app_config map, then Docker backs
+# /config with an anonymous volume that the next update throws away.
+config_on_anonymous_volume() {
+  awk '$5 == "/config" { anon = ($4 ~ /\/volumes\/[0-9a-f]{64}\/_data$/) } END { exit !anon }' \
+    "${1:-/proc/self/mountinfo}" 2>/dev/null
+}
+if config_on_anonymous_volume /proc/self/mountinfo; then
+  echo "Storage is not mapped to the Home Assistant host: the Supervisor is too old for this add-on version." >&2
+  echo "Update the Supervisor to 2026.07.1 or newer and restart the add-on. Data from before is untouched on the host." >&2
+  exit 1
+fi
+
 # Dynamically limit Node.js heap based on available container memory.
 # Docker containers may have cgroup memory limits that are lower than
 # the host's total RAM. We check (in order):
@@ -93,14 +105,41 @@ fi
 # The CLI reads HAMH_* variables; argv would show the token in ps.
 export HAMH_HOME_ASSISTANT_ACCESS_TOKEN="$ha_token"
 
+# Lets a client on this host reach the API, behind basic auth when a password is set.
+local_args=()
+local_api_password=$(bashio::config 'local_api_password' '')
+if [ -z "${local_api_password//[[:space:]]/}" ] || [ "$local_api_password" = "null" ]; then
+  local_api_password=''
+fi
+if bashio::config.true 'allow_local_access'; then
+  local_args=(--http-ip-whitelist="127.0.0.1" --http-ip-whitelist="::1")
+  if [ -n "$local_api_password" ]; then
+    export HAMH_HTTP_AUTH_USERNAME="hamh"
+    export HAMH_HTTP_AUTH_PASSWORD="$local_api_password"
+    bashio::log.info "Local API: http://127.0.0.1:$(bashio::addon.ingress_port) with user name hamh"
+  else
+    bashio::log.warning "Local API: http://127.0.0.1:$(bashio::addon.ingress_port) without a password, every process on this host has full control"
+  fi
+elif [ -n "$local_api_password" ]; then
+  bashio::log.warning "local_api_password is set but allow_local_access is off, the local API stays closed"
+fi
+
+# bashio prints null for a cleared optional field
+mdns_interface=$(bashio::config 'mdns_network_interface' '')
+mdns_interface="${mdns_interface//[[:space:]]/}"
+if [ "$mdns_interface" = "null" ]; then
+  mdns_interface=''
+fi
+
 exec home-assistant-matter-hub start \
   --log-level=$(bashio::config 'app_log_level') \
   --protocol-log-level=$(bashio::config 'protocol_log_level' 'info') \
   --disable-log-colors=$(bashio::config 'disable_log_colors') \
   --mdns-disable-ipv4=$(bashio::config 'mdns_disable_ipv4' 'false') \
-  --mdns-network-interface="$(bashio::config 'mdns_network_interface')" \
+  --mdns-network-interface="$mdns_interface" \
   --mdns-strip-global-ipv6=$(bashio::config 'mdns_strip_global_ipv6' 'false') \
   --storage-location=/config/data \
   --web-port=$(bashio::addon.ingress_port) \
   --home-assistant-url="$ha_url" \
-  --http-ip-whitelist="172.30.32.2"
+  --http-ip-whitelist="172.30.32.2" \
+  ${local_args[@]+"${local_args[@]}"}

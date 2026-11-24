@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { WebSocket } from "ws";
 import type { BetterLogger } from "../core/app/logger.js";
 import type { BridgeService } from "../services/bridges/bridge-service.js";
+import { ipWhitelist } from "./host-guard.js";
 import { WebSocketApi } from "./websocket-api.js";
 
 const log = {
@@ -31,7 +32,13 @@ async function serve(
   } as unknown as BridgeService;
   const api = new WebSocketApi(log, bridgeService);
   const server = http.createServer();
-  api.attach(server, "/", whitelist, allowedHosts, verifyAuthorization);
+  api.attach(
+    server,
+    "/",
+    whitelist && ipWhitelist(whitelist, log),
+    allowedHosts,
+    verifyAuthorization,
+  );
   await new Promise<void>((resolve) => server.listen(0, resolve));
   cleanup.push(async () => {
     api.close();
@@ -96,7 +103,10 @@ describe("WebSocketApi", () => {
     expect(messages[0].type).toBe("bridges_update");
   });
 
-  it("rejects a cross-site origin even with proxy headers", async () => {
+  it.each([
+    "x-ingress-path",
+    "x-forwarded-prefix",
+  ])("rejects a cross-site origin even with %s", async (header) => {
     const { base } = await serve([], undefined, ["matter.example.org"]);
     const host = base.slice("ws://".length);
 
@@ -108,7 +118,7 @@ describe("WebSocketApi", () => {
     await expect(
       connect(`${base}/api/ws`, {
         origin: "http://evil.example",
-        "x-ingress-path": "/api/hassio_ingress/abc",
+        [header]: "/api/hassio_ingress/abc",
         "x-forwarded-for": "192.168.1.20",
       }),
     ).rejects.toThrow("403");

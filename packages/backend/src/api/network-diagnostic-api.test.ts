@@ -123,6 +123,24 @@ describe("network diagnostics ipv6 check", () => {
   });
 });
 
+describe("network diagnostics interfaces", () => {
+  it("raises nothing for the Docker interfaces of a HA OS host", async () => {
+    fakeInterfaces = {
+      end0: [addr("127.0.0.1"), addr("fe80::2")],
+      docker0: [addr("172.30.232.1")],
+      hassio: [addr("172.30.32.1")],
+      veth1a2b: [addr("fe80::1")],
+    };
+    const result = await runDiagnostics(undefined, true);
+    // port 80 depends on the runner, the other checks cover the interfaces
+    expect(
+      result.checks.filter(
+        (c) => c.status !== "pass" && c.name !== "port_80_in_use",
+      ),
+    ).toEqual([]);
+  });
+});
+
 describe("network diagnostics unpaired bridges check", () => {
   const bridge = (isCommissioned: boolean) =>
     ({

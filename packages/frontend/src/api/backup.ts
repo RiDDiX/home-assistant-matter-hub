@@ -49,6 +49,7 @@ export async function restoreBackupSnapshot(
     overwriteExisting?: boolean;
     includeMappings?: boolean;
     restoreIdentity?: boolean;
+    restoreAppData?: boolean;
   },
 ): Promise<{
   bridgesRestored: number;
@@ -57,6 +58,7 @@ export async function restoreBackupSnapshot(
   identitiesRestored: number;
   errors: Array<{ bridgeId: string; error: string }>;
   restartRequired: boolean;
+  restarting?: boolean;
 }> {
   const res = await fetch(
     `api/backup/snapshots/${encodeURIComponent(filename)}/restore`,

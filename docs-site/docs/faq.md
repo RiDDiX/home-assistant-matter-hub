@@ -131,7 +131,7 @@ Home Assistant counts a wrong or deleted token as a failed login from `127.0.0.1
 
 ## How can an integration on the same host reach the add-on API?
 
-Available in the alpha add-on (`hamh-alpha`). In v2.1.0-alpha.990 setting `local_api_password` alone turned this on; from v2.1.0-alpha.991 on it needs `allow_local_access`.
+Available in the add-on since v2.1.0. In v2.1.0-alpha.990 setting `local_api_password` alone turned this on; since v2.1.0-alpha.991 it needs `allow_local_access`.
 
 By default the add-on API only answers the Supervisor, so the sidebar panel works and everything else gets 403. Set `allow_local_access: true` in the add-on configuration to let clients on the Home Assistant host in, for example a custom integration in Home Assistant Core.
 
@@ -296,8 +296,8 @@ Keep the custom names and entity mappings too: they are keyed by `entity_id`, an
 
 ## What's the difference between Stable and Alpha?
 
-- **Stable** (v2.0.60): Production-ready, recommended for daily use
-- **Alpha**: Ahead of Stable (v2.0.60); fixes and features land here first and may contain bugs
+- **Stable** (v2.1.0): Production-ready, recommended for daily use
+- **Alpha**: Currently level with Stable (v2.1.0); new fixes and features land here first and may contain bugs
 
 See the [Alpha Features Guide](./guides/alpha-features.md) for details on alpha features.
 
@@ -353,7 +353,7 @@ Since v2.0.24, thermostats support **auto-resume**, when off and you set a tempe
 
 If not working:
 
-- Update to v2.0.36+ (current stable: v2.0.60)
+- Update to v2.0.36+ (current stable: v2.1.0)
 - Only works for single-temp mode (not range/auto)
 - Thermostat must be in "Off" state
 

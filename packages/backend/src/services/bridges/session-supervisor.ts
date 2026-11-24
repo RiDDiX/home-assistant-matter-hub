@@ -1,12 +1,13 @@
 import * as os from "node:os";
 import { alexaPairingPortProblem } from "@home-assistant-matter-hub/common";
-import { type Environment, type Logger, Time } from "@matter/general";
+import { type Environment, hex, type Logger, Time } from "@matter/general";
 import { Network } from "@matter/main";
 import { InteractionServer } from "@matter/main/node";
 import {
   DeviceAdvertiser,
   type Fabric,
   FabricManager,
+  FailsafeContext,
   MdnsService,
   MessageType,
   SessionManager,
@@ -19,6 +20,7 @@ import {
 } from "../../matter/mdns-address-watch.js";
 import { diagnosticEventBus } from "../diagnostics/diagnostic-event-bus.js";
 import type { BridgeDataProvider } from "./bridge-data-provider.js";
+import { acquirePairingTrace, releasePairingTrace } from "./pairing-trace.js";
 import {
   deadSessionTimeoutMs,
   PRIMING_GRACE_MS,
@@ -69,6 +71,9 @@ const SHUTDOWN_SESSION_CLOSE_TIMEOUT_MS = 2_500;
 // records, so poll and re-announce when the set moves (#415).
 const MDNS_ADDRESS_CHECK_INTERVAL_MS = 60_000;
 
+// Sessions the bridge closed itself, their close is no warning
+const bridgeClosed = new WeakSet<object>();
+
 // Close the subscriptions first, the way matter.js closes its own sessions
 // gracefully. A close deferred by open exchanges then leaves no window where
 // they keep reporting on another session of the same peer (#287).
@@ -80,6 +85,7 @@ function closeGracefully(
   },
   forceReason: string,
 ): Promise<void> {
+  bridgeClosed.add(s);
   return s
     .initiateClose(async () => {
       await s.closeSubscriptions(true);
@@ -130,8 +136,11 @@ export class SessionSupervisor {
   private lastCommandImAt = new WeakMap<object, number>();
   private subscribeTimesMs = new WeakMap<object, number[]>();
   private giveUpTimesMs = new WeakMap<object, number[]>();
+  private subscriptionStartedAt = new WeakMap<object, number>();
   // Sessions whose subscriptions.deleted we already hooked for give-ups.
   private wedgeHookedSessions = new WeakSet<object>();
+  // matter.js ends the subscriptions before the session leaves the list
+  private subscribedSessions = new WeakSet<object>();
 
   // Watches the advertised interface addresses so a dynamic ISP IPv6 prefix
   // change forces a fresh operational announcement (#415).
@@ -142,6 +151,7 @@ export class SessionSupervisor {
   // snapshot.
   private mdnsCheckInFlight = false;
   private mdnsFailedRetries = 0;
+  private mdnsNotifiedSnapshot: string[] | undefined;
 
   // Session lifecycle diagnostic handlers (non-destructive, logging only).
   // biome-ignore lint/suspicious/noExplicitAny: matter.js internal types
@@ -154,6 +164,10 @@ export class SessionSupervisor {
   // Warns when Alexa pairs on a non-5540 port, the fabric rolls back later (#401).
   // biome-ignore lint/suspicious/noExplicitAny: matter.js internal types
   private fabricAddedHandler?: (fabric: any) => void;
+
+  private failsafeAddedHandler?: () => void;
+  private failsafeDeletedHandler?: () => void;
+  private pairingTraceHeld = false;
 
   // the onNewExchange wrapper outlives stop(), so it must not arm timers then;
   // a supervisor that never started counts as stopped
@@ -175,6 +189,7 @@ export class SessionSupervisor {
     this.stopped = false;
     this.wireSessionDiagnostics();
     this.wireFabricWarnings();
+    this.wirePairingTrace();
     this.startSessionRotation();
     this.startWedgeWatchdog();
     this.startMdnsAddressWatch();
@@ -185,6 +200,8 @@ export class SessionSupervisor {
     this.stopped = true;
     this.unwireSessionDiagnostics();
     this.unwireFabricWarnings();
+    this.unwirePairingTrace();
+    this.holdPairingTrace(false);
     this.wedgeLastRotatedAt.clear();
   }
 
@@ -347,6 +364,7 @@ export class SessionSupervisor {
       // must be watched too, the added event already fired without us.
       for (const sess of sessionManager.sessions) {
         hookGiveUpsWithPeers(sess);
+        if (sess.subscriptions.size > 0) this.subscribedSessions.add(sess);
       }
       this.sessionDiagHandler = (session: {
         id: number;
@@ -357,6 +375,9 @@ export class SessionSupervisor {
         let totalSubs = 0;
         for (const s of sessions) {
           totalSubs += s.subscriptions.size;
+        }
+        if (session.subscriptions.size > 0) {
+          this.subscribedSessions.add(session);
         }
         this.log.debug(
           `Session ${session.id} (peer ${session.peerNodeId}): subscriptions=${session.subscriptions.size} | total: sessions=${sessions.length} subscriptions=${totalSubs}`,
@@ -376,7 +397,7 @@ export class SessionSupervisor {
           },
         );
         if (totalSubs === 0 && sessions.length > 0) {
-          this.log.warn(
+          this.log.info(
             `All subscriptions lost, ${sessions.length} session(s) still active, waiting for controller to re-subscribe`,
           );
           if (!this.deadSessionTimer) {
@@ -486,6 +507,8 @@ export class SessionSupervisor {
       this.sessionDeletedHandler = (session: {
         id: number;
         peerNodeId: unknown;
+        fabric?: { fabricIndex?: unknown };
+        isPase?: boolean;
       }) => {
         this.sessionStartedAt.delete(session.id);
         // its timer has nothing left to close
@@ -495,7 +518,14 @@ export class SessionSupervisor {
           this.staleSessionTimers.delete(session.id);
         }
         const sessions = [...sessionManager.sessions];
-        this.log.warn(
+        // only a subscribed peer losing its last session to something the
+        // bridge did not start is worth a warning
+        const unexpected =
+          !bridgeClosed.has(session) &&
+          !session.isPase &&
+          this.subscribedSessions.has(session) &&
+          !sessions.some((s) => peerKey(s) === peerKey(session));
+        this.log[unexpected ? "warn" : "info"](
           `Session closed: id=${session.id} peer=${session.peerNodeId} | remaining sessions=${sessions.length}`,
         );
         diagnosticEventBus.emit(
@@ -576,7 +606,12 @@ export class SessionSupervisor {
   // coincident inbound IM request, so that is the discriminator.
   private hookSubscriptionGiveUps(
     session: {
+      id?: unknown;
+      peerNodeId?: unknown;
+      fabric?: { fabricIndex?: unknown };
+      isClosing?: boolean;
       subscriptions?: {
+        added?: { on?: (fn: (sub: unknown) => void) => void };
         deleted?: { on?: (fn: (sub: unknown) => void) => void };
       };
     },
@@ -591,6 +626,9 @@ export class SessionSupervisor {
       return;
     }
     this.wedgeHookedSessions.add(key);
+    session.subscriptions?.added?.on?.((sub) => {
+      if (sub) this.subscriptionStartedAt.set(sub as object, Date.now());
+    });
     deleted.on((sub) => {
       if ((sub as { isTerminated?: boolean })?.isTerminated !== true) {
         return;
@@ -616,8 +654,18 @@ export class SessionSupervisor {
       // Cross-checkable against matter.js "Giving up on subscription" notices:
       // a recorded give-up WITHOUT that notice was an InvalidSubscription or
       // Failure answer from a live controller, not a delivery give-up.
-      this.log.debug(
-        `wedge v2 give-up recorded sub=${(sub as { subscriptionId?: number })?.subscriptionId}`,
+      const subscriptionId = (sub as { subscriptionId?: number })
+        ?.subscriptionId;
+      this.log.debug(`wedge v2 give-up recorded sub=${subscriptionId}`);
+      // A closing session ends its subscriptions itself, HAMH rotations included.
+      if (session.isClosing) {
+        return;
+      }
+      const startedAt = this.subscriptionStartedAt.get(sub as object);
+      const lived =
+        startedAt != null ? `${Math.round((now - startedAt) / 1000)}s` : "?s";
+      this.log.info(
+        `Subscription ${subscriptionId != null ? hex.fixed(subscriptionId, 8) : "?"} on session ${session.id} (peer ${session.peerNodeId}, fabric ${session.fabric?.fabricIndex}) ended after ${lived}`,
       );
     });
   }
@@ -640,6 +688,16 @@ export class SessionSupervisor {
     );
   }
 
+  // A commissioner holds no subscription while the failsafe is armed, and
+  // the fast quiet window would close it mid commissioning.
+  private failsafeArmed(): boolean {
+    try {
+      return this.server.env.has(FailsafeContext);
+    } catch {
+      return false;
+    }
+  }
+
   private closeStaleSession(sessionId: number, minQuietMs = 0) {
     try {
       const sessionManager = this.server.env.get(SessionManager);
@@ -649,6 +707,7 @@ export class SessionSupervisor {
         }
         const idleSec = Math.round((Time.nowUs - s.timestamp) / 1000);
         if (
+          this.failsafeArmed() ||
           !staleSessionShouldClose(
             s,
             Math.max(
@@ -675,9 +734,10 @@ export class SessionSupervisor {
           );
           break;
         }
-        this.log.warn(
+        this.log.info(
           `Closing stale session ${s.id} (peer ${s.peerNodeId}, no subscriptions, no traffic for ${idleSec}s)`,
         );
+        bridgeClosed.add(s);
         s.initiateClose()
           .catch(() => {
             // Graceful close failed (peer unreachable), force-close locally
@@ -711,6 +771,7 @@ export class SessionSupervisor {
         }
         const idleSec = Math.round((Time.nowUs - s.timestamp) / 1000);
         if (
+          this.failsafeArmed() ||
           !staleSessionShouldClose(
             s,
             staleSessionQuietWindowMs(this.dataProvider.featureFlags),
@@ -723,9 +784,10 @@ export class SessionSupervisor {
           kept++;
           continue;
         }
-        this.log.warn(
+        this.log.info(
           `Closing dead session ${s.id} (peer ${s.peerNodeId}, no subscriptions, no traffic for ${idleSec}s)`,
         );
+        bridgeClosed.add(s);
         closes.push(
           s.initiateClose().catch(() => {
             // Graceful close failed (peer unreachable), force-close locally
@@ -846,6 +908,55 @@ export class SessionSupervisor {
       // Already disposed
     }
     this.fabricAddedHandler = undefined;
+  }
+
+  // Commissioning Reads log at debug only, and reporters send INFO logs.
+  private wirePairingTrace() {
+    this.unwirePairingTrace();
+    try {
+      const events = this.server.env.eventsFor(FailsafeContext);
+      this.failsafeAddedHandler = () => this.holdPairingTrace(true);
+      this.failsafeDeletedHandler = () => this.holdPairingTrace(false);
+      events.added.on(this.failsafeAddedHandler);
+      events.deleted.on(this.failsafeDeletedHandler);
+    } catch {
+      // environment not available
+    }
+    this.holdPairingTrace(this.failsafeArmed());
+  }
+
+  private unwirePairingTrace() {
+    try {
+      const events = this.server.env.eventsFor(FailsafeContext);
+      if (this.failsafeAddedHandler) {
+        events.added.off(this.failsafeAddedHandler);
+      }
+      if (this.failsafeDeletedHandler) {
+        events.deleted.off(this.failsafeDeletedHandler);
+      }
+    } catch {
+      // Already disposed
+    }
+    this.failsafeAddedHandler = undefined;
+    this.failsafeDeletedHandler = undefined;
+  }
+
+  private holdPairingTrace(hold: boolean) {
+    if (hold === this.pairingTraceHeld) return;
+    this.pairingTraceHeld = hold;
+    // runs inside matter.js observers, which rethrow into the pairing
+    try {
+      if (hold) {
+        acquirePairingTrace();
+        this.log.info(
+          "Commissioning failsafe armed, InteractionServer logs at debug until it ends",
+        );
+      } else {
+        releasePairingTrace();
+      }
+    } catch (e) {
+      this.log.warn("Pairing trace switch failed:", e);
+    }
   }
 
   // Start periodic age-based session rotation (#287). Aging out a controller's
@@ -1018,6 +1129,7 @@ export class SessionSupervisor {
       ipv4Enabled,
     );
     this.mdnsFailedRetries = 0;
+    this.mdnsNotifiedSnapshot = undefined;
     this.mdnsAddressTimer = setInterval(() => {
       if (this.mdnsCheckInFlight) return;
       this.mdnsCheckInFlight = true;
@@ -1065,31 +1177,34 @@ export class SessionSupervisor {
       this.readMdnsWatchSettings();
     const advertiser = this.server.env.get(DeviceAdvertiser);
     const fabrics = this.server.env.get(FabricManager);
-    const { snapshot, failedRetries } = await runMdnsAddressWatchTick({
-      readInterfaces: () => os.networkInterfaces(),
-      netInterface,
-      stripGlobalIpv6,
-      ipv4Enabled,
-      currentSnapshot: this.advertisedAddressSnapshot,
-      failedRetries: this.mdnsFailedRetries,
-      fabrics: () => fabrics.fabrics,
-      refresh: (fabric) =>
-        advertiser.refreshOperationalAdvertisement(fabric as Fabric),
-      onChange: (prev, curr) => {
-        const { added, removed } = diffAdvertisedAddresses(prev, curr);
-        this.log.warn(
-          `Advertised address set changed (${prev.length} -> ${curr.length} addresses), re-announcing operational mDNS (#415), added: [${added.join(", ")}] removed: [${removed.join(", ")}]`,
-        );
-      },
-      onRefreshError: (fabric, e) => {
-        this.log.warn(
-          `mDNS re-announce failed for fabric ${(fabric as Fabric).fabricIndex}:`,
-          e,
-        );
-      },
-    });
+    const { snapshot, failedRetries, notifiedSnapshot } =
+      await runMdnsAddressWatchTick({
+        readInterfaces: () => os.networkInterfaces(),
+        netInterface,
+        stripGlobalIpv6,
+        ipv4Enabled,
+        currentSnapshot: this.advertisedAddressSnapshot,
+        failedRetries: this.mdnsFailedRetries,
+        notifiedSnapshot: this.mdnsNotifiedSnapshot,
+        fabrics: () => fabrics.fabrics,
+        refresh: (fabric) =>
+          advertiser.refreshOperationalAdvertisement(fabric as Fabric),
+        onChange: (prev, curr) => {
+          const { added, removed } = diffAdvertisedAddresses(prev, curr);
+          this.log.warn(
+            `Advertised address set changed (${prev.length} -> ${curr.length} addresses), re-announcing operational mDNS (#415), added: [${added.join(", ")}] removed: [${removed.join(", ")}]`,
+          );
+        },
+        onRefreshError: (fabric, e) => {
+          this.log.warn(
+            `mDNS re-announce failed for fabric ${(fabric as Fabric).fabricIndex}:`,
+            e,
+          );
+        },
+      });
     this.advertisedAddressSnapshot = snapshot;
     this.mdnsFailedRetries = failedRetries;
+    this.mdnsNotifiedSnapshot = notifiedSnapshot;
   }
 
   // Env var unset or garbage falls back to defaultMaxAgeHours, 0 (rotation

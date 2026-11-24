@@ -11,6 +11,7 @@ import "@fontsource/roboto/400.css";
 import "@fontsource/roboto/500.css";
 import "@fontsource/roboto/700.css";
 
+import CircularProgress from "@mui/material/CircularProgress";
 import CssBaseline from "@mui/material/CssBaseline";
 import GlobalStyles from "@mui/material/GlobalStyles";
 import { ThemeProvider } from "@mui/material/styles";
@@ -33,6 +34,7 @@ const router = createBrowserRouter(
     {
       path: "/",
       element: <AppLayout />,
+      hydrateFallbackElement: <CircularProgress aria-label="Loading page" />,
       children: routes,
     },
   ],

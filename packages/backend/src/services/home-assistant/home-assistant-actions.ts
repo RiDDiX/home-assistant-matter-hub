@@ -46,6 +46,36 @@ function isHaRefusal(error: unknown): boolean {
   );
 }
 
+// light.turn_on takes one color descriptor and HA rejects a call with two, so
+// in a debounced batch the last call carrying one wins.
+const COLOR_KEYS = [
+  "hs_color",
+  "rgb_color",
+  "rgbw_color",
+  "rgbww_color",
+  "xy_color",
+  "color_temp_kelvin",
+  "color_temp",
+  "kelvin",
+  "color_name",
+  "white",
+];
+
+function mergeCallData(calls: HomeAssistantAction[]): Record<string, unknown> {
+  const data: Record<string, unknown> = {};
+  for (const call of calls) {
+    const next = (call.data ?? {}) as Record<string, unknown>;
+    if (
+      call.action === "light.turn_on" &&
+      COLOR_KEYS.some((key) => key in next)
+    ) {
+      for (const key of COLOR_KEYS) delete data[key];
+    }
+    Object.assign(data, next);
+  }
+  return data;
+}
+
 // Lock PINs from Matter controllers, the HA call gets them, nothing else does.
 const SECRET_KEYS = new Set(["code", "usercode", "user_code", "pin"]);
 
@@ -151,7 +181,7 @@ export class HomeAssistantActions extends Service {
       ? undefined
       : calls[0].target || calls[0].entityId;
     const action = calls[0].action;
-    const data = Object.assign({}, ...calls.map((c) => c.data));
+    const data = mergeCallData(calls);
     const [domain, actionName] = action.split(".");
     const target = entity_id ? { entity_id } : {};
     // Keyed by the entity that issued the action, not by the target it hit:
@@ -165,7 +195,8 @@ export class HomeAssistantActions extends Service {
     this.callAction(domain, actionName, data, target, false)
       .then(() => this.recordTargetResult(origin, false))
       .catch((error) => {
-        this.recordTargetResult(origin, true);
+        // a refusal proves HA is reachable, it resets the count like a success
+        this.recordTargetResult(origin, !isHaRefusal(error));
         const errorMsg = this.formatError(error);
         this.log.error(
           `Failed to call action '${action}' for entity '${entity_id ?? "(no target)"}': ${errorMsg}`,

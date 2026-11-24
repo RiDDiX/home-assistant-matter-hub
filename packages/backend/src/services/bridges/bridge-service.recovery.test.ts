@@ -45,6 +45,32 @@ describe("BridgeService recovery", () => {
     expect(running.start).not.toHaveBeenCalled();
   });
 
+  it("skips a failed bridge stopped while the pass started another", async () => {
+    const svc = await makeService();
+    svc.autoRecoveryEnabled = true;
+    let release!: () => void;
+    const first = makeBridge("a", "failed");
+    first.start.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          release = () => {
+            first.data.status = "running";
+            resolve();
+          };
+        }),
+    );
+    const second = makeBridge("b", "failed");
+    svc.bridges.push(first as unknown as Bridge, second as unknown as Bridge);
+
+    svc.recoverFailedBridgesNow();
+    await vi.waitFor(() => expect(first.start).toHaveBeenCalledTimes(1));
+    second.data.status = "stopped";
+    release();
+
+    await vi.waitFor(() => expect(svc.recoveryHistory).toHaveLength(1));
+    expect(second.start).not.toHaveBeenCalled();
+  });
+
   it("records a recovery attempt in the history", async () => {
     const svc = await makeService();
     svc.autoRecoveryEnabled = true;
@@ -487,10 +513,30 @@ describe("BridgeService refreshAll", () => {
     const all = svc.startAll().then(() => {
       done = true;
     });
-    await vi.advanceTimersByTimeAsync(5 * 60_000 - 1);
+    // past a paired bridge's full HA wait
+    await vi.advanceTimersByTimeAsync(11 * 60_000 - 1);
     expect(done).toBe(false);
     await vi.advanceTimersByTimeAsync(1);
     await all;
     expect(b.start).toHaveBeenCalledTimes(1);
+  });
+
+  it("restartAll skips a hung stop and moves past a hung start", async () => {
+    const svc = await makeService();
+    vi.useFakeTimers();
+    const a = { ...makeRefreshBridge("a"), stop: vi.fn(never) };
+    const b = { ...makeRefreshBridge("b"), stop: vi.fn(async () => {}) };
+    const c = { ...makeRefreshBridge("c"), stop: vi.fn(async () => {}) };
+    b.start.mockImplementationOnce(never);
+    svc.bridges.push(...([a, b, c] as unknown as Bridge[]));
+
+    const restarting = svc.restartAll();
+    await vi.advanceTimersByTimeAsync(90_000);
+    expect(a.start).not.toHaveBeenCalled();
+    expect(b.start).toHaveBeenCalledOnce();
+    expect(c.start).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(11 * 60_000);
+    await restarting;
+    expect(c.start).toHaveBeenCalledOnce();
   });
 });

@@ -3,7 +3,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("home-assistant-js-websocket", () => ({
   createConnection: vi.fn(),
   createLongLivedTokenAuth: vi.fn(() => ({})),
-  getConfig: vi.fn(() => Promise.resolve({ state: "RUNNING" })),
   getUser: vi.fn(() => Promise.resolve({ name: "admin", is_admin: true })),
   ERR_INVALID_AUTH: 2,
   ERR_CANNOT_CONNECT: 1,
@@ -14,7 +13,6 @@ import {
   createLongLivedTokenAuth,
   ERR_CANNOT_CONNECT,
   ERR_INVALID_AUTH,
-  getConfig,
   getUser,
 } from "home-assistant-js-websocket";
 import type { LoggerService } from "../../core/app/logger.js";
@@ -40,6 +38,8 @@ function fakeLogger(): LoggerService {
     }),
   } as unknown as LoggerService;
 }
+
+const runningConfig = async () => ({ state: "RUNNING" });
 
 describe("isTransientConnectError", () => {
   it("treats ERR_CANNOT_CONNECT as transient", () => {
@@ -81,8 +81,6 @@ describe("HomeAssistantClient connect/retry", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     vi.mocked(createConnection).mockReset();
-    vi.mocked(getConfig).mockReset();
-    vi.mocked(getConfig).mockResolvedValue({ state: "RUNNING" } as never);
   });
 
   afterEach(() => {
@@ -100,7 +98,11 @@ describe("HomeAssistantClient connect/retry", () => {
   });
 
   it("retries a transient failure and then connects", async () => {
-    const connection = { close: vi.fn(), addEventListener: vi.fn() };
+    const connection = {
+      close: vi.fn(),
+      addEventListener: vi.fn(),
+      sendMessagePromise: runningConfig,
+    };
     vi.mocked(createConnection)
       .mockRejectedValueOnce({ code: "ECONNRESET" })
       .mockResolvedValueOnce(connection as never);
@@ -133,6 +135,23 @@ describe("HomeAssistantClient connect/retry", () => {
     await expectation;
     expect(createConnection).toHaveBeenCalledTimes(60);
   });
+
+  it("closes a silent startup connection at the running-state deadline", async () => {
+    const close = vi.fn();
+    const sendMessagePromise = vi.fn(() => new Promise(() => {}));
+    vi.mocked(createConnection).mockResolvedValue({
+      close,
+      sendMessagePromise,
+    } as never);
+    const client = new HomeAssistantClient(fakeLogger(), options);
+    const rejected = expect(client.construction).rejects.toThrow(
+      "within 10 minutes",
+    );
+    await vi.advanceTimersByTimeAsync(10 * 60_000);
+    await rejected;
+    expect(sendMessagePromise.mock.calls.length).toBeGreaterThan(1);
+    expect(close).toHaveBeenCalledOnce();
+  });
 });
 
 // The websocket library reconnects on its own without re-checking HA's
@@ -146,8 +165,6 @@ describe("HomeAssistantClient haRunning", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     vi.mocked(createConnection).mockReset();
-    vi.mocked(getConfig).mockReset();
-    vi.mocked(getConfig).mockResolvedValue({ state: "RUNNING" } as never);
     listeners = {};
     // The running poll goes through sendHaMessage, so it lands on
     // sendMessagePromise rather than the library's getConfig helper.
@@ -186,6 +203,7 @@ describe("HomeAssistantClient haRunning", () => {
     const connection = {
       close: vi.fn(),
       connected: false,
+      sendMessagePromise: runningConfig,
       addEventListener: vi.fn((event: string, cb: () => void) => {
         listeners[event] = cb;
       }),
@@ -277,8 +295,6 @@ describe("HomeAssistantClient connection recovery", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     vi.mocked(createConnection).mockReset();
-    vi.mocked(getConfig).mockReset();
-    vi.mocked(getConfig).mockResolvedValue({ state: "RUNNING" } as never);
     listeners = {};
     log = {
       infoCtx: vi.fn(),
@@ -296,6 +312,7 @@ describe("HomeAssistantClient connection recovery", () => {
     vi.mocked(createConnection).mockResolvedValue({
       close: vi.fn(),
       closeRequested: false,
+      sendMessagePromise: runningConfig,
       addEventListener: vi.fn((event: string, cb: () => void) => {
         listeners[event] = cb;
       }),
@@ -314,8 +331,12 @@ describe("HomeAssistantClient connection recovery", () => {
   it("reconnects a silent socket after two missed pongs, not after one", async () => {
     const reconnect = vi.fn();
     let answer = false;
-    const sendMessagePromise = vi.fn(() =>
-      answer ? Promise.resolve() : new Promise(() => {}),
+    const sendMessagePromise = vi.fn(({ type }) =>
+      type === "get_config"
+        ? runningConfig()
+        : answer
+          ? Promise.resolve()
+          : new Promise(() => {}),
     );
     const client = await connect({
       connected: true,
@@ -392,7 +413,6 @@ describe("HomeAssistantClient user lookup", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     vi.mocked(createConnection).mockReset();
-    vi.mocked(getConfig).mockResolvedValue({ state: "RUNNING" } as never);
     vi.mocked(getUser).mockReset();
     listeners = {};
     log = {

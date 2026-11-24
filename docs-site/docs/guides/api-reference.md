@@ -116,7 +116,7 @@ Delete a bridge. Returns `204 No Content`.
 | `/api/matter/bridges/:bridgeId/actions/stop` | POST | Stop a running bridge |
 | `/api/matter/bridges/:bridgeId/actions/restart` | POST | Restart a bridge |
 | `/api/matter/bridges/:bridgeId/actions/refresh` | POST | Refresh devices without restart |
-| `/api/matter/bridges/:bridgeId/actions/factory-reset` | POST | Factory reset (removes fabrics). Answers 409 when the bridge is not running. Since v2.1.0-alpha.1003 a failed reset answers 500, keeps the device identities and leaves the bridge Failed |
+| `/api/matter/bridges/:bridgeId/actions/factory-reset` | POST | Factory reset (removes fabrics). Answers 409 when the bridge is not running. Since v2.1.0 a failed reset answers 500, keeps the device identities and leaves the bridge Failed |
 | `/api/matter/bridges/:bridgeId/actions/force-sync` | POST | Push current state to controllers |
 | `/api/matter/bridges/:bridgeId/actions/open-commissioning-window` | POST | Open pairing window for multi-fabric |
 | `/api/matter/bridges/actions/start-all` | POST | Start all bridges |

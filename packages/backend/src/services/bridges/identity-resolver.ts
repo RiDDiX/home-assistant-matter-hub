@@ -69,6 +69,30 @@ export class IdentityResolver {
     private readonly mappingStorage: EntityMappingStorage,
   ) {}
 
+  /** Reads the current endpoint id without seeding or re-keying identity. */
+  peekEndpointId(
+    bridgeId: string,
+    entity: HomeAssistantEntityRegistry,
+    stableIdentity: boolean,
+  ): string | undefined {
+    const entityId = entity.entity_id;
+    const key = stableIdentity
+      ? identityKey({ entity_id: entityId, registry: entity })
+      : null;
+    const record =
+      key == null ? undefined : this.identityStorage.getIdentity(bridgeId, key);
+    const previousEntityId = record?.lastEntityId ?? record?.anchorEntityId;
+    const mapping =
+      this.mappingStorage.getMapping(bridgeId, entityId) ??
+      (previousEntityId && previousEntityId !== entityId
+        ? this.mappingStorage.getMapping(bridgeId, previousEntityId)
+        : undefined);
+    if (mapping?.disabled) return undefined;
+    return (
+      record?.endpointId ?? createEndpointId(entityId, mapping?.customName)
+    );
+  }
+
   // Resolves one build pass in the given order. With the flag on, every id
   // frozen for an entity of this pass is reserved up front (the entity mounted
   // at it wins, else the first record in order), so neither a new key nor a
@@ -232,6 +256,7 @@ export class IdentityResolver {
     // the current ids, so nothing re-mints.
     const desired = createEndpointId(entityId, mapping?.customName);
     let endpointId = desired;
+    let anchorEntityId = entityId;
     if (opts.stableIdentity) {
       // Only make unique when the frozen id will actually be used, so a record
       // seeded while the flag is off stays identical to today's derivation.
@@ -239,10 +264,19 @@ export class IdentityResolver {
       while (opts.isEndpointIdTaken(endpointId, key)) {
         endpointId = `${desired}_${n++}`;
       }
+      // A renamed entity keeps its old anchor; only a re-pair on this entity_id may share it.
+      const held = new Set(
+        [...this.identityStorage.getBridgeIdentities(bridgeId).values()]
+          .filter((r) => (r.lastEntityId ?? r.anchorEntityId) !== entityId)
+          .map((r) => r.anchorEntityId),
+      );
+      for (let a = 2; held.has(anchorEntityId); a++) {
+        anchorEntityId = `${entityId}_${a}`;
+      }
     }
     const record: IdentityRecord = {
       endpointId,
-      anchorEntityId: entityId,
+      anchorEntityId,
       lastEntityId: entityId,
       createdAt: new Date().toISOString(),
     };

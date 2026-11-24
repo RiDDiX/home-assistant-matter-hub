@@ -54,12 +54,9 @@ export class ServerModeBridge extends BridgeBase<
     this.scheduleWarmStart();
   }
 
-  protected override async runStop(
-    code: BridgeStatus,
-    reason: string,
-  ): Promise<void> {
+  protected override async runStop(): Promise<void> {
     this.cancelWarmStart();
-    await super.runStop(code, reason);
+    await super.runStop();
   }
 
   /**

@@ -145,6 +145,41 @@ function upgrade(ws: WebSocket) {
 }
 
 describe("WebApi auth change", () => {
+  it("rejects a username that a Basic login cannot represent", async () => {
+    const storage = settingsStorage();
+    const api = await webApi(storage);
+    await api.start();
+    cleanup.push(() => api.dispose());
+    const server = (api as unknown as { server: http.Server }).server;
+    const host = `127.0.0.1:${(server.address() as AddressInfo).port}`;
+    const res = await fetch(`http://${host}/api/settings/auth`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ username: "home:admin", password: "pass" }),
+    });
+    expect(res.status).toBe(400);
+    expect(storage.auth).toBeUndefined();
+  });
+
+  it("keeps the login when a remote client asks to remove it", async () => {
+    const storage = settingsStorage({ username: "user", password: "pass" });
+    const api = await webApi(storage);
+    await api.start();
+    cleanup.push(() => api.dispose());
+    const server = (api as unknown as { server: http.Server }).server;
+    const host = `127.0.0.1:${(server.address() as AddressInfo).port}`;
+    const remove = (headers: Record<string, string> = {}) =>
+      fetch(`http://${host}/api/settings/auth`, {
+        method: "DELETE",
+        headers: { authorization: basic("user:pass"), ...headers },
+      });
+
+    expect((await remove({ "x-forwarded-for": "192.0.2.1" })).status).toBe(409);
+    expect(storage.auth).toEqual({ username: "user" });
+    expect((await remove()).status).toBe(200);
+    expect(storage.auth).toBeUndefined();
+  });
+
   it("drops open sockets when the password is set", async () => {
     const api = await webApi(settingsStorage());
     await api.start();

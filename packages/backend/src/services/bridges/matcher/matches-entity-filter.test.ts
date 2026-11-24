@@ -4,7 +4,11 @@ import {
   HomeAssistantMatcherType,
 } from "@home-assistant-matter-hub/common";
 import { describe, expect, it } from "vitest";
-import { testMatcher } from "./matches-entity-filter.js";
+import {
+  FilterTimeoutError,
+  testMatcher,
+  withinFilterBudget,
+} from "./matches-entity-filter.js";
 
 const registry: HomeAssistantEntityRegistry = {
   id: "id",
@@ -923,5 +927,34 @@ describe("matchEntityFilter.testMatcher", () => {
       );
     }
     expect(testMatcher(matcher, undefined, registry)).toBe(true);
+  });
+});
+
+describe("withinFilterBudget", () => {
+  const slow = { type: HomeAssistantMatcherType.Regex, value: "(.*)*x" };
+  const longId = { ...registry, entity_id: `sensor.${"a".repeat(43)}` };
+
+  it("returns the result of a normal pass", () => {
+    expect(
+      withinFilterBudget(() => testMatcher(slow, undefined, registry)),
+    ).toBe(false);
+  });
+
+  it("stops a backtracking pattern at the budget", () => {
+    const started = Date.now();
+    expect(() =>
+      withinFilterBudget(() => testMatcher(slow, undefined, longId), 100),
+    ).toThrow(FilterTimeoutError);
+    expect(Date.now() - started).toBeLessThan(1000);
+    // matching keeps working afterwards
+    expect(
+      withinFilterBudget(() =>
+        testMatcher(
+          { type: HomeAssistantMatcherType.Regex, value: "^sensor\\." },
+          undefined,
+          longId,
+        ),
+      ),
+    ).toBe(true);
   });
 });

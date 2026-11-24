@@ -3,6 +3,7 @@ import type { EndpointType } from "@matter/main";
 import { AirPurifierDevice as Device } from "@matter/main/devices";
 import { BasicInformationServer } from "../../../behaviors/basic-information-server.js";
 import { FanSpeedMemoryBehavior } from "../../../behaviors/fan-speed-memory.js";
+import { HepaFilterMemoryBehavior } from "../../../behaviors/hepa-filter-memory.js";
 import { HomeAssistantEntityBehavior } from "../../../behaviors/home-assistant-entity-behavior.js";
 import { IdentifyServer } from "../../../behaviors/identify-server.js";
 import { FanFanControlServer } from "../fan/behaviors/fan-fan-control-server.js";
@@ -62,6 +63,7 @@ export function AirPurifierEndpoint(
   if (hasFilterLifeSupport(attributes, mapping)) {
     const deviceWithFilter = baseDevice.with(
       AirPurifierHepaFilterMonitoringServer,
+      HepaFilterMemoryBehavior,
     );
     return deviceWithFilter.set({ homeAssistantEntity });
   }

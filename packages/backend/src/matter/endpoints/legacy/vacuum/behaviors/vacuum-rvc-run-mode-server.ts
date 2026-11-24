@@ -3,7 +3,6 @@ import {
   type CustomServiceArea,
   type EntityMappingConfig,
   type VacuumDeviceAttributes,
-  VacuumDeviceFeature,
   VacuumState,
 } from "@home-assistant-matter-hub/common";
 import { Logger } from "@matter/general";
@@ -11,12 +10,12 @@ import type { Agent } from "@matter/main";
 import { ServiceAreaBehavior } from "@matter/main/behaviors";
 import { RvcRunMode } from "@matter/main/clusters";
 import type { HomeAssistantAction } from "../../../../../services/home-assistant/home-assistant-actions.js";
-import { testBit } from "../../../../../utils/test-bit.js";
 import { trimToLength } from "../../../../../utils/trim-to-length.js";
 import { HomeAssistantEntityBehavior } from "../../../../behaviors/home-assistant-entity-behavior.js";
 import {
   type CleaningSession,
   getSession,
+  ROOM_MODE_BASE,
   RvcRunModeServer,
   RvcSupportedRunMode,
 } from "../../../../behaviors/rvc-run-mode-server.js";
@@ -28,13 +27,13 @@ import {
   isRoborockVacuum,
   isXiaomiMiotVacuum,
   parseVacuumRooms,
-  ROOM_MODE_BASE,
+  toAreaId,
 } from "../utils/parse-vacuum-rooms.js";
 import { getVacuumJobRunMode } from "./vacuum-job-lifecycle.js";
 import { getVacuumStartError } from "./vacuum-readiness.js";
+import { vacuumPause } from "./vacuum-rvc-operational-state-server.js";
 import {
   getVacuumServiceAreas,
-  toAreaId,
   type VacuumEffectiveConfig,
 } from "./vacuum-service-area-server.js";
 
@@ -80,9 +79,12 @@ type RoomModeSource = { name: string; mapName?: string };
 
 // Mode labels must be unique and at most 64 bytes, or the endpoint fails.
 // Repeated names get their map appended (#506). Unique short names stay.
-export function customAreaModeLabels(sorted: RoomModeSource[]): string[] {
+export function customAreaModeLabels(
+  sorted: RoomModeSource[],
+  reserved = ["Idle", "Cleaning"],
+): string[] {
   const names = new Set(sorted.map((a) => a.name));
-  const used = new Set(["Idle", "Cleaning"]);
+  const used = new Set(reserved);
   return sorted.map((area, i) => {
     // a made up label must not take another area's real name
     const free = (label: string) =>
@@ -611,64 +613,48 @@ const vacuumRvcRunModeConfig = {
   // biome-ignore lint/suspicious/noConfusingVoidType: Required by ValueSetter<void> interface
   start: (_: void, agent: Agent) => {
     // Check if there are selected areas from ServiceArea
+    let selectedAreas: number[] = [];
     try {
-      const serviceArea = agent.get(ServiceAreaBehavior);
       // IMPORTANT: Snapshot-copy the array. Matter.js managed state
       // returns proxied arrays; clearing the state later would
       // invalidate a live reference (Datasource subref refresh).
-      const selectedAreas = [...serviceArea.state.selectedAreas];
-
-      if (selectedAreas.length > 0) {
-        const homeAssistant = agent.get(HomeAssistantEntityBehavior);
-        // The ServiceArea cluster was built from the endpoint's effective
-        // snapshot, dispatch from it to stay in the same area id space.
-        const effective = (
-          homeAssistant.endpoint as unknown as {
-            vacuumEffective?: VacuumEffectiveConfig;
-          }
-        ).vacuumEffective;
-        const attributes = (effective?.state ?? homeAssistant.entity.state)
-          .attributes as VacuumDeviceAttributes;
-        const mapping = effective
-          ? effective.mapping
-          : homeAssistant.state.mapping;
-        const session = getSession(homeAssistant.endpoint);
-
-        const result = dispatchRoomClean(
-          attributes,
-          mapping,
-          homeAssistant.entityId,
-          selectedAreas,
-          { callAction: (a) => homeAssistant.callAction(a) },
-        );
-        session.pendingDispatches = result.pending;
-        return result.action;
-      }
+      selectedAreas = [...agent.get(ServiceAreaBehavior).state.selectedAreas];
     } catch {
       // ServiceArea not available, fall through to regular start
+    }
+
+    if (selectedAreas.length > 0) {
+      const homeAssistant = agent.get(HomeAssistantEntityBehavior);
+      // The ServiceArea cluster was built from the endpoint's effective
+      // snapshot, dispatch from it to stay in the same area id space.
+      const effective = (
+        homeAssistant.endpoint as unknown as {
+          vacuumEffective?: VacuumEffectiveConfig;
+        }
+      ).vacuumEffective;
+      const attributes = (effective?.state ?? homeAssistant.entity.state)
+        .attributes as VacuumDeviceAttributes;
+      const mapping = effective
+        ? effective.mapping
+        : homeAssistant.state.mapping;
+      const session = getSession(homeAssistant.endpoint);
+
+      const result = dispatchRoomClean(
+        attributes,
+        mapping,
+        homeAssistant.entityId,
+        selectedAreas,
+        { callAction: (a) => homeAssistant.callAction(a) },
+      );
+      session.pendingDispatches = result.pending;
+      return result.action;
     }
 
     logger.info("Starting regular cleaning (no areas selected)");
     return { action: "vacuum.start" };
   },
   returnToBase: () => ({ action: "vacuum.return_to_base" }),
-  pause: (
-    // biome-ignore lint/suspicious/noConfusingVoidType: Required by ValueSetter<void> interface
-    _: void,
-    agent: {
-      get: (
-        type: typeof HomeAssistantEntityBehavior,
-      ) => HomeAssistantEntityBehavior;
-    },
-  ) => {
-    const supportedFeatures =
-      agent.get(HomeAssistantEntityBehavior).entity.state.attributes
-        .supported_features ?? 0;
-    if (testBit(supportedFeatures, VacuumDeviceFeature.PAUSE)) {
-      return { action: "vacuum.pause" };
-    }
-    return { action: "vacuum.stop" };
-  },
+  pause: vacuumPause,
 
   cleanRoom: (
     roomMode: number,

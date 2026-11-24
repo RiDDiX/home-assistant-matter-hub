@@ -75,6 +75,8 @@ const STATE_KEY = "state";
 const PENDING_SILENCE_KEY = "pendingSilence";
 // Setters that hit a connection gap, replayed on reconnect if still current.
 const PENDING_SETTERS_KEY = "pendingSetters";
+// Trip alerts a gap or failed call never fired, replayed while still triggered.
+const PENDING_ALERTS_KEY = "pendingAlerts";
 
 const ALARM_DEVICE_ID = "alarm";
 const MODE_DEVICE_IDS: Record<ArmMode, string> = {
@@ -509,6 +511,9 @@ export class SecurityPlugin implements MatterHubPlugin {
           SILENCEABLE_ALERT_DOMAINS.has(id.split(".")[0]),
         );
         this.activeAlerts = [];
+        void this.context?.storage
+          .delete(PENDING_ALERTS_KEY)
+          .catch((e) => this.log.warn("failed to clear pending alerts:", e));
         this.enqueueSilence(toSilence);
       },
       persist: (snapshot) => {
@@ -703,18 +708,43 @@ export class SecurityPlugin implements MatterHubPlugin {
 
   private async runAlerts(entityIds: string[]): Promise<void> {
     if (entityIds.length === 0) return;
+    const storage = this.context?.storage;
+    // The newer turn_on wins over a turn_off left pending by an older clear.
+    const silence = (await storage?.get<string[]>(PENDING_SILENCE_KEY)) ?? [];
+    const keep = silence.filter((id) => !entityIds.includes(id));
+    if (keep.length < silence.length) {
+      if (keep.length > 0) await storage?.set(PENDING_SILENCE_KEY, keep);
+      else await storage?.delete(PENDING_SILENCE_KEY);
+    }
     // Barrier: the triggered snapshot and alert set reach the disk before the
     // first turn_on, or a crash leaves a blaring siren with no recovery
     // intent.
-    await this.context?.storage.flush?.();
+    await storage?.flush?.();
     const connection = this.connection;
     if (!connection || !connection.connected) {
       this.log.warn(
         `no Home Assistant connection, alerts skipped: ${entityIds.join(",")}`,
       );
+      await this.markUnfiredAlerts(entityIds, true);
       return;
     }
-    await this.callSequential(entityIds, "turn_on");
+    const ok = await this.callSequential(entityIds, "turn_on");
+    await this.markUnfiredAlerts(entityIds, !ok);
+  }
+
+  private async markUnfiredAlerts(
+    entityIds: string[],
+    unfired: boolean,
+  ): Promise<void> {
+    const storage = this.context?.storage;
+    if (!storage) return;
+    const held = (await storage.get<string[]>(PENDING_ALERTS_KEY)) ?? [];
+    if (!unfired && held.length === 0) return;
+    const next = unfired
+      ? [...new Set([...held, ...entityIds])]
+      : held.filter((id) => !entityIds.includes(id));
+    if (next.length > 0) await storage.set(PENDING_ALERTS_KEY, next);
+    else await storage.delete(PENDING_ALERTS_KEY);
   }
 
   // Every due turn_off goes to storage first and leaves it only once HA
@@ -773,6 +803,16 @@ export class SecurityPlugin implements MatterHubPlugin {
     await this.flushPendingSilence();
     const storage = this.context?.storage;
     if (!storage) return;
+    const unfired = (await storage.get<string[]>(PENDING_ALERTS_KEY)) ?? [];
+    if (unfired.length > 0) {
+      const due =
+        this.machine?.snapshot.phase === "triggered"
+          ? unfired.filter((id) => this.activeAlerts.includes(id))
+          : [];
+      const ok =
+        due.length === 0 || (await this.callSequential(due, "turn_on"));
+      if (ok) await storage.delete(PENDING_ALERTS_KEY);
+    }
     const held = await storage.get<{ mode: ArmMode | "off" }>(
       PENDING_SETTERS_KEY,
     );

@@ -51,6 +51,7 @@ interface BackupPreview {
   version: number;
   createdAt: string;
   includesIdentity: boolean;
+  includesAppData: boolean;
   bridges: Array<{
     id: string;
     name: string;
@@ -91,6 +92,7 @@ export function BackupRestore() {
   const [overwriteExisting, setOverwriteExisting] = useState(false);
   const [includeMappings, setIncludeMappings] = useState(true);
   const [restoreIdentity, setRestoreIdentity] = useState(true);
+  const [restoreAppData, setRestoreAppData] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [restartDialogOpen, setRestartDialogOpen] = useState(false);
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
@@ -160,13 +162,13 @@ export function BackupRestore() {
     setLoading(true);
     setError(null);
     try {
-      const result = await restoreBackupSnapshot(filename);
+      const result = await restoreBackupSnapshot(filename, { restoreAppData });
       if (result.errors.length > 0) {
         setError(
-          t("backup.restoredWithErrors", {
+          `${t("backup.restoredWithErrors", {
             bridges: result.bridgesRestored,
             errors: result.errors.length,
-          }),
+          })}: ${result.errors.map((e) => e.error).join("; ")}`,
         );
       } else {
         setSuccess(
@@ -297,6 +299,7 @@ export function BackupRestore() {
 
       const previewData = (await response.json()) as BackupPreview;
       setPreview(previewData);
+      setRestoreAppData(false);
       setSelectedBridges(new Set(previewData.bridges.map((b) => b.id)));
       setDialogOpen(true);
     } catch (e) {
@@ -325,6 +328,7 @@ export function BackupRestore() {
           overwriteExisting,
           includeMappings,
           restoreIdentity: restoreIdentity && preview?.includesIdentity,
+          restoreAppData: restoreAppData && preview?.includesAppData,
         }),
       );
 
@@ -350,10 +354,10 @@ export function BackupRestore() {
 
       if (result.errors.length > 0) {
         setError(
-          t("backup.restoredWithErrors", {
+          `${t("backup.restoredWithErrors", {
             bridges: result.bridgesRestored,
             errors: result.errors.length,
-          }),
+          })}: ${result.errors.map((e) => e.error).join("; ")}`,
         );
       } else {
         setSuccess(
@@ -495,7 +499,7 @@ export function BackupRestore() {
                   {t("backup.fullBackupDesc")}
                 </Typography>
                 <Typography variant="body2" color="text.secondary">
-                  {t("backup.fullBackupWarning")}
+                  {t("backup.sensitiveBackupWarning")}
                 </Typography>
               </Box>
               <Button
@@ -603,6 +607,9 @@ export function BackupRestore() {
           </Button>
         </Box>
 
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+          {t("backup.sensitiveBackupWarning")}
+        </Typography>
         {snapshotsLoading ? (
           <Box display="flex" justifyContent="center" p={2}>
             <CircularProgress size={24} />
@@ -638,7 +645,10 @@ export function BackupRestore() {
                         size="small"
                         color="warning"
                         aria-label={t("backup.restoreSnapshot")}
-                        onClick={() => setSnapshotRestoreTarget(snap.filename)}
+                        onClick={() => {
+                          setRestoreAppData(false);
+                          setSnapshotRestoreTarget(snap.filename);
+                        }}
                       >
                         <RestoreIcon fontSize="small" />
                       </IconButton>
@@ -840,6 +850,17 @@ export function BackupRestore() {
                     label={t("backup.restoreIdentities")}
                   />
                 )}
+                {preview.includesAppData && (
+                  <FormControlLabel
+                    control={
+                      <Checkbox
+                        checked={restoreAppData}
+                        onChange={(e) => setRestoreAppData(e.target.checked)}
+                      />
+                    }
+                    label={t("backup.restoreAppData")}
+                  />
+                )}
               </Box>
             </>
           )}
@@ -851,7 +872,9 @@ export function BackupRestore() {
           <Button
             variant="contained"
             onClick={handleRestore}
-            disabled={loading || selectedBridges.size === 0}
+            disabled={
+              loading || (selectedBridges.size === 0 && !restoreAppData)
+            }
             startIcon={
               loading ? <CircularProgress size={20} color="inherit" /> : null
             }
@@ -914,6 +937,15 @@ export function BackupRestore() {
           <Alert severity="warning" sx={{ mt: 2 }}>
             {t("backup.restoreWarning")}
           </Alert>
+          <FormControlLabel
+            control={
+              <Checkbox
+                checked={restoreAppData}
+                onChange={(e) => setRestoreAppData(e.target.checked)}
+              />
+            }
+            label={t("backup.restoreAppData")}
+          />
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setSnapshotRestoreTarget(null)}>

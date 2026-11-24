@@ -1,61 +1,51 @@
 import path from "node:path";
 import type express from "express";
+import type { BetterLogger } from "../core/app/logger.js";
 
-const ingressPath = "x-ingress-path";
 const forwardedPrefix = "x-forwarded-prefix";
+// Home Assistant ingress sends this, X-Forwarded-Prefix is proposed to replace
+// it. See https://github.com/home-assistant/core/pull/193747
+const ingressPath = "x-ingress-path";
 
-export function supportIngress(
-  req: express.Request,
-  _: express.Response,
-  next: express.NextFunction,
-) {
-  if (!(ingressPath in req.headers)) {
-    return next();
-  }
-  const prefix = req.header(ingressPath);
-  if (!prefix) {
-    return next();
-  }
-  const baseUrl = buildPath(prefix, req.baseUrl);
-  req.baseUrl = baseUrl;
-  req.originalUrl = buildPath(baseUrl, req.url);
-  req.url = buildPath(req.url);
-  next();
-}
-
-export function supportProxyLocation(
-  req: express.Request,
-  res: express.Response,
-  next: express.NextFunction,
-) {
-  if (!(forwardedPrefix in req.headers)) {
-    return next();
-  }
-  const prefix = req.header(forwardedPrefix);
-  if (!prefix) {
-    return next();
-  }
-  let baseUrl = buildPath(prefix, req.baseUrl);
-  if (baseUrl.endsWith("/")) {
-    baseUrl = baseUrl.slice(0, -1);
-  }
-  if (!req.url.startsWith(`${baseUrl}/`)) {
-    res
-      .status(400)
-      .contentType("text/plain")
-      .send(`URL ${req.url} does not match base url ${baseUrl}`);
-    return;
-  }
-  req.baseUrl = baseUrl;
-  req.originalUrl = req.url;
-  req.url = req.url.slice(baseUrl.length);
-  next();
-}
-
-function buildPath(...paths: string[]): string {
-  let result = path.posix.join(...paths);
-  if (!result.startsWith("/")) {
-    result = `/${result}`;
-  }
-  return result;
+// Both headers carry the path prefix that the proxy removed from the URL.
+export function supportProxyPrefix(log: BetterLogger): express.RequestHandler {
+  let warned = false;
+  return (req, res, next) => {
+    const forwarded = req.header(forwardedPrefix);
+    const prefix = forwarded || req.header(ingressPath);
+    if (!prefix) {
+      return next();
+    }
+    // A backslash or tab can make the base href another origin, a comma is two values.
+    if (!/^[\w.~%/-]+$/.test(prefix)) {
+      res
+        .status(400)
+        .contentType("text/plain")
+        .send(
+          "X-Forwarded-Prefix or X-Ingress-Path must be a plain path like /hamh",
+        );
+      return;
+    }
+    const baseUrl = path.posix
+      .join("/", prefix, req.baseUrl)
+      .replace(/\/$/, "");
+    // Removing a prefix without its trailing slash can leave two slashes.
+    let url = req.url.replace(/^\/+/, "/");
+    // Deprecated: older versions required X-Forwarded-Prefix to still be in the
+    // URL. A sub-path like /api is ambiguous here, as it is also a route of ours.
+    // To remove it, also remove shouldHandle in websocket-api.ts.
+    if (forwarded && baseUrl && url.startsWith(`${baseUrl}/`)) {
+      url = url.slice(baseUrl.length);
+      if (!warned) {
+        warned = true;
+        log.warn(
+          "A reverse proxy sends X-Forwarded-Prefix but keeps the prefix in the URL. This is deprecated and may stop working in a future version. Remove the prefix from the URL in the proxy, or use --http-base-path instead of the header. See https://riddix.github.io/home-assistant-matter-hub/guides/reverse-proxy",
+        );
+      }
+    }
+    req.baseUrl = baseUrl;
+    req.originalUrl = `${baseUrl}${url}`;
+    req.url = url;
+    next();
+  };
 }

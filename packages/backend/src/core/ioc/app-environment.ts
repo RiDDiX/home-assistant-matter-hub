@@ -81,6 +81,7 @@ export class AppEnvironment extends EnvironmentBase {
       new HomeAssistantRegistry(
         await this.load(HomeAssistantClient),
         this.options.homeAssistant,
+        aliasesWanted(await this.load(BridgeStorage)),
       ),
     );
 
@@ -126,9 +127,13 @@ export class AppEnvironment extends EnvironmentBase {
         this.options.webApi,
       ),
     );
-
-    this.runtime.add({
-      [Symbol.asyncDispose]: () => this.dispose(),
-    });
   }
+}
+
+// stored bridges are loaded before the registry, so the first load knows it
+function aliasesWanted(bridgeStorage: BridgeStorage): () => boolean {
+  return () =>
+    bridgeStorage.bridges.some(
+      (b) => b.featureFlags?.preferEntityAlias === true,
+    );
 }

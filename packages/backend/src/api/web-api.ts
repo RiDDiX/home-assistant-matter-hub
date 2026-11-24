@@ -1,4 +1,5 @@
 import type * as http from "node:http";
+import path from "node:path";
 import express from "express";
 import basicAuth from "express-basic-auth";
 import AccessControl from "express-ip-access-control";
@@ -24,7 +25,7 @@ import { diagnosticApi } from "./diagnostic-api.js";
 import { entityMappingApi } from "./entity-mapping-api.js";
 import { healthApi } from "./health-api.js";
 import { homeAssistantApi } from "./home-assistant-api.js";
-import { hostGuard } from "./host-guard.js";
+import { hostGuard, ipWhitelist, isSupervisorIngress } from "./host-guard.js";
 import { lockCredentialApi } from "./lock-credential-api.js";
 import { logsApi } from "./logs-api.js";
 import { mappingProfileApi } from "./mapping-profile-api.js";
@@ -32,7 +33,7 @@ import { matterApi } from "./matter-api.js";
 import { metricsApi } from "./metrics-api.js";
 import { networkDiagnosticApi } from "./network-diagnostic-api.js";
 import { pluginApi } from "./plugin-api.js";
-import { supportIngress, supportProxyLocation } from "./proxy-support.js";
+import { supportProxyPrefix } from "./proxy-support.js";
 import { settingsApi } from "./settings-api.js";
 import { systemApi } from "./system-api.js";
 import { webUi } from "./web-ui.js";
@@ -69,6 +70,7 @@ export class WebApi extends Service {
 
   private app!: express.Application;
   private server?: http.Server;
+  private isAllowed?: (remoteAddress: string | undefined) => boolean;
 
   constructor(
     logger: LoggerService,
@@ -149,6 +151,7 @@ export class WebApi extends Service {
           this.bridgeService,
           this.props.auth,
           () => this.wsApi.disconnectAll(),
+          (req) => this.allowsAnonymousAdmin(req),
         ),
       )
       .use(
@@ -201,31 +204,24 @@ export class WebApi extends Service {
         ),
       );
 
+    const proxyPrefix = supportProxyPrefix(this.log);
     const middlewares: express.Handler[] = [
       this.accessLogger,
       hostGuard(this.props.allowedHosts),
-      supportIngress,
-      supportProxyLocation,
+      proxyPrefix,
     ];
 
     // Whitelist first, so denied clients never get an auth challenge.
     if (this.props.whitelist && this.props.whitelist.length > 0) {
-      const whitelist = AccessControl({
-        log: (clientIp, access) => {
-          this.log.silly(
-            `Client ${clientIp} was ${access ? "granted" : "denied"}`,
-          );
-        },
-        mode: "allow",
-        allows: this.props.whitelist,
-        statusCode: "403",
-        message: "Forbidden",
-      });
+      const isAllowed = ipWhitelist(this.props.whitelist, this.log);
+      this.isAllowed = isAllowed;
       // The container healthcheck probes from loopback.
       middlewares.push((req, res, next) =>
-        healthProbePaths.has(req.path) && isLoopback(req.socket.remoteAddress)
+        (healthProbePaths.has(req.path) &&
+          isLoopback(req.socket.remoteAddress)) ||
+        isAllowed(req.socket.remoteAddress)
           ? next()
-          : whitelist(req, res, next),
+          : res.status(403).send("Forbidden"),
       );
     }
     middlewares.push(this.createDynamicAuthMiddleware());
@@ -233,6 +229,10 @@ export class WebApi extends Service {
       this.log.info("Basic authentication enabled (environment variables)");
     } else if (this.settingsStorage.auth) {
       this.log.info("Basic authentication enabled (stored settings)");
+    } else if (!this.isAllowed) {
+      this.log.warn(
+        "No web login is set, so the web UI and API only answer requests from this machine. Set HAMH_HTTP_AUTH_USERNAME and HAMH_HTTP_AUTH_PASSWORD to reach them from other devices.",
+      );
     }
 
     const appRouter = express.Router();
@@ -245,7 +245,9 @@ export class WebApi extends Service {
     const basePath = this.props.basePath;
     if (basePath !== "/") {
       this.log.info(`Base path configured: ${basePath}`);
-      this.app.get("/", (_req, res) => res.redirect(basePath));
+      this.app.get("/", proxyPrefix, (req, res) =>
+        res.redirect(path.posix.join("/", req.baseUrl, basePath)),
+      );
     }
     this.app.use(basePath, appRouter);
     // Express' default handler answers with the stack trace outside production.
@@ -318,13 +320,44 @@ export class WebApi extends Service {
         return next();
       }
       if (envMiddleware) {
-        return envMiddleware(req, res, next);
+        return this.skipsEnvAuth(req) ? next() : envMiddleware(req, res, next);
       }
       if (!this.settingsStorage.auth) {
-        return next();
+        if (this.allowsAnonymousAdmin(req)) return next();
+        return res
+          .status(403)
+          .send("Configure HTTP authentication to access HAMH remotely.");
       }
       return storageMiddleware(req, res, next);
     };
+  }
+
+  private allowsAnonymousAdmin(req: http.IncomingMessage): boolean {
+    if (isSupervisorIngress(req.headers, req.socket.remoteAddress)) return true;
+    // An IP whitelist is the access control its owner chose.
+    if (this.isAllowed?.(req.socket.remoteAddress)) return true;
+    // A reverse proxy can connect from loopback on behalf of a remote user.
+    const host = (req.headers.host ?? "").toLowerCase().replace(/:\d+$/, "");
+    return (
+      isLoopback(req.socket.remoteAddress) &&
+      (host === "localhost" || isLoopback(host.replace(/^\[(.*)\]$/, "$1"))) &&
+      !Object.keys(req.headers).some(
+        (name) =>
+          name === "forwarded" ||
+          name.startsWith("x-forwarded-") ||
+          name === "x-ingress-path" ||
+          name === "x-real-ip",
+      )
+    );
+  }
+
+  // HA already authenticates ingress, the add-on sets env credentials only to
+  // guard local clients.
+  private skipsEnvAuth(req: http.IncomingMessage): boolean {
+    return (
+      this.props.auth !== undefined &&
+      isSupervisorIngress(req.headers, req.socket.remoteAddress)
+    );
   }
 
   // Same credentials as the http middleware, for upgrades that skip Express.
@@ -379,9 +412,12 @@ export class WebApi extends Service {
     this.wsApi.attach(
       this.server,
       this.props.basePath,
-      this.props.whitelist,
+      this.isAllowed,
       this.props.allowedHosts,
-      (header) => this.verifyAuthorization(header),
+      (header, req) =>
+        this.props.auth || this.settingsStorage.auth
+          ? this.skipsEnvAuth(req) || this.verifyAuthorization(header)
+          : this.allowsAnonymousAdmin(req),
     );
   }
 }

@@ -21,16 +21,14 @@ interface AllBridgeFeatureFlags {
    */
   readonly autoBatteryMapping: boolean;
   /**
-   * Auto Humidity Mapping: Automatically combine humidity sensors with temperature sensors
-   * from the same Home Assistant device. When enabled, humidity sensors will be merged into
-   * temperature sensors to create combined TemperatureHumiditySensor devices.
+   * Auto Humidity Mapping: Include a humidity endpoint from the same Home
+   * Assistant device as a selected temperature sensor.
    * Default: true (enabled)
    */
   readonly autoHumidityMapping: boolean;
   /**
-   * Auto Pressure Mapping: Automatically combine pressure sensors with temperature sensors
-   * from the same Home Assistant device. When enabled, pressure sensors will be merged into
-   * temperature sensors to create combined sensor devices.
+   * Auto Pressure Mapping: Include a pressure endpoint from the same Home
+   * Assistant device as a selected temperature sensor.
    * Default: true (enabled)
    */
   readonly autoPressureMapping: boolean;
@@ -78,6 +76,16 @@ interface AllBridgeFeatureFlags {
    * Default: false (disabled)
    */
   readonly preferEntityRegistryName: boolean;
+  /**
+   * Prefer Entity Alias: Use the first Home Assistant entity alias (entity
+   * settings, Voice assistants, Aliases) as nodeLabel. nodeLabel resolves as
+   * customName → first alias → registry name (with preferEntityRegistryName)
+   * → friendly_name → entity_id. Blank and null aliases are skipped, an entity
+   * without an alias keeps its normal name. A per-entity customName still
+   * takes precedence.
+   * Default: false (disabled)
+   */
+  readonly preferEntityAlias: boolean;
   /**
    * Vacuum OnOff Cluster: Add an OnOff cluster to robot vacuum endpoints.
    * Amazon Alexa REQUIRES PowerController (mapped from OnOff) for robotic vacuums.
@@ -168,6 +176,15 @@ interface AllBridgeFeatureFlags {
 }
 
 export type BridgeFeatureFlags = Partial<AllBridgeFeatureFlags>;
+
+/** Matter cover percent is 100 - HA percent unless one of the cover flags is set. */
+export function isCoverPositionInverted(flags?: BridgeFeatureFlags): boolean {
+  return (
+    flags?.coverDoNotInvertPercentage !== true &&
+    flags?.coverUseHomeAssistantPercentage !== true &&
+    flags?.coverSwapOpenClose !== true
+  );
+}
 
 export type BridgeIconType =
   | "light"

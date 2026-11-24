@@ -11,6 +11,7 @@ import { testBit } from "../../../../../utils/test-bit.js";
 import { trimToLength } from "../../../../../utils/trim-to-length.js";
 import { HomeAssistantEntityBehavior } from "../../../../behaviors/home-assistant-entity-behavior.js";
 import { RvcOperationalStateServer } from "../../../../behaviors/rvc-operational-state-server.js";
+import type { ValueSetter } from "../../../../behaviors/utils/cluster-config.js";
 import {
   getVacuumBatteryPercent,
   getVacuumChargingState,
@@ -170,6 +171,17 @@ function getVacuumReadiness(entity: HomeAssistantEntityState, agent: Agent) {
   return readinessReport(entity.state, agent);
 }
 
+/** Shared with the RvcRunMode pause. */
+export const vacuumPause: ValueSetter<void> = (_, agent) => {
+  const supportedFeatures =
+    agent.get(HomeAssistantEntityBehavior).entity.state.attributes
+      .supported_features ?? 0;
+  if (testBit(supportedFeatures, VacuumDeviceFeature.PAUSE)) {
+    return { action: "vacuum.pause" };
+  }
+  return { action: "vacuum.stop" };
+};
+
 export const VacuumRvcOperationalStateServer = RvcOperationalStateServer({
   getResumeError: getVacuumStartError,
   getAdditionalOperationalStates: (_, agent) =>
@@ -234,15 +246,7 @@ export const VacuumRvcOperationalStateServer = RvcOperationalStateServer({
       : 0,
   getPhase: getVacuumJobPhase,
   shouldCompleteOperation: shouldCompleteVacuumJob,
-  pause: (_, agent) => {
-    const supportedFeatures =
-      agent.get(HomeAssistantEntityBehavior).entity.state.attributes
-        .supported_features ?? 0;
-    if (testBit(supportedFeatures, VacuumDeviceFeature.PAUSE)) {
-      return { action: "vacuum.pause" };
-    }
-    return { action: "vacuum.stop" };
-  },
+  pause: vacuumPause,
   resume: () => ({
     action: "vacuum.start",
   }),

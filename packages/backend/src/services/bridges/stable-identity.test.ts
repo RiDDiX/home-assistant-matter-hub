@@ -597,6 +597,37 @@ describe("IdentityResolver", () => {
     // the dormant original record must not have been touched
     expect(id.getIdentity("b", key1)?.lastEntityId).toBe("light.a");
   });
+
+  it("a new entity on a renamed entity's old name gets its own anchor", async () => {
+    const id = new FakeIdentityStorage();
+    const resolver = new IdentityResolver(
+      asIdentity(id),
+      asMapping(new FakeMappingStorage()),
+    );
+    const first = { entity_id: "light.a", registry: reg("U1", "hue") };
+    const pass = async (
+      entities: { entity_id: string; registry?: HomeAssistantEntityRegistry }[],
+    ) =>
+      resolver.resolveIdentities(
+        "b",
+        entities,
+        () => undefined,
+        true,
+        fakeLogger(),
+      );
+    await pass([first]);
+    const renamed = { entity_id: "light.b", registry: reg("U1", "hue") };
+    const added = { entity_id: "light.a", registry: reg("U2", "hue") };
+    const res = await pass([renamed, added]);
+    const anchorB = res.get("light.b")?.anchorEntityId;
+    const anchorA = res.get("light.a")?.anchorEntityId;
+    expect(anchorB).toBe("light.a");
+    expect(anchorA).not.toBe(anchorB);
+
+    const again = await pass([renamed, added]);
+    expect(again.get("light.b")?.anchorEntityId).toBe(anchorB);
+    expect(again.get("light.a")?.anchorEntityId).toBe(anchorA);
+  });
 });
 
 // --- bridge manager integration ---
@@ -1265,6 +1296,48 @@ describe("stable identity through BridgeEndpointManager (#404)", () => {
     expect((await read(manager, "switch.b"))?.id).toBe("switch_b");
   });
 
+  it.each([
+    false,
+    true,
+  ])("rename hint with stableIdentity %s", async (stable) => {
+    const ha = makeHa();
+    setEntity(ha, "switch.old", { unique_id: "U", platform: "hue" });
+    const manager = await buildManager(
+      ha,
+      makeProvider(`bridge-hint-${stable}`, { stableIdentity: stable }),
+      new FakeMappingStorage(),
+      new FakeIdentityStorage(),
+    );
+    await manager.refreshDevices();
+    const before = await read(manager, "switch.old");
+
+    removeEntity(ha, "switch.old");
+    setEntity(ha, "switch.new", { unique_id: "U", platform: "hue" });
+    await manager.refreshDevices();
+    await manager.refreshDevices();
+
+    // biome-ignore lint/suspicious/noExplicitAny: read the private logger
+    const info = (manager as any).log.info as ReturnType<typeof vi.fn>;
+    const hints = info.mock.calls.filter((c) =>
+      String(c[0]).includes("Stable Device Identity"),
+    );
+    const after = await read(manager, "switch.new");
+    if (stable) {
+      expect(hints).toHaveLength(0);
+      expect(after!.number).toBe(before!.number);
+      return;
+    }
+    expect(hints).toEqual([
+      [
+        "Entity switch.old was renamed to switch.new, controllers will see it as a new device. The Stable Device Identity option keeps the endpoint across renames",
+      ],
+    ]);
+    // unchanged: new endpoint, old one waits out the removal grace
+    expect(after!.id).not.toBe(before!.id);
+    expect(after!.number).not.toBe(before!.number);
+    expect((await read(manager, "switch.old"))?.number).toBe(before!.number);
+  });
+
   it("a second entity on a taken endpoint id is a failed entity naming the holder", async () => {
     const ha = makeHa();
     setEntity(ha, "switch.one");
@@ -1702,5 +1775,40 @@ describe("registry snapshot follows Home Assistant (#467)", () => {
     expect(after!.nodeLabel).toBe("Registry New");
     expect(after!.number).toBe(before!.number);
     expect(after!.id).toBe(before!.id);
+  });
+});
+
+// #555: the alias rides on the registry entry, an alias edit must reach
+// nodeLabel live without moving the endpoint or its identity
+describe("entity alias as nodeLabel (#555)", () => {
+  it("an alias change reaches nodeLabel with preferEntityAlias", async () => {
+    const ha = makeHa();
+    setEntity(ha, "switch.lamp", { unique_id: "U", platform: "hue" });
+    ha.entities["switch.lamp"].aliases = [null, "Desk Lamp"];
+    const manager = await buildManager(
+      ha,
+      makeProvider("bridge-555-alias", { preferEntityAlias: true }),
+      new FakeMappingStorage(),
+      new FakeIdentityStorage(),
+    );
+
+    await manager.refreshDevices();
+    const before = await read(manager, "switch.lamp");
+    expect(before!.nodeLabel).toBe("Desk Lamp");
+
+    ha.entities["switch.lamp"] = {
+      entity_id: "switch.lamp",
+      unique_id: "U",
+      platform: "hue",
+      aliases: ["Reading Lamp"],
+    };
+    await manager.refreshDevices();
+
+    const after = await read(manager, "switch.lamp");
+    expect(after!.nodeLabel).toBe("Reading Lamp");
+    expect(after!.number).toBe(before!.number);
+    expect(after!.id).toBe(before!.id);
+    expect(after!.uniqueId).toBe(before!.uniqueId);
+    expect(after!.serialNumber).toBe(before!.serialNumber);
   });
 });

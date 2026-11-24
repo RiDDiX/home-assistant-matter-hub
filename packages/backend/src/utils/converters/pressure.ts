@@ -5,13 +5,16 @@
  *
  * @param pressure - The raw pressure value
  * @param unit - The unit of measurement (e.g. "hPa", "mbar", "kPa", "Pa", "bar", "cbar", "psi", "inHg", "mmHg")
+ * @param assumeHpa - Treat missing or unrecognized units as hPa
  * @returns The pressure in hPa, or undefined if conversion is not possible
  */
 export function convertPressureToHpa(
   pressure: number,
-  unit: string | undefined,
+  unit: unknown,
+  assumeHpa = true,
 ): number | undefined {
-  const normalizedUnit = unit?.toLowerCase();
+  const normalizedUnit =
+    typeof unit === "string" ? unit.toLowerCase() : undefined;
   if (normalizedUnit === "pa") {
     return pressure / 100;
   }
@@ -36,6 +39,5 @@ export function convertPressureToHpa(
   if (normalizedUnit === "mmhg") {
     return pressure * 1.33322;
   }
-  // Assume hPa by default
-  return pressure;
+  return assumeHpa ? pressure : undefined;
 }

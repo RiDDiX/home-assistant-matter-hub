@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { BridgeDataProvider } from "./bridge-data-provider.js";
 import {
   DEAD_SESSION_TIMEOUT_MS,
+  FAST_DEAD_SESSION_TIMEOUT_MS,
   PRIMING_GRACE_MS,
   STALE_SESSION_QUIET_WINDOW_MS,
 } from "./session-rotation.js";
@@ -43,6 +44,9 @@ function fakeSession(id: number, subs = 0): FakeSession {
   };
 }
 
+// a commissioner holds the failsafe while its CASE session has no subscription
+let failsafeArmed = false;
+
 function makeSupervisor(
   sessions: FakeSession[],
   featureFlags: object = {},
@@ -79,6 +83,8 @@ function makeSupervisor(
   };
   const fabricManager = { events: { added: event("fabricAdded") } };
   const env = {
+    has: (type: { name?: string }) =>
+      type?.name === "FailsafeContext" && failsafeArmed,
     get: (type: { name?: string }) =>
       type?.name === "InteractionServer"
         ? interactionServer
@@ -124,6 +130,7 @@ function makeSupervisor(
 
 beforeEach(() => {
   vi.useFakeTimers();
+  failsafeArmed = false;
 });
 
 afterEach(() => {
@@ -197,6 +204,46 @@ describe("0-sub session replaced by a new session", () => {
   });
 });
 
+describe("armed failsafe under fastSessionRecovery", () => {
+  it("dead session timer closes nothing until the failsafe ends", async () => {
+    const lost = fakeSession(1);
+    const phone = fakeSession(2);
+    phone.peerNodeId = 7n;
+    const { handlers } = makeSupervisor([lost, phone], {
+      fastSessionRecovery: true,
+    });
+    failsafeArmed = true;
+
+    handlers.subscriptionsChanged?.(lost as never);
+    await vi.advanceTimersByTimeAsync(FAST_DEAD_SESSION_TIMEOUT_MS * 3);
+    expect(phone.initiateClose).not.toHaveBeenCalled();
+    expect(lost.initiateClose).not.toHaveBeenCalled();
+
+    failsafeArmed = false;
+    await vi.advanceTimersByTimeAsync(FAST_DEAD_SESSION_TIMEOUT_MS);
+    expect(phone.initiateClose).toHaveBeenCalled();
+    expect(lost.initiateClose).toHaveBeenCalled();
+  });
+
+  it("replaced session timer waits for the failsafe to end", async () => {
+    const old = fakeSession(1);
+    const fresh = fakeSession(2, 1);
+    const { handlers } = makeSupervisor([old, fresh], {
+      fastSessionRecovery: true,
+    });
+    failsafeArmed = true;
+
+    handlers.added?.(fresh as never);
+    await vi.advanceTimersByTimeAsync(PRIMING_GRACE_MS * 2);
+    expect(old.initiateClose).not.toHaveBeenCalled();
+
+    failsafeArmed = false;
+    await vi.advanceTimersByTimeAsync(FAST_DEAD_SESSION_TIMEOUT_MS);
+    expect(old.initiateClose).toHaveBeenCalled();
+    expect(fresh.initiateClose).not.toHaveBeenCalled();
+  });
+});
+
 describe("session deleted", () => {
   it("clears its stale timer", async () => {
     const s = fakeSession(1);
@@ -208,6 +255,41 @@ describe("session deleted", () => {
     list.splice(0);
     handlers.deleted?.(s as never);
     expect(internals.staleSessionTimers.size).toBe(0);
+  });
+});
+
+describe("session closed log level", () => {
+  const closedAt = (fn: ReturnType<typeof vi.fn>) =>
+    fn.mock.calls.filter((c) => String(c[0]).startsWith("Session closed:"))
+      .length;
+
+  it("info for a stale close the bridge started", async () => {
+    const s = fakeSession(1, 1);
+    s.timestamp = Time.nowUs - STALE_SESSION_QUIET_WINDOW_MS;
+    const { handlers, list, log } = makeSupervisor([s]);
+    handlers.subscriptionsChanged?.(s as never);
+    s.subscriptions.size = 0;
+    handlers.subscriptionsChanged?.(s as never);
+    await vi.advanceTimersByTimeAsync(DEAD_SESSION_TIMEOUT_MS);
+    expect(s.initiateClose).toHaveBeenCalled();
+
+    list.splice(0);
+    handlers.deleted?.(s as never);
+    expect(closedAt(log.info)).toBe(1);
+    expect(closedAt(log.warn)).toBe(0);
+  });
+
+  it("warn when a subscribed peer loses its last session", () => {
+    const s = fakeSession(1, 1);
+    const { handlers, list, log } = makeSupervisor([s]);
+    handlers.subscriptionsChanged?.(s as never);
+
+    list.splice(0);
+    handlers.deleted?.(s as never);
+    expect(log.warn).toHaveBeenCalledWith(
+      "Session closed: id=1 peer=99 | remaining sessions=0",
+    );
+    expect(closedAt(log.info)).toBe(0);
   });
 });
 
@@ -346,6 +428,60 @@ describe("wedge watchdog per peer", () => {
 
   it("v2 flags it when the peer is command silent on all its sessions", async () => {
     expect(await olderV2Flagged(false)).toBe(true);
+  });
+});
+
+describe("subscription ended by the peer side (#543)", () => {
+  function watched() {
+    const s = fakeSession(1, 1);
+    const subHandlers: {
+      added?: (sub: unknown) => void;
+      deleted?: (sub: unknown) => void;
+    } = {};
+    Object.assign(s.subscriptions, {
+      added: { on: (fn: (sub: unknown) => void) => (subHandlers.added = fn) },
+      deleted: {
+        on: (fn: (sub: unknown) => void) => (subHandlers.deleted = fn),
+      },
+    });
+    const harness = makeSupervisor([s]);
+    const sub = { subscriptionId: 0x1a2b, isTerminated: true };
+    subHandlers.added?.(sub);
+    const ended = () =>
+      harness.log.info.mock.calls.filter((c) =>
+        String(c[0]).includes("ended after"),
+      );
+    return { s, sub, subHandlers, ended, ...harness };
+  }
+
+  it("names peer, fabric, session and lifetime", async () => {
+    const { sub, subHandlers, ended, log } = watched();
+    await vi.advanceTimersByTimeAsync(90_000);
+    subHandlers.deleted?.(sub);
+    expect(ended()).toEqual([
+      [
+        "Subscription 00001a2b on session 1 (peer 99, fabric 1) ended after 90s",
+      ],
+    ]);
+    expect(log.debug).toHaveBeenCalledWith(
+      expect.stringContaining("wedge v2 give-up recorded"),
+    );
+  });
+
+  it("stays quiet when the session is closing", async () => {
+    const { s, sub, subHandlers, ended } = watched();
+    await vi.advanceTimersByTimeAsync(90_000);
+    s.isClosing = true;
+    subHandlers.deleted?.(sub);
+    expect(ended()).toEqual([]);
+  });
+
+  it("stays quiet when a new subscribe replaced it", async () => {
+    const { s, sub, subHandlers, ended, imRequest } = watched();
+    await vi.advanceTimersByTimeAsync(90_000);
+    imRequest(s, MessageType.SubscribeRequest);
+    subHandlers.deleted?.(sub);
+    expect(ended()).toEqual([]);
   });
 });
 

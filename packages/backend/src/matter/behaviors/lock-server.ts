@@ -465,7 +465,8 @@ export async function applyClearCredential(
   }
   if (
     request.credential.credentialType === DoorLock.CredentialType.Pin &&
-    normalizeSupportedIndex(request.credential.credentialIndex) !== null
+    (normalizeSupportedIndex(request.credential.credentialIndex) !== null ||
+      request.credential.credentialIndex === 0xfffe)
   ) {
     await clearStoredAndPhysical(env, entityId, passthrough);
   }
@@ -515,7 +516,7 @@ export async function applyClearUser(
     return;
   }
   const storage = env.get(LockCredentialStorage);
-  const hadCredential = storage.hasCredential(entityId);
+  const hadCredential = !!storage.getCredential(entityId)?.pinCodeHash;
   await clearStoredAndPhysical(
     env,
     entityId,

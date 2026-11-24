@@ -1,6 +1,13 @@
+import {
+  type BridgeData,
+  type HomeAssistantEntityState,
+  HomeAssistantMatcherType,
+} from "@home-assistant-matter-hub/common";
 import { Logger } from "@matter/general";
 import type { Connection } from "home-assistant-js-websocket";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { BridgeDataProvider } from "../bridges/bridge-data-provider.js";
+import { BridgeRegistry } from "../bridges/bridge-registry.js";
 import type { HomeAssistantClient } from "./home-assistant-client.js";
 import { HomeAssistantRegistry } from "./home-assistant-registry.js";
 
@@ -351,6 +358,85 @@ describe("HomeAssistantRegistry", () => {
     expect(registry.labels).toEqual([{ label_id: "voice_2", name: "Voice" }]);
   });
 
+  it.each([
+    ["config/label_registry/list", { label_id: "voice_2", name: "Voice" }],
+    ["config/area_registry/list", { area_id: "kitchen", name: "Kitchen" }],
+  ])("retries a first load whose %s query fails", async (type, item) => {
+    const fake = makeConnection();
+    let failures = 2;
+    fake.connection.sendMessagePromise = vi.fn((message: { type: string }) => {
+      if (message.type !== type) return Promise.resolve([]);
+      if (failures-- > 0) return Promise.reject(new Error("timed out"));
+      return Promise.resolve([item]);
+    }) as unknown as Connection["sendMessagePromise"];
+    const client = {
+      connection: fake.connection,
+      haRunning: true,
+    } as unknown as HomeAssistantClient & { haRunning: boolean };
+    const registry = new HomeAssistantRegistry(client, defaultOptions);
+    const initPromise = registry.construction;
+    await vi.runAllTimersAsync();
+    await initPromise;
+
+    // one commit only, and it carries the list
+    expect(registry.snapshotGeneration).toBe(1);
+    expect(registry.labels.length + registry.areas.size).toBe(1);
+  });
+
+  // HA answers a failed command with { code, message }; a dropped socket
+  // rejects with the result wrapper around code 3
+  const listFailures: [string, () => unknown, number, number][] = [
+    [
+      "unknown_command",
+      () => ({ code: "unknown_command", message: "x" }),
+      1,
+      0,
+    ],
+    ["unauthorized", () => ({ code: "unauthorized", message: "x" }), 1, 0],
+    [
+      "unknown_error",
+      () => ({ code: "unknown_error", message: "x" }),
+      4,
+      14_000,
+    ],
+    ["timeout", () => new Error("timed out"), 4, 14_000],
+    // fetchRegistries retries a drop once inside the attempt
+    ["connection lost", lostError, 7, 14_000],
+  ];
+  describe.each([
+    ["config/label_registry/list"],
+    ["config/area_registry/list"],
+  ])("first load with a failing %s", (type) => {
+    it.each(listFailures)("%s", async (_, error, calls, elapsed) => {
+      const fake = makeConnection();
+      let listCalls = 0;
+      fake.connection.sendMessagePromise = vi.fn(
+        (message: { type: string }) => {
+          if (message.type !== type) return Promise.resolve([]);
+          listCalls++;
+          return Promise.reject(error());
+        },
+      ) as unknown as Connection["sendMessagePromise"];
+      const client = {
+        connection: fake.connection,
+        haRunning: true,
+      } as unknown as HomeAssistantClient & { haRunning: boolean };
+      const start = Date.now();
+      const registry = new HomeAssistantRegistry(client, defaultOptions);
+      let doneAt = 0;
+      const initPromise = registry.construction.then(() => {
+        doneAt = Date.now();
+      });
+      await vi.runAllTimersAsync();
+      await initPromise;
+      expect(listCalls).toBe(calls);
+      expect(doneAt - start).toBe(elapsed);
+      // loads without it after the last strict attempt, as before
+      expect(registry.snapshotGeneration).toBe(1);
+      expect(registry.labels.length + registry.areas.size).toBe(0);
+    });
+  });
+
   it("picks up a label rename with an unchanged id", async () => {
     const fake = makeConnection();
     let labelName = "Voice";
@@ -399,6 +485,32 @@ describe("HomeAssistantRegistry", () => {
     defaultModel = "New";
     await expect(registry.reload()).resolves.toBe(true);
     expect(registry.devices.d1?.default_model).toBe("New");
+  });
+
+  it("reconciles when a classless sensor first reports a measurement unit", async () => {
+    const fake = makeConnection();
+    const entity_id = "sensor.template_humidity";
+    let value = "unavailable";
+    let attributes: Record<string, string> = {};
+    fake.connection.sendMessagePromise = vi.fn((message: { type: string }) =>
+      Promise.resolve(
+        message.type === "get_states"
+          ? [{ entity_id, state: value, attributes }]
+          : [],
+      ),
+    ) as unknown as Connection["sendMessagePromise"];
+    const registry = new HomeAssistantRegistry(
+      { connection: fake.connection, haRunning: true } as HomeAssistantClient,
+      defaultOptions,
+    );
+    await vi.runAllTimersAsync();
+    await registry.construction;
+
+    value = "48";
+    attributes = { unit_of_measurement: "%" };
+    await expect(registry.reload()).resolves.toBe(true);
+    value = "54";
+    await expect(registry.reload()).resolves.toBe(false);
   });
 
   // identity-resolver keys endpoints on it
@@ -1021,6 +1133,79 @@ describe("HomeAssistantRegistry", () => {
     expect(registry.states["light.b"].state).toBe("on");
   });
 
+  it("refreshes class filters when a subscription update wins over an unchanged poll", async () => {
+    const fake = makeConnection();
+    const entityId = "sensor.a";
+    const previous: HomeAssistantEntityState = {
+      entity_id: entityId,
+      state: "23",
+      attributes: { device_class: "temperature" },
+      last_changed: "2026-01-01T00:00:01Z",
+      last_updated: "2026-01-01T00:00:01Z",
+      context: { id: "poll" },
+    };
+    let pendingStates: Promise<HomeAssistantEntityState[]> | undefined;
+    const send = vi.fn((message: { type: string }) =>
+      message.type === "get_states"
+        ? (pendingStates ?? Promise.resolve([previous]))
+        : Promise.resolve([]),
+    );
+    fake.connection.sendMessagePromise =
+      send as unknown as Connection["sendMessagePromise"];
+    const registry = new HomeAssistantRegistry(
+      { connection: fake.connection, haRunning: true } as HomeAssistantClient,
+      defaultOptions,
+    );
+    await vi.runAllTimersAsync();
+    await registry.construction;
+    const bridge = new BridgeRegistry(
+      registry,
+      new BridgeDataProvider({
+        filter: {
+          include: [
+            {
+              type: HomeAssistantMatcherType.DeviceClass,
+              value: "temperature",
+            },
+          ],
+          exclude: [],
+          includeMode: "any",
+        },
+      } as unknown as BridgeData),
+    );
+    const onRefresh = vi.fn(() => {
+      bridge.refresh();
+      return true;
+    });
+    registry.enableAutoRefresh(onRefresh);
+    const interval = defaultOptions.refreshInterval * 1000;
+    await vi.advanceTimersByTimeAsync(interval);
+    expect(bridge.entityIds).toEqual([entityId]);
+    onRefresh.mockClear();
+    send.mockClear();
+
+    let finishPoll!: (states: HomeAssistantEntityState[]) => void;
+    pendingStates = new Promise((resolve) => {
+      finishPoll = resolve;
+    });
+    await vi.advanceTimersByTimeAsync(interval);
+    expect(send).toHaveBeenCalledWith({ type: "get_states" });
+    bridge.mergeExternalStates({
+      [entityId]: {
+        ...previous,
+        attributes: { device_class: "humidity" },
+        last_updated: "2026-01-01T00:00:03Z",
+      },
+    });
+    finishPoll([previous]);
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(onRefresh).toHaveBeenCalledOnce();
+    expect(registry.states[entityId].attributes.device_class).toBe("humidity");
+    expect(bridge.entityIds).toEqual([]);
+    registry.disableAutoRefresh();
+  });
+
   it("keeps the newer snapshot when an older reload finishes last", async () => {
     const fake = makeConnection();
     const entityLists: unknown[] = [];
@@ -1062,5 +1247,100 @@ describe("HomeAssistantRegistry", () => {
     expect(Object.keys(registry.entities)).toEqual(["light.new"]);
     entityLists.push([{ entity_id: "light.new" }]);
     await expect(registry.reload()).resolves.toBe(false);
+  });
+
+  describe("entity aliases (#555)", () => {
+    function makeAliasRegistry(wanted: boolean) {
+      const fake = makeConnection();
+      const ha = {
+        aliases: ["Desk Lamp"] as (string | null)[],
+        fail: false,
+        name: "Lamp",
+      };
+      const send = vi.fn((message: { type: string; entity_ids?: string[] }) => {
+        if (message.type === "config/entity_registry/list") {
+          return Promise.resolve([
+            { entity_id: "light.a", name: ha.name },
+            { entity_id: "light.off", disabled_by: "user" },
+          ]);
+        }
+        if (message.type === "config/entity_registry/get_entries") {
+          if (ha.fail) {
+            return Promise.reject({ code: "unknown_command" });
+          }
+          return Promise.resolve(
+            Object.fromEntries(
+              (message.entity_ids ?? []).map((id) => [
+                id,
+                { entity_id: id, aliases: ha.aliases },
+              ]),
+            ),
+          );
+        }
+        return Promise.resolve([]);
+      });
+      fake.connection.sendMessagePromise =
+        send as unknown as Connection["sendMessagePromise"];
+      const client = {
+        connection: fake.connection,
+        haRunning: true,
+      } as unknown as HomeAssistantClient;
+      const registry = new HomeAssistantRegistry(
+        client,
+        defaultOptions,
+        () => wanted,
+      );
+      const aliasCalls = () =>
+        send.mock.calls.filter(
+          ([m]) => m.type === "config/entity_registry/get_entries",
+        );
+      return { registry, ha, aliasCalls };
+    }
+
+    it("sends no alias query while no bridge wants aliases", async () => {
+      const { registry, aliasCalls } = makeAliasRegistry(false);
+      await vi.runAllTimersAsync();
+      await registry.construction;
+      await registry.reload();
+      expect(aliasCalls()).toHaveLength(0);
+      expect(registry.entities["light.a"].aliases).toBeUndefined();
+    });
+
+    it("puts aliases on enabled entries and skips disabled ones", async () => {
+      const { registry, aliasCalls } = makeAliasRegistry(true);
+      await vi.runAllTimersAsync();
+      await registry.construction;
+      expect(aliasCalls()).toHaveLength(1);
+      expect(aliasCalls()[0][0].entity_ids).toEqual(["light.a"]);
+      expect(registry.entities["light.a"].aliases).toEqual(["Desk Lamp"]);
+      expect(registry.entities["light.off"].aliases).toBeUndefined();
+    });
+
+    it("reports an alias only edit as a change", async () => {
+      const { registry, ha } = makeAliasRegistry(true);
+      await vi.runAllTimersAsync();
+      await registry.construction;
+      await expect(registry.reload()).resolves.toBe(false);
+      ha.aliases = [null, "Reading Lamp"];
+      await expect(registry.reload()).resolves.toBe(true);
+      expect(registry.entities["light.a"].aliases).toEqual([
+        null,
+        "Reading Lamp",
+      ]);
+    });
+
+    it("keeps the last aliases when the alias query fails", async () => {
+      const { registry, ha } = makeAliasRegistry(true);
+      await vi.runAllTimersAsync();
+      await registry.construction;
+      ha.fail = true;
+      await expect(registry.reload()).resolves.toBe(false);
+      expect(registry.entities["light.a"].aliases).toEqual(["Desk Lamp"]);
+      // a full rebuild on fresh entries still carries the last aliases
+      ha.name = "Lamp 2";
+      await expect(registry.reload()).resolves.toBe(true);
+      expect(registry.entities["light.a"].name).toBe("Lamp 2");
+      expect(registry.entities["light.a"].aliases).toEqual(["Desk Lamp"]);
+    });
   });
 });

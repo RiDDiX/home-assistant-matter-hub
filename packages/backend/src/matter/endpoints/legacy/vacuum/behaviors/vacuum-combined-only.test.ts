@@ -159,4 +159,21 @@ describe("combined-only cleaning modes", () => {
       createCleanModeConfig(fan, water, options).getCurrentMode(entity, agent),
     ).toBe(1);
   });
+  it.each([
+    ["mop", ["vacuum"]],
+    ["vac_and_mop", ["vacuum"]],
+    ["mop", ["vacuum", "vacuum_then_mop"]],
+  ])("keeps the reported mode inside the advertised modes when the live clean mode is %s but only %j was registered", (live, registered) => {
+    const { agent, entity } = fixture(["vacuum", "mop", "vac_and_mop"], live);
+    entity.attributes.fan_speed = "unknown";
+    const advertised = buildSupportedModes(fan, water, registered).map(
+      (mode) => mode.mode,
+    );
+    const current = createCleanModeConfig(
+      fan,
+      water,
+      registered,
+    ).getCurrentMode(entity, agent);
+    expect(advertised).toContain(current);
+  });
 });

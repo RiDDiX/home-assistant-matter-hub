@@ -27,6 +27,10 @@ const logger = Logger.get("HomeAssistantRegistry");
 // shortcut: groups still incomplete after 60s use auto-refresh; revisit if controllers still rediscover devices.
 const STARTUP_WAIT_MS = 60_000;
 const INCOMPLETE_REFRESH_RETRIES = 3;
+// a failed label or area query fails only the first attempts of the first
+// load, later ones load without it so a query that never works cannot block
+// the snapshot. A refusal no retry can change is never retried.
+const STRICT_LIST_ATTEMPTS = 3;
 
 export type HomeAssistantDevices = Record<string, HomeAssistantDeviceRegistry>;
 export type HomeAssistantEntities = Record<string, HomeAssistantEntityRegistry>;
@@ -86,6 +90,8 @@ export class HomeAssistantRegistry extends Service {
   constructor(
     private readonly client: HomeAssistantClient,
     private readonly options: HomeAssistantClientProps,
+    // aliases cost an extra query, only fetched while a bridge uses them
+    private readonly wantsAliases: () => boolean = () => false,
   ) {
     super("HomeAssistantRegistry");
   }
@@ -244,23 +250,30 @@ export class HomeAssistantRegistry extends Service {
 
   async reload(): Promise<boolean> {
     const seq = ++this.reloadsStarted;
-    return await withRetry(() => this.fetchRegistries(seq), {
-      maxAttempts: 10,
-      baseDelayMs: 2000,
-      maxDelayMs: 30000,
-      onRetry: (attempt, error, delayMs) => {
-        logger.warn(
-          `Registry fetch failed (attempt ${attempt}), retrying in ${delayMs}ms:`,
-          error,
-        );
+    let attempt = 0;
+    return await withRetry(
+      () => this.fetchRegistries(seq, ++attempt <= STRICT_LIST_ATTEMPTS),
+      {
+        maxAttempts: 10,
+        baseDelayMs: 2000,
+        maxDelayMs: 30000,
+        onRetry: (attempt, error, delayMs) => {
+          logger.warn(
+            `Registry fetch failed (attempt ${attempt}), retrying in ${delayMs}ms:`,
+            error,
+          );
+        },
       },
-    });
+    );
   }
 
-  private async fetchRegistries(seq: number): Promise<boolean> {
+  private async fetchRegistries(
+    seq: number,
+    strict: boolean,
+  ): Promise<boolean> {
     await this.waitForConnection(30_000);
     try {
-      return await this.runRegistryQueries(seq);
+      return await this.runRegistryQueries(seq, strict);
     } catch (e) {
       if (!isConnectionLost(e)) throw e;
       // WS dropped mid-flight; the library auto-reconnects. Wait for the
@@ -268,7 +281,7 @@ export class HomeAssistantRegistry extends Service {
       // by withRetry's backoff.
       logger.debug("Registry fetch hit connection drop, waiting for reconnect");
       await this.waitForConnection(60_000);
-      return await this.runRegistryQueries(seq);
+      return await this.runRegistryQueries(seq, strict);
     }
   }
 
@@ -295,14 +308,17 @@ export class HomeAssistantRegistry extends Service {
     });
   }
 
-  private async runRegistryQueries(seq: number): Promise<boolean> {
+  private async runRegistryQueries(
+    seq: number,
+    strict: boolean,
+  ): Promise<boolean> {
     // Trust must hold for the WHOLE fetch: a flip to RUNNING mid-flight
     // would otherwise let a STARTING-era partial snapshot commit (#438).
     const trustedAtStart = this.client.haRunning;
     const connection = this.client.connection;
 
     // Fire the five HA queries in parallel. Label and area registries aren't
-    // guaranteed on older HA versions, so a failure there never fails the
+    // guaranteed on older HA versions, so a failure there never blocks the
     // whole reload.
     const timeoutMs = this.options.messageTimeoutMs;
     const [entityRegistry, statesList, deviceRegistry, labels, areas] =
@@ -315,13 +331,28 @@ export class HomeAssistantRegistry extends Service {
         ),
         getDeviceRegistry(connection, timeoutMs),
         // failed query: keep last labels, empty would unmount filtered
-        // endpoints (#500)
+        // endpoints (#500). With none loaded yet, retry instead of starting
+        // bridges without their label matched entities.
         getLabelRegistry(connection, timeoutMs).catch((e) => {
+          if (
+            strict &&
+            this._snapshotGeneration === 0 &&
+            !isPermanentRefusal(e)
+          ) {
+            throw e;
+          }
           logger.warn("Label registry fetch failed, keeping last labels:", e);
           return this._labels;
         }),
         // same for areas: empty flips the fingerprint and drops room names
         getAreaRegistry(connection, timeoutMs).catch((e) => {
+          if (
+            strict &&
+            this._snapshotGeneration === 0 &&
+            !isPermanentRefusal(e)
+          ) {
+            throw e;
+          }
           logger.warn("Area registry fetch failed, keeping last areas:", e);
           return Array.from(this._areas, ([area_id, name]) => ({
             area_id,
@@ -329,33 +360,14 @@ export class HomeAssistantRegistry extends Service {
           }));
         }),
       ]);
+    if (this.wantsAliases()) {
+      await this.loadAliases(entityRegistry, timeoutMs);
+    }
 
     if (seq < this.lastCommittedReload) {
       logger.debug("Discarding registry snapshot, a newer reload committed");
       return false;
     }
-
-    // Fingerprint structural registry data to detect changes.
-    // State *values* change constantly (handled by WebSocket subscription);
-    // we only check if entity/device/state IDs or key attributes changed.
-    const hash = createHash("md5");
-    for (const e of entityRegistry) {
-      hash.update(
-        `${e.entity_id}\0${e.unique_id ?? ""}\0${e.device_id ?? ""}\0${e.disabled_by ?? ""}\0${e.hidden_by ?? ""}\0${e.area_id ?? ""}\0${(e.labels ?? []).join(",")}\0${e.platform ?? ""}\0${e.entity_category ?? ""}\0${e.name ?? ""}\0${e.original_name ?? ""}\n`,
-      );
-    }
-    for (const s of statesList) {
-      hash.update(`${s.entity_id}\0${s.attributes?.device_class ?? ""}\n`);
-    }
-    for (const d of deviceRegistry) {
-      hash.update(
-        `${d.id}\0${(d.labels ?? []).join(",")}\0${d.area_id ?? ""}\0${d.name_by_user ?? ""}\0${d.name ?? ""}\0${d.model ?? ""}\0${d.model_id ?? ""}\0${d.manufacturer ?? ""}\0${d.hw_version ?? ""}\0${d.sw_version ?? ""}\0${d.serial_number ?? ""}\0${d.default_name ?? ""}\0${d.default_model ?? ""}\0${d.default_manufacturer ?? ""}\n`,
-      );
-    }
-    // name too: matchers resolve label names to ids, a rename must refresh
-    for (const l of labels) hash.update(`${l.label_id}\0${l.name}\n`);
-    for (const a of areas) hash.update(`${a.area_id}\0${a.name}\n`);
-    const fingerprint = hash.digest("hex");
 
     // A snapshot taken while HA was starting is partial. Publishing it would
     // leave entities missing from the cached registry long after HA is back,
@@ -369,8 +381,6 @@ export class HomeAssistantRegistry extends Service {
       this.lastRegistryFingerprint = "";
       return false;
     }
-    this._snapshotGeneration++;
-    this.lastCommittedReload = seq;
 
     // Always update states (values change via WebSocket, but fresh data
     // is needed for the UI and initial endpoint state)
@@ -383,6 +393,44 @@ export class HomeAssistantRegistry extends Service {
         states[id] = current;
       }
     }
+
+    // Fingerprint structural registry data to detect changes.
+    // State *values* change constantly (handled by WebSocket subscription);
+    // we only check if entity/device/state IDs or key attributes changed.
+    const hash = createHash("md5");
+    for (const e of entityRegistry) {
+      hash.update(
+        `${e.entity_id}\0${e.id ?? ""}\0${e.config_entry_id ?? ""}\0${e.unique_id ?? ""}\0${e.device_id ?? ""}\0${e.disabled_by ?? ""}\0${e.hidden_by ?? ""}\0${e.area_id ?? ""}\0${(e.labels ?? []).join(",")}\0${e.platform ?? ""}\0${e.entity_category ?? ""}\0${e.name ?? ""}\0${e.original_name ?? ""}\0${JSON.stringify(e.aliases ?? [])}\n`,
+      );
+    }
+    // merged states: a class change a subscription brought counts too
+    // shortcut: a class lost while unavailable stays remembered by the bridge
+    // filters after recovery until the next structural change or restart,
+    // hash availability here if that ever matters
+    for (const { entity_id } of statesList) {
+      const attributes = states[entity_id].attributes;
+      const deviceClass = attributes?.device_class;
+      // A manual humidity or pressure source can derive its type from its unit.
+      const unit =
+        !deviceClass && entity_id.startsWith("sensor.")
+          ? attributes?.unit_of_measurement
+          : undefined;
+      hash.update(
+        `${entity_id}\0${deviceClass ?? ""}\0${typeof unit === "string" ? unit : ""}\n`,
+      );
+    }
+    for (const d of deviceRegistry) {
+      hash.update(
+        `${d.id}\0${(d.labels ?? []).join(",")}\0${d.area_id ?? ""}\0${d.name_by_user ?? ""}\0${d.name ?? ""}\0${d.model ?? ""}\0${d.model_id ?? ""}\0${d.manufacturer ?? ""}\0${d.hw_version ?? ""}\0${d.sw_version ?? ""}\0${d.serial_number ?? ""}\0${d.default_name ?? ""}\0${d.default_model ?? ""}\0${d.default_manufacturer ?? ""}\n`,
+      );
+    }
+    // name too: matchers resolve label names to ids, a rename must refresh
+    for (const l of labels) hash.update(`${l.label_id}\0${l.name}\n`);
+    for (const a of areas) hash.update(`${a.area_id}\0${a.name}\n`);
+    const fingerprint = hash.digest("hex");
+
+    this._snapshotGeneration++;
+    this.lastCommittedReload = seq;
     this._states = states;
 
     if (fingerprint === this.lastRegistryFingerprint) {
@@ -428,6 +476,40 @@ export class HomeAssistantRegistry extends Service {
 
     return true;
   }
+
+  // the list call never carries aliases, only the extended entries do (#555)
+  private async loadAliases(
+    entityRegistry: HomeAssistantEntityRegistry[],
+    timeoutMs: number,
+  ): Promise<void> {
+    const enabled = entityRegistry.filter((e) => !e.disabled_by);
+    if (enabled.length === 0) return;
+    try {
+      const entries = await sendHaMessage<
+        Record<string, { aliases?: (string | null)[] } | null>
+      >(
+        this.client.connection,
+        {
+          type: "config/entity_registry/get_entries",
+          entity_ids: enabled.map((e) => e.entity_id),
+        },
+        timeoutMs,
+      );
+      for (const e of enabled) e.aliases = entries[e.entity_id]?.aliases;
+    } catch (e) {
+      logger.warn("Entity alias fetch failed, keeping last aliases:", e);
+      for (const entity of enabled) {
+        entity.aliases = this._entities[entity.entity_id]?.aliases;
+      }
+    }
+  }
+}
+
+// HA without that registry, or a token without its scope. Other codes such
+// as unknown_error can be startup noise and keep the retry.
+function isPermanentRefusal(e: unknown): boolean {
+  const code = (e as { code?: unknown } | null)?.code;
+  return code === "unknown_command" || code === "unauthorized";
 }
 
 function isConnectionLost(e: unknown): boolean {

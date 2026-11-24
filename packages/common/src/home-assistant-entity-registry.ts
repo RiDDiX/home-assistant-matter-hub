@@ -1,4 +1,6 @@
 export interface HomeAssistantEntityRegistry {
+  // only from config/entity_registry/get_entries, null = the entity's own name
+  aliases?: (string | null)[];
   area_id?: string;
   categories?: Record<string, unknown>;
   config_entry_id?: unknown;

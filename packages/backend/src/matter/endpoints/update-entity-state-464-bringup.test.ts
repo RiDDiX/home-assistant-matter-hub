@@ -1,7 +1,11 @@
 import type { HomeAssistantEntityState } from "@home-assistant-matter-hub/common";
+import { Logger } from "@matter/general";
 import type { Endpoint } from "@matter/main";
-import { describe, expect, it } from "vitest";
-import { updateEntityState } from "./update-entity-state.js";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  updateEntityState,
+  warnOnFailedUpdate,
+} from "./update-entity-state.js";
 
 // #464: two covers moved in the same millisecond, the second setStateOf could
 // not take the endpoint lock synchronously and matter.js dropped the position
@@ -76,5 +80,35 @@ describe("#464 serialized endpoint state writes", () => {
     await expect(
       updateEntityState(endpoint, state("open")),
     ).resolves.toBeUndefined();
+  });
+});
+
+describe("warnOnFailedUpdate", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("warns once with the entity id and rejects with the same error", async () => {
+    const warn = vi.spyOn(Logger.prototype, "warn");
+    const error = new Error("write failed");
+
+    const result = warnOnFailedUpdate("fan.test", Promise.reject(error));
+    await expect(result).rejects.toBe(error);
+
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith(
+      "State update failed for fan.test:",
+      error,
+    );
+  });
+
+  it("logs nothing when the update resolves", async () => {
+    const warn = vi.spyOn(Logger.prototype, "warn");
+
+    await expect(
+      warnOnFailedUpdate("fan.test", Promise.resolve()),
+    ).resolves.toBeUndefined();
+
+    expect(warn).not.toHaveBeenCalled();
   });
 });

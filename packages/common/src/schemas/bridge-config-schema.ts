@@ -152,7 +152,9 @@ const featureFlagSchema: JSONSchema7 = {
     coverDoNotInvertPercentage: {
       title: "Do not invert Percentages for Covers",
       description:
-        "Do not invert the percentage of covers to match Home Assistant (not Matter compliant)",
+        "Report Home Assistant cover percentages without inversion (not Matter compliant). " +
+        'The numbers come out the same as with "Use Home Assistant Percentage for Covers". ' +
+        "Kept for older setups.",
       type: "boolean",
       default: false,
     },
@@ -160,10 +162,10 @@ const featureFlagSchema: JSONSchema7 = {
     coverUseHomeAssistantPercentage: {
       title: "Use Home Assistant Percentage for Covers (Alexa-friendly)",
       description:
-        "Display cover percentages matching Home Assistant values in Matter controllers like Alexa. " +
-        "This makes the displayed percentage match what you see in Home Assistant, but the semantic meaning differs: " +
-        "in HA, higher percentage = more open; in Alexa, higher percentage is typically interpreted as more closed. " +
-        "Open/Close commands will still work correctly.",
+        "Controllers show and accept the same number as Home Assistant, so 80% in Home Assistant reads 80%. " +
+        "Matter counts 100% as closed, so a controller may still label the number as closed. " +
+        "Open and close commands keep working. " +
+        "A request for exactly 0% opens and exactly 100% closes, because controllers such as Alexa send open and close that way.",
       type: "boolean",
       default: false,
     },
@@ -171,8 +173,8 @@ const featureFlagSchema: JSONSchema7 = {
     coverSwapOpenClose: {
       title: "Swap Open/Close for Covers",
       description:
-        "Swap open/close commands and invert position reporting for covers. Enable this if Alexa voice commands " +
-        "are reversed (saying 'close' opens the blinds and vice versa).",
+        "Swap the open and close commands for every cover on this bridge and report positions without inversion, as Home Assistant numbers. " +
+        "To swap the commands of a single cover and leave its percentage alone, use the per-cover option in the entity mapping.",
       type: "boolean",
       default: false,
     },
@@ -207,8 +209,7 @@ const featureFlagSchema: JSONSchema7 = {
     autoHumidityMapping: {
       title: "Auto Humidity Mapping",
       description:
-        "Automatically combine humidity sensors with temperature sensors from the same Home Assistant device. " +
-        "When enabled, humidity sensors will be merged into temperature sensors to create combined TemperatureHumiditySensor devices.",
+        "Automatically include a humidity endpoint from the same Home Assistant device as a selected temperature sensor.",
       type: "boolean",
       default: true,
     },
@@ -216,8 +217,7 @@ const featureFlagSchema: JSONSchema7 = {
     autoPressureMapping: {
       title: "Auto Pressure Mapping",
       description:
-        "Automatically combine pressure sensors with temperature sensors from the same Home Assistant device. " +
-        "When enabled, pressure sensors will be merged into temperature sensors to create combined sensor devices.",
+        "Automatically include a pressure endpoint from the same Home Assistant device as a selected temperature sensor.",
       type: "boolean",
       default: true,
     },
@@ -226,7 +226,7 @@ const featureFlagSchema: JSONSchema7 = {
       title: "Auto Composed Devices",
       description:
         "A temperature sensor with its humidity and pressure sensors becomes one device with a sub-device per reading, " +
-        "battery on the parent. Off, they share one endpoint and Apple Home shows no humidity. Also forces battery, " +
+        "battery on the parent. With this flag off, the readings use separate endpoints. Also forces battery, " +
         "humidity and pressure auto-mapping on and unlocks Composed Sub-Entities and air purifier grouping. " +
         "Controllers see new devices; existing ones change shape after a bridge restart.",
       type: "boolean",
@@ -271,6 +271,17 @@ const featureFlagSchema: JSONSchema7 = {
         "commands that relied on the short entity name. " +
         "Resolution order: customName → registry name → registry original_name → friendly_name → entity_id. " +
         "Matter has no alias concept, this only changes which single name is reported.",
+      type: "boolean",
+      default: false,
+    },
+
+    preferEntityAlias: {
+      title: "Prefer Entity Alias",
+      description:
+        "Use the Home Assistant entity alias (entity settings, Voice assistants, Aliases) as nodeLabel. " +
+        "With several aliases the first one is used. Home Assistant before 2026.4 does not keep alias order, " +
+        "so use a single alias there. A per-entity custom name still takes precedence, " +
+        "entities without an alias keep their normal name.",
       type: "boolean",
       default: false,
     },

@@ -3,6 +3,7 @@ import {
   CoverDeviceState,
   CoverSupportedFeatures,
   type HomeAssistantEntityState,
+  isCoverPositionInverted,
 } from "@home-assistant-matter-hub/common";
 import { Logger } from "@matter/general";
 import type { Agent } from "@matter/main";
@@ -13,10 +14,7 @@ import {
   type WindowCoveringConfig,
   WindowCoveringServer,
 } from "../../../../behaviors/window-covering-server.js";
-import {
-  adjustPositionForReading as adjustReading,
-  adjustPositionForWriting as adjustWriting,
-} from "./cover-position-utils.js";
+import { adjustPosition } from "./cover-position-utils.js";
 
 const logger = Logger.get("CoverWindowCoveringServer");
 
@@ -117,7 +115,7 @@ export const deviceClassMapping = (entity: HomeAssistantEntityState) => {
  */
 const adjustPositionForReading = (position: number, agent: Agent) => {
   const { featureFlags } = agent.env.get(BridgeDataProvider);
-  const result = adjustReading(position, featureFlags);
+  const result = adjustPosition(position, featureFlags);
   logger.debug(`adjustPositionForReading: HA=${position}%, result=${result}%`);
   return result;
 };
@@ -128,7 +126,7 @@ const adjustPositionForReading = (position: number, agent: Agent) => {
  */
 const adjustPositionForWriting = (position: number, agent: Agent) => {
   const { featureFlags } = agent.env.get(BridgeDataProvider);
-  return adjustWriting(position, featureFlags);
+  return adjustPosition(position, featureFlags);
 };
 
 /**
@@ -159,19 +157,16 @@ const shouldSwapOpenClose = (agent: Agent): boolean => {
  * fires and which space the stored positions live in. Resolved here, through
  * the very same helpers the real paths use, so it can never desync from them:
  * swapDispatch comes from shouldSwapOpenClose (per-entity mapping first), while
- * spaceInverted follows adjustPosition, which reads the BRIDGE flags only. A
- * per-entity swap therefore moves the dispatch without moving the space, and
- * printing one number for both misled three diagnosis rounds (#429).
+ * spaceInverted follows isCoverPositionInverted, which reads the BRIDGE flags
+ * only. A per-entity swap therefore moves the dispatch without moving the
+ * space, and printing one number for both misled three diagnosis rounds (#429).
  */
 const diagnosticFlags = (agent: Agent): string => {
   const { featureFlags } = agent.env.get(BridgeDataProvider);
   const useHaPercentage =
     featureFlags?.coverUseHomeAssistantPercentage === true;
   const doNotInvert = featureFlags?.coverDoNotInvertPercentage === true;
-  const skipInversion = useHaPercentage || doNotInvert;
-  const spaceInverted =
-    !skipInversion && featureFlags?.coverSwapOpenClose !== true;
-  return `useHaPercentage=${useHaPercentage} doNotInvert=${doNotInvert} swapDispatch=${shouldSwapOpenClose(agent)} spaceInverted=${spaceInverted}`;
+  return `useHaPercentage=${useHaPercentage} doNotInvert=${doNotInvert} swapDispatch=${shouldSwapOpenClose(agent)} spaceInverted=${isCoverPositionInverted(featureFlags)}`;
 };
 
 /**
@@ -256,16 +251,9 @@ const closeLiftAction = (agent: Agent) =>
 const setTiltPositionAction = (position: number, agent: Agent) => {
   // For binary tilt covers (no tilt position support), translate to open/close tilt
   if (!supportsTiltPositionControl(agent)) {
-    const adjustedPosition = adjustPositionForWriting(position, agent);
-    const shouldOpen = adjustedPosition != null && adjustedPosition >= 50;
-    const swapped = shouldSwapOpenClose(agent);
-    if (shouldOpen) {
-      return {
-        action: swapped ? "cover.close_cover_tilt" : "cover.open_cover_tilt",
-      };
-    }
+    const shouldOpen = adjustPositionForWriting(position, agent) >= 50;
     return {
-      action: swapped ? "cover.open_cover_tilt" : "cover.close_cover_tilt",
+      action: shouldOpen ? "cover.open_cover_tilt" : "cover.close_cover_tilt",
     };
   }
   return {
@@ -276,28 +264,22 @@ const setTiltPositionAction = (position: number, agent: Agent) => {
 
 // Covers with open_tilt use the dedicated services; a set-tilt-position-only
 // cover has none, so tilt open/close falls back to set_cover_tilt_position at
-// the fully open (0) / closed (100) value, invert applied like the slider (#405).
-const openTiltAction = (agent: Agent) => {
+// the HA end itself (open = 100, closed = 0), no Matter conversion (#405, #448).
+const tiltEndAction = (end: "open" | "close", agent: Agent) => {
   if (!supportsOpenCloseTilt(agent)) {
-    return setTiltPositionAction(0, agent);
+    return {
+      action: "cover.set_cover_tilt_position",
+      data: { tilt_position: end === "open" ? 100 : 0 },
+    };
   }
-  return {
-    action: shouldSwapOpenClose(agent)
-      ? "cover.close_cover_tilt"
-      : "cover.open_cover_tilt",
-  };
+  return { action: `cover.${end}_cover_tilt` };
 };
 
-const closeTiltAction = (agent: Agent) => {
-  if (!supportsOpenCloseTilt(agent)) {
-    return setTiltPositionAction(100, agent);
-  }
-  return {
-    action: shouldSwapOpenClose(agent)
-      ? "cover.open_cover_tilt"
-      : "cover.close_cover_tilt",
-  };
-};
+const openTiltAction = (agent: Agent) =>
+  tiltEndAction(shouldSwapOpenClose(agent) ? "close" : "open", agent);
+
+const closeTiltAction = (agent: Agent) =>
+  tiltEndAction(shouldSwapOpenClose(agent) ? "open" : "close", agent);
 
 const config: WindowCoveringConfig = {
   getCurrentLiftPosition: (entity, agent) => {
@@ -378,12 +360,8 @@ const config: WindowCoveringConfig = {
       // HA semantics: 0=closed, 100=open
       // If adjusted position < 50, cover should be more closed → close
       // If adjusted position >= 50, cover should be more open → open
-      const shouldOpen = adjustedPosition != null && adjustedPosition >= 50;
-      const swapped = shouldSwapOpenClose(agent);
-      if (shouldOpen) {
-        return { action: swapped ? "cover.close_cover" : "cover.open_cover" };
-      }
-      return { action: swapped ? "cover.open_cover" : "cover.close_cover" };
+      const shouldOpen = adjustedPosition >= 50;
+      return { action: shouldOpen ? "cover.open_cover" : "cover.close_cover" };
     }
     return {
       action: "cover.set_cover_position",

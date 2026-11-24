@@ -401,4 +401,34 @@ describe("generic switch long press", () => {
       firedEvents.find((e) => e.type === "hamh_action")?.data,
     ).toMatchObject({ event_type: "double_press", press_count: 2 });
   });
+
+  it("numbered multi_press types report their own count", async () => {
+    const { send } = await mountRecording([
+      "multi_press_1",
+      "multi_press_2",
+      "multi_press_3",
+    ]);
+
+    await send("multi_press_1");
+    await send("multi_press_3");
+    expect(
+      firedEvents
+        .filter((e) => e.type === "hamh_action")
+        .map((e) => e.data?.press_count),
+    ).toEqual([1, 3]);
+  });
+});
+
+// Some integrations list null among event_types, the entity was skipped with
+// "Cannot read properties of null (reading 'toLowerCase')".
+describe("event_types with non-string entries", () => {
+  it.each([
+    [[null, "single_press"]],
+    [[null]],
+  ])("mounts the event entity for %j", async (types) => {
+    eventTypes = types as string[];
+    await mount({ entityId: ENTITY });
+    await server?.close();
+    await mount({ entityId: ENTITY, matterDeviceType: "doorbell" });
+  });
 });

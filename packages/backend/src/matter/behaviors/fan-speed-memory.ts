@@ -5,7 +5,8 @@ import { DatatypeModel, FieldElement } from "@matter/main/model";
 // instances per transaction, so instance fields on the fan server reset on
 // every interaction and the power-on restore never saw the captured speed.
 // Behavior state survives transactions, and quality N persists it across
-// restarts too.
+// restarts too. lastSpeedMax keeps SpeedMax stable when a start finds the
+// entity unavailable and percentage_step missing (#505).
 export class FanSpeedMemoryBehavior extends Behavior {
   static override readonly id = "fanSpeedMemory";
   declare state: FanSpeedMemoryBehavior.State;
@@ -30,6 +31,12 @@ export class FanSpeedMemoryBehavior extends Behavior {
       quality: "N",
       default: false,
     }),
+    FieldElement({
+      name: "lastSpeedMax",
+      type: "uint8",
+      quality: "N",
+      default: 0,
+    }),
   );
 }
 
@@ -38,5 +45,6 @@ export namespace FanSpeedMemoryBehavior {
     lastPercent = 0;
     lastSpeed = 0;
     lastAuto = false;
+    lastSpeedMax = 0;
   }
 }

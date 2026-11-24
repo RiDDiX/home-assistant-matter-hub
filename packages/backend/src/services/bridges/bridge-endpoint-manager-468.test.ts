@@ -107,6 +107,7 @@ interface FakeHa {
   labels: unknown[];
   snapshotGeneration: number;
   markRefreshIncomplete: ReturnType<typeof vi.fn>;
+  grantRefreshRetries: ReturnType<typeof vi.fn>;
 }
 
 function makeHa(): FakeHa {
@@ -118,6 +119,7 @@ function makeHa(): FakeHa {
     labels: [],
     snapshotGeneration: 1,
     markRefreshIncomplete: vi.fn(),
+    grantRefreshRetries: vi.fn(),
   };
   for (const id of [VACUUM, OTHER]) {
     ha.entities[id] = { entity_id: id };
@@ -657,6 +659,26 @@ describe("filter edits reconcile without the grace window (#468)", () => {
     expect(pending(manager).has(VACUUM)).toBe(true);
   });
 
+  it("keeps a vanished vacuum's room switches through the grace window", async () => {
+    const ha = makeHa();
+    ha.states[VACUUM].attributes.rooms = { "16": "Kitchen", "17": "Bedroom" };
+    const { manager, mapping } = await buildManager(ha);
+    mapping.put("bridge-468", { entityId: VACUUM, vacuumRoomSwitches: true });
+    await manager.refreshDevices();
+    const before = switchNumbers(manager);
+    expect(Object.keys(before)).toHaveLength(2);
+
+    delete ha.entities[VACUUM];
+    delete ha.states[VACUUM];
+    await expect(manager.refreshDevices()).resolves.toBe(true);
+
+    expect(new Set(mountedEntityIds(manager))).toEqual(
+      new Set([OTHER, VACUUM]),
+    );
+    expect(pending(manager).has(VACUUM)).toBe(true);
+    expect(switchNumbers(manager)).toEqual(before);
+  });
+
   it("re-including the entity mounts it again under the same endpoint number", async () => {
     const ha = makeHa();
     const { manager, provider } = await buildManager(ha);
@@ -695,6 +717,41 @@ describe("filter edits reconcile without the grace window (#468)", () => {
     setFilter(provider, ["vacuum.*"]);
     await manager.refreshDevices();
     expect(switchNumbers(manager)).toEqual(before);
+  });
+
+  it("keeps the room switch numbers when the vacuum is disabled and enabled again", async () => {
+    const ha = makeHa();
+    ha.states[VACUUM].attributes.rooms = { "16": "Kitchen", "17": "Bedroom" };
+    const { manager, mapping } = await buildManager(ha);
+    mapping.put("bridge-468", { entityId: VACUUM, vacuumRoomSwitches: true });
+    await manager.refreshDevices();
+    const before = switchNumbers(manager);
+    expect(Object.keys(before)).toHaveLength(2);
+
+    mapping.put("bridge-468", {
+      entityId: VACUUM,
+      vacuumRoomSwitches: true,
+      disabled: true,
+    });
+    await manager.refreshDevices();
+    expect(switchNumbers(manager)).toEqual({});
+
+    mapping.put("bridge-468", { entityId: VACUUM, vacuumRoomSwitches: true });
+    await manager.refreshDevices();
+    expect(switchNumbers(manager)).toEqual(before);
+  });
+
+  it("an isolation queued behind a rebuild of the same endpoint leaves the new one mounted", async () => {
+    const ha = makeHa();
+    const { manager, mapping } = await buildManager(ha);
+    await manager.refreshDevices();
+
+    mapping.put("bridge-468", { entityId: VACUUM, vacuumRoomSwitches: true });
+    const refresh = manager.refreshDevices();
+    const isolation = manager.isolateEntity(VACUUM);
+    await Promise.all([refresh, isolation]);
+
+    expect(mountedEntityIds(manager)).toEqual([OTHER, VACUUM].sort());
   });
 
   it("an isolation during a refresh leaves no room switch behind", async () => {

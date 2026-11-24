@@ -5,8 +5,10 @@ import type {
 import { HepaFilterMonitoringServer as Base } from "@matter/main/behaviors";
 import { ResourceMonitoring } from "@matter/main/clusters";
 import { applyPatchState } from "../../utils/apply-patch-state.js";
+import { HepaFilterMemoryBehavior } from "./hepa-filter-memory.js";
 import { HomeAssistantEntityBehavior } from "./home-assistant-entity-behavior.js";
 import type { ValueGetter } from "./utils/cluster-config.js";
+import { lockResource } from "./utils/lock-resource.js";
 
 export interface HepaFilterMonitoringConfig {
   /**
@@ -44,11 +46,19 @@ class HepaFilterMonitoringServerBase extends FeaturedBase {
     this.state.changeIndication = ResourceMonitoring.ChangeIndication.Ok;
 
     await super.initialize();
+    // Condition is not persisted, start from the last known one
+    const memory = this.agent.has(HepaFilterMemoryBehavior)
+      ? await this.agent.load(HepaFilterMemoryBehavior)
+      : undefined;
+    const known = memory?.state.lastCondition;
+    if (known != null) {
+      this.applyCondition(known);
+    }
     const homeAssistant = await this.agent.load(HomeAssistantEntityBehavior);
     this.update(homeAssistant.entity);
     this.reactTo(homeAssistant.onChange, this.update, {
       offline: true,
-      lock: true,
+      lock: memory ? [lockResource(this), lockResource(memory)] : true,
     });
   }
 
@@ -61,23 +71,31 @@ class HepaFilterMonitoringServerBase extends FeaturedBase {
     if (filterLife !== null) {
       // Clamp to valid range 0-100
       const condition = Math.max(0, Math.min(100, Math.round(filterLife)));
-
-      // Determine change indication based on filter life
-      let changeIndication: ResourceMonitoring.ChangeIndication;
-      if (condition <= 5) {
-        changeIndication = ResourceMonitoring.ChangeIndication.Critical;
-      } else if (condition <= 20) {
-        changeIndication = ResourceMonitoring.ChangeIndication.Warning;
-      } else {
-        changeIndication = ResourceMonitoring.ChangeIndication.Ok;
+      this.applyCondition(condition);
+      if (this.agent.has(HepaFilterMemoryBehavior)) {
+        applyPatchState(this.agent.get(HepaFilterMemoryBehavior).state, {
+          lastCondition: condition,
+        });
       }
-
-      applyPatchState(this.state, {
-        condition,
-        changeIndication,
-        degradationDirection: ResourceMonitoring.DegradationDirection.Down,
-      });
     }
+  }
+
+  private applyCondition(condition: number) {
+    // Determine change indication based on filter life
+    let changeIndication: ResourceMonitoring.ChangeIndication;
+    if (condition <= 5) {
+      changeIndication = ResourceMonitoring.ChangeIndication.Critical;
+    } else if (condition <= 20) {
+      changeIndication = ResourceMonitoring.ChangeIndication.Warning;
+    } else {
+      changeIndication = ResourceMonitoring.ChangeIndication.Ok;
+    }
+
+    applyPatchState(this.state, {
+      condition,
+      changeIndication,
+      degradationDirection: ResourceMonitoring.DegradationDirection.Down,
+    });
   }
 
   private getFilterLife(

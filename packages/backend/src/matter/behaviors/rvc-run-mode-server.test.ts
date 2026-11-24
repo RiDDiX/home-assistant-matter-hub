@@ -200,3 +200,91 @@ describe("changeToMode(Cleaning) room order (#368)", () => {
     expect(serviceArea.state.currentArea).toBe(3);
   });
 });
+
+describe("changeToMode(room mode) with a selection", () => {
+  it("does not fall back to cleanRoom when the area start throws", () => {
+    const endpoint = {};
+    const session = getSession(endpoint);
+    session.activeAreas = [];
+    const serviceArea = {
+      state: {
+        selectedAreas: [3],
+        currentArea: null as number | null,
+        progress: [] as ServiceArea.Progress[],
+      },
+    };
+    const calls: unknown[] = [];
+    const homeAssistant = {
+      state: { mapping: {} },
+      callAction: (a: unknown) => calls.push(a),
+    };
+    const ctx = {
+      endpoint,
+      state: {
+        currentMode: RvcSupportedRunMode.Idle,
+        supportedModes: [
+          { mode: RvcSupportedRunMode.Idle },
+          { mode: RvcSupportedRunMode.Cleaning },
+          { mode: 104 },
+        ],
+        config: {
+          start: () => {
+            throw new Error("dispatch failed");
+          },
+          cleanRoom: () => ({ action: "vacuum.clean_room_4" }),
+        },
+      },
+      agent: {
+        // biome-ignore lint/suspicious/noExplicitAny: stub
+        get: (beh: any) =>
+          beh === HomeAssistantEntityBehavior ? homeAssistant : serviceArea,
+      },
+      readCleanedAreaSqm: proto.readCleanedAreaSqm,
+      orderSelectedAreas: proto.orderSelectedAreas,
+      trySetCurrentArea: proto.trySetCurrentArea,
+      updateProgress: proto.updateProgress,
+      restoreParkedAreas: proto.restoreParkedAreas,
+      showRunning: proto.showRunning,
+      findAreaIdForMode: () => 4,
+    };
+
+    expect(() => proto.changeToMode.call(ctx, { newMode: 104 })).toThrow(
+      "dispatch failed",
+    );
+    expect(calls).toEqual([]);
+  });
+});
+
+describe("update while unavailable", () => {
+  it("keeps the room modes the stripped attributes no longer carry", () => {
+    const endpoint = {};
+    const roomModes = [
+      { label: "Idle", mode: RvcSupportedRunMode.Idle, modeTags: [] },
+      { label: "Cleaning", mode: RvcSupportedRunMode.Cleaning, modeTags: [] },
+      { label: "Kitchen", mode: 116, modeTags: [] },
+    ];
+    const ctx = {
+      endpoint,
+      state: {
+        currentMode: RvcSupportedRunMode.Idle,
+        supportedModes: roomModes,
+        config: {
+          getCurrentMode: () => RvcSupportedRunMode.Idle,
+          getSupportedModes: () => roomModes.slice(0, 2),
+        },
+      },
+      agent: {
+        get: () => {
+          throw new Error("no ServiceArea");
+        },
+      },
+      renameAreas: () => {},
+    };
+
+    proto.update.call(ctx, { state: { state: "unavailable", attributes: {} } });
+    expect(ctx.state.supportedModes).toEqual(roomModes);
+
+    proto.update.call(ctx, { state: { state: "docked", attributes: {} } });
+    expect(ctx.state.supportedModes).toEqual(roomModes.slice(0, 2));
+  });
+});

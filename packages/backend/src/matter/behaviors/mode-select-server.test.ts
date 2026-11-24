@@ -1,5 +1,20 @@
-import { describe, expect, it } from "vitest";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { Environment, VariableService } from "@matter/general";
+import { Endpoint, VendorId } from "@matter/main";
+import { ServerNode } from "@matter/main/node";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { BridgeDataProvider } from "../../services/bridges/bridge-data-provider.js";
+import {
+  type HomeAssistantAction,
+  HomeAssistantActions,
+} from "../../services/home-assistant/home-assistant-actions.js";
+import { AggregatorEndpoint } from "../endpoints/aggregator-endpoint.js";
+import { createLegacyEndpointType } from "../endpoints/legacy/create-legacy-endpoint-type.js";
+import { HomeAssistantEntityBehavior } from "./home-assistant-entity-behavior.js";
 import { buildSupportedModes, findCurrentMode } from "./mode-select-server.js";
+import { clampCurrentMode } from "./utils/clamp-current-mode.js";
 
 describe("buildSupportedModes", () => {
   it("keeps mode labels stable for runtime option updates", () => {
@@ -28,5 +43,140 @@ describe("buildSupportedModes", () => {
     expect(findCurrentMode(options, "option 254")).toBe(254);
     expect(findCurrentMode(options, "Option 299")).toBe(0);
     expect(findCurrentMode(options, undefined)).toBe(0);
+  });
+});
+
+describe("clampCurrentMode", () => {
+  const supportedModes = [{ mode: 0 }, { mode: 1 }, { mode: 2 }];
+
+  it("replaces a mode that left the list", () => {
+    const state = { supportedModes, currentMode: 5 };
+    clampCurrentMode(state, 0);
+    expect(state.currentMode).toBe(0);
+  });
+
+  it("keeps a mode that is still listed", () => {
+    const state = { supportedModes, currentMode: 2 };
+    clampCurrentMode(state, 0);
+    expect(state.currentMode).toBe(2);
+  });
+});
+
+describe("mode select endpoint", () => {
+  let dir: string;
+  let env: Environment;
+  let calls: HomeAssistantAction[];
+  let server: ServerNode | undefined;
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "hamh-mode-select-"));
+    env = new Environment("test", Environment.default);
+    env.get(VariableService).set("storage.path", dir);
+    calls = [];
+    env.set(HomeAssistantActions, {
+      call: (a: HomeAssistantAction) => calls.push(a),
+      // biome-ignore lint/suspicious/noExplicitAny: test stub
+    } as any);
+    env.set(
+      BridgeDataProvider,
+      new BridgeDataProvider({
+        id: "b",
+        name: "b",
+        port: 0,
+        filter: { include: [], exclude: [], includeMode: "any" },
+        featureFlags: {},
+        basicInformation: {
+          vendorId: 0xfff1,
+          vendorName: "riddix",
+          productName: "MatterHub",
+          productLabel: "Home Assistant Matter Hub",
+          hardwareVersion: 1,
+          softwareVersion: 1,
+          // biome-ignore lint/suspicious/noExplicitAny: test fixture
+        } as any,
+        // biome-ignore lint/suspicious/noExplicitAny: test fixture
+      } as any),
+    );
+  });
+
+  afterEach(async () => {
+    await server?.close().catch(() => {});
+    server = undefined;
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  const entity = (options: string[], state: string) => ({
+    entity_id: "select.mode",
+    state: { entity_id: "select.mode", state, attributes: { options } },
+  });
+
+  async function start(options: string[], state: string) {
+    const type = createLegacyEndpointType(entity(options, state) as never, {
+      entityId: "select.mode",
+    })!;
+    server = await ServerNode.create({
+      // biome-ignore lint/suspicious/noExplicitAny: env valid at runtime
+      environment: env as any,
+      id: "mode-select-node",
+      network: { port: 0 },
+      commissioning: { passcode: 20202021, discriminator: 3840 },
+      basicInformation: { vendorId: VendorId(0xfff1), productId: 0x8000 },
+    });
+    const aggregator = new AggregatorEndpoint("aggregator");
+    await server.add(aggregator);
+    const endpoint = new Endpoint(type, { id: "s" });
+    await aggregator.add(endpoint);
+    return endpoint;
+  }
+
+  it("restarts with the stored mode gone instead of failing the endpoint", async () => {
+    const first = await start(["a", "b", "c", "d", "e", "f"], "a");
+    // A seeded value is not stored, a runtime change is
+    await first.set({ modeSelect: { currentMode: 5 } });
+    await server?.close();
+
+    const second = await start(["a", "b", "c"], "b");
+    // biome-ignore lint/suspicious/noExplicitAny: read cluster state
+    expect((second.state as any).modeSelect.currentMode).toBe(1);
+  });
+
+  it.each([
+    "unavailable",
+    "Unknown",
+  ])("keeps the last mode and sends nothing while %s", async (sentinel) => {
+    const endpoint = await start(["a", "b", "c"], "c");
+    await endpoint.setStateOf(HomeAssistantEntityBehavior, {
+      entity: entity([sentinel], sentinel) as never,
+    });
+    // biome-ignore lint/suspicious/noExplicitAny: read cluster state
+    const modeSelect = (endpoint.state as any).modeSelect;
+    expect(modeSelect.currentMode).toBe(2);
+    expect(modeSelect.supportedModes).toHaveLength(3);
+
+    await endpoint.act(async (agent) => {
+      // biome-ignore lint/suspicious/noExplicitAny: drive the controller command
+      await (agent as any).modeSelect.changeToMode({ newMode: 0 });
+    });
+    expect(calls).toEqual([]);
+  });
+
+  it("follows changed options while the state is unknown", async () => {
+    const endpoint = await start(["a", "b", "c"], "c");
+    await endpoint.setStateOf(HomeAssistantEntityBehavior, {
+      entity: entity(["x", "y"], "unknown") as never,
+    });
+    // biome-ignore lint/suspicious/noExplicitAny: read cluster state
+    const modeSelect = (endpoint.state as any).modeSelect;
+    expect(modeSelect.supportedModes).toHaveLength(2);
+    expect(modeSelect.currentMode).toBe(0);
+  });
+
+  it("keeps the last mode while the state is unknown", async () => {
+    const endpoint = await start(["a", "b", "c"], "c");
+    await endpoint.setStateOf(HomeAssistantEntityBehavior, {
+      entity: entity(["a", "b", "c"], "unknown") as never,
+    });
+    // biome-ignore lint/suspicious/noExplicitAny: read cluster state
+    expect((endpoint.state as any).modeSelect.currentMode).toBe(2);
   });
 });

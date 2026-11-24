@@ -22,7 +22,19 @@ import {
   BasicInformation,
   BridgedDeviceBasicInformation,
   Descriptor,
+  PressureMeasurement,
+  RelativeHumidityMeasurement,
+  TemperatureMeasurement,
 } from "@matter/main/clusters";
+import {
+  HumiditySensorDevice,
+  PressureSensorDevice,
+  TemperatureSensorDevice,
+} from "@matter/main/devices";
+import {
+  AggregatorEndpoint,
+  BridgedNodeEndpoint,
+} from "@matter/main/endpoints";
 import { ServerNode } from "@matter/main/node";
 import { Read, Subscribe } from "@matter/main/protocol";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -32,12 +44,14 @@ import {
   type HomeAssistantAction,
   HomeAssistantActions,
 } from "../home-assistant/home-assistant-actions.js";
+import { HomeAssistantConfig } from "../home-assistant/home-assistant-config.js";
 import type { EntityIdentityStorage } from "../storage/entity-identity-storage.js";
 import type { EntityMappingStorage } from "../storage/entity-mapping-storage.js";
 import { BridgeDataProvider } from "./bridge-data-provider.js";
 import { BridgeEndpointManager } from "./bridge-endpoint-manager.js";
 import { BridgeRegistry } from "./bridge-registry.js";
 import { EntityStateProvider } from "./entity-state-provider.js";
+import { TopologyTracker } from "./topology-tracker.js";
 
 // The root ConfigurationVersion has to move once whenever the set of bridged
 // endpoints changes, HA entities included, and never for a restart that
@@ -109,6 +123,8 @@ interface FakeHa {
   areas: Map<string, string>;
   labels: unknown[];
   snapshotGeneration: number;
+  markRefreshIncomplete: () => void;
+  grantRefreshRetries: () => void;
 }
 
 function addEntity(ha: FakeHa, id: string) {
@@ -131,12 +147,17 @@ function makeHa(ids: string[]): FakeHa {
     areas: new Map(),
     labels: [],
     snapshotGeneration: 1,
+    markRefreshIncomplete: () => {},
+    grantRefreshRetries: () => {},
   };
   for (const id of ids) addEntity(ha, id);
   return ha;
 }
 
-function makeProvider(patterns: string[]): BridgeDataProvider {
+function makeProvider(
+  patterns: string[],
+  featureFlags: Record<string, boolean>,
+): BridgeDataProvider {
   return new BridgeDataProvider({
     id: BRIDGE_ID,
     name: "b",
@@ -149,7 +170,7 @@ function makeProvider(patterns: string[]): BridgeDataProvider {
       exclude: [],
       includeMode: "any",
     },
-    featureFlags: {},
+    featureFlags,
     basicInformation: {
       vendorId: 0xfff1,
       vendorName: "t",
@@ -173,11 +194,16 @@ async function startBridge(
   ha: FakeHa,
   patterns = ["vacuum.*"],
   plugins?: PluginManager,
+  featureFlags: Record<string, boolean> = {},
 ) {
-  const provider = makeProvider(patterns);
+  const provider = makeProvider(patterns, featureFlags);
   const env = new Environment("test", Environment.default);
   env.get(VariableService).set("storage.path", dir);
   env.set(BridgeDataProvider, provider);
+  env.set(HomeAssistantConfig, {
+    unitSystem: { temperature: "°C" },
+    // biome-ignore lint/suspicious/noExplicitAny: test stub
+  } as any);
   env.set(HomeAssistantActions, {
     call(_action: HomeAssistantAction) {},
     fireEvent() {},
@@ -195,6 +221,11 @@ async function startBridge(
     id: "bem-cv-node",
     network: { port: 0 },
     commissioning: { passcode: 20202021, discriminator: 3840 },
+    // A bridge without accessories needs an explicit device type to pair.
+    productDescription: {
+      name: "b",
+      deviceType: AggregatorEndpoint.deviceType,
+    },
     basicInformation: { vendorId: VendorId(0xfff1), productId: 0x8000 },
   });
   server = node;
@@ -242,30 +273,35 @@ async function stopBridge() {
 const version = () =>
   server!.stateOf(BasicInformationServer).configurationVersion;
 
+const trackerOf = (bem: BridgeEndpointManager) =>
+  (
+    bem as unknown as {
+      topology: {
+        timer?: ReturnType<typeof setTimeout>;
+        enqueue(run: () => Promise<unknown>): Promise<void>;
+        compare(): Promise<void>;
+        signature(): string;
+      };
+    }
+  ).topology;
+
 // Runs the armed settle compare now instead of after TOPOLOGY_SETTLE_MS.
 async function settle(bem: BridgeEndpointManager) {
-  const t = bem as unknown as {
-    topologyTimer?: ReturnType<typeof setTimeout>;
-    enqueueTopology(run: () => Promise<unknown>): Promise<void>;
-    compareTopology(): Promise<void>;
-  };
-  if (t.topologyTimer === undefined) return;
-  clearTimeout(t.topologyTimer);
-  t.topologyTimer = undefined;
-  await t.enqueueTopology(() => t.compareTopology());
+  const t = trackerOf(bem);
+  if (t.timer === undefined) return;
+  clearTimeout(t.timer);
+  t.timer = undefined;
+  await t.enqueue(() => t.compare());
 }
 
 // Runs one compare now, armed timer or not.
 async function compare(bem: BridgeEndpointManager) {
-  const t = bem as unknown as {
-    enqueueTopology(run: () => Promise<unknown>): Promise<void>;
-    compareTopology(): Promise<void>;
-  };
-  await t.enqueueTopology(() => t.compareTopology());
+  const t = trackerOf(bem);
+  await t.enqueue(() => t.compare());
 }
 
 const settleArmed = (bem: BridgeEndpointManager) =>
-  (bem as unknown as { topologyTimer?: unknown }).topologyTimer !== undefined;
+  trackerOf(bem).timer !== undefined;
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "hamh-bem-cv-"));
@@ -463,13 +499,11 @@ describe("root ConfigurationVersion follows the bridged endpoint set", () => {
 
   it("survives a part whose Descriptor state cannot be read", async () => {
     // only the signature read throws, matter.js itself reads the state too
-    const proto = BridgeEndpointManager.prototype as unknown as {
-      topologySignature(): string;
-    };
-    const signature = proto.topologySignature;
+    const proto = TopologyTracker.prototype;
+    const signature = proto.signature;
     let inSignature = false;
-    vi.spyOn(proto, "topologySignature").mockImplementation(function (
-      this: BridgeEndpointManager,
+    vi.spyOn(proto, "signature").mockImplementation(function (
+      this: TopologyTracker,
     ) {
       inSignature = true;
       try {
@@ -508,14 +542,12 @@ describe("root ConfigurationVersion follows the bridged endpoint set", () => {
   // Fails the Descriptor read of vacuum_b inside the signature while
   // failures() says so, matter.js itself reads the state too.
   function unreadableInSignature(failures: () => boolean) {
-    const proto = BridgeEndpointManager.prototype as unknown as {
-      topologySignature(...args: unknown[]): string;
-    };
-    const signature = proto.topologySignature;
+    const proto = TopologyTracker.prototype;
+    const signature = proto.signature;
     let inSignature = false;
-    vi.spyOn(proto, "topologySignature").mockImplementation(function (
-      this: BridgeEndpointManager,
-      ...args: unknown[]
+    vi.spyOn(proto, "signature").mockImplementation(function (
+      this: TopologyTracker,
+      ...args: [boolean?]
     ) {
       inSignature = true;
       try {
@@ -599,9 +631,7 @@ describe("root ConfigurationVersion follows the bridged endpoint set", () => {
     expect(version()).toBe(2);
     await compare(bem);
     expect(version()).toBe(2);
-    const signature = (
-      bem as unknown as { topologySignature(): string }
-    ).topologySignature();
+    const signature = trackerOf(bem).signature();
     expect(await createContext("hamh").get<string>("topology", "")).toBe(
       signature,
     );
@@ -687,8 +717,7 @@ describe("root ConfigurationVersion follows the bridged endpoint set", () => {
     });
     const timeouts = vi.spyOn(globalThis, "setTimeout");
     const armedDelay = () => {
-      const timer = (bem as unknown as { topologyTimer?: unknown })
-        .topologyTimer;
+      const timer = trackerOf(bem).timer;
       const i = timeouts.mock.results.findIndex((r) => r.value === timer);
       return timeouts.mock.calls[i]?.[1];
     };
@@ -922,6 +951,176 @@ describe("controller view of a changed endpoint set", () => {
       expect(value(bdbi.id, bdbi.attributes.reachable.id)).toBe(true);
       expect(value(bdbi.id, bdbi.attributes.uniqueId.id)).toBe(served.uniqueId);
       expect(value(bdbi.id, bdbi.attributes.nodeLabel.id)).toBe("vacuum.b");
+    },
+  );
+
+  function addSensorMeasurements(ha: FakeHa) {
+    ha.devices.climate = { id: "climate", name: "Climate", labels: [] };
+    for (const [deviceClass, state, unit] of [
+      ["temperature", "21", "°C"],
+      ["humidity", "40", "%"],
+      ["pressure", "1013", "hPa"],
+    ]) {
+      const id = `sensor.${deviceClass}`;
+      ha.entities[id] = { entity_id: id, device_id: "climate", labels: [] };
+      ha.states[id] = {
+        entity_id: id,
+        state,
+        attributes: { device_class: deviceClass, unit_of_measurement: unit },
+        context: { id: "ctx" },
+        last_changed: "2026-01-01T00:00:00",
+        last_updated: "2026-01-01T00:00:00",
+      };
+    }
+  }
+
+  it.each([
+    {
+      scenario: "separate endpoints before commissioning",
+      addBeforeCommissioning: true,
+      composed: false,
+      include: "sensor.*",
+    },
+    {
+      scenario: "out-of-filter siblings after commissioning",
+      addBeforeCommissioning: false,
+      composed: false,
+      include: "sensor.temperature",
+    },
+    {
+      scenario: "explicit composition",
+      addBeforeCommissioning: true,
+      composed: true,
+      include: "sensor.temperature",
+    },
+  ])(
+    "reads one measurement type per endpoint for $scenario",
+    { timeout: 30_000 },
+    async ({ addBeforeCommissioning, composed, include }) => {
+      const ha = makeHa([]);
+      if (addBeforeCommissioning) addSensorMeasurements(ha);
+      const { bem } = await startBridge(ha, [include], undefined, {
+        autoComposedDevices: composed,
+      });
+      const client = await commission();
+      if (!addBeforeCommissioning) {
+        const seen = await subscribe(client, partsOnly(bem));
+        addSensorMeasurements(ha);
+        await bem.refreshDevices();
+        const siblings = [...bem.root.parts].map((p) => p.number);
+        expect(siblings).toHaveLength(3);
+        for (const ep of [0, bem.root.number]) {
+          await expect
+            .poll(
+              () =>
+                partsOf(seen, ep).some((p) =>
+                  siblings.every((n) => p.includes(n)),
+                ),
+              poll,
+            )
+            .toBe(true);
+        }
+      }
+
+      const parent = bem.root.parts.get("sensor_temperature")!;
+      expect(parent).toBeDefined();
+      const endpoints = composed ? parent.parts : bem.root.parts;
+      expect(bem.root.parts.size).toBe(composed ? 1 : 3);
+      const temp = composed
+        ? endpoints.get("sensor_temperature_temp")!
+        : parent;
+      const hum = endpoints.get(
+        composed ? "sensor_temperature_humidity" : "sensor_humidity",
+      )!;
+      const press = endpoints.get(
+        composed ? "sensor_temperature_pressure" : "sensor_pressure",
+      )!;
+      expect(new Set([temp.number, hum.number, press.number]).size).toBe(3);
+
+      const read: Report[] = [];
+      await collect(read)(
+        client.interaction.read(
+          Read(
+            Read.Attribute({
+              cluster: Descriptor.Complete,
+              attributes: ["deviceTypeList", "partsList", "serverList"],
+            }),
+            Read.Attribute({
+              endpoint: temp.number,
+              cluster: TemperatureMeasurement.Complete,
+              attributes: ["measuredValue"],
+            }),
+            Read.Attribute({
+              endpoint: hum.number,
+              cluster: RelativeHumidityMeasurement.Complete,
+              attributes: ["measuredValue"],
+            }),
+            Read.Attribute({
+              endpoint: press.number,
+              cluster: PressureMeasurement.Complete,
+              attributes: ["measuredValue"],
+            }),
+          ),
+        ),
+      );
+      const attribute = (ep: number, cluster: number, attr: number) =>
+        read.find(
+          (r) => r.ep === ep && r.cluster === cluster && r.attr === attr,
+        )?.value;
+      const descriptor = Descriptor.Complete.attributes;
+      const typeEntry = ({
+        deviceType,
+        deviceRevision,
+      }: {
+        deviceType: number;
+        deviceRevision: number;
+      }) => ({ deviceType, revision: deviceRevision });
+      for (const [endpoint, type, measurement, raw] of [
+        [temp, TemperatureSensorDevice, TemperatureMeasurement.Complete, 2100],
+        [hum, HumiditySensorDevice, RelativeHumidityMeasurement.Complete, 4000],
+        [press, PressureSensorDevice, PressureMeasurement.Complete, 1013],
+      ] as const) {
+        const types = attribute(
+          endpoint.number,
+          DESCRIPTOR,
+          descriptor.deviceTypeList.id,
+        );
+        const expected = composed
+          ? [typeEntry(type)]
+          : [typeEntry(type), typeEntry(BridgedNodeEndpoint)];
+        expect(types).toEqual(expect.arrayContaining(expected));
+        expect(types).toHaveLength(expected.length);
+        expect(attribute(endpoint.number, DESCRIPTOR, PARTS)).toEqual([]);
+        const servers = attribute(
+          endpoint.number,
+          DESCRIPTOR,
+          descriptor.serverList.id,
+        ) as number[];
+        expect(
+          servers.filter((id) =>
+            [
+              TemperatureMeasurement.Complete.id,
+              RelativeHumidityMeasurement.Complete.id,
+              PressureMeasurement.Complete.id,
+            ].some((measurementId) => measurementId === id),
+          ),
+        ).toEqual([measurement.id]);
+        expect(
+          attribute(
+            endpoint.number,
+            measurement.id,
+            measurement.attributes.measuredValue.id,
+          ),
+        ).toBe(raw);
+      }
+      if (composed) {
+        expect(
+          attribute(parent.number, DESCRIPTOR, descriptor.deviceTypeList.id),
+        ).toEqual([typeEntry(BridgedNodeEndpoint)]);
+        expect(attribute(parent.number, DESCRIPTOR, PARTS)).toEqual(
+          expect.arrayContaining([temp.number, hum.number, press.number]),
+        );
+      }
     },
   );
 

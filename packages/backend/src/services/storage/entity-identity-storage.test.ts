@@ -134,13 +134,83 @@ describe("EntityIdentityStorage", () => {
     storage.setIdentity("bridge1", "k1", record);
     await vi.advanceTimersByTimeAsync(500);
     expect(set).toHaveBeenCalledTimes(1);
-    await storage.dispose();
+    const disposing = storage.dispose();
     fail(new Error("disk full"));
-    await vi.advanceTimersByTimeAsync(0);
+    await disposing;
 
+    // the flush in dispose retried once, nothing armed after it
+    expect(set).toHaveBeenCalledTimes(2);
     expect(vi.getTimerCount()).toBe(0);
     await vi.advanceTimersByTimeAsync(60_000);
+    expect(set).toHaveBeenCalledTimes(2);
+  });
+
+  it("dispose waits for a debounced write in flight and flushes a change made during it", async () => {
+    const storage = new EntityIdentityStorage(appStorage);
+    await storage.construction;
+    let finish!: () => void;
+    const set = vi
+      .spyOn(
+        (storage as unknown as { storage: { set: () => Promise<void> } })
+          .storage,
+        "set",
+      )
+      .mockImplementationOnce(
+        () => new Promise<void>((resolve) => (finish = resolve)),
+      )
+      .mockResolvedValue(undefined);
+    vi.useFakeTimers();
+
+    storage.setIdentity("bridge1", "k1", record);
+    await vi.advanceTimersByTimeAsync(500);
     expect(set).toHaveBeenCalledTimes(1);
+    storage.setIdentity("bridge1", "k2", record);
+    let done = false;
+    const disposing = storage.dispose().then(() => {
+      done = true;
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(done).toBe(false);
+    expect(set).toHaveBeenCalledTimes(1);
+
+    finish();
+    await disposing;
+    expect(set).toHaveBeenCalledTimes(2);
+    expect(set).toHaveBeenLastCalledWith("data", {
+      version: 1,
+      identities: { bridge1: { k1: record, k2: record } },
+    });
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("retries a delete whose flush failed", async () => {
+    const storage = new EntityIdentityStorage(appStorage);
+    await storage.construction;
+    vi.spyOn(Logger.prototype, "warn").mockImplementation(() => {});
+    storage.setIdentity("bridge1", "k1", record);
+    storage.setIdentity("bridge1", "k2", record);
+    await storage.flush();
+    const set = vi
+      .spyOn(
+        (storage as unknown as { storage: { set: () => Promise<void> } })
+          .storage,
+        "set",
+      )
+      .mockRejectedValueOnce(new Error("disk full"))
+      .mockResolvedValue(undefined);
+    vi.useFakeTimers();
+
+    await expect(storage.deleteIdentity("bridge1", "k1")).rejects.toThrow(
+      "disk full",
+    );
+    expect(set).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(set).toHaveBeenCalledTimes(2);
+    expect(set).toHaveBeenLastCalledWith("data", {
+      version: 1,
+      identities: { bridge1: { k2: record } },
+    });
+    expect(vi.getTimerCount()).toBe(0);
   });
 
   it("keeps records scoped per bridge and deletes only the asked bridge", async () => {

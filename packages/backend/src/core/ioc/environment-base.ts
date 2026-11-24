@@ -36,7 +36,12 @@ export class EnvironmentBase extends Environment {
     while (this.services.length > 0) {
       const service = this.services.pop()!;
       this.log.info(`Disposing ${service.serviceName}`);
-      await service.dispose?.();
+      // one broken service must not keep the others, like the HA client, alive
+      try {
+        await service.dispose?.();
+      } catch (e) {
+        this.log.error(`Disposing ${service.serviceName} failed:`, e);
+      }
     }
   }
 

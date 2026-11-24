@@ -21,7 +21,10 @@ import { HomeAssistantConfig } from "../home-assistant/home-assistant-config.js"
 import type { EntityIdentityStorage } from "../storage/entity-identity-storage.js";
 import type { EntityMappingStorage } from "../storage/entity-mapping-storage.js";
 import { BridgeDataProvider } from "./bridge-data-provider.js";
-import { BridgeEndpointManager } from "./bridge-endpoint-manager.js";
+import {
+  BridgeEndpointManager,
+  ISOLATION_REMOUNT_PERIOD_MS,
+} from "./bridge-endpoint-manager.js";
 import { BridgeRegistry } from "./bridge-registry.js";
 import { EntityIsolationService } from "./entity-isolation-service.js";
 import { EntityStateProvider } from "./entity-state-provider.js";
@@ -100,6 +103,7 @@ interface FakeHa {
   labels: unknown[];
   snapshotGeneration: number;
   markRefreshIncomplete: ReturnType<typeof vi.fn>;
+  grantRefreshRetries: ReturnType<typeof vi.fn>;
 }
 
 function makeHa(): FakeHa {
@@ -111,6 +115,7 @@ function makeHa(): FakeHa {
     labels: [],
     snapshotGeneration: 1,
     markRefreshIncomplete: vi.fn(),
+    grantRefreshRetries: vi.fn(),
   };
   ha.entities[VACUUM] = { entity_id: VACUUM };
   ha.states[VACUUM] = {
@@ -642,6 +647,36 @@ describe("identity survives isolation and plugin stops (#438)", () => {
 
     await manager.refreshDevices();
     expect(vacuumEndpoint(manager).number).toBe(before);
+  });
+
+  it("arms one remount per isolated entity, a second isolation stays closed", async () => {
+    const ha = makeHa();
+    const { manager } = await buildManager(ha);
+    await manager.refreshDevices();
+
+    await manager.isolateEntity(VACUUM);
+    expect(ha.grantRefreshRetries).toHaveBeenCalledTimes(1);
+    await manager.refreshDevices();
+    expect(vacuumEndpoint(manager)).toBeDefined();
+
+    await manager.isolateEntity(VACUUM);
+    expect(ha.grantRefreshRetries).toHaveBeenCalledTimes(1);
+  });
+
+  it("arms the remount again for an isolation after a healthy hour", async () => {
+    const ha = makeHa();
+    const { manager } = await buildManager(ha);
+    await manager.refreshDevices();
+    const isolateAt = async (time: number) => {
+      const now = vi.spyOn(Date, "now").mockReturnValue(time);
+      await manager.isolateEntity(VACUUM).finally(() => now.mockRestore());
+    };
+
+    await isolateAt(1_000_000);
+    await manager.refreshDevices();
+    await isolateAt(1_000_000 + ISOLATION_REMOUNT_PERIOD_MS);
+
+    expect(ha.grantRefreshRetries).toHaveBeenCalledTimes(2);
   });
 
   it("a recreated entity no longer lists as failed", async () => {

@@ -1,49 +1,15 @@
-import type { BridgeFeatureFlags } from "@home-assistant-matter-hub/common";
+import {
+  type BridgeFeatureFlags,
+  isCoverPositionInverted,
+} from "@home-assistant-matter-hub/common";
 
 /**
- * Inversion is its own inverse (100 - (100 - x) === x), so read and write
- * share the same body. Both exported names stay for callers that distinguish
- * them at the call site; the shared helper is the single source of truth.
+ * Converts a cover percent between HA and Matter. Inversion is its own inverse
+ * (100 - (100 - x) === x), so reading and writing share this one function.
  */
-function adjustPosition(
+export function adjustPosition(
   position: number,
   flags: BridgeFeatureFlags | undefined,
-): number | null {
-  if (position == null) {
-    return null;
-  }
-
-  const skipInversion =
-    flags?.coverDoNotInvertPercentage === true ||
-    flags?.coverUseHomeAssistantPercentage === true;
-
-  if (flags?.coverSwapOpenClose === true && !skipInversion) {
-    return position;
-  }
-
-  if (!skipInversion) {
-    return 100 - position;
-  }
-
-  return position;
-}
-
-/**
- * Adjust cover position when READING from HA to report to Matter.
- */
-export function adjustPositionForReading(
-  position: number,
-  flags: BridgeFeatureFlags | undefined,
-): number | null {
-  return adjustPosition(position, flags);
-}
-
-/**
- * Adjust cover position when WRITING from Matter to HA.
- */
-export function adjustPositionForWriting(
-  position: number,
-  flags: BridgeFeatureFlags | undefined,
-): number | null {
-  return adjustPosition(position, flags);
+): number {
+  return isCoverPositionInverted(flags) ? 100 - position : position;
 }
