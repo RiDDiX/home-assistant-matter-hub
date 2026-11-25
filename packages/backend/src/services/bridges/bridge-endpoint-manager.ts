@@ -185,6 +185,8 @@ export class BridgeEndpointManager extends Service {
   // Comparing earlier would announce a half set on every start.
   private pluginsStarted = false;
   private entitiesReconciled = false;
+  // a compare during a refresh would see a half applied set
+  private refreshing = false;
 
   // Whether each controller held a subscription when the device list moved,
   // one that did not only sees the change when it subscribes again. A held
@@ -326,7 +328,7 @@ export class BridgeEndpointManager extends Service {
     this.root = new AggregatorEndpoint("aggregator");
     this.topology = new TopologyTracker(
       this.root,
-      () => this.pluginsStarted && this.entitiesReconciled,
+      () => this.pluginsStarted && this.entitiesReconciled && !this.refreshing,
       log,
     );
     this.identityResolver = new IdentityResolver(
@@ -459,6 +461,10 @@ export class BridgeEndpointManager extends Service {
           `Plugin "${pluginName}": failed to add device "${device.id}":`,
           e,
         );
+        // an add that threw after attaching left it mounted, a stop closes it
+        if (this.root.parts.has(endpoint)) {
+          this.pluginEndpoints.set(device.id, endpoint);
+        }
         return false;
       }
       return true;
@@ -498,7 +504,9 @@ export class BridgeEndpointManager extends Service {
             e,
           );
         }
-        this.pluginEndpoints.delete(deviceId);
+        // a failed close leaves it mounted, it stays tracked for the next try
+        if (!this.root.parts.has(endpoint))
+          this.pluginEndpoints.delete(deviceId);
       }
     };
 
@@ -770,6 +778,8 @@ export class BridgeEndpointManager extends Service {
       if (!(endpoint instanceof VacuumAreaSwitchEndpoint)) {
         await this.closeAreaSwitchesOf(endpoint);
       }
+      // the endpoint may stay unmounted, controllers have to hear about it
+      this.topology.settle();
       // One remount per period via a fresh registry retry, a repeat isolation
       // within it stays closed so an endpoint that keeps failing cannot loop.
       const now = Date.now();
@@ -962,10 +972,12 @@ export class BridgeEndpointManager extends Service {
   refreshDevices(checkFilteredReservations = false): Promise<boolean> {
     const next = this.refreshChain.then(async () => {
       let complete = false;
+      this.refreshing = true;
       try {
         await this.runRefreshDevices(checkFilteredReservations);
         complete = !this._refreshIncomplete;
       } finally {
+        this.refreshing = false;
         // a start, an API refresh or a recheck needs the retry as much as a tick
         if (!complete) this.registry.markRefreshIncomplete();
       }
@@ -1249,11 +1261,12 @@ export class BridgeEndpointManager extends Service {
             `Removing endpoint ${endpoint.entityId} (ep ${endpoint.number}) after the grace window, controllers will see a new number if it returns`,
           );
           await endpoint.delete();
+          this.mappingFingerprints.delete(endpoint.entityId);
+          this.pendingRemovals.delete(endpoint.entityId);
         } catch (e) {
+          // the kept entry lets the removal recheck try again
           this.log.warn(`Failed to delete endpoint ${endpoint.entityId}:`, e);
         }
-        this.mappingFingerprints.delete(endpoint.entityId);
-        this.pendingRemovals.delete(endpoint.entityId);
       } else if (
         this.registry.isAutoComposedDevicesEnabled() &&
         this.registry.isComposedSubEntityUsed(endpoint.entityId)
@@ -1575,6 +1588,8 @@ export class BridgeEndpointManager extends Service {
     // Not added/removed: an isolation closes endpoints between reconciles.
     if (lifecycle === this.lifecycle) {
       this.entitiesReconciled = true;
+      // the set is applied, reconciled() has to be able to arm
+      this.refreshing = false;
       this.topology.reconciled();
     }
 

@@ -17,7 +17,7 @@ import {
   HumiditySensorDevice,
   TemperatureSensorDevice,
 } from "@matter/main/devices";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ServerModeServerNode } from "../../matter/endpoints/server-mode-server-node.js";
 import { HomeAssistantActions } from "../home-assistant/home-assistant-actions.js";
 import type { HomeAssistantClient } from "../home-assistant/home-assistant-client.js";
@@ -170,7 +170,7 @@ describe("server mode ConfigurationVersion follows the device set", () => {
     expect(await stored()).toBe("");
     await settle(m);
     expect(version()).toBe(1);
-    expect(await stored()).toMatch(/^v2:/);
+    expect(await stored()).toMatch(/^v3:/);
   });
 
   it("bumps once for a device added after the first settle", async () => {
@@ -184,6 +184,47 @@ describe("server mode ConfigurationVersion follows the device set", () => {
     await settle(m);
     expect(version()).toBe(2);
     await m.refreshDevices();
+    await settle(m);
+    expect(version()).toBe(2);
+  });
+
+  it("skips a compare during a refresh and announces the set once after it", async () => {
+    const ha = haRegistry(["switch.a"]);
+    const m = await start(ha);
+    await settle(m);
+    const t = (
+      m as unknown as {
+        topology: {
+          enqueue(run: () => Promise<unknown>): Promise<void>;
+          compare(): Promise<void>;
+        };
+      }
+    ).topology;
+    let release!: () => void;
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    let mounted!: () => void;
+    const added = new Promise<void>((r) => {
+      mounted = r;
+    });
+    const addDevice = node!.addDevice.bind(node!);
+    vi.spyOn(node!, "addDevice").mockImplementationOnce(async (endpoint) => {
+      await addDevice(endpoint);
+      mounted();
+      await gate;
+    });
+
+    addSwitch(ha, "switch.b");
+    const refresh = m.refreshDevices();
+    await added;
+    // the new device is mounted, the refresh is not done yet
+    await t.enqueue(() => t.compare());
+    expect(version()).toBe(1);
+    release();
+    await refresh;
+    await settle(m);
+    expect(version()).toBe(2);
     await settle(m);
     expect(version()).toBe(2);
   });

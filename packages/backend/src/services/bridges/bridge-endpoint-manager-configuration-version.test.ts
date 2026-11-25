@@ -489,7 +489,7 @@ describe("root ConfigurationVersion follows the bridged endpoint set", () => {
     await restarted.bem.refreshDevices();
     await settle(restarted.bem);
     expect(version()).toBe(1);
-    expect(await storage.get<string>("topology", "")).toMatch(/^v2:/);
+    expect(await storage.get<string>("topology", "")).toMatch(/^v3:/);
     await stopBridge();
 
     const again = await startBridge(ha);
@@ -672,11 +672,11 @@ describe("root ConfigurationVersion follows the bridged endpoint set", () => {
     await settle(bem);
     expect(version()).toBe(2);
 
-    // a wipe and a first run with another set leave a foreign v2 signature
+    // a wipe and a first run with another set leave a foreign v3 signature
     const storage = bem.root.env
       .get(ServerNodeStore)
       .storage.createContext("hamh");
-    await storage.set("topology", "v2:0123456789abcdef");
+    await storage.set("topology", "v3:0123456789abcdef");
     await compare(bem);
     expect(version()).toBe(3);
   });
@@ -750,6 +750,127 @@ describe("root ConfigurationVersion follows the bridged endpoint set", () => {
 
     const restarted = await startBridge(ha);
     await settle(restarted.bem);
+    expect(version()).toBe(2);
+  });
+
+  it("replaces a v2 signature of an unchanged set without bumping", async () => {
+    const ha = makeHa(["vacuum.a"]);
+    const { bem } = await startBridge(ha);
+    await settle(bem);
+    await stopBridge();
+
+    const restarted = await startBridge(ha);
+    const storage = restarted.bem.root.env
+      .get(ServerNodeStore)
+      .storage.createContext("hamh");
+    await storage.set("topology", "v2:0123456789abcdef");
+    await compare(restarted.bem);
+    expect(version()).toBe(1);
+    expect(await storage.get<string>("topology", "")).toMatch(/^v3:/);
+  });
+
+  it("bumps for an entity that returns under its id with a new number inside the settle window (#543)", async () => {
+    const ha = makeHa(["vacuum.a", "vacuum.b"]);
+    const { bem } = await startBridge(ha);
+    await settle(bem);
+    const part = () =>
+      [...bem.root.parts].find(
+        (p) => (p as { entityId?: string }).entityId === "vacuum.b",
+      );
+    const before = part()!;
+    const pending = (
+      bem as unknown as { pendingRemovals: Map<string, { since: number }> }
+    ).pendingRemovals;
+
+    delete ha.entities["vacuum.b"];
+    delete ha.states["vacuum.b"];
+    await bem.refreshDevices();
+    // past the grace and a fresh HA reload
+    pending.get("vacuum.b")!.since = 0;
+    ha.snapshotGeneration++;
+    await bem.refreshDevices();
+    expect(part()).toBeUndefined();
+
+    addEntity(ha, "vacuum.b");
+    await bem.refreshDevices();
+    expect(part()!.id).toBe(before.id);
+    expect(part()!.number).not.toBe(before.number);
+    expect(version()).toBe(1);
+    await settle(bem);
+    expect(version()).toBe(2);
+  });
+
+  it("keeps the pending removal when the grace delete fails", async () => {
+    const ha = makeHa(["vacuum.a", "vacuum.b"]);
+    const { bem } = await startBridge(ha);
+    await settle(bem);
+    const part = () =>
+      [...bem.root.parts].find(
+        (p) => (p as { entityId?: string }).entityId === "vacuum.b",
+      );
+    const pending = (
+      bem as unknown as { pendingRemovals: Map<string, { since: number }> }
+    ).pendingRemovals;
+
+    delete ha.entities["vacuum.b"];
+    delete ha.states["vacuum.b"];
+    await bem.refreshDevices();
+    pending.get("vacuum.b")!.since = 0;
+    ha.snapshotGeneration++;
+    vi.spyOn(part()!, "delete").mockRejectedValueOnce(new Error("busy"));
+    await bem.refreshDevices();
+    expect(part()).toBeDefined();
+    expect(pending.has("vacuum.b")).toBe(true);
+
+    // what the removal recheck runs
+    await bem.refreshDevices();
+    expect(part()).toBeUndefined();
+    expect(pending.has("vacuum.b")).toBe(false);
+  });
+
+  it("announces an isolated endpoint that stays unmounted", async () => {
+    const ha = makeHa(["vacuum.a", "vacuum.b"]);
+    const { bem } = await startBridge(ha);
+    await settle(bem);
+    expect(settleArmed(bem)).toBe(false);
+    await bem.isolateEntity("vacuum.b");
+    expect(bem.root.parts.size).toBe(1);
+    expect(settleArmed(bem)).toBe(true);
+    await settle(bem);
+    expect(version()).toBe(2);
+  });
+
+  it("skips a compare during a refresh and announces the set once after it", async () => {
+    const ha = makeHa(["vacuum.a"]);
+    const { bem } = await startBridge(ha);
+    await settle(bem);
+    let release!: () => void;
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    let mounted!: () => void;
+    const added = new Promise<void>((r) => {
+      mounted = r;
+    });
+    const add = bem.root.add.bind(bem.root);
+    vi.spyOn(bem.root, "add").mockImplementationOnce(async (endpoint) => {
+      const part = await add(endpoint);
+      mounted();
+      await gate;
+      return part;
+    });
+
+    addEntity(ha, "vacuum.b");
+    const refresh = bem.refreshDevices();
+    await added;
+    // the new endpoint is mounted, the refresh is not done yet
+    await compare(bem);
+    expect(version()).toBe(1);
+    release();
+    await refresh;
+    await settle(bem);
+    expect(version()).toBe(2);
+    await compare(bem);
     expect(version()).toBe(2);
   });
 });

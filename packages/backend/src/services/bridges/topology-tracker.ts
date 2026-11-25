@@ -12,7 +12,7 @@ import type { ServerNode } from "@matter/main/node";
 // the entities whose state arrived late.
 const TOPOLOGY_SETTLE_MS = 90_000;
 // Prefix of the stored topology signature, changes with what it covers.
-const TOPOLOGY_FORMAT = "v2:";
+const TOPOLOGY_FORMAT = "v3:";
 const TOPOLOGY_RETRIES = 3;
 // A failed write retries soon, the set already settled before it.
 const TOPOLOGY_RETRY_MS = 10_000;
@@ -66,8 +66,11 @@ export class TopologyTracker {
   }
 
   async change(change: () => Promise<unknown>): Promise<void> {
-    await this.enqueue(change);
-    this.settle();
+    try {
+      await this.enqueue(change);
+    } finally {
+      this.settle();
+    }
   }
 
   // After a trusted reconcile: only one that moved the set re-arms.
@@ -100,10 +103,11 @@ export class TopologyTracker {
     this.timer.unref?.();
   }
 
-  // Ids and Descriptor device types, child parts included, so a rebuild
-  // under the same id with another device type counts as a change. Strict
-  // throws on an unreadable part, so a compare retries it before hashing it
-  // blank, a passing read failure would bump the version twice otherwise.
+  // Ids, endpoint numbers and Descriptor device types, child parts included,
+  // so a rebuild under the same id with another number or device type counts
+  // as a change (#543). Strict throws on an unreadable part, so a compare
+  // retries it before hashing it blank, a passing read failure would bump the
+  // version twice otherwise.
   signature(strict = false): string {
     const lines: string[] = [];
     const walk = (parts: Iterable<Endpoint>, prefix: string) => {
@@ -111,8 +115,10 @@ export class TopologyTracker {
         const id = `${prefix}${part.id}`;
         // an uninitialized or crashed part throws here, it must not fail
         // the whole refresh, so it counts with no device types
+        let number: number | string = "";
         let types: string[] = [];
         try {
+          number = part.number;
           types = part
             .stateOf(DescriptorServer)
             .deviceTypeList.map((d) => `${d.deviceType}.${d.revision}`)
@@ -120,7 +126,7 @@ export class TopologyTracker {
         } catch (e) {
           if (strict) throw e;
         }
-        lines.push(`${id}=${types.join(",")}`);
+        lines.push(`${id}#${number}=${types.join(",")}`);
         walk(part.parts, `${id}/`);
       }
     };
@@ -136,8 +142,12 @@ export class TopologyTracker {
   // The last announced set lives in the node storage, so a restart with the
   // same endpoints announces nothing and a changed one announces once (#505).
   async compare(): Promise<void> {
-    // a stop that began after the timer fired leaves a half unmounted set
-    if (!this.known()) return;
+    // a stop that began after the timer fired leaves a half unmounted set, a
+    // running refresh a half applied one. The next reconcile re-arms.
+    if (!this.known()) {
+      this.reconciledSet = "";
+      return;
+    }
     try {
       const signature = this.signature(this.retries < TOPOLOGY_RETRIES);
       const storage = this.parent.env

@@ -95,6 +95,8 @@ export class ServerModeEndpointManager extends Service {
   // the root PartsList moves with the devices, so does ConfigurationVersion
   private readonly topology: TopologyTracker;
   private entitiesReconciled = false;
+  // a compare during a refresh would see a half applied set
+  private refreshing = false;
 
   get failedEntities(): FailedEntity[] {
     return this._failedEntities;
@@ -129,7 +131,7 @@ export class ServerModeEndpointManager extends Service {
     );
     this.topology = new TopologyTracker(
       serverNode,
-      () => this.entitiesReconciled,
+      () => this.entitiesReconciled && !this.refreshing,
       log,
     );
     this.topology.handler = bumpConfigurationVersion(serverNode, log);
@@ -323,10 +325,12 @@ export class ServerModeEndpointManager extends Service {
   refreshDevices(checkFilteredReservations = false): Promise<boolean> {
     const next = this.refreshChain.then(async () => {
       let complete = false;
+      this.refreshing = true;
       try {
         await this.runRefreshDevices(checkFilteredReservations);
         complete = !this._refreshIncomplete;
       } finally {
+        this.refreshing = false;
         // a start, an API refresh or a recheck needs the retry as much as a tick
         if (!complete) this.registry.markRefreshIncomplete();
       }
@@ -807,6 +811,8 @@ export class ServerModeEndpointManager extends Service {
         this.scheduleRemovalRecheck();
         if (reconciled) {
           this.entitiesReconciled = true;
+          // the set is applied, reconciled() has to be able to arm
+          this.refreshing = false;
           this.topology.reconciled();
         }
       }
