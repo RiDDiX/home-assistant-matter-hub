@@ -39,13 +39,13 @@ of port forwarding etc.
 | Channel | Branch | Current Version | Description |
 |---------|--------|-----------------|-------------|
 | **Stable** | `main` | v2.1.0 | Production-ready, recommended for most users |
-| **Alpha** | `alpha` | v2.2.0-alpha.x | Currently level with Stable; next pre-release lands here first |
+| **Alpha** | `alpha` | v2.2.0-alpha.1010 | Ahead of Stable, carries the additions listed under Alpha Features |
 | **Testing** | `testing` | v4.1.0-testing.x | ⚠️ **Highly unstable!** Experimental features, may break |
 
 ### Which version should I use?
 
 - **Most users**: Use **Stable** (`main` branch) - thoroughly tested
-- **Early adopters**: Use **Alpha** (`alpha` branch) - currently level with Stable until the next pre-release lands
+- **Early adopters**: Use **Alpha** (`alpha` branch) - gets every fix and feature first, see Alpha Features below
 - **Developers/Testers**: Use **Testing** (`testing` branch) - bleeding edge, expect breakage
 
 ### Read this before updating to v2.1.0
@@ -646,7 +646,9 @@ Re-assign the affected devices to their rooms after they reconnect. See the [doc
 <details>
 <summary><strong>🧪 Alpha Features (v2.2.0-alpha.x)</strong> - Click to expand</summary>
 
-**Alpha is currently level with Stable (v2.1.0).** All alpha work up to the latest pre-release has been promoted into v2.1.0. New alpha work continues from the next pre-release tag (v2.2.0-alpha.1009) onward and will appear here as development progresses.
+**v2.2.0-alpha.1010:**
+- **Login handled by the proxy** ([#558](https://github.com/RiDDiX/home-assistant-matter-hub/issues/558)): the reverse proxy guide has a new section for a proxy that asks for its own login, such as Cloudflare Access, Authelia or Authentik. Leave the HAMH login unset, put the proxy's address in `--http-ip-whitelist` and the public name in `--http-allowed-hosts`, and there is no second HAMH login. See [Login handled by the proxy](https://riddix.github.io/home-assistant-matter-hub/guides/reverse-proxy#login-handled-by-the-proxy).
+- **Login password** ([#558](https://github.com/RiDDiX/home-assistant-matter-hub/issues/558)): Settings refuses a password that starts or ends with a space. Before, it was stored trimmed and could then never log in.
 
 </details>
 
