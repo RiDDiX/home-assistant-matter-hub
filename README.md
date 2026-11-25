@@ -39,7 +39,7 @@ of port forwarding etc.
 | Channel | Branch | Current Version | Description |
 |---------|--------|-----------------|-------------|
 | **Stable** | `main` | v2.1.0 | Production-ready, recommended for most users |
-| **Alpha** | `alpha` | v2.2.0-alpha.1010 | Ahead of Stable, carries the additions listed under Alpha Features |
+| **Alpha** | `alpha` | v2.2.0-alpha.1011 | Ahead of Stable, carries the additions listed under Alpha Features |
 | **Testing** | `testing` | v4.1.0-testing.x | ⚠️ **Highly unstable!** Experimental features, may break |
 
 ### Which version should I use?
@@ -645,6 +645,10 @@ Re-assign the affected devices to their rooms after they reconnect. See the [doc
 
 <details>
 <summary><strong>🧪 Alpha Features (v2.2.0-alpha.x)</strong> - Click to expand</summary>
+
+**v2.2.0-alpha.1011:**
+- **Endpoint renumbering announced** ([#543](https://github.com/RiDDiX/home-assistant-matter-hub/issues/543)): an entity that disappears from Home Assistant for longer than the 5 minute grace comes back with a new endpoint number. The bridge now counts endpoint numbers in its topology check, so controllers always get a ConfigurationVersion bump for that, also when the entity returns within the 90 s settle window. Endpoint numbers of removed devices are still never given to another device.
+- **Topology check during a refresh** ([#543](https://github.com/RiDDiX/home-assistant-matter-hub/issues/543)): the ConfigurationVersion check waits until a running device refresh has finished, and an isolated device that stays unmounted is now announced too.
 
 **v2.2.0-alpha.1010:**
 - **Login handled by the proxy** ([#558](https://github.com/RiDDiX/home-assistant-matter-hub/issues/558)): the reverse proxy guide has a new section for a proxy that asks for its own login, such as Cloudflare Access, Authelia or Authentik. Leave the HAMH login unset, put the proxy's address in `--http-ip-whitelist` and the public name in `--http-allowed-hosts`, and there is no second HAMH login. See [Login handled by the proxy](https://riddix.github.io/home-assistant-matter-hub/guides/reverse-proxy#login-handled-by-the-proxy).

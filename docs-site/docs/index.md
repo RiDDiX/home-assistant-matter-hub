@@ -646,6 +646,10 @@ Home, ...) are not placed in the same network segment. Please make sure to revie
 <details>
 <summary><strong>🧪 Alpha (v2.2.0-alpha.x)</strong></summary>
 
+**v2.2.0-alpha.1011:**
+- **Endpoint renumbering announced** ([#543](https://github.com/RiDDiX/home-assistant-matter-hub/issues/543)): an entity that disappears from Home Assistant for longer than the 5 minute grace comes back with a new endpoint number. The bridge now counts endpoint numbers in its topology check, so controllers always get a ConfigurationVersion bump for that, also when the entity returns within the 90 s settle window. Endpoint numbers of removed devices are still never given to another device.
+- **Topology check during a refresh** ([#543](https://github.com/RiDDiX/home-assistant-matter-hub/issues/543)): the ConfigurationVersion check waits until a running device refresh has finished, and an isolated device that stays unmounted is now announced too.
+
 **v2.2.0-alpha.1010:**
 - **Login handled by the proxy** ([#558](https://github.com/RiDDiX/home-assistant-matter-hub/issues/558)): the reverse proxy guide has a new section for a proxy that asks for its own login, such as Cloudflare Access, Authelia or Authentik. Leave the HAMH login unset, put the proxy's address in `--http-ip-whitelist` and the public name in `--http-allowed-hosts`, and there is no second HAMH login. See [Login handled by the proxy](./guides/reverse-proxy.md#login-handled-by-the-proxy).
 - **Login password** ([#558](https://github.com/RiDDiX/home-assistant-matter-hub/issues/558)): Settings refuses a password that starts or ends with a space. Before, it was stored trimmed and could then never log in.
