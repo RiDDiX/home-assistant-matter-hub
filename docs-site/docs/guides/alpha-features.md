@@ -31,7 +31,7 @@ docker run -d \
 
 ## Current Alpha Features
 
-Alpha is currently level with Stable (v2.1.0); there are no alpha-only features right now. Standalone Devices graduated to Stable in v2.0.47, see [Standalone Devices](../getting-started/standalone-devices.md).
+Alpha is ahead of Stable (v2.1.0). The reverse proxy guide explains how a proxy that asks for its own login, such as Cloudflare Access, Authelia or Authentik, reaches HAMH without a second HAMH login, see [Login handled by the proxy](./reverse-proxy.md#login-handled-by-the-proxy). Settings refuses a login password that starts or ends with a space. See the alpha notes for each release. Standalone Devices graduated to Stable in v2.0.47, see [Standalone Devices](../getting-started/standalone-devices.md).
 
 For a complete list of all supported features and device types, see [Supported Device Types](../supported-device-types.md).
 
