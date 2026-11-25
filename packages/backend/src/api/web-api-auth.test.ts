@@ -161,6 +161,34 @@ describe("WebApi auth change", () => {
     expect(storage.auth).toBeUndefined();
   });
 
+  it("refuses a padded password and stores a valid one as typed", async () => {
+    const storage = settingsStorage();
+    const api = await webApi(storage);
+    await api.start();
+    cleanup.push(() => api.dispose());
+    const server = (api as unknown as { server: http.Server }).server;
+    const host = `127.0.0.1:${(server.address() as AddressInfo).port}`;
+    const put = (password: string) =>
+      fetch(`http://${host}/api/settings/auth`, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ username: "user", password }),
+      });
+
+    const padded = await put(" pass ");
+    expect(padded.status).toBe(400);
+    expect(await padded.json()).toEqual({
+      error: "The password cannot start or end with a space",
+    });
+    expect(storage.auth).toBeUndefined();
+
+    expect((await put("pa ss")).status).toBe(200);
+    const login = await fetch(`http://${host}/api/settings/auth`, {
+      headers: { authorization: basic("user:pa ss") },
+    });
+    expect(login.status).toBe(200);
+  });
+
   it("keeps the login when a remote client asks to remove it", async () => {
     const storage = settingsStorage({ username: "user", password: "pass" });
     const api = await webApi(storage);

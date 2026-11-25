@@ -142,7 +142,7 @@ Options:
 
 Since v2.1.0-alpha.1002, remote web access to standalone and Docker installs requires a login. Set `HAMH_HTTP_AUTH_USERNAME` and `HAMH_HTTP_AUTH_PASSWORD` before starting the app, or set a login in Settings by opening `http://localhost:8482` on the machine running HAMH. Usernames cannot contain a colon. Home Assistant ingress uses your Home Assistant login.
 
-Without a login, other devices get a `403` and the log shows a warning at start. Addresses listed in `--http-ip-whitelist` get in without a login. A login can only be removed in Settings from a device that still gets in afterwards.
+Without a login, other devices get a `403` and the log shows a warning at start. Addresses listed in `--http-ip-whitelist` get in without a login, see [Login handled by the proxy](../guides/reverse-proxy.md#login-handled-by-the-proxy). A login can only be removed in Settings from a device that still gets in afterwards.
 
 Each of those configuration options can be configured via environment variables, too. Simply prefix them with `HAMH_`
 and write them in capslock with underscores (e.g. `HAMH_MDNS_NETWORK_INTERFACE`).

@@ -1,6 +1,6 @@
 # Using a reverse proxy
 
-Configure a HAMH web login before exposing a standalone instance through a reverse proxy. Set `HAMH_HTTP_AUTH_USERNAME` and `HAMH_HTTP_AUTH_PASSWORD`, or visit the app directly on localhost to set a login in Settings. Forward authentication headers for HTTP and WebSocket requests. Set `X-Forwarded-For` so HAMH can distinguish proxied requests from local setup when the proxy runs on the same machine.
+Configure a HAMH web login before exposing a standalone instance through a reverse proxy. Set `HAMH_HTTP_AUTH_USERNAME` and `HAMH_HTTP_AUTH_PASSWORD`, or visit the app directly on localhost to set a login in Settings. Forward authentication headers for HTTP and WebSocket requests. Set `X-Forwarded-For` so HAMH can distinguish proxied requests from local setup when the proxy runs on the same machine. If the proxy asks for a login itself, see [Login handled by the proxy](#login-handled-by-the-proxy) instead.
 
 ## WebSocket Support
 
@@ -29,6 +29,35 @@ To stop other websites from talking to HAMH through your browser, HAMH only answ
 Browser requests whose `Origin` differs from the `Host` are rejected, unless the `Origin` host is listed in `--http-allowed-hosts` or the request comes through Home Assistant ingress.
 The Home Assistant add-on panel (ingress) needs no setting, whatever name Home Assistant is reached by.
 So a proxy on `matter.example.org` needs `--http-allowed-hosts=matter.example.org`, whether or not it rewrites the `Host` header.
+
+## Login handled by the proxy
+
+If your proxy already asks for a login (Cloudflare Access, Authelia, Authentik), you can skip the second HAMH login:
+
+- leave the HAMH login unset,
+- set `--http-ip-whitelist` (or `HAMH_HTTP_IP_WHITELIST`) to the proxy's address as HAMH sees it,
+- add the public name to `--http-allowed-hosts` (or `HAMH_HTTP_ALLOWED_HOSTS`).
+
+```
+HAMH_HTTP_IP_WHITELIST=172.18.0.5
+HAMH_HTTP_ALLOWED_HOSTS=matter.example.org
+```
+
+HAMH only checks the address the connection comes from, never `X-Forwarded-For` or similar headers, so a forged header cannot get anyone in. Every address not on the list gets a `403`, so also add your LAN range if other devices should reach HAMH directly. Those devices then get in without a login too.
+An environment variable takes only one value. For more, use a CIDR that covers them, repeat `--http-ip-whitelist` on the command line, or list them in the `--config` file.
+
+To find the proxy's address, set the whitelist to any single address that is not the proxy, for example your own PC's, then open HAMH through the proxy. HAMH logs a warning `Denied <address>, not in --http-ip-whitelist` the first time it refuses an address. An IPv4 address can show up as `::ffff:172.18.0.5`, list it as `172.18.0.5`.
+
+- A proxy or `cloudflared` on the same host connects from `127.0.0.1` or `::1`. Listing those lets every program on that machine in without a login.
+- With Docker bridge networking, list the proxy container's own address (give it a fixed one), not the bridge gateway such as `172.17.0.1`. Connections from the host and through published ports can arrive from the gateway too.
+- HAMH's port must only be reachable through the proxy.
+
+Without a login and without a whitelist, a proxy on the same host that rewrites `Host` to `localhost` or `127.0.0.1` and sends no `X-Forwarded-For`, `Forwarded` or `X-Real-IP` header looks like a local browser, so everyone behind it gets in. Forward the original `Host` or `X-Forwarded-For`, or set a login. For nginx:
+
+```nginx
+proxy_set_header Host $host;
+proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+```
 
 ## Running in a sub-path
 

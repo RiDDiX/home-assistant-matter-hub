@@ -67,9 +67,16 @@ export function settingsApi(
         res.status(400).json({ error: "The username cannot contain a colon" });
         return;
       }
+      // Basic auth compares the raw password, a trimmed one could never log in.
+      if (password !== password.trim()) {
+        res.status(400).json({
+          error: "The password cannot start or end with a space",
+        });
+        return;
+      }
       await settingsStorage.setAuth({
         username: username.trim(),
-        password: password.trim(),
+        password,
       });
       onAuthChange?.();
       res.json({

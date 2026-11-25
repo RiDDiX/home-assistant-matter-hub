@@ -163,6 +163,35 @@ describe("WebApi auth", () => {
     expect(await upgrade(host, undefined, forwarded)).toBe(true);
   });
 
+  it("lets a proxy that handles the login in by its address (#558)", async () => {
+    const host = await serve(["127.0.0.1"], {
+      anonymous: true,
+      allowedHosts: ["matter.example.org"],
+    });
+    const headers = {
+      host: "matter.example.org",
+      "x-forwarded-for": "203.0.113.9",
+      "x-forwarded-proto": "https",
+      "cf-connecting-ip": "203.0.113.9",
+    };
+    const res = await new Promise<http.IncomingMessage>((resolve, reject) => {
+      request(`http://${host}/api/settings/auth`, { headers }, (res) => {
+        res.resume();
+        resolve(res);
+      })
+        .on("error", reject)
+        .end();
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.headers["www-authenticate"]).toBeUndefined();
+    expect(
+      await upgrade(host, undefined, {
+        ...headers,
+        origin: "https://matter.example.org",
+      }),
+    ).toBe(true);
+  });
+
   it("requires credentials over http", async () => {
     const host = await serve();
     expect(await get(host, "/api/settings/auth")).toBe(401);
