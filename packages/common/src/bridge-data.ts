@@ -14,6 +14,15 @@ interface AllBridgeFeatureFlags {
    */
   readonly serverMode: boolean;
   /**
+   * Apple Adaptive Temperature: Enable Apple Home Adaptive Temperature (iOS 26+)
+   * for climate entities on this bridge. Implies Server Mode, plain Thermostat
+   * device type (disables FanControl and OnOff), Apple 0x1349 MEI preset
+   * extensions, and allowlisted thermostat Vendor/Product IDs (0x115F / 0x4801).
+   * Best with one thermostat per bridge for independent room assignment.
+   * Default: false (disabled)
+   */
+  readonly appleAdaptiveTemperature: boolean;
+  /**
    * Auto Battery Mapping: Automatically assign battery sensors from the same Home Assistant device
    * to the main entity. When enabled, battery sensors will be merged into their parent devices
    * instead of appearing as separate devices in Matter controllers.

@@ -128,6 +128,22 @@ export const bridgeTemplates: BridgeTemplate[] = [
     tags: ["vacuum", "server-mode", "apple-home"],
   },
   {
+    id: "apple_adaptive_thermostat",
+    name: "Apple Adaptive Thermostat",
+    description:
+      "Standalone thermostat bridge configured for Apple Home Adaptive Temperature (iOS 26+). Advertises Aqara Thermostat Hub W200 IDs (0x115F / 0x4801) required by Apple's allowlist, so Apple Home defaults the pairing name to 'Aqara Thermostat Hub W200' (rename during setup). Best with one thermostat per bridge.",
+    icon: "climate",
+    filter: {
+      include: [{ type: HomeAssistantMatcherType.Domain, value: "climate" }],
+      exclude: [],
+    },
+    featureFlags: {
+      serverMode: true,
+      appleAdaptiveTemperature: true,
+    },
+    tags: ["climate", "thermostat", "server-mode", "apple-home"],
+  },
+  {
     id: "media_players",
     name: "Media Players & Speakers",
     description:

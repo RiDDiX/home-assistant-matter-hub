@@ -490,6 +490,12 @@ const config: ThermostatServerConfig = {
 export function ClimateThermostatServer(
   initialState: ThermostatServerInitialState = {},
   features?: ThermostatServerFeatures,
+  appleAdaptiveTemperature = false,
 ) {
-  return ThermostatServer(config, initialState, features);
+  return ThermostatServer(
+    config,
+    initialState,
+    features,
+    appleAdaptiveTemperature,
+  );
 }

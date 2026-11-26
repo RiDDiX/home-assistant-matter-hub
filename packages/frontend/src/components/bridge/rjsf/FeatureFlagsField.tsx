@@ -26,6 +26,13 @@ export function FeatureFlagsField(props: FieldProps) {
 
   const handleToggle = useCallback(
     (key: string, checked: boolean) => {
+      if (key === "appleAdaptiveTemperature" && checked) {
+        onChange(
+          { ...formData, appleAdaptiveTemperature: true, serverMode: true },
+          fieldPathId.path,
+        );
+        return;
+      }
       onChange({ ...formData, [key]: checked }, fieldPathId.path);
     },
     [formData, onChange, fieldPathId],
@@ -111,7 +118,12 @@ export function FeatureFlagsField(props: FieldProps) {
             );
           }
 
-          const value = formData[key] ?? flagSchema.default ?? false;
+          const isServerModeLocked =
+            key === "serverMode" && formData.appleAdaptiveTemperature === true;
+          const isFieldDisabled = disabled || readonly || isServerModeLocked;
+          const value = isServerModeLocked
+            ? true
+            : (formData[key] ?? flagSchema.default ?? false);
           return (
             <Grid key={key} size={{ xs: 12, sm: 6, lg: 4 }}>
               <Card
@@ -129,9 +141,9 @@ export function FeatureFlagsField(props: FieldProps) {
               >
                 <CardActionArea
                   onClick={() => {
-                    if (!disabled && !readonly) handleToggle(key, !value);
+                    if (!isFieldDisabled) handleToggle(key, !value);
                   }}
-                  disabled={disabled || readonly}
+                  disabled={isFieldDisabled}
                   aria-pressed={value === true}
                   sx={{ height: "100%" }}
                 >
@@ -171,7 +183,7 @@ export function FeatureFlagsField(props: FieldProps) {
                       <Switch
                         checked={value}
                         size="small"
-                        disabled={disabled || readonly}
+                        disabled={isFieldDisabled}
                         tabIndex={-1}
                         onClick={(e) => e.stopPropagation()}
                         onChange={(e) => handleToggle(key, e.target.checked)}

@@ -78,6 +78,49 @@ describe("FeatureFlagsField", () => {
       expect(input).toBeDisabled();
     }
   });
+
+  it("auto-enables and locks serverMode when appleAdaptiveTemperature is toggled on", async () => {
+    const onChange = vi.fn();
+    const baseProps = makeProps({ onChange });
+    const adaptiveSchema = {
+      ...baseProps.schema,
+      properties: {
+        ...baseProps.schema.properties,
+        appleAdaptiveTemperature: {
+          type: "boolean" as const,
+          title: "Apple Adaptive Temperature (Server Mode)",
+          description: "Enable Apple Home Adaptive Temperature",
+          default: false,
+        },
+      },
+    };
+
+    const { rerender, container } = renderInTheme(
+      <FeatureFlagsField {...baseProps} schema={adaptiveSchema} />,
+    );
+
+    await userEvent.click(
+      screen.getByText("Apple Adaptive Temperature (Server Mode)"),
+    );
+    expect(onChange).toHaveBeenCalledWith(
+      { appleAdaptiveTemperature: true, serverMode: true },
+      "",
+    );
+
+    // Once enabled, Server Mode stays checked and disabled even if serverMode was omitted
+    rerender(
+      <ThemeProvider theme={appTheme}>
+        <FeatureFlagsField
+          {...baseProps}
+          schema={adaptiveSchema}
+          formData={{ appleAdaptiveTemperature: true }}
+        />
+      </ThemeProvider>,
+    );
+    const checkboxes = container.querySelectorAll('input[type="checkbox"]');
+    expect(checkboxes[1]).toBeChecked();
+    expect(checkboxes[1]).toBeDisabled();
+  });
 });
 
 // #443: number-typed flags (coverSliderDebounceMs, fanSliderDebounceMs) used to

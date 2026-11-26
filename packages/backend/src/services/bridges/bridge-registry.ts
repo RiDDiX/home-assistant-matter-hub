@@ -504,6 +504,10 @@ export class BridgeRegistry {
     return this.dataProvider.featureFlags?.vacuumOnOff === true;
   }
 
+  isAppleAdaptiveTemperatureEnabled(): boolean {
+    return this.dataProvider.featureFlags?.appleAdaptiveTemperature === true;
+  }
+
   // Consume frozen device identities (#404). Seeding always runs; only
   // consumption of the stored endpoint id/anchor is gated on this flag.
   isStableIdentityEnabled(): boolean {
