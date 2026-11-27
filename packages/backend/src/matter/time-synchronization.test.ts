@@ -7,7 +7,7 @@ import {
   ClimateHvacMode,
 } from "@home-assistant-matter-hub/common";
 import { Environment, VariableService } from "@matter/general";
-import { TimeSynchronization } from "@matter/main/clusters";
+import { Thermostat, TimeSynchronization } from "@matter/main/clusters";
 import { Endpoint, type ServerNode } from "@matter/main/node";
 import { DeviceTypeId } from "@matter/main/types";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -331,12 +331,35 @@ describe("RootTimeSynchronizationServer and standalone climate endpoint", () => 
       (tState.presetTypes as Array<{ presetScenario: number }>).length,
     ).toBe(6);
     expect(tState.appleAttr0002).toBe(true);
-    expect(tState.temperatureSetpointHold).toBeUndefined();
+    expect(tState.appleAttr000F).toBe(1);
+    expect(tState.temperatureSetpointHold).toBe(
+      Thermostat.TemperatureSetpointHold.SetpointHoldOff,
+    );
+    expect(tState.temperatureSetpointHoldDuration).toBeNull();
+    expect(tState.setpointHoldExpiryTimestamp).toBeNull();
 
     const standardType = ClimateDevice(haState, true, false);
     expect(standardType.deviceType).toBe(0x0072);
     expect(Object.keys(standardType.behaviors)).toContain("fanControl");
     expect(Object.keys(standardType.behaviors)).toContain("onOff");
     expect(Object.keys(standardType.behaviors)).not.toContain("binding");
+
+    const standardEp = new Endpoint(asStandaloneEndpointType(standardType), {
+      id: "climate-standard",
+    });
+    const standardServer = new ServerModeServerNode(
+      env(),
+      makeBridgeData(true),
+    );
+    try {
+      await standardServer.addDevice(standardEp);
+      await standardEp.construction;
+      const standardState = (
+        standardEp.state as unknown as { thermostat: Record<string, unknown> }
+      ).thermostat;
+      expect(standardState.temperatureSetpointHold).toBeUndefined();
+    } finally {
+      await standardServer.close().catch(() => {});
+    }
   });
 });

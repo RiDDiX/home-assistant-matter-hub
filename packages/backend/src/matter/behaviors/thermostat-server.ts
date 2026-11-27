@@ -2,7 +2,12 @@ import type { HomeAssistantEntityInformation } from "@home-assistant-matter-hub/
 import { Bytes, Logger } from "@matter/general";
 import { ThermostatServer as MatterThermostatServer } from "@matter/main/behaviors";
 import { Thermostat } from "@matter/main/clusters";
-import { AppleThermostatServerBase } from "./apple-adaptive-temperature.js";
+import {
+  AppleThermostatServerBase,
+  isAdaptiveTemperatureEnabled,
+  nowEpochS,
+  toNullableEpochS,
+} from "./apple-adaptive-temperature.js";
 
 const logger = Logger.get("ThermostatServer");
 
@@ -28,6 +33,8 @@ interface ThermostatRuntimeState {
   nudgedHeat?: number;
   nudgedCool?: number;
   autoResuming?: { mode: SystemMode; at: number };
+  holdTimer?: ReturnType<typeof setTimeout>;
+  holdGeneration: number;
 }
 
 // Scoped per Matter endpoint object (WeakMap) so identical entityIds across
@@ -56,13 +63,71 @@ function getRuntimeState(
   }
   let state = byEntity.get(entityId);
   if (!state) {
-    state = { nudgingSetpoints: false, activatingPreset: false };
+    state = {
+      nudgingSetpoints: false,
+      activatingPreset: false,
+      holdGeneration: 0,
+    };
     byEntity.set(entityId, state);
   }
   return state;
 }
 
-function clearApplePresetTracking(state: unknown): void {
+function clearHoldTimer(runtime: ThermostatRuntimeState): void {
+  runtime.holdGeneration++;
+  if (runtime.holdTimer !== undefined) {
+    clearTimeout(runtime.holdTimer);
+    runtime.holdTimer = undefined;
+  }
+}
+
+function clearEndpointHoldTimers(endpoint?: object): void {
+  if (!endpoint) return;
+  const byEntity = endpointRuntimeStates.get(endpoint);
+  if (!byEntity) return;
+  for (const runtime of byEntity.values()) {
+    clearHoldTimer(runtime);
+  }
+  endpointRuntimeStates.delete(endpoint);
+}
+
+function clearHoldState(
+  state: unknown,
+  runtime?: ThermostatRuntimeState,
+  options?: { clearAppleOverride?: boolean; setHoldOff?: boolean },
+): void {
+  if (runtime) {
+    clearHoldTimer(runtime);
+  }
+  const s = state as Record<string, unknown>;
+  if (
+    options?.setHoldOff !== false &&
+    s.temperatureSetpointHold !== undefined
+  ) {
+    s.temperatureSetpointHold =
+      Thermostat.TemperatureSetpointHold.SetpointHoldOff;
+  }
+  if (s.temperatureSetpointHoldDuration !== undefined) {
+    s.temperatureSetpointHoldDuration = null;
+  }
+  if (s.setpointHoldExpiryTimestamp !== undefined) {
+    s.setpointHoldExpiryTimestamp = null;
+  }
+  if (options?.clearAppleOverride !== false) {
+    if (s.appleAttr000C !== undefined) {
+      s.appleAttr000C = null;
+    }
+    if (s.appleAttr000E !== undefined) {
+      s.appleAttr000E = true;
+    }
+  }
+}
+
+function clearApplePresetTracking(
+  state: unknown,
+  runtime?: ThermostatRuntimeState,
+): void {
+  clearHoldState(state, runtime);
   const meiState = state as Record<string, unknown>;
   if (meiState.appleAttr0009 !== undefined) {
     meiState.appleAttr0009 = null;
@@ -70,6 +135,281 @@ function clearApplePresetTracking(state: unknown): void {
   if (meiState.appleAttr000B !== undefined) {
     meiState.appleAttr000B = null;
   }
+}
+
+function cloneBytes(value: Bytes): Uint8Array {
+  return Bytes.of(value).slice();
+}
+
+function enterAppleHold(
+  state: unknown,
+  runtime: ThermostatRuntimeState,
+  options: {
+    source: Thermostat.SetpointChangeSource;
+    amount?: number | null;
+    scheduledPresetHandle?: Bytes | null;
+  },
+): void {
+  const s = state as Record<string, unknown>;
+  if (s.setpointChangeSource !== undefined) {
+    s.setpointChangeSource = options.source;
+    if (s.setpointChangeAmount !== undefined) {
+      // Matter.js nullable int16 reserves -32768 (0x8000) as null sentinel.
+      s.setpointChangeAmount =
+        typeof options.amount === "number" && Number.isFinite(options.amount)
+          ? Math.max(-32767, Math.min(32767, Math.trunc(options.amount)))
+          : null;
+    }
+    if (s.setpointChangeSourceTimestamp !== undefined) {
+      s.setpointChangeSourceTimestamp = nowEpochS();
+    }
+  }
+
+  const adaptiveEnabled = isAdaptiveTemperatureEnabled(s);
+  const scheduledHandle =
+    (s.activePresetHandle as Bytes | null | undefined) ??
+    options.scheduledPresetHandle ??
+    (s.appleAttr0009 as Bytes | null | undefined) ??
+    null;
+
+  if (
+    s.temperatureSetpointHold ===
+    Thermostat.TemperatureSetpointHold.SetpointHoldOn
+  ) {
+    if (adaptiveEnabled && s.appleAttr000C !== undefined) {
+      s.appleAttr000C = 2;
+    }
+    if (
+      adaptiveEnabled &&
+      s.appleAttr0009 !== undefined &&
+      (s.activePresetHandle != null || options.scheduledPresetHandle != null) &&
+      scheduledHandle !== null
+    ) {
+      s.appleAttr0009 = cloneBytes(scheduledHandle);
+    }
+    return;
+  }
+
+  if (!adaptiveEnabled || scheduledHandle === null) {
+    clearHoldState(s, runtime);
+    return;
+  }
+
+  if (
+    s.appleAttr0009 !== undefined &&
+    (s.activePresetHandle != null || options.scheduledPresetHandle != null)
+  ) {
+    s.appleAttr0009 = cloneBytes(scheduledHandle);
+  }
+  clearHoldState(s, runtime, { setHoldOff: false });
+  if (s.appleAttr000C !== undefined) {
+    s.appleAttr000C = 2;
+  }
+  if (s.temperatureSetpointHold !== undefined) {
+    s.temperatureSetpointHold =
+      Thermostat.TemperatureSetpointHold.SetpointHoldOn;
+  }
+}
+
+function applyHoldDuration(
+  // biome-ignore lint/suspicious/noExplicitAny: Internal helper working across feature variants
+  self: any,
+  runtime: ThermostatRuntimeState,
+  opts: {
+    durationMinutes: number | null | undefined;
+    resumeOnNextEvent?: boolean;
+    setHoldOn?: boolean;
+    updateAppleMei: boolean;
+  },
+): void {
+  const s = self.state as Record<string, unknown>;
+  if (opts.updateAppleMei) {
+    const prevHandle = self.state.activePresetHandle as Bytes | null;
+    if (prevHandle !== null && s.appleAttr0009 !== undefined) {
+      s.appleAttr0009 = cloneBytes(prevHandle);
+    }
+    self.state.activePresetHandle = null;
+    if (s.appleAttr000C !== undefined) {
+      s.appleAttr000C = 2;
+    }
+    if (opts.resumeOnNextEvent !== undefined && s.appleAttr000E !== undefined) {
+      s.appleAttr000E = opts.resumeOnNextEvent;
+    }
+  } else if (opts.setHoldOn && self.state.activePresetHandle !== null) {
+    self.state.activePresetHandle = null;
+  }
+
+  if (opts.setHoldOn && s.temperatureSetpointHold !== undefined) {
+    s.temperatureSetpointHold =
+      Thermostat.TemperatureSetpointHold.SetpointHoldOn;
+  }
+
+  if (
+    opts.resumeOnNextEvent !== true &&
+    opts.durationMinutes != null &&
+    opts.durationMinutes > 0
+  ) {
+    const clampedMin = Math.min(1440, Math.trunc(opts.durationMinutes));
+    const nowMs = Date.now();
+    const expiryUnixSec = toNullableEpochS(
+      Math.floor(nowMs / 1000) + clampedMin * 60,
+    );
+    if (s.temperatureSetpointHoldDuration !== undefined) {
+      s.temperatureSetpointHoldDuration = clampedMin;
+    }
+    if (s.setpointHoldExpiryTimestamp !== undefined) {
+      s.setpointHoldExpiryTimestamp = expiryUnixSec;
+    }
+    scheduleHoldExpiry(self, runtime, nowMs + clampedMin * 60_000);
+    return;
+  }
+
+  clearHoldTimer(runtime);
+  if (
+    (opts.durationMinutes === null || opts.resumeOnNextEvent === true) &&
+    s.temperatureSetpointHoldDuration !== undefined
+  ) {
+    s.temperatureSetpointHoldDuration = null;
+  }
+  if (s.setpointHoldExpiryTimestamp !== undefined) {
+    s.setpointHoldExpiryTimestamp = null;
+  }
+}
+
+function resumeScheduledPresetOrClearHold(
+  // biome-ignore lint/suspicious/noExplicitAny: Internal helper working across feature variants
+  self: any,
+  runtime: ThermostatRuntimeState,
+): void {
+  clearHoldTimer(runtime);
+  const state = self.state as Record<string, unknown>;
+  const scheduledHandle = state.appleAttr0009;
+  const persistedPresets = state.persistedPresets as
+    | Thermostat.Preset[]
+    | undefined;
+  const homeAssistant = self.agent?.get?.(HomeAssistantEntityBehavior) as
+    | { isAvailable?: boolean }
+    | undefined;
+  const hasScheduledPreset =
+    isAdaptiveTemperatureEnabled(state) &&
+    Bytes.isBytes(scheduledHandle) &&
+    (homeAssistant?.isAvailable ?? true) &&
+    persistedPresets?.some(
+      (p) =>
+        p.presetHandle !== null &&
+        Bytes.areEqual(p.presetHandle, scheduledHandle),
+    );
+
+  if (hasScheduledPreset && typeof self.setActivePresetRequest === "function") {
+    const prevScheduledExpiry =
+      typeof state.appleAttr000B === "number" &&
+      state.appleAttr000B > Math.floor(Date.now() / 1000)
+        ? state.appleAttr000B
+        : null;
+    self.setActivePresetRequest({
+      presetHandle: cloneBytes(scheduledHandle),
+    });
+    if (prevScheduledExpiry !== null && state.appleAttr000B !== undefined) {
+      state.appleAttr000B = prevScheduledExpiry;
+    }
+    return;
+  }
+
+  clearHoldState(state, runtime);
+}
+
+function scheduleHoldExpiry(
+  // biome-ignore lint/suspicious/noExplicitAny: Internal helper working across feature variants
+  self: any,
+  runtime: ThermostatRuntimeState,
+  targetMs: number,
+): void {
+  clearHoldTimer(runtime);
+  const gen = runtime.holdGeneration;
+  const endpoint = self?.endpoint;
+  const behaviorType = self?.type;
+  if (!endpoint || !behaviorType || endpoint.lifecycle?.isGone) {
+    return;
+  }
+
+  const armTimer = () => {
+    if (runtime.holdGeneration !== gen || endpoint.lifecycle?.isGone) {
+      return;
+    }
+    const delayMs = Math.max(0, Math.min(targetMs - Date.now(), 2_147_483_647));
+    runtime.holdTimer = setTimeout(() => {
+      runtime.holdTimer = undefined;
+      if (runtime.holdGeneration !== gen || endpoint.lifecycle?.isGone) {
+        return;
+      }
+      if (!endpoint.lifecycle?.isReady) {
+        if (typeof endpoint.lifecycle?.ready?.once === "function") {
+          endpoint.lifecycle.ready.once(() => {
+            if (runtime.holdGeneration === gen && !endpoint.lifecycle?.isGone) {
+              armTimer();
+            }
+          });
+        }
+        return;
+      }
+      // Handle holds >24.8 days (exceeding Node's 32-bit setTimeout cap).
+      if (targetMs - Date.now() > 1000) {
+        armTimer();
+        return;
+      }
+      void Promise.resolve(
+        endpoint.act(async (agent: Agent) => {
+          if (runtime.holdGeneration !== gen || endpoint.lifecycle?.isGone) {
+            return;
+          }
+          // biome-ignore lint/suspicious/noExplicitAny: Internal helper working across feature variants
+          const behavior = agent.get(behaviorType) as any;
+          if (typeof agent.context?.transaction?.lock === "function") {
+            await agent.context.transaction.lock(behavior);
+          }
+          if (runtime.holdGeneration !== gen || endpoint.lifecycle?.isGone) {
+            return;
+          }
+          const state = behavior.state as Record<string, unknown>;
+          if (
+            state.temperatureSetpointHold !==
+            Thermostat.TemperatureSetpointHold.SetpointHoldOn
+          ) {
+            return;
+          }
+          if (
+            typeof state.setpointHoldExpiryTimestamp === "number" &&
+            state.setpointHoldExpiryTimestamp >
+              Math.floor(Date.now() / 1000) + 1
+          ) {
+            scheduleHoldExpiry(
+              behavior,
+              runtime,
+              state.setpointHoldExpiryTimestamp * 1000,
+            );
+            return;
+          }
+          resumeScheduledPresetOrClearHold(behavior, runtime);
+        }),
+      ).catch((err: unknown) => {
+        logger.warn("[APPLE-MEI] Failed to expire setpoint hold:", err);
+      });
+    }, delayMs);
+    runtime.holdTimer.unref?.();
+  };
+
+  if (
+    !endpoint.lifecycle?.isReady &&
+    typeof endpoint.lifecycle?.ready?.once === "function"
+  ) {
+    endpoint.lifecycle.ready.once(() => {
+      if (runtime.holdGeneration === gen && !endpoint.lifecycle?.isGone) {
+        armTimer();
+      }
+    });
+    return;
+  }
+  armTimer();
 }
 
 // Transactions executing preset operations (SetActivePresetRequest or persistedPresetsChanged).
@@ -381,6 +721,15 @@ const presetDefaults = {
   presetTypes: standardPresetTypes,
   numberOfPresets: 10,
   activePresetHandle: null,
+  // Apple Home (iOS 26+) requires standard Matter Setpoint Hold & Change Source
+  // attributes (matching Aqara W200 attributeList: 0x0023, 0x0024, 0x0030-0x0032,
+  // 0x0052) to render the active Adaptive preset badge ("At Home" / "Night" / etc.).
+  temperatureSetpointHold: Thermostat.TemperatureSetpointHold.SetpointHoldOff,
+  temperatureSetpointHoldDuration: null,
+  setpointHoldExpiryTimestamp: null,
+  setpointChangeSource: Thermostat.SetpointChangeSource.Manual,
+  setpointChangeAmount: null,
+  setpointChangeSourceTimestamp: 946_684_800,
 };
 
 const heatingOnlyDefaults = {
@@ -730,9 +1079,31 @@ async function thermostatPostInitialize(self: any): Promise<void> {
       self.events.persistedPresets$Changed,
       self.persistedPresetsChanged,
     );
+    self.reactTo(
+      self.events.temperatureSetpointHold$Changed,
+      self.temperatureSetpointHoldChanged,
+    );
+    self.reactTo(
+      self.events.temperatureSetpointHoldDuration$Changed,
+      self.temperatureSetpointHoldDurationChanged,
+    );
+    const attr000EEvt = self.events.appleAttr000E$Changed;
+    if (attr000EEvt) {
+      self.reactTo(attr000EEvt, self.appleAttr000EChanged);
+    }
+    if (
+      self.state.temperatureSetpointHold ===
+        Thermostat.TemperatureSetpointHold.SetpointHoldOn &&
+      typeof self.state.setpointHoldExpiryTimestamp === "number"
+    ) {
+      scheduleHoldExpiry(
+        self,
+        runtime,
+        self.state.setpointHoldExpiryTimestamp * 1000,
+      );
+    }
     for (const attr of [
       "appleAttr0002",
-      "appleAttr000E",
       "appleAttr0010",
       "appleAttr0011",
       "appleAttr0012",
@@ -744,7 +1115,7 @@ async function thermostatPostInitialize(self: any): Promise<void> {
           const formatted =
             value && typeof value === "object"
               ? JSON.stringify(value, (_, v) =>
-                  v instanceof Uint8Array ? `0x${Bytes.toHex(v)}` : v,
+                  Bytes.isBytes(v) ? `0x${Bytes.toHex(v)}` : v,
                 )
               : String(value);
           logger.debug(`[APPLE-MEI] Write Thermostat.${attr} = ${formatted}`);
@@ -805,6 +1176,11 @@ export class ThermostatServerBase extends AdaptiveFullFeaturedBase {
     thermostatPreInitialize(this);
     await super.initialize();
     await thermostatPostInitialize(this);
+  }
+
+  override async [Symbol.asyncDispose]() {
+    clearEndpointHoldTimers(this.endpoint);
+    await super[Symbol.asyncDispose]();
   }
 
   // biome-ignore lint/correctness/noUnusedPrivateClassMembers: Called via thermostatPostInitialize + prototype copy
@@ -1270,13 +1646,17 @@ export class ThermostatServerBase extends AdaptiveFullFeaturedBase {
 
     const finalHandle = keepActive ? savedPresetHandle : null;
     setIntendedPresetForTx(this.context?.transaction, key, finalHandle);
-    this.state.activePresetHandle = finalHandle;
     if (!keepActive) {
       logger.debug(
-        `[APPLE-MEI] Clearing active preset 0x${Bytes.toHex(savedPresetHandle)} -> null (systemMode=${ctx.systemMode}, heat=${ctx.haHeatingTemperature}, cool=${ctx.haCoolingTemperature})`,
+        `[APPLE-MEI] Entering Apple hold from active preset 0x${Bytes.toHex(savedPresetHandle)} -> null (systemMode=${ctx.systemMode}, heat=${ctx.haHeatingTemperature}, cool=${ctx.haCoolingTemperature})`,
       );
-      clearApplePresetTracking(this.state);
+      enterAppleHold(this.state, runtime, {
+        source: Thermostat.SetpointChangeSource.Manual,
+        amount: null,
+        scheduledPresetHandle: savedPresetHandle,
+      });
     }
+    this.state.activePresetHandle = finalHandle;
   }
 
   private trackNudge(
@@ -1322,7 +1702,7 @@ export class ThermostatServerBase extends AdaptiveFullFeaturedBase {
           setIntendedPresetForTx(tx, txKey(this, homeAssistant.entityId), null);
         }
         this.state.activePresetHandle = null;
-        clearApplePresetTracking(this.state);
+        clearApplePresetTracking(this.state, runtime);
         return;
       }
 
@@ -1358,10 +1738,20 @@ export class ThermostatServerBase extends AdaptiveFullFeaturedBase {
       this.state.activePresetHandle = request.presetHandle;
       const meiState = this.state as unknown as Record<string, unknown>;
       if (meiState.appleAttr0009 !== undefined) {
-        meiState.appleAttr0009 = request.presetHandle;
+        meiState.appleAttr0009 = cloneBytes(request.presetHandle);
       }
       if (meiState.appleAttr000B !== undefined) {
         meiState.appleAttr000B = null;
+      }
+      clearHoldState(this.state, runtime);
+      if (meiState.appleAttr000F !== undefined) {
+        meiState.appleAttr000F = preset.presetScenario;
+      }
+      if (this.state.setpointChangeSource !== undefined) {
+        this.state.setpointChangeSource =
+          Thermostat.SetpointChangeSource.External;
+        this.state.setpointChangeAmount = null;
+        this.state.setpointChangeSourceTimestamp = nowEpochS();
       }
       runtime.lastPresetActivation = {
         handle: request.presetHandle,
@@ -1521,6 +1911,185 @@ export class ThermostatServerBase extends AdaptiveFullFeaturedBase {
     });
   }
 
+  // biome-ignore lint/correctness/noUnusedPrivateClassMembers: Called via thermostatPostInitialize + prototype copy
+  private temperatureSetpointHoldChanged(
+    value: Thermostat.TemperatureSetpointHold,
+    _oldValue: Thermostat.TemperatureSetpointHold,
+    context?: ActionContext,
+  ) {
+    if (transactionIsOffline(context)) {
+      return;
+    }
+    logger.debug(
+      `[APPLE-MEI] Write Thermostat.temperatureSetpointHold = ${value}`,
+    );
+    this.agent.asLocalActor(() => {
+      const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);
+      const runtime = getRuntimeState(this, homeAssistant.entityId);
+      const meiState = this.state as unknown as Record<string, unknown>;
+
+      if (value === Thermostat.TemperatureSetpointHold.SetpointHoldOff) {
+        clearHoldState(this.state, runtime);
+        if (
+          !isAdaptiveTemperatureEnabled(this.state) ||
+          !Bytes.isBytes(meiState.appleAttr0009)
+        ) {
+          return;
+        }
+        const expectedGen = runtime.holdGeneration;
+        const endpoint = this.endpoint;
+        const behaviorType = (
+          this as unknown as { type?: Parameters<Agent["get"]>[0] }
+        ).type;
+        if (endpoint && typeof endpoint.act === "function" && behaviorType) {
+          runtime.holdTimer = setTimeout(() => {
+            runtime.holdTimer = undefined;
+            if (
+              runtime.holdGeneration !== expectedGen ||
+              !endpoint.lifecycle?.isReady ||
+              endpoint.lifecycle?.isGone
+            ) {
+              return;
+            }
+            void Promise.resolve(
+              endpoint.act(async (agent) => {
+                if (
+                  runtime.holdGeneration !== expectedGen ||
+                  endpoint.lifecycle?.isGone
+                ) {
+                  return;
+                }
+                // biome-ignore lint/suspicious/noExplicitAny: Internal helper working across feature variants
+                const behavior = agent.get(behaviorType) as any;
+                if (typeof agent.context?.transaction?.lock === "function") {
+                  await agent.context.transaction.lock(behavior);
+                }
+                if (
+                  runtime.holdGeneration !== expectedGen ||
+                  endpoint.lifecycle?.isGone
+                ) {
+                  return;
+                }
+                if (
+                  behavior.state.temperatureSetpointHold !==
+                    Thermostat.TemperatureSetpointHold.SetpointHoldOff ||
+                  behavior.state.activePresetHandle !== null
+                ) {
+                  return;
+                }
+                resumeScheduledPresetOrClearHold(behavior, runtime);
+              }),
+            ).catch((err: unknown) => {
+              logger.warn(
+                "[APPLE-MEI] Failed to resume preset after End Hold:",
+                err,
+              );
+            });
+          }, 0);
+          runtime.holdTimer.unref?.();
+        } else {
+          resumeScheduledPresetOrClearHold(this, runtime);
+        }
+        return;
+      }
+
+      if (value === Thermostat.TemperatureSetpointHold.SetpointHoldOn) {
+        const durationMinutes =
+          this.state.temperatureSetpointHoldDuration &&
+          this.state.temperatureSetpointHoldDuration > 0
+            ? this.state.temperatureSetpointHoldDuration
+            : undefined;
+        const adaptiveEnabled = isAdaptiveTemperatureEnabled(this.state);
+        applyHoldDuration(this, runtime, {
+          durationMinutes,
+          resumeOnNextEvent:
+            adaptiveEnabled && durationMinutes !== undefined
+              ? false
+              : undefined,
+          updateAppleMei: adaptiveEnabled,
+        });
+      }
+    });
+  }
+
+  // biome-ignore lint/correctness/noUnusedPrivateClassMembers: Called via thermostatPostInitialize + prototype copy
+  private temperatureSetpointHoldDurationChanged(
+    value: number | null,
+    _oldValue: number | null,
+    context?: ActionContext,
+  ) {
+    if (transactionIsOffline(context)) {
+      return;
+    }
+    logger.debug(
+      `[APPLE-MEI] Write Thermostat.temperatureSetpointHoldDuration = ${value}`,
+    );
+    this.agent.asLocalActor(() => {
+      const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);
+      const runtime = getRuntimeState(this, homeAssistant.entityId);
+      const adaptiveEnabled = isAdaptiveTemperatureEnabled(this.state);
+
+      if (value != null && value > 0) {
+        applyHoldDuration(this, runtime, {
+          durationMinutes: value,
+          resumeOnNextEvent: adaptiveEnabled ? false : undefined,
+          setHoldOn: true,
+          updateAppleMei: adaptiveEnabled,
+        });
+      } else {
+        clearHoldTimer(runtime);
+        if (this.state.setpointHoldExpiryTimestamp !== undefined) {
+          this.state.setpointHoldExpiryTimestamp = null;
+        }
+      }
+    });
+  }
+
+  // biome-ignore lint/correctness/noUnusedPrivateClassMembers: Called via thermostatPostInitialize + prototype copy
+  private appleAttr000EChanged(
+    value: boolean,
+    _oldValue: boolean,
+    context?: ActionContext,
+  ) {
+    logger.debug(`[APPLE-MEI] Write Thermostat.appleAttr000E = ${value}`);
+    if (transactionIsOffline(context)) {
+      return;
+    }
+    if (
+      value === true &&
+      this.state.temperatureSetpointHold ===
+        Thermostat.TemperatureSetpointHold.SetpointHoldOn
+    ) {
+      this.agent.asLocalActor(() => {
+        const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);
+        const runtime = getRuntimeState(this, homeAssistant.entityId);
+        clearHoldState(this.state, runtime, {
+          clearAppleOverride: false,
+          setHoldOff: false,
+        });
+      });
+    }
+  }
+
+  applyAppleSetpointHold(
+    resumeOnNextEvent: boolean,
+    durationMinutes: number | null,
+  ): void {
+    if (!this.features.presets || !isAdaptiveTemperatureEnabled(this.state)) {
+      return;
+    }
+    this.agent.asLocalActor(() => {
+      const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);
+      const runtime = getRuntimeState(this, homeAssistant.entityId);
+      applyHoldDuration(this, runtime, {
+        durationMinutes: resumeOnNextEvent ? null : durationMinutes,
+        resumeOnNextEvent,
+        setHoldOn: true,
+        updateAppleMei: true,
+      });
+    });
+  }
+
   override setpointRaiseLower(request: Thermostat.SetpointRaiseLowerRequest) {
     const config = this.state.config;
     const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);
@@ -1551,8 +2120,11 @@ export class ThermostatServerBase extends AdaptiveFullFeaturedBase {
       this.agent.asLocalActor(() => {
         const runtime = getRuntimeState(this, homeAssistant.entityId);
         runtime.lastPresetActivation = { handle: null, at: Date.now() };
+        enterAppleHold(this.state, runtime, {
+          source: Thermostat.SetpointChangeSource.External,
+          amount: request.amount * 10,
+        });
         this.state.activePresetHandle = null;
-        clearApplePresetTracking(this.state);
       });
     }
 
@@ -1674,6 +2246,7 @@ export class ThermostatServerBase extends AdaptiveFullFeaturedBase {
     if (!next) {
       return;
     }
+    const amount = value - oldValue;
     // Use asLocalActor to avoid access control issues when accessing HomeAssistantEntityBehavior
     this.agent.asLocalActor(() => {
       const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);
@@ -1725,14 +2298,27 @@ export class ThermostatServerBase extends AdaptiveFullFeaturedBase {
           logger.debug(
             `${source}: skipping - not in own/auto mode (mode=${currentMode}, haMode=${haHvacMode})`,
           );
-          if (this.features.presets && this.state.activePresetHandle === null) {
-            clearApplePresetTracking(this.state);
+          if (this.features.presets) {
+            runtime.lastPresetActivation = { handle: null, at: Date.now() };
+            enterAppleHold(this.state, runtime, {
+              source: Thermostat.SetpointChangeSource.External,
+              amount,
+            });
+            if (this.state.activePresetHandle !== null) {
+              this.state.activePresetHandle = null;
+            }
           }
           return;
         }
       }
 
-      clearApplePresetTracking(this.state);
+      if (this.features.presets) {
+        runtime.lastPresetActivation = { handle: null, at: Date.now() };
+        enterAppleHold(this.state, runtime, {
+          source: Thermostat.SetpointChangeSource.External,
+          amount,
+        });
+      }
 
       if (heat) {
         const coolingSetpoint = this.features.cooling
@@ -2024,6 +2610,18 @@ export namespace ThermostatServerBase {
 // but advertise only the features they actually support (#136).
 // Standard classes omit Presets & Apple 0x1349 MEI so non-adaptive bridges
 // keep their exact Matter schema; Adaptive classes enable them opt-in.
+const PRESET_PROTOTYPE_METHODS = new Set([
+  "setActivePresetRequest",
+  "persistedPresetsChanged",
+  "reconcilePersistedPresets",
+  "reconcileActivePresetOnUpdate",
+  "restoreIntendedPreset",
+  "temperatureSetpointHoldChanged",
+  "temperatureSetpointHoldDurationChanged",
+  "appleAttr000EChanged",
+  "applyAppleSetpointHold",
+]);
+
 function copyPrototypeMethods(
   source: { prototype: object },
   target: { prototype: object },
@@ -2033,7 +2631,7 @@ function copyPrototypeMethods(
     if (
       name === "constructor" ||
       name === "initialize" ||
-      (excludePresets && name === "setActivePresetRequest")
+      (excludePresets && PRESET_PROTOTYPE_METHODS.has(name))
     ) {
       continue;
     }
@@ -2056,6 +2654,11 @@ class AdaptiveHeatingOnlyThermostatServerBase extends AdaptiveHeatingOnlyFeature
     await super.initialize();
     await thermostatPostInitialize(this);
   }
+
+  override async [Symbol.asyncDispose]() {
+    clearEndpointHoldTimers(this.endpoint);
+    await super[Symbol.asyncDispose]();
+  }
 }
 namespace AdaptiveHeatingOnlyThermostatServerBase {
   export type State = InstanceType<
@@ -2074,6 +2677,11 @@ class AdaptiveCoolingOnlyThermostatServerBase extends AdaptiveCoolingOnlyFeature
     thermostatPreInitialize(this);
     await super.initialize();
     await thermostatPostInitialize(this);
+  }
+
+  override async [Symbol.asyncDispose]() {
+    clearEndpointHoldTimers(this.endpoint);
+    await super[Symbol.asyncDispose]();
   }
 }
 namespace AdaptiveCoolingOnlyThermostatServerBase {
@@ -2094,6 +2702,11 @@ class AdaptiveHeatingAndCoolingThermostatServerBase extends AdaptiveHeatingAndCo
     thermostatPreInitialize(this);
     await super.initialize();
     await thermostatPostInitialize(this);
+  }
+
+  override async [Symbol.asyncDispose]() {
+    clearEndpointHoldTimers(this.endpoint);
+    await super[Symbol.asyncDispose]();
   }
 }
 namespace AdaptiveHeatingAndCoolingThermostatServerBase {

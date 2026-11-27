@@ -11,10 +11,14 @@ import {
   TlvByteString,
   TlvField,
   TlvObject,
+  TlvUInt16,
   TlvUInt32,
 } from "@matter/main/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { AppleThermostatServerBase } from "./apple-adaptive-temperature.js";
+import {
+  AppleThermostatServerBase,
+  MAX_NULLABLE_EPOCH_S,
+} from "./apple-adaptive-temperature.js";
 
 const APPLE_THERMOSTAT_ATTR_IDS = [
   0x13490002, 0x13490009, 0x1349000a, 0x1349000b, 0x1349000c, 0x1349000d,
@@ -66,6 +70,10 @@ describe("Apple 0x1349 Adaptive Temperature MEI extensions", () => {
         Thermostat.ControlSequenceOfOperation.CoolingAndHeating,
       systemMode: Thermostat.SystemMode.Auto,
       activePresetHandle: null,
+      temperatureSetpointHold:
+        Thermostat.TemperatureSetpointHold.SetpointHoldOff,
+      temperatureSetpointHoldDuration: null,
+      setpointHoldExpiryTimestamp: null,
       numberOfPresets: 10,
       presetTypes: [
         {
@@ -148,7 +156,7 @@ describe("Apple 0x1349 Adaptive Temperature MEI extensions", () => {
     expect(therm.appleAttr0002).toBe(true);
     expect(therm.appleAttr000D).toBe(1);
     expect(therm.appleAttr000E).toBe(true);
-    expect(therm.appleAttr000F).toBe(5);
+    expect(therm.appleAttr000F).toBe(1);
     expect(therm.appleAttr0010).toHaveLength(5);
     expect(therm.appleAttr0011).toEqual({ f0: true, f1: null });
 
@@ -219,6 +227,22 @@ describe("Apple 0x1349 Adaptive Temperature MEI extensions", () => {
       expect(tBehavior.state.appleAttr0009).toEqual(new Uint8Array([1]));
       expect(tBehavior.state.appleAttr000B).toBeNull();
 
+      // Large durationSec near UINT32_MAX (0xfffffffe) must clamp to MAX_NULLABLE_EPOCH_S
+      // without overflowing nullable epoch-s (0xffffffff is reserved as null sentinel)
+      const nearMaxPayload = TlvObject({
+        handle: TlvField(0, TlvByteString),
+        duration: TlvField(1, TlvUInt32),
+        flag: TlvField(2, TlvBoolean),
+      }).encode({
+        handle: new Uint8Array([1]),
+        duration: 0xfffffffe,
+        flag: false,
+      });
+      expect(() =>
+        tBehavior.appleCmdF3(TlvAny.decode(nearMaxPayload)),
+      ).not.toThrow();
+      expect(tBehavior.state.appleAttr000B).toBe(MAX_NULLABLE_EPOCH_S);
+
       // Missing field 0 must be ignored rather than clearing the active preset
       const emptyPayload = TlvObject({}).encode({});
       expect(() =>
@@ -226,6 +250,49 @@ describe("Apple 0x1349 Adaptive Temperature MEI extensions", () => {
       ).not.toThrow();
       expect(tBehavior.state.appleAttr0009).toEqual(new Uint8Array([1]));
       expect(tBehavior.state.activePresetHandle).toEqual(new Uint8Array([1]));
+
+      // appleCmdF9 { 0: false, 1: 180 } -> timed hold ("For 3 hours") while Adaptive enabled
+      const f9ThreeHours = TlvObject({
+        resumeOnNextEvent: TlvField(0, TlvBoolean),
+        durationMinutes: TlvField(1, TlvUInt16),
+      }).encode({ resumeOnNextEvent: false, durationMinutes: 180 });
+      const f9Before = Math.floor(Date.now() / 1000);
+      const tBehaviorWithF9 = tBehavior as unknown as {
+        state: Record<string, unknown>;
+        appleCmdF9(req: unknown): unknown;
+      };
+      tBehaviorWithF9.appleCmdF9(TlvAny.decode(f9ThreeHours));
+      expect(tBehavior.state.appleAttr000C).toBe(2);
+      expect(tBehavior.state.appleAttr000E).toBe(false);
+      expect(tBehavior.state.temperatureSetpointHold).toBe(1);
+      expect(tBehavior.state.temperatureSetpointHoldDuration).toBe(180);
+      expect(
+        tBehavior.state.setpointHoldExpiryTimestamp as number,
+      ).toBeGreaterThanOrEqual(f9Before + 180 * 60 - 5);
+
+      // appleCmdF9 { 0: false } -> Indefinitely
+      const f9Indefinite = TlvObject({
+        resumeOnNextEvent: TlvField(0, TlvBoolean),
+      }).encode({ resumeOnNextEvent: false });
+      tBehaviorWithF9.appleCmdF9(TlvAny.decode(f9Indefinite));
+      expect(tBehavior.state.appleAttr000C).toBe(2);
+      expect(tBehavior.state.appleAttr000E).toBe(false);
+      expect(tBehavior.state.temperatureSetpointHoldDuration).toBeNull();
+      expect(tBehavior.state.setpointHoldExpiryTimestamp).toBeNull();
+
+      // appleCmdF9 { 0: true } -> Holding until next event
+      const f9NextEvent = TlvObject({
+        resumeOnNextEvent: TlvField(0, TlvBoolean),
+      }).encode({ resumeOnNextEvent: true });
+      tBehaviorWithF9.appleCmdF9(TlvAny.decode(f9NextEvent));
+      expect(tBehavior.state.appleAttr000C).toBe(2);
+      expect(tBehavior.state.appleAttr000E).toBe(true);
+      expect(tBehavior.state.temperatureSetpointHoldDuration).toBeNull();
+      expect(tBehavior.state.setpointHoldExpiryTimestamp).toBeNull();
+
+      // Invalid/missing field 0 is ignored without mutating state
+      tBehaviorWithF9.appleCmdF9(TlvAny.decode(emptyPayload));
+      expect(tBehavior.state.appleAttr000E).toBe(true);
 
       // Pre-2000 host clock must fall back to null instead of underflowing TlvEpochS
       const dateSpy = vi.spyOn(Date, "now").mockReturnValue(500_000_000_000);
@@ -242,6 +309,22 @@ describe("Apple 0x1349 Adaptive Temperature MEI extensions", () => {
       expect(tBehavior.state.appleAttr0009).toBeNull();
       expect(tBehavior.state.appleAttr000B).toBeNull();
       expect(tBehavior.state.activePresetHandle).toBeNull();
+
+      // appleCmdF9 is ignored when Adaptive Temperature is disabled
+      tBehavior.state.appleAttr0002 = false;
+      tBehaviorWithF9.appleCmdF9(TlvAny.decode(f9ThreeHours));
+      expect(tBehavior.state.appleAttr000C).toBeNull();
+      expect(tBehavior.state.temperatureSetpointHold).toBe(
+        Thermostat.TemperatureSetpointHold.SetpointHoldOff,
+      );
+      expect(tBehavior.state.temperatureSetpointHoldDuration).toBeNull();
+      tBehavior.state.appleAttr0002 = true;
+      tBehavior.state.appleAttr0011 = { f0: false, f1: null };
+      tBehaviorWithF9.appleCmdF9(TlvAny.decode(f9ThreeHours));
+      expect(tBehavior.state.appleAttr000C).toBeNull();
+      expect(tBehavior.state.temperatureSetpointHold).toBe(
+        Thermostat.TemperatureSetpointHold.SetpointHoldOff,
+      );
     });
   });
 });

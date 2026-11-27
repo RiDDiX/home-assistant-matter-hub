@@ -17,6 +17,7 @@ import {
   TlvByteString,
   TlvField,
   TlvObject,
+  TlvUInt16,
   TlvUInt32,
 } from "@matter/main/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -60,8 +61,13 @@ interface ThermostatClusterState {
   appleAttr0002?: boolean;
   appleAttr0009?: Uint8Array | null;
   appleAttr000B?: number | null;
+  appleAttr000C?: number | null;
+  appleAttr000E?: boolean;
   appleAttr0010?: unknown[];
   appleAttr0011?: { f0: boolean; f1?: number | null };
+  temperatureSetpointHold?: number;
+  temperatureSetpointHoldDuration?: number | null;
+  setpointHoldExpiryTimestamp?: number | null;
 }
 
 function getThermostatState(endpoint: LegacyEndpoint): ThermostatClusterState {
@@ -606,7 +612,8 @@ describe(
         },
       ]);
 
-      // 8. Real fabric cross-mode direct setpoint write in Heat mode clears activePresetHandle and Apple MEI attrs
+      // 8. Real fabric cross-mode direct setpoint write in Heat mode enters Apple hold (keeps scheduled preset),
+      // and controller writes to temperatureSetpointHoldDuration / appleAttr000E / temperatureSetpointHold work over fabric
       calls = [];
       await remoteWriteAttr(
         client,
@@ -616,9 +623,139 @@ describe(
         2600,
       );
       expect(t.activePresetHandle).toBeNull();
-      expect(t.appleAttr0009).toBeNull();
+      expect(
+        t.appleAttr0009 != null && Bytes.areEqual(t.appleAttr0009, sleepHandle),
+      ).toBe(true);
       expect(t.appleAttr000B).toBeNull();
+      expect(t.temperatureSetpointHold).toBe(
+        Thermostat.TemperatureSetpointHold.SetpointHoldOn,
+      );
+      expect(t.appleAttr000C).toBe(2);
+      expect(t.appleAttr000E).toBe(true);
       expect(calls).toEqual([]);
+
+      const expectedHoldUnixExpiry = Math.floor(Date.now() / 1000) + 180 * 60;
+      await remoteWriteAttr(
+        client,
+        endpoint.number,
+        Thermostat,
+        "temperatureSetpointHoldDuration",
+        180,
+      );
+      expect(t.appleAttr000E).toBe(false);
+      // Read.Attribute decodes TlvEpochS back to Unix seconds (wire value is expiry - 946_684_800)
+      const holdExpiryUnix = (await remoteReadAttr(
+        client,
+        endpoint.number,
+        Thermostat,
+        "setpointHoldExpiryTimestamp",
+      )) as number;
+      expect(holdExpiryUnix).toBeGreaterThanOrEqual(
+        expectedHoldUnixExpiry - 30,
+      );
+      expect(holdExpiryUnix).toBeLessThanOrEqual(expectedHoldUnixExpiry + 30);
+
+      await remoteWriteAttr(
+        client,
+        endpoint.number,
+        AppleThermostatCluster,
+        "appleAttr000E",
+        true,
+      );
+      expect(t.temperatureSetpointHold).toBe(
+        Thermostat.TemperatureSetpointHold.SetpointHoldOn,
+      );
+      expect(t.appleAttr000C).toBe(2);
+      expect(t.temperatureSetpointHoldDuration).toBeNull();
+      expect(t.setpointHoldExpiryTimestamp).toBeNull();
+
+      calls = [];
+      await remoteWriteAttr(
+        client,
+        endpoint.number,
+        Thermostat,
+        "temperatureSetpointHold",
+        Thermostat.TemperatureSetpointHold.SetpointHoldOff,
+      );
+      // Synchronous clearing of hold metadata before deferred preset restoration completes
+      expect(t.temperatureSetpointHoldDuration).toBeNull();
+      expect(t.setpointHoldExpiryTimestamp).toBeNull();
+      expect(t.appleAttr000C).toBeNull();
+      expect(t.appleAttr000E).toBe(true);
+      await vi.waitFor(() => {
+        expect(
+          t.activePresetHandle !== null &&
+            Bytes.areEqual(t.activePresetHandle, sleepHandle),
+        ).toBe(true);
+        expect(t.occupiedHeatingSetpoint).toBe(1800);
+        expect(calls).toEqual([
+          { action: "climate.set_temperature", data: { temperature: 18 } },
+        ]);
+      });
+
+      // Real fabric appleCmdF9 hold duration transitions ("For 3 hours", "Indefinitely", "Holding until next event")
+      const f9ThreeHoursPayload = TlvObject({
+        resumeOnNextEvent: TlvField(0, TlvBoolean),
+        durationMinutes: TlvField(1, TlvUInt16),
+      }).encode({ resumeOnNextEvent: false, durationMinutes: 180 });
+      const expectedF9Expiry = Math.floor(Date.now() / 1000) + 180 * 60;
+      await remoteInvoke(
+        client,
+        endpoint.number,
+        AppleThermostatCluster,
+        "appleCmdF9",
+        TlvAny.decode(f9ThreeHoursPayload),
+      );
+      expect(t.temperatureSetpointHold).toBe(
+        Thermostat.TemperatureSetpointHold.SetpointHoldOn,
+      );
+      expect(t.temperatureSetpointHoldDuration).toBe(180);
+      expect(t.appleAttr000C).toBe(2);
+      expect(t.appleAttr000E).toBe(false);
+      const f9ExpiryRead = (await remoteReadAttr(
+        client,
+        endpoint.number,
+        Thermostat,
+        "setpointHoldExpiryTimestamp",
+      )) as number;
+      expect(f9ExpiryRead).toBeGreaterThanOrEqual(expectedF9Expiry - 30);
+      expect(f9ExpiryRead).toBeLessThanOrEqual(expectedF9Expiry + 30);
+
+      const f9IndefinitePayload = TlvObject({
+        resumeOnNextEvent: TlvField(0, TlvBoolean),
+      }).encode({ resumeOnNextEvent: false });
+      await remoteInvoke(
+        client,
+        endpoint.number,
+        AppleThermostatCluster,
+        "appleCmdF9",
+        TlvAny.decode(f9IndefinitePayload),
+      );
+      expect(t.temperatureSetpointHold).toBe(
+        Thermostat.TemperatureSetpointHold.SetpointHoldOn,
+      );
+      expect(t.temperatureSetpointHoldDuration).toBeNull();
+      expect(t.setpointHoldExpiryTimestamp).toBeNull();
+      expect(t.appleAttr000C).toBe(2);
+      expect(t.appleAttr000E).toBe(false);
+
+      const f9NextEventPayload = TlvObject({
+        resumeOnNextEvent: TlvField(0, TlvBoolean),
+      }).encode({ resumeOnNextEvent: true });
+      await remoteInvoke(
+        client,
+        endpoint.number,
+        AppleThermostatCluster,
+        "appleCmdF9",
+        TlvAny.decode(f9NextEventPayload),
+      );
+      expect(t.temperatureSetpointHold).toBe(
+        Thermostat.TemperatureSetpointHold.SetpointHoldOn,
+      );
+      expect(t.temperatureSetpointHoldDuration).toBeNull();
+      expect(t.setpointHoldExpiryTimestamp).toBeNull();
+      expect(t.appleAttr000C).toBe(2);
+      expect(t.appleAttr000E).toBe(true);
 
       // 9. Re-activate via appleCmdF3 and verify appleCmdF4 clears active preset + Apple MEI attrs
       await remoteInvoke(
@@ -631,6 +768,10 @@ describe(
       expect(t.activePresetHandle).not.toBeNull();
       expect(t.appleAttr0009).not.toBeNull();
       expect(t.appleAttr000B).not.toBeNull();
+      expect(t.appleAttr000C).toBeNull();
+      expect(t.temperatureSetpointHold).toBe(
+        Thermostat.TemperatureSetpointHold.SetpointHoldOff,
+      );
 
       calls = [];
       await remoteInvoke(
@@ -643,6 +784,7 @@ describe(
       expect(t.activePresetHandle).toBeNull();
       expect(t.appleAttr0009).toBeNull();
       expect(t.appleAttr000B).toBeNull();
+      expect(t.appleAttr000C).toBeNull();
       expect(calls).toEqual([]);
     });
 
@@ -712,6 +854,127 @@ describe(
           Bytes.areEqual(t2.appleAttr0009, occupiedHandle),
       ).toBe(true);
       expect(t2.appleAttr000B).not.toBeNull();
+    });
+
+    it("restores scheduled preset on startup when a persisted timed hold expired while offline", async () => {
+      const nodeId = "adaptive-expired-hold-node";
+      const sleepHandle = createPresetHandle(Thermostat.PresetScenario.Sleep);
+
+      const first = await mountStandalone(true, nodeId);
+      await first.endpoint.act(async (agent) => {
+        const therm = agent.get(AppleThermostatServerBase) as unknown as {
+          state: ThermostatClusterState;
+        };
+        therm.state.appleAttr0009 = sleepHandle;
+        therm.state.appleAttr000C = 2;
+        therm.state.appleAttr000E = false;
+        therm.state.activePresetHandle = null;
+        therm.state.temperatureSetpointHold =
+          Thermostat.TemperatureSetpointHold.SetpointHoldOn;
+        therm.state.temperatureSetpointHoldDuration = 180;
+        // Expired 60s ago while server was offline
+        therm.state.setpointHoldExpiryTimestamp =
+          Math.floor(Date.now() / 1000) - 60;
+      });
+
+      await first.serverNode.close();
+      server = undefined;
+
+      initEnv();
+      const second = await mountStandalone(true, nodeId);
+      const t2 = getThermostatState(second.endpoint);
+      await vi.waitFor(() => {
+        expect(
+          t2.activePresetHandle !== null &&
+            Bytes.areEqual(t2.activePresetHandle, sleepHandle),
+        ).toBe(true);
+        expect(t2.temperatureSetpointHold).toBe(
+          Thermostat.TemperatureSetpointHold.SetpointHoldOff,
+        );
+        expect(t2.temperatureSetpointHoldDuration).toBeNull();
+        expect(t2.setpointHoldExpiryTimestamp).toBeNull();
+        expect(t2.appleAttr000C).toBeNull();
+        expect(t2.appleAttr000E).toBe(true);
+        expect(calls).toContainEqual({
+          action: "climate.set_temperature",
+          data: { temperature: 18 },
+        });
+      });
+    });
+
+    it("waits for an overlapping thermostat lock when End Hold restores the scheduled preset", async () => {
+      const { endpoint, client } = await mountStandaloneAndCommission(true);
+      const t = getThermostatState(endpoint);
+      const sleepHandle = createPresetHandle(Thermostat.PresetScenario.Sleep);
+
+      await remoteInvoke(
+        client,
+        endpoint.number,
+        Thermostat,
+        "setActivePresetRequest",
+        { presetHandle: sleepHandle },
+      );
+      await remoteWriteAttr(
+        client,
+        endpoint.number,
+        Thermostat,
+        "occupiedHeatingSetpoint",
+        2200,
+      );
+      expect(t.activePresetHandle).toBeNull();
+      expect(t.temperatureSetpointHold).toBe(
+        Thermostat.TemperatureSetpointHold.SetpointHoldOn,
+      );
+
+      // Hold an exclusive transaction lock right as temperatureSetpointHold$Changed fires so
+      // the 0ms End Hold restore overlaps an active lock on thermostat.state.
+      let contenderPromise: Promise<void> | undefined;
+      let contenderAcquired = false;
+      (
+        endpoint.events as unknown as {
+          thermostat: {
+            temperatureSetpointHold$Changed: {
+              once: (cb: () => void) => void;
+            };
+          };
+        }
+      ).thermostat.temperatureSetpointHold$Changed.once(() => {
+        contenderPromise = Promise.resolve(
+          endpoint.act(async (agent) => {
+            const therm = agent.get(AppleThermostatServerBase);
+            await agent.context.transaction.lock(therm);
+            contenderAcquired = true;
+            await new Promise((resolve) => setTimeout(resolve, 40));
+          }),
+        );
+      });
+
+      calls = [];
+      await remoteWriteAttr(
+        client,
+        endpoint.number,
+        Thermostat,
+        "temperatureSetpointHold",
+        Thermostat.TemperatureSetpointHold.SetpointHoldOff,
+      );
+      await contenderPromise;
+      expect(contenderAcquired).toBe(true);
+
+      await vi.waitFor(() => {
+        expect(
+          t.activePresetHandle !== null &&
+            Bytes.areEqual(t.activePresetHandle, sleepHandle),
+        ).toBe(true);
+        expect(t.occupiedHeatingSetpoint).toBe(1800);
+        expect(t.temperatureSetpointHold).toBe(
+          Thermostat.TemperatureSetpointHold.SetpointHoldOff,
+        );
+        expect(t.appleAttr000C).toBeNull();
+        expect(t.appleAttr000E).toBe(true);
+        expect(calls).toEqual([
+          { action: "climate.set_temperature", data: { temperature: 18 } },
+        ]);
+      });
     });
   },
 );

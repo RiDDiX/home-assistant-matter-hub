@@ -11,8 +11,31 @@ import { ClusterType, TlvAny, type TlvStream } from "@matter/main/types";
 const logger = Logger.get("AppleAdaptiveTemp");
 
 // TlvEpochS encodes Unix seconds minus Matter epoch (2000-01-01T00:00:00Z) as uint32.
-const MATTER_EPOCH_S_OFFSET = 946_684_800;
-const MAX_TLV_EPOCH_S = 0xffffffff + MATTER_EPOCH_S_OFFSET;
+// Nullable epoch-s reserves 0xffffffff as the null sentinel (Matter.js max = 0xfffffffe).
+export const MATTER_EPOCH_S_OFFSET = 946_684_800;
+export const MAX_NULLABLE_EPOCH_S = 0xfffffffe + MATTER_EPOCH_S_OFFSET;
+
+export function nowEpochS(): number {
+  return Math.max(MATTER_EPOCH_S_OFFSET, Math.floor(Date.now() / 1000));
+}
+
+export function toNullableEpochS(rawUnixSec: number): number | null {
+  if (!Number.isFinite(rawUnixSec)) {
+    return null;
+  }
+  const truncated = Math.trunc(rawUnixSec);
+  return truncated >= MATTER_EPOCH_S_OFFSET
+    ? Math.min(MAX_NULLABLE_EPOCH_S, truncated)
+    : null;
+}
+
+export function isAdaptiveTemperatureEnabled(state: unknown): boolean {
+  const s = state as Record<string, unknown>;
+  return (
+    s.appleAttr0002 !== false &&
+    (s.appleAttr0011 as { f0?: boolean } | undefined)?.f0 === true
+  );
+}
 
 function formatDecodedPayload(value: unknown): string {
   if (value == null) {
@@ -21,7 +44,7 @@ function formatDecodedPayload(value: unknown): string {
   return JSON.stringify(value, (_, v) =>
     typeof v === "bigint"
       ? v.toString()
-      : v instanceof Uint8Array
+      : Bytes.isBytes(v)
         ? `0x${Bytes.toHex(v)}`
         : v,
   );
@@ -34,8 +57,9 @@ function decodeApplePayload(
     return undefined;
   }
   try {
-    const stream =
-      payload instanceof Uint8Array ? TlvAny.decode(payload) : payload;
+    const stream = Bytes.isBytes(payload)
+      ? TlvAny.decode(Bytes.of(payload))
+      : payload;
     if (
       Array.isArray(stream) ||
       (typeof stream === "object" &&
@@ -140,10 +164,10 @@ function buildAppleThermostatSchema(): ClusterModel {
     new AttributeModel({
       id: 0x1349000c,
       name: "AppleAttr000C",
-      type: "epoch-s",
+      type: "uint8",
       conformance: "M",
       access: "R V",
-      quality: "X",
+      quality: "X N",
       default: null,
     }),
     new AttributeModel({
@@ -169,7 +193,8 @@ function buildAppleThermostatSchema(): ClusterModel {
       type: "uint8",
       conformance: "M",
       access: "R V",
-      default: 5,
+      quality: "N",
+      default: 1,
     }),
     new AttributeModel({
       id: 0x13490010,
@@ -327,7 +352,7 @@ const ExtendedThermostatWithDefaults = ExtendedThermostatBase.set({
   appleAttr000C: null,
   appleAttr000D: 1,
   appleAttr000E: true,
-  appleAttr000F: 5,
+  appleAttr000F: 1,
   appleAttr0010: defaultAppleAttr0010,
   appleAttr0011: defaultAppleAttr0011,
   appleAttr0012: false,
@@ -348,26 +373,23 @@ class AppleThermostatServerImpl extends ExtendedThermostatWithDefaults {
       return;
     }
     const rawHandle = decoded["0"];
-    if (rawHandle !== null && !(rawHandle instanceof Uint8Array)) {
+    if (rawHandle !== null && !Bytes.isBytes(rawHandle)) {
       logger.debug(
         "[APPLE-MEI] Thermostat.appleCmdF3 invalid field 0 type; ignoring",
       );
       return;
     }
-    const presetHandle =
-      rawHandle instanceof Uint8Array ? new Uint8Array(rawHandle) : null;
+    const presetHandle = Bytes.isBytes(rawHandle)
+      ? Bytes.of(rawHandle).slice()
+      : null;
     const rawDuration = decoded["1"];
     const durationSec =
       typeof rawDuration === "number" || typeof rawDuration === "bigint"
         ? Math.trunc(Number(rawDuration))
         : undefined;
-    const rawExpiry =
-      durationSec !== undefined && durationSec > 0 && durationSec !== 0xffffffff
-        ? Math.floor(Date.now() / 1000) + durationSec
-        : null;
     const expiryUnixSec =
-      rawExpiry !== null && rawExpiry >= MATTER_EPOCH_S_OFFSET
-        ? Math.min(MAX_TLV_EPOCH_S, rawExpiry)
+      durationSec !== undefined && durationSec > 0 && durationSec !== 0xffffffff
+        ? toNullableEpochS(Math.floor(Date.now() / 1000) + durationSec)
         : null;
 
     // Validate/activate standard preset first so an unknown handle throws before
@@ -393,6 +415,17 @@ class AppleThermostatServerImpl extends ExtendedThermostatWithDefaults {
     const stateObj = this.state as unknown as Record<string, unknown>;
     stateObj.appleAttr0009 = null;
     stateObj.appleAttr000B = null;
+    stateObj.appleAttr000C = null;
+    stateObj.appleAttr000E = true;
+    if (stateObj.temperatureSetpointHold !== undefined) {
+      stateObj.temperatureSetpointHold = 0;
+    }
+    if (stateObj.temperatureSetpointHoldDuration !== undefined) {
+      stateObj.temperatureSetpointHoldDuration = null;
+    }
+    if (stateObj.setpointHoldExpiryTimestamp !== undefined) {
+      stateObj.setpointHoldExpiryTimestamp = null;
+    }
     const selfWithPreset = this as unknown as {
       setActivePresetRequest?: (req: {
         presetHandle: Uint8Array | null;
@@ -418,7 +451,72 @@ class AppleThermostatServerImpl extends ExtendedThermostatWithDefaults {
   }
 
   appleCmdF9(request: unknown) {
-    logAppleCommand("Thermostat", 0x134900f9, "appleCmdF9", request);
+    const decoded = decodeApplePayload(request);
+    logAppleCommand("Thermostat", 0x134900f9, "appleCmdF9", decoded, true);
+    if (!decoded || typeof decoded["0"] !== "boolean") {
+      logger.debug(
+        "[APPLE-MEI] Thermostat.appleCmdF9 missing/invalid field 0 (resumeOnNextEvent); ignoring",
+      );
+      return;
+    }
+    if (!isAdaptiveTemperatureEnabled(this.state)) {
+      logger.debug(
+        "[APPLE-MEI] Thermostat.appleCmdF9 ignored because Adaptive Temperature is disabled",
+      );
+      return;
+    }
+
+    const resumeOnNextEvent = decoded["0"];
+    const rawDuration = decoded["1"];
+    const parsedDuration =
+      typeof rawDuration === "number" || typeof rawDuration === "bigint"
+        ? Math.trunc(Number(rawDuration))
+        : null;
+    const durationMinutes =
+      parsedDuration !== null &&
+      Number.isFinite(parsedDuration) &&
+      parsedDuration > 0
+        ? Math.min(1440, parsedDuration)
+        : null;
+
+    const selfWithHold = this as unknown as {
+      applyAppleSetpointHold?: (
+        resumeOnNextEvent: boolean,
+        durationMinutes: number | null,
+      ) => void;
+    };
+    if (typeof selfWithHold.applyAppleSetpointHold === "function") {
+      selfWithHold.applyAppleSetpointHold(resumeOnNextEvent, durationMinutes);
+    } else {
+      const stateObj = this.state as unknown as Record<string, unknown>;
+      stateObj.appleAttr000C = 2;
+      stateObj.appleAttr000E = resumeOnNextEvent;
+      if (stateObj.temperatureSetpointHold !== undefined) {
+        stateObj.temperatureSetpointHold = 1;
+      }
+      if (!resumeOnNextEvent && durationMinutes !== null) {
+        const expiryUnixSec = toNullableEpochS(
+          Math.floor(Date.now() / 1000) + durationMinutes * 60,
+        );
+        if (stateObj.temperatureSetpointHoldDuration !== undefined) {
+          stateObj.temperatureSetpointHoldDuration = durationMinutes;
+        }
+        if (stateObj.setpointHoldExpiryTimestamp !== undefined) {
+          stateObj.setpointHoldExpiryTimestamp = expiryUnixSec;
+        }
+      } else {
+        if (stateObj.temperatureSetpointHoldDuration !== undefined) {
+          stateObj.temperatureSetpointHoldDuration = null;
+        }
+        if (stateObj.setpointHoldExpiryTimestamp !== undefined) {
+          stateObj.setpointHoldExpiryTimestamp = null;
+        }
+      }
+    }
+
+    logger.debug(
+      `[APPLE-MEI] Thermostat.appleCmdF9 applied resumeOnNextEvent=${resumeOnNextEvent} durationMinutes=${String(durationMinutes)}`,
+    );
   }
 }
 

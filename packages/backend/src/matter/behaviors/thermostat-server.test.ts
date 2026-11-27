@@ -5,7 +5,7 @@ import type {
 } from "@home-assistant-matter-hub/common";
 import type { ActionContext } from "@matter/main";
 import { Thermostat } from "@matter/main/clusters";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { HomeAssistantAction } from "../../services/home-assistant/home-assistant-actions.js";
 import { HomeAssistantConfig } from "../../services/home-assistant/home-assistant-config.js";
 import { ClimateThermostatServer } from "../endpoints/legacy/climate/behaviors/climate-thermostat-server.js";
@@ -426,6 +426,17 @@ describe("ThermostatServerBase.setActivePresetRequest", () => {
         activePresetHandle: null as Uint8Array | null,
         appleAttr0009: null as Uint8Array | null,
         appleAttr000B: 999 as number | null,
+        appleAttr000C: 2 as number | null,
+        appleAttr000E: false,
+        appleAttr000F: 1,
+        appleAttr0011: { f0: true, f1: null },
+        temperatureSetpointHold:
+          Thermostat.TemperatureSetpointHold.SetpointHoldOn,
+        temperatureSetpointHoldDuration: 180 as number | null,
+        setpointHoldExpiryTimestamp: 1795757072 as number | null,
+        setpointChangeSource: Thermostat.SetpointChangeSource.Manual,
+        setpointChangeAmount: null as number | null,
+        setpointChangeSourceTimestamp: 946_684_800,
         systemMode: 4,
       },
       agent: {
@@ -460,6 +471,13 @@ describe("ThermostatServerBase.setActivePresetRequest", () => {
     expect(mockSelf.state.activePresetHandle).toEqual(handle);
     expect(mockSelf.state.appleAttr0009).toEqual(handle);
     expect(mockSelf.state.appleAttr000B).toBeNull();
+    expect(mockSelf.state.appleAttr000C).toBeNull();
+    expect(mockSelf.state.appleAttr000E).toBe(true);
+    expect(mockSelf.state.temperatureSetpointHold).toBe(
+      Thermostat.TemperatureSetpointHold.SetpointHoldOff,
+    );
+    expect(mockSelf.state.temperatureSetpointHoldDuration).toBeNull();
+    expect(mockSelf.state.setpointHoldExpiryTimestamp).toBeNull();
     expect(mockSelf.state.occupiedHeatingSetpoint).toBe(2000);
     expect(mockSelf.state.occupiedCoolingSetpoint).toBe(2400);
     expect(actions).toEqual([{ action: "setTemperature", low: 20, high: 24 }]);
@@ -687,7 +705,7 @@ describe("ThermostatServerBase.setActivePresetRequest", () => {
     });
   });
 
-  it("clears activePresetHandle, appleAttr0009, and appleAttr000B on setpointRaiseLower", () => {
+  it("enters Apple hold (preserves appleAttr0009/000B, sets hold=On and 000C=2) on setpointRaiseLower", () => {
     const actions: unknown[] = [];
     const handle = createPresetHandle(Thermostat.PresetScenario.Occupied);
     const mockSelf = {
@@ -710,8 +728,19 @@ describe("ThermostatServerBase.setActivePresetRequest", () => {
           }),
         },
         activePresetHandle: handle as Uint8Array | null,
+        appleAttr0002: true,
         appleAttr0009: handle as Uint8Array | null,
         appleAttr000B: 1795746272 as number | null,
+        appleAttr000C: null as number | null,
+        appleAttr000E: true,
+        appleAttr0011: { f0: true, f1: null },
+        temperatureSetpointHold:
+          Thermostat.TemperatureSetpointHold.SetpointHoldOff,
+        temperatureSetpointHoldDuration: null as number | null,
+        setpointHoldExpiryTimestamp: null as number | null,
+        setpointChangeSource: Thermostat.SetpointChangeSource.External,
+        setpointChangeAmount: null as number | null,
+        setpointChangeSourceTimestamp: 946_684_800,
         minHeatSetpointLimit: 700,
         maxHeatSetpointLimit: 3500,
         minCoolSetpointLimit: 700,
@@ -738,8 +767,16 @@ describe("ThermostatServerBase.setActivePresetRequest", () => {
       { mode: Thermostat.SetpointRaiseLowerMode.Heat, amount: 10 },
     );
     expect(mockSelf.state.activePresetHandle).toBeNull();
-    expect(mockSelf.state.appleAttr0009).toBeNull();
-    expect(mockSelf.state.appleAttr000B).toBeNull();
+    expect(mockSelf.state.appleAttr0009).toEqual(handle);
+    expect(mockSelf.state.appleAttr000B).toBe(1795746272);
+    expect(mockSelf.state.appleAttr000C).toBe(2);
+    expect(mockSelf.state.appleAttr000E).toBe(true);
+    expect(mockSelf.state.temperatureSetpointHold).toBe(
+      Thermostat.TemperatureSetpointHold.SetpointHoldOn,
+    );
+    expect(mockSelf.state.temperatureSetpointHoldDuration).toBeNull();
+    expect(mockSelf.state.setpointHoldExpiryTimestamp).toBeNull();
+    expect(mockSelf.state.setpointChangeAmount).toBe(100);
     expect(actions).toHaveLength(1);
   });
 
@@ -981,8 +1018,20 @@ function createClimateMock(opts: {
     state: {
       config,
       activePresetHandle: opts.activePresetHandle,
+      appleAttr0002: true,
       appleAttr0009: opts.activePresetHandle,
       appleAttr000B: opts.activePresetHandle ? 1795746272 : null,
+      appleAttr000C: null as number | null,
+      appleAttr000E: true,
+      appleAttr000F: 1,
+      appleAttr0011: { f0: true, f1: null },
+      temperatureSetpointHold:
+        Thermostat.TemperatureSetpointHold.SetpointHoldOff,
+      temperatureSetpointHoldDuration: null as number | null,
+      setpointHoldExpiryTimestamp: null as number | null,
+      setpointChangeSource: Thermostat.SetpointChangeSource.Manual,
+      setpointChangeAmount: null as number | null,
+      setpointChangeSourceTimestamp: 946_684_800,
       persistedPresets: [
         {
           presetHandle: opts.activePresetHandle ?? handle,
@@ -1068,7 +1117,7 @@ describe("ThermostatServerBase.update preset handling", () => {
     expect(mockSelf.state.activePresetHandle).toEqual(handle);
   });
 
-  it("clears activePresetHandle, appleAttr0009, and appleAttr000B when HA setpoint diverges outside tolerance", () => {
+  it("enters Apple hold (preserves appleAttr0009/000B, sets hold=On and 000C=2) when HA setpoint diverges outside tolerance", () => {
     const handle = createPresetHandle(Thermostat.PresetScenario.Occupied);
     const haState = {
       entity_id: "climate.diverge",
@@ -1096,8 +1145,15 @@ describe("ThermostatServerBase.update preset handling", () => {
       state: haState,
     } as unknown as HomeAssistantEntityInformation);
     expect(mockSelf.state.activePresetHandle).toBeNull();
-    expect(mockSelf.state.appleAttr0009).toBeNull();
-    expect(mockSelf.state.appleAttr000B).toBeNull();
+    expect(mockSelf.state.appleAttr0009).toEqual(handle);
+    expect(mockSelf.state.appleAttr000B).toBe(1795746272);
+    expect(mockSelf.state.appleAttr000C).toBe(2);
+    expect(mockSelf.state.appleAttr000E).toBe(true);
+    expect(mockSelf.state.temperatureSetpointHold).toBe(
+      Thermostat.TemperatureSetpointHold.SetpointHoldOn,
+    );
+    expect(mockSelf.state.temperatureSetpointHoldDuration).toBeNull();
+    expect(mockSelf.state.setpointHoldExpiryTimestamp).toBeNull();
   });
 
   it("applies latched cool and dual-range setpoints on HVAC mode switches while a preset is active", () => {
@@ -1291,8 +1347,12 @@ describe("ThermostatServerBase.update preset handling", () => {
 
     expect(actions).toEqual([]);
     expect(mockSelf.state.activePresetHandle).toBeNull();
-    expect(mockSelf.state.appleAttr0009).toBeNull();
-    expect(mockSelf.state.appleAttr000B).toBeNull();
+    expect(mockSelf.state.appleAttr0009).toEqual(handle);
+    expect(mockSelf.state.temperatureSetpointHold).toBe(
+      Thermostat.TemperatureSetpointHold.SetpointHoldOn,
+    );
+    expect(mockSelf.state.appleAttr000C).toBe(2);
+    expect(mockSelf.state.appleAttr000E).toBe(true);
   });
 
   it("preserves default persistedPresets when a Fahrenheit thermostat boots unavailable", () => {
@@ -1418,7 +1478,7 @@ describe("ThermostatServerBase.update preset handling", () => {
     expect(dryActions).toEqual([]);
   });
 
-  it("clears appleAttr0009/000B when Matter.js clears activePresetHandle on a cross-mode setpoint write", () => {
+  it("preserves scheduled preset in Apple hold when Matter.js clears activePresetHandle on a cross-mode setpoint write", () => {
     const actions: HomeAssistantAction[] = [];
     const haState = {
       entity_id: "climate.cross_mode",
@@ -1462,8 +1522,13 @@ describe("ThermostatServerBase.update preset handling", () => {
     ).coolingSetpointChanging.call(mockSelf, 2500, 2333, onlineContext);
 
     expect(actions).toEqual([]);
-    expect(mockSelf.state.appleAttr0009).toBeNull();
-    expect(mockSelf.state.appleAttr000B).toBeNull();
+    expect(mockSelf.state.appleAttr0009).toEqual(staleHandle);
+    expect(mockSelf.state.appleAttr000B).toBe(1795746272);
+    expect(mockSelf.state.temperatureSetpointHold).toBe(
+      Thermostat.TemperatureSetpointHold.SetpointHoldOn,
+    );
+    expect(mockSelf.state.appleAttr000C).toBe(2);
+    expect(mockSelf.state.appleAttr000E).toBe(true);
   });
 
   it("ignores heatingSetpoint-only preset edits in Dry mode on heat+cool devices", () => {
@@ -1514,5 +1579,506 @@ describe("ThermostatServerBase.update preset handling", () => {
     );
 
     expect(actions).toEqual([]);
+  });
+});
+
+describe("Apple Adaptive Temperature hold duration", () => {
+  const onlineContext = {
+    subject: 1n,
+    session: { subject: 1n },
+  } as unknown as ActionContext;
+
+  function makeHoldMock(opts?: {
+    adaptiveEnabled?: boolean;
+    activePreset?: boolean;
+    heatingSetpoint?: number;
+  }) {
+    const actions: HomeAssistantAction[] = [];
+    const handle = createPresetHandle(Thermostat.PresetScenario.Occupied);
+    const haState = {
+      entity_id: "climate.hold_unit",
+      state: "heat",
+      attributes: {
+        hvac_modes: ["off", "heat", "cool", "heat_cool"],
+        temperature: 20,
+        current_temperature: 20,
+        min_temp: 7,
+        max_temp: 35,
+        supported_features: 3,
+      },
+    } as unknown as HomeAssistantEntityState<ClimateDeviceAttributes>;
+    const mockSelf = createClimateMock({
+      endpointId: `hold-ep-${Math.random()}`,
+      entityId: "climate.hold_unit",
+      haState,
+      actions,
+      activePresetHandle: opts?.activePreset !== false ? handle : null,
+      heatingSetpoint: opts?.heatingSetpoint ?? 2000,
+      coolingSetpoint: 2333,
+      systemMode: Thermostat.SystemMode.Heat,
+    });
+    mockSelf.state.appleAttr0011 = {
+      f0: opts?.adaptiveEnabled !== false,
+      f1: null,
+    };
+    const proto = ThermostatServerBase.prototype as unknown as {
+      heatingSetpointChanging: (
+        v: number,
+        old: number,
+        c?: ActionContext,
+      ) => void;
+      temperatureSetpointHoldChanged: (
+        v: Thermostat.TemperatureSetpointHold,
+        old: Thermostat.TemperatureSetpointHold,
+        c?: ActionContext,
+      ) => void;
+      temperatureSetpointHoldDurationChanged: (
+        v: number | null,
+        old: number | null,
+        c?: ActionContext,
+      ) => void;
+      appleAttr000EChanged: (
+        v: boolean,
+        old: boolean,
+        c?: ActionContext,
+      ) => void;
+      setActivePresetRequest: (req: {
+        presetHandle: Uint8Array | null;
+      }) => void;
+      handleSetActivePresetRequest: (req: {
+        presetHandle: Uint8Array | null;
+      }) => Thermostat.Preset | undefined;
+    };
+    const behaviorType = Symbol("ThermostatBehavior");
+    const mockFull = {
+      ...mockSelf,
+      type: behaviorType,
+      endpoint: {
+        id: "hold-ep",
+        env: { close: () => Promise.resolve() },
+        lifecycle: { isReady: true },
+        act: async (fn: (agent: unknown) => Promise<void> | void) => {
+          await fn({ get: () => mockFull });
+        },
+      },
+      handleSetActivePresetRequest: ({
+        presetHandle,
+      }: {
+        presetHandle: Uint8Array | null;
+      }) => {
+        mockFull.state.activePresetHandle = presetHandle;
+        return presetHandle ? mockFull.state.persistedPresets[0] : undefined;
+      },
+      setActivePresetRequest(req: { presetHandle: Uint8Array | null }) {
+        return proto.setActivePresetRequest.call(this, req);
+      },
+      heatingSetpointChanging(v: number, old: number, c?: ActionContext) {
+        proto.heatingSetpointChanging.call(this, v, old, c);
+      },
+      temperatureSetpointHoldChanged(
+        v: Thermostat.TemperatureSetpointHold,
+        old: Thermostat.TemperatureSetpointHold,
+        c?: ActionContext,
+      ) {
+        proto.temperatureSetpointHoldChanged.call(this, v, old, c);
+      },
+      temperatureSetpointHoldDurationChanged(
+        v: number | null,
+        old: number | null,
+        c?: ActionContext,
+      ) {
+        proto.temperatureSetpointHoldDurationChanged.call(this, v, old, c);
+      },
+      appleAttr000EChanged(v: boolean, old: boolean, c?: ActionContext) {
+        proto.appleAttr000EChanged.call(this, v, old, c);
+      },
+    };
+    return { mockFull, actions, handle };
+  }
+
+  it("enters Holding until next event on manual setpoint change, then transitions across 3h / Indefinitely / Next Event", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-11-26T12:00:00Z"));
+      const { mockFull, actions, handle } = makeHoldMock();
+
+      // Manual dial adjustment enters Holding until next event
+      mockFull.heatingSetpointChanging(2150, 2000, onlineContext);
+      expect(mockFull.state.temperatureSetpointHold).toBe(
+        Thermostat.TemperatureSetpointHold.SetpointHoldOn,
+      );
+      expect(mockFull.state.temperatureSetpointHoldDuration).toBeNull();
+      expect(mockFull.state.setpointHoldExpiryTimestamp).toBeNull();
+      expect(mockFull.state.appleAttr000C).toBe(2);
+      expect(mockFull.state.appleAttr000E).toBe(true);
+      expect(mockFull.state.appleAttr0009).toEqual(handle);
+      expect(mockFull.state.appleAttr000B).toBe(1795746272);
+      expect(mockFull.state.setpointChangeAmount).toBe(150);
+
+      // User switches to For 3 hours (180 min)
+      mockFull.state.temperatureSetpointHoldDuration = 180;
+      mockFull.temperatureSetpointHoldDurationChanged(180, null, onlineContext);
+      const expectedExpiry = Math.floor(Date.now() / 1000) + 180 * 60;
+      expect(mockFull.state.setpointHoldExpiryTimestamp).toBe(expectedExpiry);
+      expect(mockFull.state.appleAttr000E).toBe(false);
+
+      // Subsequent manual setpoint nudge while already in timed hold preserves 3h duration/expiry
+      mockFull.heatingSetpointChanging(2200, 2150, onlineContext);
+      expect(mockFull.state.temperatureSetpointHoldDuration).toBe(180);
+      expect(mockFull.state.setpointHoldExpiryTimestamp).toBe(expectedExpiry);
+      expect(mockFull.state.appleAttr000E).toBe(false);
+
+      // Switch to Indefinitely (duration = null): keeps appleAttr000E = false, cancels timer
+      mockFull.state.temperatureSetpointHoldDuration = null;
+      mockFull.temperatureSetpointHoldDurationChanged(null, 180, onlineContext);
+      expect(mockFull.state.setpointHoldExpiryTimestamp).toBeNull();
+      expect(mockFull.state.appleAttr000E).toBe(false);
+      const actionsBeforeTimer = actions.length;
+      await vi.advanceTimersByTimeAsync(181 * 60 * 1000);
+      expect(actions.length).toBe(actionsBeforeTimer);
+
+      // Re-arm 1 minute timed hold, then let timer expire -> restores scheduled preset
+      mockFull.state.temperatureSetpointHoldDuration = 1;
+      mockFull.temperatureSetpointHoldDurationChanged(1, null, onlineContext);
+      await vi.advanceTimersByTimeAsync(60 * 1000 + 10);
+
+      expect(mockFull.state.activePresetHandle).toEqual(handle);
+      expect(mockFull.state.temperatureSetpointHold).toBe(
+        Thermostat.TemperatureSetpointHold.SetpointHoldOff,
+      );
+      expect(mockFull.state.temperatureSetpointHoldDuration).toBeNull();
+      expect(mockFull.state.setpointHoldExpiryTimestamp).toBeNull();
+      expect(mockFull.state.appleAttr000C).toBeNull();
+      expect(mockFull.state.appleAttr000E).toBe(true);
+      expect(actions.at(-1)).toEqual({
+        action: "climate.set_temperature",
+        data: { temperature: 20 },
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("cancels timed hold when switching back to Holding until next event via appleAttr000E = true or explicit clear", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-11-26T12:00:00Z"));
+      const { mockFull, actions } = makeHoldMock();
+
+      mockFull.state.temperatureSetpointHoldDuration = 180;
+      mockFull.temperatureSetpointHoldDurationChanged(180, null, onlineContext);
+      expect(mockFull.state.setpointHoldExpiryTimestamp).not.toBeNull();
+
+      mockFull.state.appleAttr000E = true;
+      mockFull.appleAttr000EChanged(true, false, onlineContext);
+      expect(mockFull.state.temperatureSetpointHold).toBe(
+        Thermostat.TemperatureSetpointHold.SetpointHoldOn,
+      );
+      expect(mockFull.state.appleAttr000C).toBe(2);
+      expect(mockFull.state.appleAttr000E).toBe(true);
+      expect(mockFull.state.temperatureSetpointHoldDuration).toBeNull();
+      expect(mockFull.state.setpointHoldExpiryTimestamp).toBeNull();
+
+      await vi.advanceTimersByTimeAsync(181 * 60 * 1000);
+      expect(actions).toEqual([]);
+
+      // Writing SetpointHoldOn while temperatureSetpointHoldDuration is already set clears appleAttr000E and arms expiry
+      mockFull.state.appleAttr000C = null;
+      mockFull.state.appleAttr000E = true;
+      mockFull.state.temperatureSetpointHoldDuration = 180;
+      mockFull.state.temperatureSetpointHold =
+        Thermostat.TemperatureSetpointHold.SetpointHoldOn;
+      mockFull.temperatureSetpointHoldChanged(
+        Thermostat.TemperatureSetpointHold.SetpointHoldOn,
+        Thermostat.TemperatureSetpointHold.SetpointHoldOff,
+        onlineContext,
+      );
+      expect(mockFull.state.appleAttr000C).toBe(2);
+      expect(mockFull.state.appleAttr000E).toBe(false);
+      expect(mockFull.state.setpointHoldExpiryTimestamp).toBe(
+        Math.floor(Date.now() / 1000) + 180 * 60,
+      );
+
+      // Explicit SetActivePresetRequest(null) clears hold and scheduled preset tracking
+      mockFull.state.appleAttr000C = 2;
+      mockFull.setActivePresetRequest({ presetHandle: null });
+      expect(mockFull.state.temperatureSetpointHold).toBe(
+        Thermostat.TemperatureSetpointHold.SetpointHoldOff,
+      );
+      expect(mockFull.state.appleAttr0009).toBeNull();
+      expect(mockFull.state.appleAttr000B).toBeNull();
+      expect(mockFull.state.appleAttr000C).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not enter hold on setpoint change when Adaptive Temperature is disabled or no preset is scheduled", () => {
+    const disabled = makeHoldMock({
+      adaptiveEnabled: false,
+      activePreset: false,
+    });
+    disabled.mockFull.heatingSetpointChanging(2200, 2000, onlineContext);
+    expect(disabled.mockFull.state.temperatureSetpointHold).toBe(
+      Thermostat.TemperatureSetpointHold.SetpointHoldOff,
+    );
+    expect(disabled.mockFull.state.appleAttr000C).toBeNull();
+
+    const noPreset = makeHoldMock({
+      adaptiveEnabled: true,
+      activePreset: false,
+    });
+    noPreset.mockFull.state.appleAttr0009 = null;
+    noPreset.mockFull.heatingSetpointChanging(2200, 2000, onlineContext);
+    expect(noPreset.mockFull.state.temperatureSetpointHold).toBe(
+      Thermostat.TemperatureSetpointHold.SetpointHoldOff,
+    );
+    expect(noPreset.mockFull.state.appleAttr000C).toBeNull();
+  });
+
+  it("restores scheduled preset on End Hold (temperatureSetpointHold = SetpointHoldOff) when Adaptive is enabled", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-11-26T12:00:00Z"));
+      const { mockFull, actions, handle } = makeHoldMock();
+      const futureExpiry = Math.floor(Date.now() / 1000) + 3600;
+      mockFull.state.appleAttr000B = futureExpiry;
+
+      mockFull.state.temperatureSetpointHoldDuration = 180;
+      mockFull.temperatureSetpointHoldDurationChanged(180, null, onlineContext);
+      expect(mockFull.state.activePresetHandle).toBeNull();
+      expect(mockFull.state.appleAttr000C).toBe(2);
+
+      // End Hold writes temperatureSetpointHold = SetpointHoldOff
+      mockFull.state.temperatureSetpointHold =
+        Thermostat.TemperatureSetpointHold.SetpointHoldOff;
+      mockFull.temperatureSetpointHoldChanged(
+        Thermostat.TemperatureSetpointHold.SetpointHoldOff,
+        Thermostat.TemperatureSetpointHold.SetpointHoldOn,
+        onlineContext,
+      );
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(mockFull.state.activePresetHandle).toEqual(handle);
+      expect(mockFull.state.appleAttr0009).toEqual(handle);
+      expect(mockFull.state.appleAttr000B).toBe(futureExpiry);
+      expect(mockFull.state.appleAttr000C).toBeNull();
+      expect(mockFull.state.appleAttr000E).toBe(true);
+      expect(mockFull.state.temperatureSetpointHoldDuration).toBeNull();
+      expect(mockFull.state.setpointHoldExpiryTimestamp).toBeNull();
+      expect(actions).toEqual([
+        { action: "climate.set_temperature", data: { temperature: 20 } },
+      ]);
+
+      // When Adaptive is disabled or no scheduled preset exists, clearing hold does not call HA
+      const disabled = makeHoldMock({
+        adaptiveEnabled: false,
+        activePreset: false,
+      });
+      disabled.mockFull.state.appleAttr0009 = handle;
+      disabled.mockFull.state.appleAttr000C = 2;
+      disabled.mockFull.state.temperatureSetpointHold =
+        Thermostat.TemperatureSetpointHold.SetpointHoldOff;
+      disabled.mockFull.temperatureSetpointHoldChanged(
+        Thermostat.TemperatureSetpointHold.SetpointHoldOff,
+        Thermostat.TemperatureSetpointHold.SetpointHoldOn,
+        onlineContext,
+      );
+      await vi.advanceTimersByTimeAsync(0);
+      expect(disabled.mockFull.state.activePresetHandle).toBeNull();
+      expect(disabled.mockFull.state.appleAttr000C).toBeNull();
+      expect(disabled.actions).toEqual([]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("clamps SetpointChangeAmount to [-32767, 32767] for Matter nullable int16", () => {
+    const { mockFull } = makeHoldMock();
+    mockFull.heatingSetpointChanging(-20000, 20000, onlineContext);
+    expect(mockFull.state.setpointChangeAmount).toBe(-32767);
+    mockFull.heatingSetpointChanging(20000, -20000, onlineContext);
+    expect(mockFull.state.setpointChangeAmount).toBe(32767);
+  });
+
+  it("handles applyAppleSetpointHold on pre-2000 clock and ignores it when Adaptive is disabled", async () => {
+    vi.useFakeTimers();
+    try {
+      const proto = ThermostatServerBase.prototype as unknown as {
+        applyAppleSetpointHold: (
+          resumeOnNextEvent: boolean,
+          durationMinutes: number | null,
+        ) => void;
+      };
+      vi.setSystemTime(new Date("1985-11-05T00:00:00Z"));
+      const { mockFull, actions, handle } = makeHoldMock();
+      proto.applyAppleSetpointHold.call(mockFull, false, 1);
+
+      expect(mockFull.state.temperatureSetpointHold).toBe(
+        Thermostat.TemperatureSetpointHold.SetpointHoldOn,
+      );
+      expect(mockFull.state.temperatureSetpointHoldDuration).toBe(1);
+      // Pre-2000 host clock falls back to null for Matter epoch-s while local timer still expires
+      expect(mockFull.state.setpointHoldExpiryTimestamp).toBeNull();
+
+      await vi.advanceTimersByTimeAsync(60_000 + 10);
+      expect(mockFull.state.activePresetHandle).toEqual(handle);
+      expect(mockFull.state.temperatureSetpointHold).toBe(
+        Thermostat.TemperatureSetpointHold.SetpointHoldOff,
+      );
+      expect(actions).toEqual([
+        { action: "climate.set_temperature", data: { temperature: 20 } },
+      ]);
+
+      // Disabled Adaptive Temperature ignores applyAppleSetpointHold
+      const disabled = makeHoldMock({ adaptiveEnabled: false });
+      proto.applyAppleSetpointHold.call(disabled.mockFull, false, 180);
+      expect(disabled.mockFull.state.temperatureSetpointHold).toBe(
+        Thermostat.TemperatureSetpointHold.SetpointHoldOff,
+      );
+      expect(
+        disabled.mockFull.state.temperatureSetpointHoldDuration,
+      ).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("cancels deferred End Hold restore if a preset activates before microtask runs, and clears holdTimer on dispose", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-11-26T12:00:00Z"));
+      const { mockFull, actions, handle } = makeHoldMock();
+      const proto = ThermostatServerBase.prototype as unknown as {
+        applyAppleSetpointHold: (
+          resumeOnNextEvent: boolean,
+          durationMinutes: number | null,
+        ) => void;
+      };
+
+      // Synchronous hold clear + rapid preset activation before microtask flushes
+      mockFull.state.temperatureSetpointHoldDuration = 180;
+      mockFull.temperatureSetpointHoldDurationChanged(180, null, onlineContext);
+      mockFull.state.temperatureSetpointHold =
+        Thermostat.TemperatureSetpointHold.SetpointHoldOff;
+      mockFull.temperatureSetpointHoldChanged(
+        Thermostat.TemperatureSetpointHold.SetpointHoldOff,
+        Thermostat.TemperatureSetpointHold.SetpointHoldOn,
+        onlineContext,
+      );
+      // Hold fields cleared synchronously before microtask
+      expect(mockFull.state.temperatureSetpointHoldDuration).toBeNull();
+      expect(mockFull.state.setpointHoldExpiryTimestamp).toBeNull();
+      expect(mockFull.state.appleAttr000C).toBeNull();
+      expect(mockFull.state.appleAttr000E).toBe(true);
+
+      // Rapid preset activation bumps holdGeneration so pending restore timer is skipped
+      mockFull.setActivePresetRequest({ presetHandle: handle });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(actions).toEqual([
+        { action: "climate.set_temperature", data: { temperature: 20 } },
+      ]);
+
+      // Arm 1m timer and dispose behavior -> timer must never fire
+      proto.applyAppleSetpointHold.call(mockFull, false, 1);
+      await ThermostatServerBase.prototype[Symbol.asyncDispose].call(mockFull);
+      actions.length = 0;
+      await vi.advanceTimersByTimeAsync(61_000);
+      expect(actions).toEqual([]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("awaits agent.context.transaction.lock before End Hold restore and aborts if a new hold starts while waiting", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-11-26T12:00:00Z"));
+      const { mockFull, actions, handle } = makeHoldMock();
+      const proto = ThermostatServerBase.prototype as unknown as {
+        applyAppleSetpointHold: (
+          resumeOnNextEvent: boolean,
+          durationMinutes: number | null,
+        ) => void;
+      };
+
+      let releaseLock!: () => void;
+      const lockSpy = vi.fn(
+        (_resource: unknown) =>
+          new Promise<void>((resolve) => {
+            releaseLock = resolve;
+          }),
+      );
+      let lockResolved = false;
+      mockFull.endpoint.act = async (
+        fn: (agent: unknown) => Promise<void> | void,
+      ) => {
+        await fn({
+          get: () => mockFull,
+          context: {
+            transaction: {
+              lock: async (resource: unknown) => {
+                await lockSpy(resource);
+                lockResolved = true;
+              },
+            },
+          },
+        });
+      };
+
+      // Case 1: End Hold awaits transaction.lock(behavior) before restoring preset
+      mockFull.state.temperatureSetpointHoldDuration = 180;
+      mockFull.temperatureSetpointHoldDurationChanged(180, null, onlineContext);
+      mockFull.state.temperatureSetpointHold =
+        Thermostat.TemperatureSetpointHold.SetpointHoldOff;
+      mockFull.temperatureSetpointHoldChanged(
+        Thermostat.TemperatureSetpointHold.SetpointHoldOff,
+        Thermostat.TemperatureSetpointHold.SetpointHoldOn,
+        onlineContext,
+      );
+
+      await vi.advanceTimersByTimeAsync(0);
+      expect(lockSpy).toHaveBeenCalledTimes(1);
+      expect(lockSpy).toHaveBeenCalledWith(mockFull);
+      expect(lockResolved).toBe(false);
+      // Must NOT have restored preset before lock resolved
+      expect(mockFull.state.activePresetHandle).toBeNull();
+      expect(actions).toEqual([]);
+
+      releaseLock();
+      await vi.waitFor(() => {
+        expect(lockResolved).toBe(true);
+        expect(mockFull.state.activePresetHandle).toEqual(handle);
+        expect(actions).toEqual([
+          { action: "climate.set_temperature", data: { temperature: 20 } },
+        ]);
+      });
+
+      // Case 2: If a new hold starts while awaiting transaction.lock, stale End Hold restore aborts
+      actions.length = 0;
+      lockResolved = false;
+      mockFull.state.temperatureSetpointHold =
+        Thermostat.TemperatureSetpointHold.SetpointHoldOff;
+      mockFull.temperatureSetpointHoldChanged(
+        Thermostat.TemperatureSetpointHold.SetpointHoldOff,
+        Thermostat.TemperatureSetpointHold.SetpointHoldOn,
+        onlineContext,
+      );
+      await vi.advanceTimersByTimeAsync(0);
+      expect(lockSpy).toHaveBeenCalledTimes(2);
+
+      // New hold arrives while lock is pending, bumping holdGeneration
+      proto.applyAppleSetpointHold.call(mockFull, false, 180);
+      releaseLock();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(lockResolved).toBe(true);
+      expect(mockFull.state.activePresetHandle).toBeNull();
+      expect(mockFull.state.temperatureSetpointHold).toBe(
+        Thermostat.TemperatureSetpointHold.SetpointHoldOn,
+      );
+      expect(actions).toEqual([]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
