@@ -417,6 +417,11 @@ function scheduleHoldExpiry(
 // triggering unwanted hold state during Datasource.preCommit().
 const presetControlledTransactions = new WeakSet<object>();
 
+// Transactions where hold state was mutated internally by our own handlers/commands.
+// Prevents cascaded post-commit $Changed events (e.g. temperatureSetpointHoldDuration -> null
+// when clearing a timed hold) from re-entering hold handlers or cancelling End Hold timers.
+const holdControlledTransactions = new WeakSet<object>();
+
 // Intended active preset handle per (transaction, endpointKey) to restore activePresetHandle
 // if Matter.js's assertOccupied*SetpointChanging resets it to null in pre-commit.
 const intendedActivePresetByTx = new WeakMap<
@@ -1683,6 +1688,7 @@ export class ThermostatServerBase extends AdaptiveFullFeaturedBase {
 
     if (tx) {
       presetControlledTransactions.add(tx);
+      holdControlledTransactions.add(tx);
     } else {
       runtime.activatingPreset = true;
     }
@@ -1917,7 +1923,11 @@ export class ThermostatServerBase extends AdaptiveFullFeaturedBase {
     _oldValue: Thermostat.TemperatureSetpointHold,
     context?: ActionContext,
   ) {
-    if (transactionIsOffline(context)) {
+    const tx = context?.transaction ?? this.context?.transaction;
+    if (
+      transactionIsOffline(context) ||
+      (tx && holdControlledTransactions.has(tx))
+    ) {
       return;
     }
     logger.debug(
@@ -1929,6 +1939,9 @@ export class ThermostatServerBase extends AdaptiveFullFeaturedBase {
       const meiState = this.state as unknown as Record<string, unknown>;
 
       if (value === Thermostat.TemperatureSetpointHold.SetpointHoldOff) {
+        if (tx) {
+          holdControlledTransactions.add(tx);
+        }
         clearHoldState(this.state, runtime);
         if (
           !isAdaptiveTemperatureEnabled(this.state) ||
@@ -1994,6 +2007,9 @@ export class ThermostatServerBase extends AdaptiveFullFeaturedBase {
       }
 
       if (value === Thermostat.TemperatureSetpointHold.SetpointHoldOn) {
+        if (tx) {
+          holdControlledTransactions.add(tx);
+        }
         const durationMinutes =
           this.state.temperatureSetpointHoldDuration &&
           this.state.temperatureSetpointHoldDuration > 0
@@ -2018,7 +2034,11 @@ export class ThermostatServerBase extends AdaptiveFullFeaturedBase {
     _oldValue: number | null,
     context?: ActionContext,
   ) {
-    if (transactionIsOffline(context)) {
+    const tx = context?.transaction ?? this.context?.transaction;
+    if (
+      transactionIsOffline(context) ||
+      (tx && holdControlledTransactions.has(tx))
+    ) {
       return;
     }
     logger.debug(
@@ -2030,13 +2050,22 @@ export class ThermostatServerBase extends AdaptiveFullFeaturedBase {
       const adaptiveEnabled = isAdaptiveTemperatureEnabled(this.state);
 
       if (value != null && value > 0) {
+        if (tx) {
+          holdControlledTransactions.add(tx);
+        }
         applyHoldDuration(this, runtime, {
           durationMinutes: value,
           resumeOnNextEvent: adaptiveEnabled ? false : undefined,
           setHoldOn: true,
           updateAppleMei: adaptiveEnabled,
         });
-      } else {
+      } else if (
+        this.state.temperatureSetpointHold ===
+        Thermostat.TemperatureSetpointHold.SetpointHoldOn
+      ) {
+        if (tx) {
+          holdControlledTransactions.add(tx);
+        }
         clearHoldTimer(runtime);
         if (this.state.setpointHoldExpiryTimestamp !== undefined) {
           this.state.setpointHoldExpiryTimestamp = null;
@@ -2052,7 +2081,11 @@ export class ThermostatServerBase extends AdaptiveFullFeaturedBase {
     context?: ActionContext,
   ) {
     logger.debug(`[APPLE-MEI] Write Thermostat.appleAttr000E = ${value}`);
-    if (transactionIsOffline(context)) {
+    const tx = context?.transaction ?? this.context?.transaction;
+    if (
+      transactionIsOffline(context) ||
+      (tx && holdControlledTransactions.has(tx))
+    ) {
       return;
     }
     if (
@@ -2060,6 +2093,9 @@ export class ThermostatServerBase extends AdaptiveFullFeaturedBase {
       this.state.temperatureSetpointHold ===
         Thermostat.TemperatureSetpointHold.SetpointHoldOn
     ) {
+      if (tx) {
+        holdControlledTransactions.add(tx);
+      }
       this.agent.asLocalActor(() => {
         const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);
         const runtime = getRuntimeState(this, homeAssistant.entityId);
@@ -2077,6 +2113,10 @@ export class ThermostatServerBase extends AdaptiveFullFeaturedBase {
   ): void {
     if (!this.features.presets || !isAdaptiveTemperatureEnabled(this.state)) {
       return;
+    }
+    const tx = this.context?.transaction;
+    if (tx) {
+      holdControlledTransactions.add(tx);
     }
     this.agent.asLocalActor(() => {
       const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);
@@ -2117,6 +2157,10 @@ export class ThermostatServerBase extends AdaptiveFullFeaturedBase {
     );
 
     if (this.features.presets) {
+      const tx = this.context?.transaction;
+      if (tx) {
+        holdControlledTransactions.add(tx);
+      }
       this.agent.asLocalActor(() => {
         const runtime = getRuntimeState(this, homeAssistant.entityId);
         runtime.lastPresetActivation = { handle: null, at: Date.now() };
@@ -2299,6 +2343,10 @@ export class ThermostatServerBase extends AdaptiveFullFeaturedBase {
             `${source}: skipping - not in own/auto mode (mode=${currentMode}, haMode=${haHvacMode})`,
           );
           if (this.features.presets) {
+            const holdTx = tx ?? this.context?.transaction;
+            if (holdTx) {
+              holdControlledTransactions.add(holdTx);
+            }
             runtime.lastPresetActivation = { handle: null, at: Date.now() };
             enterAppleHold(this.state, runtime, {
               source: Thermostat.SetpointChangeSource.External,
@@ -2313,6 +2361,10 @@ export class ThermostatServerBase extends AdaptiveFullFeaturedBase {
       }
 
       if (this.features.presets) {
+        const holdTx = tx ?? this.context?.transaction;
+        if (holdTx) {
+          holdControlledTransactions.add(holdTx);
+        }
         runtime.lastPresetActivation = { handle: null, at: Date.now() };
         enterAppleHold(this.state, runtime, {
           source: Thermostat.SetpointChangeSource.External,

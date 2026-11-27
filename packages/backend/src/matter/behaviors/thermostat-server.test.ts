@@ -1849,13 +1849,20 @@ describe("Apple Adaptive Temperature hold duration", () => {
       expect(mockFull.state.activePresetHandle).toBeNull();
       expect(mockFull.state.appleAttr000C).toBe(2);
 
-      // End Hold writes temperatureSetpointHold = SetpointHoldOff
+      // End Hold writes temperatureSetpointHold = SetpointHoldOff; cascading duration -> null on the same
+      // transaction or with SetpointHoldOff must NOT cancel the deferred preset restore.
       mockFull.state.temperatureSetpointHold =
         Thermostat.TemperatureSetpointHold.SetpointHoldOff;
       mockFull.temperatureSetpointHoldChanged(
         Thermostat.TemperatureSetpointHold.SetpointHoldOff,
         Thermostat.TemperatureSetpointHold.SetpointHoldOn,
         onlineContext,
+      );
+      mockFull.temperatureSetpointHoldDurationChanged(null, 180, onlineContext);
+      mockFull.temperatureSetpointHoldDurationChanged(
+        null,
+        180,
+        {} as ActionContext,
       );
       await vi.advanceTimersByTimeAsync(0);
 

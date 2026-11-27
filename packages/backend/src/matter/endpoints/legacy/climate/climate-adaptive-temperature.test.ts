@@ -757,6 +757,44 @@ describe(
       expect(t.appleAttr000C).toBe(2);
       expect(t.appleAttr000E).toBe(true);
 
+      // Direct End Hold straight from a timed hold ("For 3 hours", duration = 180 -> null)
+      // must still restore activePresetHandle without duration$Changed cancelling the restore timer.
+      await remoteInvoke(
+        client,
+        endpoint.number,
+        AppleThermostatCluster,
+        "appleCmdF9",
+        TlvAny.decode(f9ThreeHoursPayload),
+      );
+      expect(t.temperatureSetpointHold).toBe(
+        Thermostat.TemperatureSetpointHold.SetpointHoldOn,
+      );
+      expect(t.temperatureSetpointHoldDuration).toBe(180);
+      expect(t.appleAttr000E).toBe(false);
+
+      calls = [];
+      await remoteWriteAttr(
+        client,
+        endpoint.number,
+        Thermostat,
+        "temperatureSetpointHold",
+        Thermostat.TemperatureSetpointHold.SetpointHoldOff,
+      );
+      await vi.waitFor(() => {
+        expect(
+          t.activePresetHandle !== null &&
+            Bytes.areEqual(t.activePresetHandle, sleepHandle),
+        ).toBe(true);
+        expect(t.occupiedHeatingSetpoint).toBe(1800);
+        expect(t.temperatureSetpointHoldDuration).toBeNull();
+        expect(t.setpointHoldExpiryTimestamp).toBeNull();
+        expect(t.appleAttr000C).toBeNull();
+        expect(t.appleAttr000E).toBe(true);
+        expect(calls).toEqual([
+          { action: "climate.set_temperature", data: { temperature: 18 } },
+        ]);
+      });
+
       // 9. Re-activate via appleCmdF3 and verify appleCmdF4 clears active preset + Apple MEI attrs
       await remoteInvoke(
         client,
