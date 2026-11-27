@@ -1,14 +1,15 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type {
-  HomeAssistantEntityRegistry,
-  HomeAssistantEntityState,
+import {
+  ClimateDeviceFeature,
+  type HomeAssistantEntityRegistry,
+  type HomeAssistantEntityState,
 } from "@home-assistant-matter-hub/common";
 import { Bytes, Environment, VariableService } from "@matter/general";
 import { ControllerBehavior, VendorId } from "@matter/main";
-import { Thermostat, TimeSynchronization } from "@matter/main/clusters";
-import { ServerNode } from "@matter/main/node";
+import { Thermostat } from "@matter/main/clusters";
+import { Endpoint, ServerNode } from "@matter/main/node";
 import { Invoke, Read, Write } from "@matter/main/protocol";
 import {
   DeviceTypeId,
@@ -36,7 +37,9 @@ import type {
 import { AppleThermostatServerBase } from "../../../behaviors/apple-adaptive-temperature.js";
 import { createPresetHandle } from "../../../behaviors/thermostat-server.js";
 import { ServerModeServerNode } from "../../server-mode-server-node.js";
+import { asStandaloneEndpointType } from "../../standalone-endpoint-type.js";
 import { LegacyEndpoint } from "../legacy-endpoint.js";
+import { ClimateDevice } from "./index.js";
 
 const DEVICE_ID = "ecobee-remote-1";
 const CLIMATE_ID = "climate.ecobee_remote";
@@ -428,16 +431,6 @@ describe(
 
       expect(t.appleAttr0010).toHaveLength(1);
       expect(t.appleAttr0011).toEqual({ f0: true });
-
-      // Remote read of Endpoint 0 TimeSynchronization.localTime (TlvEpochUs)
-      const wireLocalTime = await remoteReadAttr(
-        client,
-        0,
-        TimeSynchronization.Complete,
-        "localTime",
-      );
-      expect(wireLocalTime).not.toBeNull();
-      expect(Number(wireLocalTime)).toBeGreaterThanOrEqual(946_684_800_000_000);
 
       // 2. Activate Occupied preset via appleCmdF3 over fabric
       const f3Payload = TlvObject({
@@ -1013,6 +1006,123 @@ describe(
           { action: "climate.set_temperature", data: { temperature: 18 } },
         ]);
       });
+    });
+
+    it("isolates Presets, Hold, and 0x1349 MEI to appleAdaptiveTemperature without TimeSynchronization or BindingServer", async () => {
+      const makeBridgeData = (appleAdaptiveTemperature: boolean) =>
+        ({
+          id: `isolation-${counter++}`,
+          name: "Test Thermostat",
+          port: 0,
+          filter: { include: [], exclude: [], includeMode: "any" },
+          featureFlags: {
+            serverMode: true,
+            appleAdaptiveTemperature,
+          },
+          basicInformation: {
+            vendorId: 0xfff1,
+            vendorName: "test",
+            productId: 0x8000,
+            productName: "test",
+            productLabel: "test",
+            hardwareVersion: 1,
+            softwareVersion: 1,
+          },
+        }) as unknown as ConstructorParameters<typeof ServerModeServerNode>[1];
+
+      const adaptiveBridge = makeBridgeData(true);
+      const adaptiveServer = new ServerModeServerNode(env, adaptiveBridge);
+      server = adaptiveServer;
+      await adaptiveServer.construction;
+
+      expect("timeSynchronization" in adaptiveServer.behaviors.supported).toBe(
+        false,
+      );
+      expect(adaptiveServer.state.basicInformation.vendorId).toBe(0x115f);
+      expect(adaptiveServer.state.basicInformation.productId).toBe(0x4801);
+
+      const stateWithFanAndPower = makeHaState({
+        attributes: {
+          supported_features:
+            ClimateDeviceFeature.TARGET_TEMPERATURE |
+            ClimateDeviceFeature.TARGET_TEMPERATURE_RANGE |
+            ClimateDeviceFeature.FAN_MODE |
+            ClimateDeviceFeature.TURN_ON |
+            ClimateDeviceFeature.TURN_OFF,
+          fan_modes: ["auto", "on"],
+          fan_mode: "auto",
+        },
+      });
+      const haEntity = {
+        entity: {
+          entity_id: CLIMATE_ID,
+          state: stateWithFanAndPower as never,
+          registry: undefined as never,
+          deviceRegistry: undefined as never,
+        },
+        mapping: undefined,
+      };
+
+      const adaptiveType = asStandaloneEndpointType(
+        ClimateDevice(haEntity, true, true),
+      );
+      expect(adaptiveType.deviceType).toBe(0x0301);
+      expect(Object.keys(adaptiveType.behaviors)).not.toContain("fanControl");
+      expect(Object.keys(adaptiveType.behaviors)).not.toContain("onOff");
+      expect(Object.keys(adaptiveType.behaviors)).not.toContain("binding");
+      expect(Object.keys(adaptiveType.behaviors)).not.toContain(
+        "bridgedDeviceBasicInformation",
+      );
+
+      const ep = new Endpoint(adaptiveType, { id: "climate-living-room" });
+      await adaptiveServer.addDevice(ep);
+      await adaptiveServer.updateAdvertisedDeviceType(DeviceTypeId(769));
+      await ep.construction;
+
+      const tState = (
+        ep.state as unknown as { thermostat: Record<string, unknown> }
+      ).thermostat;
+      expect(tState.numberOfPresets).toBe(10);
+      expect(
+        (tState.presetTypes as Array<{ presetScenario: number }>).length,
+      ).toBe(6);
+      expect(tState.appleAttr0002).toBe(true);
+      expect(tState.appleAttr000F).toBe(1);
+      expect(tState.temperatureSetpointHold).toBe(
+        Thermostat.TemperatureSetpointHold.SetpointHoldOff,
+      );
+      expect(tState.temperatureSetpointHoldDuration).toBeNull();
+      expect(tState.setpointHoldExpiryTimestamp).toBeNull();
+
+      const standardType = ClimateDevice(haEntity, true, false);
+      expect(standardType.deviceType).toBe(0x0072);
+      expect(Object.keys(standardType.behaviors)).toContain("fanControl");
+      expect(Object.keys(standardType.behaviors)).toContain("onOff");
+      expect(Object.keys(standardType.behaviors)).not.toContain("binding");
+
+      const standardEp = new Endpoint(asStandaloneEndpointType(standardType), {
+        id: "climate-standard",
+      });
+      const standardServer = new ServerModeServerNode(
+        env,
+        makeBridgeData(false),
+      );
+      try {
+        await standardServer.construction;
+        expect(
+          "timeSynchronization" in standardServer.behaviors.supported,
+        ).toBe(false);
+        await standardServer.addDevice(standardEp);
+        await standardEp.construction;
+        const standardState = (
+          standardEp.state as unknown as {
+            thermostat: Record<string, unknown>;
+          }
+        ).thermostat;
+        expect(standardState.temperatureSetpointHold).toBeUndefined();
+      } finally {
+        await standardServer.close().catch(() => {});
+      }
     });
   },
 );

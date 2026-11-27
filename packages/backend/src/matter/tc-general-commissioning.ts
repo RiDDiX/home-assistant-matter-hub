@@ -3,7 +3,6 @@ import { GeneralCommissioningServer } from "@matter/main/behaviors";
 import { GeneralCommissioning } from "@matter/main/clusters";
 import { ServerNode } from "@matter/main/node";
 import { AttestationWarningServer } from "./attestation-warning.js";
-import { RootTimeSynchronizationServer } from "./time-synchronization.js";
 
 // #449: Alexa invokes SetTcAcknowledgements during pairing. matter.js does not
 // implement the TermsAndConditions feature, so the command fails as
@@ -41,26 +40,10 @@ export namespace TcGeneralCommissioningServer {
 export function rootEndpointType(flags?: BridgeFeatureFlags) {
   // AttestationWarningServer adds no cluster state, so the node fingerprint is
   // the same with and without it and it can be mounted unconditionally (#465).
-  const tc = flags?.supportTermsAndConditions === true;
-  const adaptive = flags?.appleAdaptiveTemperature === true;
-  if (tc && adaptive) {
-    return ServerNode.RootEndpoint.with(
-      TcGeneralCommissioningServer,
-      AttestationWarningServer,
-      RootTimeSynchronizationServer,
-    );
-  }
-  if (tc) {
-    return ServerNode.RootEndpoint.with(
-      TcGeneralCommissioningServer,
-      AttestationWarningServer,
-    );
-  }
-  if (adaptive) {
-    return ServerNode.RootEndpoint.with(
-      AttestationWarningServer,
-      RootTimeSynchronizationServer,
-    );
-  }
-  return ServerNode.RootEndpoint.with(AttestationWarningServer);
+  return flags?.supportTermsAndConditions
+    ? ServerNode.RootEndpoint.with(
+        TcGeneralCommissioningServer,
+        AttestationWarningServer,
+      )
+    : ServerNode.RootEndpoint.with(AttestationWarningServer);
 }

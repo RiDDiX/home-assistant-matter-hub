@@ -67,7 +67,7 @@ The flag only takes effect after a **full HAMH restart** (restarting just the br
 
 ## Apple Adaptive Temperature (iOS 26+, opt-in)
 
-Apple Home's Adaptive Temperature (At Home, Away, Night, and Extended Away automatic presets) requires a standalone Matter **Thermostat** (`0x0301`) advertising Matter `Presets`, root `TimeSynchronization`, Apple `0x1349` MEI preset extensions, and an Apple-allowlisted thermostat Vendor/Product ID.
+Apple Home's Adaptive Temperature (At Home, Away, Night, and Extended Away automatic presets) requires a standalone Matter **Thermostat** (`0x0301`) advertising Matter `Presets`, Apple `0x1349` MEI preset extensions, and an Apple-allowlisted thermostat Vendor/Product ID.
 
 To enable it, create a bridge using the **Apple Adaptive Thermostat** template (or enable `appleAdaptiveTemperature` in **Bridge Settings → Feature Flags**) with one thermostat per bridge:
 
