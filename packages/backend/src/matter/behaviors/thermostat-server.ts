@@ -91,25 +91,38 @@ function clearEndpointHoldTimers(endpoint?: object): void {
   endpointRuntimeStates.delete(endpoint);
 }
 
+function setHoldAttr(
+  state: Record<string, unknown>,
+  tx: object | undefined,
+  attr: HoldTrackedAttr,
+  value: unknown,
+): void {
+  if (state[attr] === undefined || Object.is(state[attr], value)) {
+    return;
+  }
+  recordInternalWrite(internalHoldWritesByTx, tx, attr, value);
+  state[attr] = value;
+}
+
 function clearHoldState(
   state: unknown,
   runtime?: ThermostatRuntimeState,
-  options?: { clearAppleOverride?: boolean; setHoldOff?: boolean },
+  options?: { clearAppleOverride?: boolean; setHoldOff?: boolean; tx?: object },
 ): void {
   if (runtime) {
     clearHoldTimer(runtime);
   }
   const s = state as Record<string, unknown>;
-  if (
-    options?.setHoldOff !== false &&
-    s.temperatureSetpointHold !== undefined
-  ) {
-    s.temperatureSetpointHold =
-      Thermostat.TemperatureSetpointHold.SetpointHoldOff;
+  const tx = options?.tx;
+  if (options?.setHoldOff !== false) {
+    setHoldAttr(
+      s,
+      tx,
+      "temperatureSetpointHold",
+      Thermostat.TemperatureSetpointHold.SetpointHoldOff,
+    );
   }
-  if (s.temperatureSetpointHoldDuration !== undefined) {
-    s.temperatureSetpointHoldDuration = null;
-  }
+  setHoldAttr(s, tx, "temperatureSetpointHoldDuration", null);
   if (s.setpointHoldExpiryTimestamp !== undefined) {
     s.setpointHoldExpiryTimestamp = null;
   }
@@ -117,17 +130,16 @@ function clearHoldState(
     if (s.appleAttr000C !== undefined) {
       s.appleAttr000C = null;
     }
-    if (s.appleAttr000E !== undefined) {
-      s.appleAttr000E = true;
-    }
+    setHoldAttr(s, tx, "appleAttr000E", true);
   }
 }
 
 function clearApplePresetTracking(
   state: unknown,
   runtime?: ThermostatRuntimeState,
+  tx?: object,
 ): void {
-  clearHoldState(state, runtime);
+  clearHoldState(state, runtime, { tx });
   const meiState = state as Record<string, unknown>;
   if (meiState.appleAttr0009 !== undefined) {
     meiState.appleAttr0009 = null;
@@ -148,6 +160,7 @@ function enterAppleHold(
     source: Thermostat.SetpointChangeSource;
     amount?: number | null;
     scheduledPresetHandle?: Bytes | null;
+    tx?: object;
   },
 ): void {
   const s = state as Record<string, unknown>;
@@ -191,7 +204,7 @@ function enterAppleHold(
   }
 
   if (!adaptiveEnabled || scheduledHandle === null) {
-    clearHoldState(s, runtime);
+    clearHoldState(s, runtime, { tx: options.tx });
     return;
   }
 
@@ -201,14 +214,16 @@ function enterAppleHold(
   ) {
     s.appleAttr0009 = cloneBytes(scheduledHandle);
   }
-  clearHoldState(s, runtime, { setHoldOff: false });
+  clearHoldState(s, runtime, { setHoldOff: false, tx: options.tx });
   if (s.appleAttr000C !== undefined) {
     s.appleAttr000C = 2;
   }
-  if (s.temperatureSetpointHold !== undefined) {
-    s.temperatureSetpointHold =
-      Thermostat.TemperatureSetpointHold.SetpointHoldOn;
-  }
+  setHoldAttr(
+    s,
+    options.tx,
+    "temperatureSetpointHold",
+    Thermostat.TemperatureSetpointHold.SetpointHoldOn,
+  );
 }
 
 function applyHoldDuration(
@@ -220,6 +235,7 @@ function applyHoldDuration(
     resumeOnNextEvent?: boolean;
     setHoldOn?: boolean;
     updateAppleMei: boolean;
+    tx?: object;
   },
 ): void {
   const s = self.state as Record<string, unknown>;
@@ -232,16 +248,20 @@ function applyHoldDuration(
     if (s.appleAttr000C !== undefined) {
       s.appleAttr000C = 2;
     }
-    if (opts.resumeOnNextEvent !== undefined && s.appleAttr000E !== undefined) {
-      s.appleAttr000E = opts.resumeOnNextEvent;
+    if (opts.resumeOnNextEvent !== undefined) {
+      setHoldAttr(s, opts.tx, "appleAttr000E", opts.resumeOnNextEvent);
     }
   } else if (opts.setHoldOn && self.state.activePresetHandle !== null) {
     self.state.activePresetHandle = null;
   }
 
-  if (opts.setHoldOn && s.temperatureSetpointHold !== undefined) {
-    s.temperatureSetpointHold =
-      Thermostat.TemperatureSetpointHold.SetpointHoldOn;
+  if (opts.setHoldOn) {
+    setHoldAttr(
+      s,
+      opts.tx,
+      "temperatureSetpointHold",
+      Thermostat.TemperatureSetpointHold.SetpointHoldOn,
+    );
   }
 
   if (
@@ -254,9 +274,7 @@ function applyHoldDuration(
     const expiryUnixSec = toNullableEpochS(
       Math.floor(nowMs / 1000) + clampedMin * 60,
     );
-    if (s.temperatureSetpointHoldDuration !== undefined) {
-      s.temperatureSetpointHoldDuration = clampedMin;
-    }
+    setHoldAttr(s, opts.tx, "temperatureSetpointHoldDuration", clampedMin);
     if (s.setpointHoldExpiryTimestamp !== undefined) {
       s.setpointHoldExpiryTimestamp = expiryUnixSec;
     }
@@ -265,11 +283,8 @@ function applyHoldDuration(
   }
 
   clearHoldTimer(runtime);
-  if (
-    (opts.durationMinutes === null || opts.resumeOnNextEvent === true) &&
-    s.temperatureSetpointHoldDuration !== undefined
-  ) {
-    s.temperatureSetpointHoldDuration = null;
+  if (opts.durationMinutes === null || opts.resumeOnNextEvent === true) {
+    setHoldAttr(s, opts.tx, "temperatureSetpointHoldDuration", null);
   }
   if (s.setpointHoldExpiryTimestamp !== undefined) {
     s.setpointHoldExpiryTimestamp = null;
@@ -412,15 +427,53 @@ function scheduleHoldExpiry(
   armTimer();
 }
 
-// Transactions executing preset operations (SetActivePresetRequest or persistedPresetsChanged).
-// Prevents intermediate/deferred setpoint writes from double-calling HA set_temperature or
-// triggering unwanted hold state during Datasource.preCommit().
-const presetControlledTransactions = new WeakSet<object>();
+type HoldTrackedAttr =
+  | "temperatureSetpointHold"
+  | "temperatureSetpointHoldDuration"
+  | "appleAttr000E";
+type SetpointTrackedKind = "heat" | "cool";
 
-// Transactions where hold state was mutated internally by our own handlers/commands.
-// Prevents cascaded post-commit $Changed events (e.g. temperatureSetpointHoldDuration -> null
-// when clearing a timed hold) from re-entering hold handlers or cancelling End Hold timers.
-const holdControlledTransactions = new WeakSet<object>();
+// Per-(transaction, attribute) expected values written internally by preset/hold handlers.
+// Matter.js reuses the same Transaction object across attributes in a multi-attribute WriteRequest,
+// so consuming per attribute ensures chained internal cascades are suppressed without swallowing
+// sibling controller writes in the same packet.
+const internalHoldWritesByTx = new WeakMap<
+  object,
+  Map<HoldTrackedAttr, unknown>
+>();
+const internalSetpointWritesByTx = new WeakMap<
+  object,
+  Map<SetpointTrackedKind, number>
+>();
+
+function recordInternalWrite<K extends string, V>(
+  store: WeakMap<object, Map<K, V>>,
+  tx: object | undefined,
+  key: K,
+  value: V,
+): void {
+  if (!tx) return;
+  let map = store.get(tx);
+  if (!map) {
+    map = new Map();
+    store.set(tx, map);
+  }
+  map.set(key, value);
+}
+
+function consumeInternalWrite<K extends string, V>(
+  store: WeakMap<object, Map<K, V>>,
+  tx: object | undefined,
+  key: K,
+  value: V,
+): boolean {
+  if (!tx) return false;
+  const map = store.get(tx);
+  if (!map?.has(key)) return false;
+  const expected = map.get(key);
+  map.delete(key);
+  return Object.is(expected, value);
+}
 
 // Intended active preset handle per (transaction, endpointKey) to restore activePresetHandle
 // if Matter.js's assertOccupied*SetpointChanging resets it to null in pre-commit.
@@ -1136,8 +1189,18 @@ export function applyPresetSetpointsToState(
   self: any,
   newHeat: number | undefined,
   newCool: number | undefined,
+  tx?: object,
 ): void {
   const oldCool = self.state.occupiedCoolingSetpoint ?? 2400;
+  const writeSetpoint = (kind: SetpointTrackedKind, nextVal: number) => {
+    const attr =
+      kind === "heat" ? "occupiedHeatingSetpoint" : "occupiedCoolingSetpoint";
+    if (Object.is(self.state[attr], nextVal)) {
+      return;
+    }
+    recordInternalWrite(internalSetpointWritesByTx, tx, kind, nextVal);
+    self.state[attr] = nextVal;
+  };
 
   if (
     self.features.heating &&
@@ -1146,23 +1209,23 @@ export function applyPresetSetpointsToState(
   ) {
     if (newHeat !== undefined && newCool !== undefined) {
       if (newHeat > oldCool) {
-        self.state.occupiedCoolingSetpoint = newCool;
-        self.state.occupiedHeatingSetpoint = newHeat;
+        writeSetpoint("cool", newCool);
+        writeSetpoint("heat", newHeat);
       } else {
-        self.state.occupiedHeatingSetpoint = newHeat;
-        self.state.occupiedCoolingSetpoint = newCool;
+        writeSetpoint("heat", newHeat);
+        writeSetpoint("cool", newCool);
       }
     } else if (newHeat !== undefined) {
-      self.state.occupiedHeatingSetpoint = newHeat;
+      writeSetpoint("heat", newHeat);
     } else if (newCool !== undefined) {
-      self.state.occupiedCoolingSetpoint = newCool;
+      writeSetpoint("cool", newCool);
     }
   } else {
     if (self.features.heating && newHeat !== undefined) {
-      self.state.occupiedHeatingSetpoint = newHeat;
+      writeSetpoint("heat", newHeat);
     }
     if (self.features.cooling && newCool !== undefined) {
-      self.state.occupiedCoolingSetpoint = newCool;
+      writeSetpoint("cool", newCool);
     }
   }
 }
@@ -1686,10 +1749,7 @@ export class ThermostatServerBase extends AdaptiveFullFeaturedBase {
     const config = this.state.config;
     const tx = this.context?.transaction;
 
-    if (tx) {
-      presetControlledTransactions.add(tx);
-      holdControlledTransactions.add(tx);
-    } else {
+    if (!tx) {
       runtime.activatingPreset = true;
     }
     try {
@@ -1708,7 +1768,7 @@ export class ThermostatServerBase extends AdaptiveFullFeaturedBase {
           setIntendedPresetForTx(tx, txKey(this, homeAssistant.entityId), null);
         }
         this.state.activePresetHandle = null;
-        clearApplePresetTracking(this.state, runtime);
+        clearApplePresetTracking(this.state, runtime, tx);
         return;
       }
 
@@ -1732,8 +1792,6 @@ export class ThermostatServerBase extends AdaptiveFullFeaturedBase {
           ? Math.max(minCool, Math.min(maxCool, preset.coolingSetpoint))
           : undefined;
 
-      applyPresetSetpointsToState(this, newHeat, newCool);
-
       if (tx) {
         setIntendedPresetForTx(
           tx,
@@ -1741,6 +1799,8 @@ export class ThermostatServerBase extends AdaptiveFullFeaturedBase {
           request.presetHandle,
         );
       }
+      applyPresetSetpointsToState(this, newHeat, newCool, tx);
+
       this.state.activePresetHandle = request.presetHandle;
       const meiState = this.state as unknown as Record<string, unknown>;
       if (meiState.appleAttr0009 !== undefined) {
@@ -1749,7 +1809,7 @@ export class ThermostatServerBase extends AdaptiveFullFeaturedBase {
       if (meiState.appleAttr000B !== undefined) {
         meiState.appleAttr000B = null;
       }
-      clearHoldState(this.state, runtime);
+      clearHoldState(this.state, runtime, { tx });
       if (meiState.appleAttr000F !== undefined) {
         meiState.appleAttr000F = preset.presetScenario;
       }
@@ -1857,13 +1917,13 @@ export class ThermostatServerBase extends AdaptiveFullFeaturedBase {
             const key = txKey(this, homeAssistant.entityId);
             const tx = this.context?.transaction;
             if (tx) {
-              presetControlledTransactions.add(tx);
               setIntendedPresetForTx(tx, key, savedHandle);
             }
             applyPresetSetpointsToState(
               this,
               this.features.heating ? activePreset.heatingSetpoint : undefined,
               this.features.cooling ? activePreset.coolingSetpoint : undefined,
+              tx,
             );
             this.state.activePresetHandle = savedHandle;
             runtime.lastPresetActivation = {
@@ -1926,7 +1986,12 @@ export class ThermostatServerBase extends AdaptiveFullFeaturedBase {
     const tx = context?.transaction ?? this.context?.transaction;
     if (
       transactionIsOffline(context) ||
-      (tx && holdControlledTransactions.has(tx))
+      consumeInternalWrite(
+        internalHoldWritesByTx,
+        tx,
+        "temperatureSetpointHold",
+        value,
+      )
     ) {
       return;
     }
@@ -1939,10 +2004,7 @@ export class ThermostatServerBase extends AdaptiveFullFeaturedBase {
       const meiState = this.state as unknown as Record<string, unknown>;
 
       if (value === Thermostat.TemperatureSetpointHold.SetpointHoldOff) {
-        if (tx) {
-          holdControlledTransactions.add(tx);
-        }
-        clearHoldState(this.state, runtime);
+        clearHoldState(this.state, runtime, { tx });
         if (
           !isAdaptiveTemperatureEnabled(this.state) ||
           !Bytes.isBytes(meiState.appleAttr0009)
@@ -2007,9 +2069,6 @@ export class ThermostatServerBase extends AdaptiveFullFeaturedBase {
       }
 
       if (value === Thermostat.TemperatureSetpointHold.SetpointHoldOn) {
-        if (tx) {
-          holdControlledTransactions.add(tx);
-        }
         const durationMinutes =
           this.state.temperatureSetpointHoldDuration &&
           this.state.temperatureSetpointHoldDuration > 0
@@ -2023,6 +2082,7 @@ export class ThermostatServerBase extends AdaptiveFullFeaturedBase {
               ? false
               : undefined,
           updateAppleMei: adaptiveEnabled,
+          tx,
         });
       }
     });
@@ -2037,7 +2097,12 @@ export class ThermostatServerBase extends AdaptiveFullFeaturedBase {
     const tx = context?.transaction ?? this.context?.transaction;
     if (
       transactionIsOffline(context) ||
-      (tx && holdControlledTransactions.has(tx))
+      consumeInternalWrite(
+        internalHoldWritesByTx,
+        tx,
+        "temperatureSetpointHoldDuration",
+        value,
+      )
     ) {
       return;
     }
@@ -2050,22 +2115,17 @@ export class ThermostatServerBase extends AdaptiveFullFeaturedBase {
       const adaptiveEnabled = isAdaptiveTemperatureEnabled(this.state);
 
       if (value != null && value > 0) {
-        if (tx) {
-          holdControlledTransactions.add(tx);
-        }
         applyHoldDuration(this, runtime, {
           durationMinutes: value,
           resumeOnNextEvent: adaptiveEnabled ? false : undefined,
           setHoldOn: true,
           updateAppleMei: adaptiveEnabled,
+          tx,
         });
       } else if (
         this.state.temperatureSetpointHold ===
         Thermostat.TemperatureSetpointHold.SetpointHoldOn
       ) {
-        if (tx) {
-          holdControlledTransactions.add(tx);
-        }
         clearHoldTimer(runtime);
         if (this.state.setpointHoldExpiryTimestamp !== undefined) {
           this.state.setpointHoldExpiryTimestamp = null;
@@ -2080,28 +2140,26 @@ export class ThermostatServerBase extends AdaptiveFullFeaturedBase {
     _oldValue: boolean,
     context?: ActionContext,
   ) {
-    logger.debug(`[APPLE-MEI] Write Thermostat.appleAttr000E = ${value}`);
     const tx = context?.transaction ?? this.context?.transaction;
     if (
       transactionIsOffline(context) ||
-      (tx && holdControlledTransactions.has(tx))
+      consumeInternalWrite(internalHoldWritesByTx, tx, "appleAttr000E", value)
     ) {
       return;
     }
+    logger.debug(`[APPLE-MEI] Write Thermostat.appleAttr000E = ${value}`);
     if (
       value === true &&
       this.state.temperatureSetpointHold ===
         Thermostat.TemperatureSetpointHold.SetpointHoldOn
     ) {
-      if (tx) {
-        holdControlledTransactions.add(tx);
-      }
       this.agent.asLocalActor(() => {
         const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);
         const runtime = getRuntimeState(this, homeAssistant.entityId);
         clearHoldState(this.state, runtime, {
           clearAppleOverride: false,
           setHoldOff: false,
+          tx,
         });
       });
     }
@@ -2115,9 +2173,6 @@ export class ThermostatServerBase extends AdaptiveFullFeaturedBase {
       return;
     }
     const tx = this.context?.transaction;
-    if (tx) {
-      holdControlledTransactions.add(tx);
-    }
     this.agent.asLocalActor(() => {
       const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);
       const runtime = getRuntimeState(this, homeAssistant.entityId);
@@ -2126,6 +2181,7 @@ export class ThermostatServerBase extends AdaptiveFullFeaturedBase {
         resumeOnNextEvent,
         setHoldOn: true,
         updateAppleMei: true,
+        tx,
       });
     });
   }
@@ -2158,15 +2214,13 @@ export class ThermostatServerBase extends AdaptiveFullFeaturedBase {
 
     if (this.features.presets) {
       const tx = this.context?.transaction;
-      if (tx) {
-        holdControlledTransactions.add(tx);
-      }
       this.agent.asLocalActor(() => {
         const runtime = getRuntimeState(this, homeAssistant.entityId);
         runtime.lastPresetActivation = { handle: null, at: Date.now() };
         enterAppleHold(this.state, runtime, {
           source: Thermostat.SetpointChangeSource.External,
           amount: request.amount * 10,
+          tx,
         });
         this.state.activePresetHandle = null;
       });
@@ -2247,9 +2301,6 @@ export class ThermostatServerBase extends AdaptiveFullFeaturedBase {
     oldValue: number,
     context?: ActionContext,
   ) {
-    if (this.features.presets) {
-      this.restoreIntendedPreset(context);
-    }
     this.setpointChanging("heat", value, oldValue, context);
   }
 
@@ -2259,9 +2310,6 @@ export class ThermostatServerBase extends AdaptiveFullFeaturedBase {
     oldValue: number,
     context?: ActionContext,
   ) {
-    if (this.features.presets) {
-      this.restoreIntendedPreset(context);
-    }
     this.setpointChanging("cool", value, oldValue, context);
   }
 
@@ -2279,11 +2327,20 @@ export class ThermostatServerBase extends AdaptiveFullFeaturedBase {
     const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);
     const runtime = getRuntimeState(this, homeAssistant.entityId);
     const tx = context?.transaction;
+    const internalPresetWrite = consumeInternalWrite(
+      internalSetpointWritesByTx,
+      tx ?? this.context?.transaction,
+      kind,
+      value,
+    );
     if (
       transactionIsOffline(context) ||
-      (tx && presetControlledTransactions.has(tx)) ||
+      internalPresetWrite ||
       runtime.activatingPreset
     ) {
+      if (this.features.presets) {
+        this.restoreIntendedPreset(context);
+      }
       return;
     }
     const next = Temperature.celsius(value / 100);
@@ -2343,14 +2400,11 @@ export class ThermostatServerBase extends AdaptiveFullFeaturedBase {
             `${source}: skipping - not in own/auto mode (mode=${currentMode}, haMode=${haHvacMode})`,
           );
           if (this.features.presets) {
-            const holdTx = tx ?? this.context?.transaction;
-            if (holdTx) {
-              holdControlledTransactions.add(holdTx);
-            }
             runtime.lastPresetActivation = { handle: null, at: Date.now() };
             enterAppleHold(this.state, runtime, {
               source: Thermostat.SetpointChangeSource.External,
               amount,
+              tx: tx ?? this.context?.transaction,
             });
             if (this.state.activePresetHandle !== null) {
               this.state.activePresetHandle = null;
@@ -2361,14 +2415,11 @@ export class ThermostatServerBase extends AdaptiveFullFeaturedBase {
       }
 
       if (this.features.presets) {
-        const holdTx = tx ?? this.context?.transaction;
-        if (holdTx) {
-          holdControlledTransactions.add(holdTx);
-        }
         runtime.lastPresetActivation = { handle: null, at: Date.now() };
         enterAppleHold(this.state, runtime, {
           source: Thermostat.SetpointChangeSource.External,
           amount,
+          tx: tx ?? this.context?.transaction,
         });
       }
 

@@ -339,6 +339,28 @@ async function remoteWriteAttr(
   expect(result[0]?.status).toBe(0);
 }
 
+async function remoteWriteAttrs(
+  client: Awaited<ReturnType<typeof mountStandaloneAndCommission>>["client"],
+  endpointNo: number,
+  entries: Array<{ cluster: unknown; attributes: string; value: unknown }>,
+) {
+  const result = await client.interaction.write(
+    Write(
+      ...entries.map((entry) =>
+        Write.Attribute({
+          endpoint: endpointNo,
+          cluster: entry.cluster,
+          attributes: entry.attributes,
+          value: entry.value,
+        } as unknown as Parameters<typeof Write.Attribute>[0]),
+      ),
+    ),
+  );
+  for (const r of result) {
+    expect(r.status).toBe(0);
+  }
+}
+
 async function remoteReadAttr(
   client: Awaited<ReturnType<typeof mountStandaloneAndCommission>>["client"],
   endpointNo: number,
@@ -1038,6 +1060,7 @@ describe(
       expect("timeSynchronization" in adaptiveServer.behaviors.supported).toBe(
         false,
       );
+      expect("binding" in adaptiveServer.behaviors.supported).toBe(false);
       expect(adaptiveServer.state.basicInformation.vendorId).toBe(0x115f);
       expect(adaptiveServer.state.basicInformation.productId).toBe(0x4801);
 
@@ -1112,6 +1135,7 @@ describe(
         expect(
           "timeSynchronization" in standardServer.behaviors.supported,
         ).toBe(false);
+        expect("binding" in standardServer.behaviors.supported).toBe(false);
         await standardServer.addDevice(standardEp);
         await standardEp.construction;
         const standardState = (
@@ -1120,9 +1144,162 @@ describe(
           }
         ).thermostat;
         expect(standardState.temperatureSetpointHold).toBeUndefined();
+        expect(standardState.appleAttr0002).toBeUndefined();
       } finally {
         await standardServer.close().catch(() => {});
       }
+    });
+
+    it("processes all sibling attributes in multi-attribute WriteRequest batches without swallowing hold or End Hold transitions", async () => {
+      const { endpoint, client } = await mountStandaloneAndCommission(true);
+      const t = getThermostatState(endpoint);
+      const sleepHandle = createPresetHandle(Thermostat.PresetScenario.Sleep);
+
+      await remoteInvoke(
+        client,
+        endpoint.number,
+        Thermostat,
+        "setActivePresetRequest",
+        { presetHandle: sleepHandle },
+      );
+
+      // 1. [occupiedHeatingSetpoint = 2200, temperatureSetpointHoldDuration = 180] in one WriteRequest
+      await remoteWriteAttrs(client, endpoint.number, [
+        {
+          cluster: Thermostat,
+          attributes: "occupiedHeatingSetpoint",
+          value: 2200,
+        },
+        {
+          cluster: Thermostat,
+          attributes: "temperatureSetpointHoldDuration",
+          value: 180,
+        },
+      ]);
+      expect(t.temperatureSetpointHold).toBe(
+        Thermostat.TemperatureSetpointHold.SetpointHoldOn,
+      );
+      expect(t.temperatureSetpointHoldDuration).toBe(180);
+      expect(t.setpointHoldExpiryTimestamp).not.toBeNull();
+      expect(t.appleAttr000C).toBe(2);
+      expect(t.appleAttr000E).toBe(false);
+
+      // 2. [temperatureSetpointHoldDuration = null, temperatureSetpointHold = SetpointHoldOff] straight from 180m hold
+      calls = [];
+      await remoteWriteAttrs(client, endpoint.number, [
+        {
+          cluster: Thermostat,
+          attributes: "temperatureSetpointHoldDuration",
+          value: null,
+        },
+        {
+          cluster: Thermostat,
+          attributes: "temperatureSetpointHold",
+          value: Thermostat.TemperatureSetpointHold.SetpointHoldOff,
+        },
+      ]);
+      await vi.waitFor(() => {
+        expect(
+          t.activePresetHandle !== null &&
+            Bytes.areEqual(t.activePresetHandle, sleepHandle),
+        ).toBe(true);
+        expect(t.occupiedHeatingSetpoint).toBe(1800);
+        expect(t.appleAttr000C).toBeNull();
+        expect(t.appleAttr000E).toBe(true);
+        expect(calls).toEqual([
+          { action: "climate.set_temperature", data: { temperature: 18 } },
+        ]);
+      });
+
+      // 3. [temperatureSetpointHold = SetpointHoldOn, temperatureSetpointHoldDuration = 180] from Off/null
+      await remoteWriteAttrs(client, endpoint.number, [
+        {
+          cluster: Thermostat,
+          attributes: "temperatureSetpointHold",
+          value: Thermostat.TemperatureSetpointHold.SetpointHoldOn,
+        },
+        {
+          cluster: Thermostat,
+          attributes: "temperatureSetpointHoldDuration",
+          value: 180,
+        },
+      ]);
+      expect(t.temperatureSetpointHold).toBe(
+        Thermostat.TemperatureSetpointHold.SetpointHoldOn,
+      );
+      expect(t.temperatureSetpointHoldDuration).toBe(180);
+      expect(t.setpointHoldExpiryTimestamp).not.toBeNull();
+      expect(t.appleAttr000C).toBe(2);
+      expect(t.appleAttr000E).toBe(false);
+
+      // 4a. [temperatureSetpointHoldDuration = 180, appleAttr000E = true] while SetpointHoldOn -> clears duration & expiry
+      await remoteWriteAttrs(client, endpoint.number, [
+        {
+          cluster: Thermostat,
+          attributes: "temperatureSetpointHoldDuration",
+          value: 180,
+        },
+        {
+          cluster: AppleThermostatCluster,
+          attributes: "appleAttr000E",
+          value: true,
+        },
+      ]);
+      expect(t.temperatureSetpointHold).toBe(
+        Thermostat.TemperatureSetpointHold.SetpointHoldOn,
+      );
+      expect(t.temperatureSetpointHoldDuration).toBeNull();
+      expect(t.setpointHoldExpiryTimestamp).toBeNull();
+      expect(t.appleAttr000C).toBe(2);
+      expect(t.appleAttr000E).toBe(true);
+
+      // 4b. Reversed order [appleAttr000E = true, temperatureSetpointHoldDuration = 180] -> arms 180m hold & sets 000E = false
+      await remoteWriteAttrs(client, endpoint.number, [
+        {
+          cluster: AppleThermostatCluster,
+          attributes: "appleAttr000E",
+          value: true,
+        },
+        {
+          cluster: Thermostat,
+          attributes: "temperatureSetpointHoldDuration",
+          value: 180,
+        },
+      ]);
+      expect(t.temperatureSetpointHold).toBe(
+        Thermostat.TemperatureSetpointHold.SetpointHoldOn,
+      );
+      expect(t.temperatureSetpointHoldDuration).toBe(180);
+      expect(t.setpointHoldExpiryTimestamp).not.toBeNull();
+      expect(t.appleAttr000C).toBe(2);
+      expect(t.appleAttr000E).toBe(false);
+
+      // 5. [occupiedHeatingSetpoint = 2200, temperatureSetpointHold = SetpointHoldOff] -> End Hold still restores Sleep
+      calls = [];
+      await remoteWriteAttrs(client, endpoint.number, [
+        {
+          cluster: Thermostat,
+          attributes: "occupiedHeatingSetpoint",
+          value: 2200,
+        },
+        {
+          cluster: Thermostat,
+          attributes: "temperatureSetpointHold",
+          value: Thermostat.TemperatureSetpointHold.SetpointHoldOff,
+        },
+      ]);
+      await vi.waitFor(() => {
+        expect(
+          t.activePresetHandle !== null &&
+            Bytes.areEqual(t.activePresetHandle, sleepHandle),
+        ).toBe(true);
+        expect(t.occupiedHeatingSetpoint).toBe(1800);
+        expect(t.temperatureSetpointHold).toBe(
+          Thermostat.TemperatureSetpointHold.SetpointHoldOff,
+        );
+        expect(t.appleAttr000C).toBeNull();
+        expect(t.appleAttr000E).toBe(true);
+      });
     });
   },
 );
