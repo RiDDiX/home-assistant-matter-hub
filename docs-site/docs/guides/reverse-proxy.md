@@ -44,7 +44,15 @@ HAMH_HTTP_ALLOWED_HOSTS=matter.example.org
 ```
 
 HAMH only checks the address the connection comes from, never `X-Forwarded-For` or similar headers, so a forged header cannot get anyone in. Every address not on the list gets a `403`, so also add your LAN range if other devices should reach HAMH directly. Those devices then get in without a login too.
-An environment variable takes only one value. For more, use a CIDR that covers them, repeat `--http-ip-whitelist` on the command line, or list them in the `--config` file.
+On Stable 2.1.0 an environment variable takes only one value. Since v2.2.0-alpha.1012 `HAMH_HTTP_IP_WHITELIST` and `HAMH_HTTP_ALLOWED_HOSTS` also take a comma-separated list. Otherwise use a CIDR that covers them, repeat `--http-ip-whitelist` on the command line, or list them in a config file:
+
+```json
+{"httpIpWhitelist": ["192.168.1.0/24", "172.18.0.0/16"]}
+```
+
+Point HAMH at the file with `--config` or the `HAMH_CONFIG` environment variable. In Docker the variable keeps the container command untouched.
+
+Every device inside a whitelisted CIDR gets in without a login, so keep the ranges narrow.
 
 To find the proxy's address, set the whitelist to any single address that is not the proxy, for example your own PC's, then open HAMH through the proxy. HAMH logs a warning `Denied <address>, not in --http-ip-whitelist` the first time it refuses an address. An IPv4 address can show up as `::ffff:172.18.0.5`, list it as `172.18.0.5`.
 

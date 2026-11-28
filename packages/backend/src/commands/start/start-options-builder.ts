@@ -2,6 +2,15 @@ import fs from "node:fs";
 import type { Argv } from "yargs";
 import type { StartOptions } from "./start-options.js";
 
+// An env var arrives as one string, so "a,b" has to be split here.
+const commaList = (values: unknown[]): string[] =>
+  values.flatMap((value) =>
+    String(value)
+      .split(",")
+      .map((item) => item.trim())
+      .filter((item) => item !== ""),
+  );
+
 export function startOptionsBuilder(yargs: Argv): Argv<StartOptions> {
   return yargs
     .env("HAMH")
@@ -55,13 +64,15 @@ export function startOptionsBuilder(yargs: Argv): Argv<StartOptions> {
     })
     .option("http-ip-whitelist", {
       type: "array",
+      coerce: commaList,
       description:
-        "Only allow the specified IPv4, IPv6 or CIDR. You can specify this option multiple times. When configured via ENV variables, you can only specify ONE value. Defaults to allow every IP address.",
+        "Only allow the specified IPv4, IPv6 or CIDR. You can specify this option multiple times. An ENV variable takes a comma-separated list. Defaults to allow every IP address.",
     })
     .option("http-allowed-hosts", {
       type: "array",
+      coerce: commaList,
       description:
-        "Extra host names the web UI may be reached by, '*.example.com' matches subdomains. IP addresses, localhost, single-label names and .local, .localhost, .home.arpa, .lan, .internal and .fritz.box names are always allowed. You can specify this option multiple times. When configured via ENV variables, you can only specify ONE value.",
+        "Extra host names the web UI may be reached by, '*.example.com' matches subdomains. IP addresses, localhost, single-label names and .local, .localhost, .home.arpa, .lan, .internal and .fritz.box names are always allowed. You can specify this option multiple times. An ENV variable takes a comma-separated list.",
     })
     .option("mdns-disable-ipv4", {
       type: "boolean",

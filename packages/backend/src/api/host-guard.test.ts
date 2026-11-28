@@ -7,7 +7,7 @@ import {
   isSupervisorIngress,
 } from "./host-guard.js";
 
-const fakeLog = () => ({ warn: vi.fn(), debug: vi.fn() });
+const fakeLog = () => ({ warn: vi.fn(), debug: vi.fn(), error: vi.fn() });
 
 describe("ipWhitelist", () => {
   it("warns on the first denial per address, then logs at debug", () => {
@@ -55,6 +55,21 @@ describe("ipWhitelist", () => {
     expect(allowed("127.0.0.1")).toBe(false);
     expect(allowed("::1")).toBe(false);
     expect(allowed("10.1.2.3")).toBe(true);
+  });
+
+  it("logs one error when no entry is valid and denies everyone", () => {
+    const log = fakeLog();
+    const allowed = ipWhitelist(
+      ["10.0.0.0/8,127.0.0.1"],
+      log as never as BetterLogger,
+    );
+    expect(log.error).toHaveBeenCalledTimes(1);
+    expect(log.error.mock.calls[0][0]).toBe(
+      "No valid --http-ip-whitelist entry, every remote address is denied",
+    );
+    expect(allowed("127.0.0.1")).toBe(false);
+    expect(allowed("10.1.2.3")).toBe(false);
+    expect(log.error).toHaveBeenCalledTimes(1);
   });
 
   it("trims whitespace around entries", () => {

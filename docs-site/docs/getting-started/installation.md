@@ -128,11 +128,11 @@ Options:
                                  in the future.                                                                     [number] [default: 8482]
   --http-auth-username           Username for HTTP basic authentication                                                             [string]
   --http-auth-password           Password for HTTP basic authentication                                                             [string]
-  --http-ip-whitelist            Only allow the specified IPv4, IPv6 or CIDR. You can specify this option multiple times. When configured vi
-                                 a ENV variables, you can only specify ONE value. Defaults to allow every IP address.                [array]
+  --http-ip-whitelist            Only allow the specified IPv4, IPv6 or CIDR. You can specify this option multiple times. An ENV variable
+                                 takes a comma-separated list. Defaults to allow every IP address.                                   [array]
   --http-allowed-hosts           Extra host names the web UI may be reached by, '*.example.com' matches subdomains. IP addresses, localhost,
                                  single-label names and .local, .localhost, .home.arpa, .lan, .internal and .fritz.box names are always
-                                 allowed.                                                                                           [array]
+                                 allowed. You can specify this option multiple times. An ENV variable takes a comma-separated list.  [array]
   --mdns-network-interface       Limit mDNS to this network interface                                                               [string]
   --home-assistant-url           The HTTP-URL of your Home Assistant URL                                                 [string] [required]
   --home-assistant-access-token  A long-lived access token for your Home Assistant Instance                              [string] [required]
@@ -146,5 +146,12 @@ Without a login, other devices get a `403` and the log shows a warning at start.
 
 Each of those configuration options can be configured via environment variables, too. Simply prefix them with `HAMH_`
 and write them in capslock with underscores (e.g. `HAMH_MDNS_NETWORK_INTERFACE`).
+
+`HAMH_CONFIG` points at the JSON configuration file. Its keys are the option names in camelcase or kebabcase, lists are
+JSON arrays, e.g. `{"httpIpWhitelist": ["192.168.1.0/24"]}`.
+
+Recreating a container on `:latest` pulls a new version. Since v2.1.0 remote access without a login needs
+`HAMH_HTTP_AUTH_*` or a whitelist, otherwise the log shows `Configure HTTP authentication to access HAMH remotely` and
+remote clients get a `403`. Pin a version tag to update on your own schedule.
 
 **Those configuration options are not needed for the Home Assistant Addon Installation type.**

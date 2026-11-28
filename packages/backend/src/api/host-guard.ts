@@ -51,6 +51,11 @@ export function ipWhitelist(
       }
       return ok;
     });
+  if (entries.length > 0 && valid.length === 0) {
+    log.error(
+      "No valid --http-ip-whitelist entry, every remote address is denied",
+    );
+  }
   const seen = new Set<string>();
   return (remoteAddress) => {
     const address = remoteAddress ?? "";
