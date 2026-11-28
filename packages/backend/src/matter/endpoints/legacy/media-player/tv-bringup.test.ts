@@ -181,6 +181,32 @@ describe("tv media_player bring-up", () => {
     ).rejects.toThrow("Unknown input index 5");
     expect(calls).toEqual([]);
   });
+
+  // InputInfoStruct names have no length limit, so long names pass through
+  it("keeps long multi-byte source names and selects the original", async () => {
+    const long = "リビングルームのプレイステーション5番目のゲーム機";
+    const endpoint = await bringUp(
+      tvEntity(MediaPlayerDeviceFeature.SELECT_SOURCE, {
+        source_list: [`${long} A`, `${long} B`],
+        source: `${long} B`,
+      }),
+    );
+    // biome-ignore lint/suspicious/noExplicitAny: inspect cluster state
+    const state = (endpoint.state as any).mediaInput;
+    expect(Buffer.byteLength(state.inputList[1].name)).toBeGreaterThan(64);
+    expect(state.inputList.map((i: { name: string }) => i.name)).toEqual([
+      `${long} A`,
+      `${long} B`,
+    ]);
+    expect(state.currentInput).toBe(1);
+    await act(endpoint, (agent) => agent.mediaInput.selectInput({ index: 1 }));
+    expect(calls).toEqual([
+      {
+        action: "media_player.select_source",
+        data: { source: `${long} B` },
+      },
+    ]);
+  });
 });
 
 describe("speaker media_player bring-up", () => {

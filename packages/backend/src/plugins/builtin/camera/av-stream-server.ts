@@ -90,8 +90,9 @@ export class CameraAvStreamServer extends Base {
   override audioStreamAllocate(
     request: CameraAvStreamManagement.AudioStreamAllocateRequest,
   ): MaybePromise<CameraAvStreamManagement.AudioStreamAllocateResponse> {
-    // matter.js does not check enum and list constraints on command fields,
-    // CHIP answers these with CONSTRAINT_ERROR first (TC-AVSM-2.5)
+    // matter.js refuses undefined enum values, not a valid one the spec bars
+    // here or a bit depth off the list. CHIP answers these with
+    // CONSTRAINT_ERROR first (TC-AVSM-2.5)
     if (
       ![
         StreamUsage.Recording,

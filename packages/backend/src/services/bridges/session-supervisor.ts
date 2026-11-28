@@ -366,7 +366,7 @@ export class SessionSupervisor {
         hookGiveUpsWithPeers(sess);
         if (sess.subscriptions.size > 0) this.subscribedSessions.add(sess);
       }
-      this.sessionDiagHandler = (session: {
+      const reportTotals = (session: {
         id: number;
         peerNodeId: unknown;
         subscriptions: { size: number };
@@ -419,7 +419,25 @@ export class SessionSupervisor {
             "Subscriptions recovered, canceled dead session cleanup",
           );
         }
-
+      };
+      const handler = (session: Parameters<typeof reportTotals>[0]) => {
+        // A subscription moving to a newer session is a delete then an add,
+        // so look at an empty bridge again once the add had its turn.
+        if (
+          session.subscriptions.size === 0 &&
+          [...sessionManager.sessions].every((s) => s.subscriptions.size === 0)
+        ) {
+          queueMicrotask(() => {
+            // No matter.js observer around us here, a throw would be uncaught
+            try {
+              if (this.sessionDiagHandler === handler) reportTotals(session);
+            } catch (e) {
+              this.log.warn("Deferred subscription report failed:", e);
+            }
+          });
+        } else {
+          reportTotals(session);
+        }
         // Per-session stale tracking: schedule cleanup for individual
         // sessions that lose all subscriptions even when the bridge
         // as a whole still has active subscriptions from other peers.
@@ -442,6 +460,7 @@ export class SessionSupervisor {
           this.staleSessionTimers.delete(session.id);
         }
       };
+      this.sessionDiagHandler = handler;
       sessionManager.subscriptionsChanged.on(this.sessionDiagHandler);
 
       this.sessionAddedHandler = (newSession: {
@@ -501,8 +520,8 @@ export class SessionSupervisor {
           }
         }
         // Older sessions that still hold subscriptions stay open: matter.js
-        // reports on the peer's newest session and ends dead subscriptions
-        // itself, which hands the emptied session to the stale timer.
+        // moves those subscriptions to a newer session with the same CATs or
+        // ends them itself, which hands the emptied session to the stale timer.
       };
       this.sessionDeletedHandler = (session: {
         id: number;
@@ -1009,8 +1028,8 @@ export class SessionSupervisor {
     }
   }
 
-  // A controller talks on its newest session while matter.js reports an older
-  // session's subscription there too, so silence counts per peer and fabric.
+  // A subscription follows its controller to a newer session with the same
+  // CATs. Silence still counts per peer and fabric to stay on the safe side.
   private newestPeerStamp(
     stamps: WeakMap<object, number>,
     s: { peerNodeId: unknown; fabric?: { fabricIndex?: unknown } },

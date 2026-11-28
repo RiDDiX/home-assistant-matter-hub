@@ -1,6 +1,7 @@
 import { Time } from "@matter/general";
 import { MessageType } from "@matter/main/protocol";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { diagnosticEventBus } from "../diagnostics/diagnostic-event-bus.js";
 import type { BridgeDataProvider } from "./bridge-data-provider.js";
 import {
   DEAD_SESSION_TIMEOUT_MS,
@@ -544,17 +545,95 @@ describe("lifecycle", () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
-  it("arms the dead session timer at zero subscriptions, cancels it on recovery", () => {
+  it("arms the dead session timer at zero subscriptions, cancels it on recovery", async () => {
     const s = fakeSession(1);
     s.timestamp = Time.nowUs - STALE_SESSION_QUIET_WINDOW_MS;
     const { handlers, internals } = makeSupervisor([s]);
 
     handlers.subscriptionsChanged?.(s as never);
+    await Promise.resolve();
     expect(internals.deadSessionTimer).not.toBeNull();
     s.subscriptions.size = 1;
     handlers.subscriptionsChanged?.(s as never);
     expect(internals.deadSessionTimer).toBeNull();
     expect(vi.getTimerCount()).toBe(0);
+  });
+
+  // matter.js 0.18.1 moves a subscription to a newer CASE session as a
+  // delete on the old one, then an add on the new one
+  it("does not report a subscription move as all lost", async () => {
+    const old = fakeSession(1, 1);
+    const fresh = fakeSession(2);
+    const { handlers, internals, log } = makeSupervisor([old, fresh]);
+    const emit = vi.spyOn(diagnosticEventBus, "emit");
+
+    old.subscriptions.size = 0;
+    handlers.subscriptionsChanged?.(old as never);
+    fresh.subscriptions.size = 1;
+    handlers.subscriptionsChanged?.(fresh as never);
+    await Promise.resolve();
+
+    expect(internals.deadSessionTimer).toBeNull();
+    expect(log.info).not.toHaveBeenCalledWith(
+      expect.stringContaining("All subscriptions lost"),
+    );
+    const totals = emit.mock.calls
+      .filter((c) => c[0] === "subscription_changed")
+      .map(
+        (c) => (c[2] as { details: { totalSubs: number } }).details.totalSubs,
+      );
+    expect(totals).toEqual([1, 1]);
+    emit.mockRestore();
+  });
+
+  it("still reports a real loss after the move check", async () => {
+    const s = fakeSession(1, 1);
+    const { handlers, internals, log } = makeSupervisor([s]);
+
+    s.subscriptions.size = 0;
+    handlers.subscriptionsChanged?.(s as never);
+    expect(internals.deadSessionTimer).toBeNull();
+    await Promise.resolve();
+    expect(internals.deadSessionTimer).not.toBeNull();
+    expect(log.info).toHaveBeenCalledWith(
+      expect.stringContaining("All subscriptions lost"),
+    );
+  });
+
+  it("drops a pending loss check once stopped", async () => {
+    const s = fakeSession(1, 1);
+    const { sup, handlers, internals, log } = makeSupervisor([s]);
+    sup.start();
+
+    s.subscriptions.size = 0;
+    handlers.subscriptionsChanged?.(s as never);
+    sup.stop();
+    await Promise.resolve();
+    expect(internals.deadSessionTimer).toBeNull();
+    expect(log.info).not.toHaveBeenCalledWith(
+      expect.stringContaining("All subscriptions lost"),
+    );
+  });
+
+  it("logs a throw in the deferred loss report instead of crashing", async () => {
+    const s = fakeSession(1, 1);
+    const { handlers, log } = makeSupervisor([s]);
+    const emit = vi
+      .spyOn(diagnosticEventBus, "emit")
+      .mockImplementationOnce(() => {
+        throw new Error("boom");
+      });
+
+    s.subscriptions.size = 0;
+    // the microtask has no caller to throw into, vitest would flag it
+    expect(() => handlers.subscriptionsChanged?.(s as never)).not.toThrow();
+    await Promise.resolve();
+    expect(emit).toHaveBeenCalledOnce();
+    expect(log.warn).toHaveBeenCalledWith(
+      "Deferred subscription report failed:",
+      expect.any(Error),
+    );
+    emit.mockRestore();
   });
 
   it("runs the original request handler when the bookkeeping throws", () => {

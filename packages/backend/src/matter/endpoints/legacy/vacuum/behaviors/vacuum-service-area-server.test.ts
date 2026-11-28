@@ -1,9 +1,16 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type {
   EntityMappingConfig,
   HomeAssistantEntityState,
   VacuumDeviceAttributes,
 } from "@home-assistant-matter-hub/common";
+import { Environment, VariableService } from "@matter/general";
+import { type Behavior, Endpoint, VendorId } from "@matter/main";
 import type { ServiceArea } from "@matter/main/clusters";
+import { OnOffPlugInUnitDevice } from "@matter/main/devices";
+import { ServerNode } from "@matter/main/node";
 import { describe, expect, it } from "vitest";
 import {
   createCleanAreaServiceAreaServer,
@@ -211,6 +218,93 @@ describe("custom areas with maps and floors (#506)", () => {
     expect(defaults(server).supportedMaps).toEqual([
       { mapId: 1, name: "m".repeat(64) },
     ]);
+  });
+});
+
+describe("name byte limits", () => {
+  const long = "居間".repeat(30); // 180 bytes
+  const bytes = (value: string) => Buffer.byteLength(value);
+
+  // A plain device is enough, matter.js validates the cluster state on init
+  async function mount(server: Behavior.Type) {
+    const dir = mkdtempSync(join(tmpdir(), "hamh-sa-"));
+    const env = new Environment("test", Environment.default);
+    env.get(VariableService).set("storage.path", dir);
+    const node = await ServerNode.create({
+      // biome-ignore lint/suspicious/noExplicitAny: env valid at runtime
+      environment: env as any,
+      id: "sa",
+      network: { port: 0 },
+      commissioning: { passcode: 20202021, discriminator: 3840 },
+      basicInformation: { vendorId: VendorId(0xfff1), productId: 0x8000 },
+    });
+    try {
+      const endpoint = new Endpoint(OnOffPlugInUnitDevice.with(server), {
+        id: "v",
+      });
+      await node.add(endpoint);
+      // biome-ignore lint/suspicious/noExplicitAny: inspect cluster state
+      const state = (endpoint.state as any).serviceArea;
+      return {
+        maps: state.supportedMaps as ServiceArea.Map[] | undefined,
+        areas: state.supportedAreas as ServiceArea.Area[],
+      };
+    } finally {
+      await node.close().catch(() => {});
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+
+  it("mounts a long multi-byte room on a long map within the limits", async () => {
+    const attributes = {
+      rooms: { ["地図".repeat(15)]: [{ id: 1, name: long }] },
+    } as unknown as VacuumDeviceAttributes;
+    const { maps, areas } = await mount(
+      createVacuumServiceAreaServer(attributes),
+    );
+    const name = areas[0].areaInfo.locationInfo?.locationName ?? "";
+    expect(bytes(name)).toBe(126);
+    expect(long.startsWith(name)).toBe(true);
+    expect(maps).toEqual([{ mapId: 1, name: `${"地図".repeat(10)}地` }]);
+    expect(areas[0].mapId).toBe(1);
+    expect(getVacuumServiceAreas(attributes)[0].name).toBe(name);
+  });
+
+  it("keeps two cut names that share a prefix apart", async () => {
+    const attributes = {
+      rooms: { "1": `${long} A`, "2": `${long} B` },
+    } as unknown as VacuumDeviceAttributes;
+    const { areas } = await mount(createVacuumServiceAreaServer(attributes));
+    const names = areas.map((a) => a.areaInfo.locationInfo?.locationName);
+    expect(names).toEqual(["居間".repeat(21), `${"居間".repeat(21)} 2`]);
+    expect(names.every((n) => bytes(n ?? "") <= 128)).toBe(true);
+  });
+
+  it("cuts custom and CLEAN_AREA names the same way the switches see them", async () => {
+    const custom = await mount(
+      createCustomServiceAreaServer([{ name: long, service: "script.a" }]),
+    );
+    const clean = await mount(
+      createCleanAreaServiceAreaServer([
+        { areaId: 7, name: long, haAreaId: "living" },
+      ]),
+    );
+    for (const [{ areas }, mapping] of [
+      [custom, { customServiceAreas: [{ name: long, service: "script.a" }] }],
+      [
+        clean,
+        { cleanAreaRooms: [{ areaId: 7, name: long, haAreaId: "living" }] },
+      ],
+    ] as const) {
+      const name = areas[0].areaInfo.locationInfo?.locationName;
+      expect(bytes(name ?? "")).toBe(126);
+      expect(
+        getVacuumServiceAreas(
+          {} as VacuumDeviceAttributes,
+          mapping as unknown as EntityMappingConfig,
+        )[0].name,
+      ).toBe(name);
+    }
   });
 });
 

@@ -446,12 +446,15 @@ class RvcRunModeServerBase extends Base {
           }
         }
 
-        // Strategy 3: Match by location name in supportedAreas.
+        // Strategy 3: Match by location name in supportedAreas. Names over
+        // 128 bytes are cut there; a cut name with a collision number won't match.
         if (roomName) {
+          const name = (
+            trimToLength(roomName, 128, "") ?? roomName
+          ).toLowerCase();
           const area = serviceArea.state.supportedAreas.find(
             (a) =>
-              a.areaInfo.locationInfo?.locationName?.toLowerCase() ===
-              roomName.toLowerCase(),
+              a.areaInfo.locationInfo?.locationName?.toLowerCase() === name,
           );
           if (area && isAllowedArea(area.areaId)) {
             return area.areaId;

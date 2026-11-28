@@ -313,3 +313,18 @@ describe("#501 room renamed in the vacuum integration", () => {
     });
   }
 });
+
+describe("#501 current room by name", () => {
+  it("matches a room name cut to 128 bytes", async () => {
+    // 180 UTF-8 bytes, the area name is cut to 128
+    names[9] = "台所".repeat(30);
+    const endpoint = await serverMode("n501-long-name");
+    await controllerClean(endpoint, [6, 9]);
+    await enter(endpoint, 6);
+
+    // no room_id, so only the name can find the area
+    liveStates[ROOM] = state(ROOM, names[9]);
+    await push(endpoint, "cleaning");
+    expect(serviceArea(endpoint).currentArea).toBe(9);
+  });
+});

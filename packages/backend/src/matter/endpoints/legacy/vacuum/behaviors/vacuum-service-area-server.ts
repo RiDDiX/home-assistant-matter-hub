@@ -17,6 +17,29 @@ import { parseVacuumRooms, toAreaId } from "../utils/parse-vacuum-rooms.js";
 
 const logger = Logger.get("VacuumServiceAreaServer");
 
+// Matter caps map names at 64 and area names at 128 UTF-8 bytes, else the
+// endpoint fails.
+function mapNameOf(name: string): string {
+  return trimToLength(name, 64, "") ?? name;
+}
+
+function locationNameOf(name: string): string {
+  return trimToLength(name, 128, "") ?? name;
+}
+
+// Areas on a map must differ, so a cut name that repeats gets a number.
+function locationNames(names: string[]): string[] {
+  const used = new Set<string>();
+  return names.map((name) => {
+    let label = locationNameOf(name);
+    for (let n = 2; label !== name && used.has(label); n++) {
+      label = `${trimToLength(name, 128 - ` ${n}`.length, "")} ${n}`;
+    }
+    used.add(label);
+    return label;
+  });
+}
+
 /**
  * Extract unique maps (floors) from rooms that have mapName set.
  * Returns an empty array when no rooms carry floor info.
@@ -24,8 +47,9 @@ const logger = Logger.get("VacuumServiceAreaServer");
 function extractMaps(rooms: { mapName?: string }[]): ServiceArea.Map[] {
   const seen = new Map<string, number>();
   for (const room of rooms) {
-    if (room.mapName && !seen.has(room.mapName)) {
-      seen.set(room.mapName, seen.size + 1);
+    const name = room.mapName ? mapNameOf(room.mapName) : undefined;
+    if (name && !seen.has(name)) {
+      seen.set(name, seen.size + 1);
     }
   }
   return Array.from(seen.entries()).map(([name, mapId]) => ({ mapId, name }));
@@ -44,12 +68,15 @@ function roomsToAreas(
     mapLookup.set(m.name, m.mapId);
   }
 
-  return rooms.map((room) => ({
+  const names = locationNames(rooms.map((room) => room.name));
+  return rooms.map((room, index) => ({
     areaId: toAreaId(room.id),
-    mapId: room.mapName ? (mapLookup.get(room.mapName) ?? null) : null,
+    mapId: room.mapName
+      ? (mapLookup.get(mapNameOf(room.mapName)) ?? null)
+      : null,
     areaInfo: {
       locationInfo: {
-        locationName: room.name,
+        locationName: names[index],
         floorNumber: null,
         areaType: null,
       },
@@ -245,12 +272,13 @@ export function createCustomServiceAreaServer(
     ? extractMaps(mapNames.map((mapName) => ({ mapName })))
     : [];
 
+  const names = locationNames(customAreas.map((area) => area.name));
   const supportedAreas: ServiceArea.Area[] = customAreas.map((area, index) => ({
     areaId: index + 1,
     mapId: maps.find((m) => m.name === mapNames[index])?.mapId ?? null,
     areaInfo: {
       locationInfo: {
-        locationName: area.name,
+        locationName: names[index],
         floorNumber: toFloorNumber(area.floorNumber),
         areaType: null,
       },
@@ -287,18 +315,21 @@ export function createCustomServiceAreaServer(
 export function createCleanAreaServiceAreaServer(
   cleanAreaRooms: CleanAreaRoom[],
 ) {
-  const supportedAreas: ServiceArea.Area[] = cleanAreaRooms.map((room) => ({
-    areaId: room.areaId,
-    mapId: null,
-    areaInfo: {
-      locationInfo: {
-        locationName: room.name,
-        floorNumber: null,
-        areaType: null,
+  const names = locationNames(cleanAreaRooms.map((room) => room.name));
+  const supportedAreas: ServiceArea.Area[] = cleanAreaRooms.map(
+    (room, index) => ({
+      areaId: room.areaId,
+      mapId: null,
+      areaInfo: {
+        locationInfo: {
+          locationName: names[index],
+          floorNumber: null,
+          areaType: null,
+        },
+        landmarkInfo: null,
       },
-      landmarkInfo: null,
-    },
-  }));
+    }),
+  );
 
   logger.info(
     `Using ${cleanAreaRooms.length} HA areas via CLEAN_AREA: ${cleanAreaRooms.map((r) => r.name).join(", ")}`,
@@ -362,18 +393,18 @@ export function getVacuumServiceAreas(
 ): VacuumArea[] {
   const cleanAreaRooms = mapping?.cleanAreaRooms;
   if (cleanAreaRooms && cleanAreaRooms.length > 0) {
-    return cleanAreaRooms.map((room) => ({
+    const names = locationNames(cleanAreaRooms.map((room) => room.name));
+    return cleanAreaRooms.map((room, index) => ({
       areaId: room.areaId,
-      name: room.name,
+      name: names[index],
     }));
   }
 
   const customAreas = mapping?.customServiceAreas;
   if (customAreas && customAreas.length > 0) {
-    return customAreas.map((area, index) => ({
-      areaId: index + 1,
-      name: area.name,
-    }));
+    return locationNames(customAreas.map((area) => area.name)).map(
+      (name, index) => ({ areaId: index + 1, name }),
+    );
   }
 
   const roomEntities = mapping?.roomEntities;
