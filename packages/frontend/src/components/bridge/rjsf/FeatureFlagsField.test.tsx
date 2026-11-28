@@ -79,7 +79,7 @@ describe("FeatureFlagsField", () => {
     }
   });
 
-  it("auto-enables and locks serverMode when appleAdaptiveTemperature is toggled on", async () => {
+  it("shows serverMode locked on for appleAdaptiveTemperature without writing it", async () => {
     const onChange = vi.fn();
     const baseProps = makeProps({ onChange });
     const adaptiveSchema = {
@@ -102,8 +102,9 @@ describe("FeatureFlagsField", () => {
     await userEvent.click(
       screen.getByText("Apple Adaptive Temperature (Server Mode)"),
     );
+    // serverMode is derived, storing it would outlive turning adaptive off
     expect(onChange).toHaveBeenCalledWith(
-      { appleAdaptiveTemperature: true, serverMode: true },
+      { appleAdaptiveTemperature: true },
       "",
     );
 

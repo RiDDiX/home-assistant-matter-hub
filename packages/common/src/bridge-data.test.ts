@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isCoverPositionInverted } from "./bridge-data.js";
+import { isCoverPositionInverted, isServerModeBridge } from "./bridge-data.js";
 import { bridgeTemplates } from "./bridge-templates.js";
 
 describe("isCoverPositionInverted", () => {
@@ -26,6 +26,19 @@ describe("isCoverPositionInverted", () => {
         coverSwapOpenClose: swap,
       }),
     ).toBe(inverted);
+  });
+});
+
+describe("isServerModeBridge", () => {
+  it.each([
+    [undefined, false],
+    [{}, false],
+    [{ serverMode: true }, true],
+    [{ appleAdaptiveTemperature: true }, true],
+    [{ serverMode: false, appleAdaptiveTemperature: true }, true],
+    [{ serverMode: false, appleAdaptiveTemperature: false }, false],
+  ])("%o => %s", (flags, expected) => {
+    expect(isServerModeBridge(flags)).toBe(expected);
   });
 });
 

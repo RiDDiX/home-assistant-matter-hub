@@ -94,13 +94,24 @@ describe("Apple 0x1349 Adaptive Temperature MEI extensions", () => {
       ],
     } as Record<string, unknown>);
 
+    // the hold logic lives on the Adaptive thermostat classes, F9 only decodes
+    const holdCalls: [boolean, number | null][] = [];
+    class HoldSpyThermostat extends FeaturedThermostat {
+      applyAppleSetpointHold(
+        resumeOnNextEvent: boolean,
+        durationMinutes: number | null,
+      ) {
+        holdCalls.push([resumeOnNextEvent, durationMinutes]);
+      }
+    }
+
     node = await ServerNode.create({
       id: "apple-mei-test",
       environment: env,
       network: { port: 0 },
     });
 
-    const epType = ThermostatDevice.with(FeaturedThermostat);
+    const epType = ThermostatDevice.with(HoldSpyThermostat);
     const ep = new Endpoint(epType, { id: "thermostat-1" });
     await node.add(ep);
     await node.start();
@@ -172,7 +183,7 @@ describe("Apple 0x1349 Adaptive Temperature MEI extensions", () => {
 
     const beforeUnix = Math.floor(Date.now() / 1000);
     await ep.act(async (agent) => {
-      const tBehavior = agent.get(FeaturedThermostat) as unknown as {
+      const tBehavior = agent.get(HoldSpyThermostat) as unknown as {
         state: Record<string, unknown>;
         appleCmdF3(req: unknown): unknown;
         appleCmdF4(req: unknown): unknown;
@@ -256,43 +267,31 @@ describe("Apple 0x1349 Adaptive Temperature MEI extensions", () => {
         resumeOnNextEvent: TlvField(0, TlvBoolean),
         durationMinutes: TlvField(1, TlvUInt16),
       }).encode({ resumeOnNextEvent: false, durationMinutes: 180 });
-      const f9Before = Math.floor(Date.now() / 1000);
       const tBehaviorWithF9 = tBehavior as unknown as {
         state: Record<string, unknown>;
         appleCmdF9(req: unknown): unknown;
       };
       tBehaviorWithF9.appleCmdF9(TlvAny.decode(f9ThreeHours));
-      expect(tBehavior.state.appleAttr000C).toBe(2);
-      expect(tBehavior.state.appleAttr000E).toBe(false);
-      expect(tBehavior.state.temperatureSetpointHold).toBe(1);
-      expect(tBehavior.state.temperatureSetpointHoldDuration).toBe(180);
-      expect(
-        tBehavior.state.setpointHoldExpiryTimestamp as number,
-      ).toBeGreaterThanOrEqual(f9Before + 180 * 60 - 5);
 
       // appleCmdF9 { 0: false } -> Indefinitely
       const f9Indefinite = TlvObject({
         resumeOnNextEvent: TlvField(0, TlvBoolean),
       }).encode({ resumeOnNextEvent: false });
       tBehaviorWithF9.appleCmdF9(TlvAny.decode(f9Indefinite));
-      expect(tBehavior.state.appleAttr000C).toBe(2);
-      expect(tBehavior.state.appleAttr000E).toBe(false);
-      expect(tBehavior.state.temperatureSetpointHoldDuration).toBeNull();
-      expect(tBehavior.state.setpointHoldExpiryTimestamp).toBeNull();
 
       // appleCmdF9 { 0: true } -> Holding until next event
       const f9NextEvent = TlvObject({
         resumeOnNextEvent: TlvField(0, TlvBoolean),
       }).encode({ resumeOnNextEvent: true });
       tBehaviorWithF9.appleCmdF9(TlvAny.decode(f9NextEvent));
-      expect(tBehavior.state.appleAttr000C).toBe(2);
-      expect(tBehavior.state.appleAttr000E).toBe(true);
-      expect(tBehavior.state.temperatureSetpointHoldDuration).toBeNull();
-      expect(tBehavior.state.setpointHoldExpiryTimestamp).toBeNull();
 
-      // Invalid/missing field 0 is ignored without mutating state
+      // Invalid/missing field 0 is ignored
       tBehaviorWithF9.appleCmdF9(TlvAny.decode(emptyPayload));
-      expect(tBehavior.state.appleAttr000E).toBe(true);
+      expect(holdCalls).toEqual([
+        [false, 180],
+        [false, null],
+        [true, null],
+      ]);
 
       // Pre-2000 host clock must fall back to null instead of underflowing TlvEpochS
       const dateSpy = vi.spyOn(Date, "now").mockReturnValue(500_000_000_000);
@@ -311,20 +310,13 @@ describe("Apple 0x1349 Adaptive Temperature MEI extensions", () => {
       expect(tBehavior.state.activePresetHandle).toBeNull();
 
       // appleCmdF9 is ignored when Adaptive Temperature is disabled
+      holdCalls.length = 0;
       tBehavior.state.appleAttr0002 = false;
       tBehaviorWithF9.appleCmdF9(TlvAny.decode(f9ThreeHours));
-      expect(tBehavior.state.appleAttr000C).toBeNull();
-      expect(tBehavior.state.temperatureSetpointHold).toBe(
-        Thermostat.TemperatureSetpointHold.SetpointHoldOff,
-      );
-      expect(tBehavior.state.temperatureSetpointHoldDuration).toBeNull();
       tBehavior.state.appleAttr0002 = true;
       tBehavior.state.appleAttr0011 = { f0: false, f1: null };
       tBehaviorWithF9.appleCmdF9(TlvAny.decode(f9ThreeHours));
-      expect(tBehavior.state.appleAttr000C).toBeNull();
-      expect(tBehavior.state.temperatureSetpointHold).toBe(
-        Thermostat.TemperatureSetpointHold.SetpointHoldOff,
-      );
+      expect(holdCalls).toEqual([]);
     });
   });
 });

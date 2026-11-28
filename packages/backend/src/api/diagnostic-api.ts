@@ -1,4 +1,5 @@
 import os from "node:os";
+import { isServerModeBridge } from "@home-assistant-matter-hub/common";
 import type { Endpoint } from "@matter/main";
 import express from "express";
 import type { LoggerService } from "../core/app/logger.js";
@@ -225,7 +226,7 @@ export function diagnosticApi(
         statusReason: data.statusReason,
         port: data.port,
         deviceCount: data.deviceCount,
-        serverMode: data.featureFlags?.serverMode ?? false,
+        serverMode: isServerModeBridge(data.featureFlags),
         featureFlags: (data.featureFlags ?? {}) as Record<string, unknown>,
         commissioning: {
           commissioned: data.commissioning?.isCommissioned ?? false,

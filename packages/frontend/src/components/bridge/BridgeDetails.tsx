@@ -1,4 +1,7 @@
-import type { BridgeDataWithMetadata } from "@home-assistant-matter-hub/common";
+import {
+  type BridgeDataWithMetadata,
+  isServerModeBridge,
+} from "@home-assistant-matter-hub/common";
 import AddIcon from "@mui/icons-material/Add";
 import ContentCopyIcon from "@mui/icons-material/ContentCopy";
 import DevicesIcon from "@mui/icons-material/Devices";
@@ -51,18 +54,18 @@ export interface BridgeDetailsProps {
 
 export const BridgeDetails = ({ bridge }: BridgeDetailsProps) => {
   const { t } = useTranslation();
+  const serverMode = isServerModeBridge(bridge.featureFlags);
   return (
     <Grid container spacing={2}>
-      {bridge.featureFlags?.serverMode &&
-        bridge.featureFlags?.vacuumOnOff === false && (
-          <Grid size={{ xs: 12 }}>
-            <Alert severity="warning" icon={<WarningAmberIcon />}>
-              <AlertTitle>{t("bridgeUi.vacuumOnOffDisabled")}</AlertTitle>
-              <Trans i18nKey="bridgeUi.vacuumOnOffDisabledHelp" />
-            </Alert>
-          </Grid>
-        )}
-      {!bridge.featureFlags?.serverMode && bridge.featureFlags?.vacuumOnOff && (
+      {serverMode && bridge.featureFlags?.vacuumOnOff === false && (
+        <Grid size={{ xs: 12 }}>
+          <Alert severity="warning" icon={<WarningAmberIcon />}>
+            <AlertTitle>{t("bridgeUi.vacuumOnOffDisabled")}</AlertTitle>
+            <Trans i18nKey="bridgeUi.vacuumOnOffDisabledHelp" />
+          </Alert>
+        </Grid>
+      )}
+      {!serverMode && bridge.featureFlags?.vacuumOnOff && (
         <Grid size={{ xs: 12 }}>
           <Alert severity="info" icon={<WarningAmberIcon />}>
             <AlertTitle>{t("bridgeUi.vacuumOnOffEnabled")}</AlertTitle>

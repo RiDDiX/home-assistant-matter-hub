@@ -2,7 +2,6 @@ import crypto from "node:crypto";
 import type {
   BridgeBasicInformation,
   BridgeData,
-  BridgeFeatureFlags,
   CreateBridgeRequest,
   UpdateBridgeRequest,
 } from "@home-assistant-matter-hub/common";
@@ -127,20 +126,10 @@ export class BridgeService extends Service {
     }
   }
 
-  private normalizeFeatureFlags(
-    flags?: BridgeFeatureFlags,
-  ): BridgeFeatureFlags | undefined {
-    if (flags?.appleAdaptiveTemperature === true && flags.serverMode !== true) {
-      return { ...flags, serverMode: true };
-    }
-    return flags;
-  }
-
   private normalizeBridgeData(bridgeData: BridgeData): BridgeData {
     const { basicInformation } = bridgeData;
     return {
       ...bridgeData,
-      featureFlags: this.normalizeFeatureFlags(bridgeData.featureFlags),
       basicInformation: {
         ...basicInformation,
         hardwareVersionString:
@@ -444,7 +433,6 @@ export class BridgeService extends Service {
     try {
       const bridge = await this.addStoredBridge({
         ...request,
-        featureFlags: this.normalizeFeatureFlags(request.featureFlags),
         port,
         id: crypto.randomUUID().replace(/-/g, ""),
         basicInformation: this.props.basicInformation,
@@ -500,10 +488,7 @@ export class BridgeService extends Service {
     this.pendingPorts.add(previousPort);
     this.pendingPorts.add(request.port);
     try {
-      await bridge.update({
-        ...request,
-        featureFlags: this.normalizeFeatureFlags(request.featureFlags),
-      });
+      await bridge.update(request);
       // a delete that ran meanwhile already removed it from storage
       if (!this.bridges.includes(bridge)) return;
       await this.bridgeStorage.add(bridge.data);

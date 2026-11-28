@@ -1,6 +1,7 @@
 import {
   type BridgeTemplate,
   bridgeTemplates,
+  isServerModeBridge,
 } from "@home-assistant-matter-hub/common";
 import CheckCircleIcon from "@mui/icons-material/CheckCircle";
 import Box from "@mui/material/Box";
@@ -84,7 +85,7 @@ export function BridgeTemplateSelector({
                     >
                       {template.description}
                     </Typography>
-                    {template.featureFlags?.serverMode && (
+                    {isServerModeBridge(template.featureFlags) && (
                       <Chip
                         label={t("bridge.serverMode")}
                         size="small"

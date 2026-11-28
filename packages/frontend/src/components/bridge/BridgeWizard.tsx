@@ -8,6 +8,7 @@ import {
   controllerProfiles,
   type HomeAssistantMatcher,
   HomeAssistantMatcherType,
+  isServerModeBridge,
 } from "@home-assistant-matter-hub/common";
 import AddIcon from "@mui/icons-material/Add";
 import ArrowBackIcon from "@mui/icons-material/ArrowBack";
@@ -159,6 +160,11 @@ export function BridgeWizard({ open, onClose, onComplete }: BridgeWizardProps) {
     ...selectedController?.featureFlags,
     ...userFlags,
   };
+  // the stored serverMode stays the user's choice, adaptive adds it on top
+  const serverModeActive = isServerModeBridge({
+    ...featureFlags,
+    serverMode: currentBridge.serverMode,
+  });
   const [filterType, setFilterType] = useState<WizardFilterType>("pattern");
   const [labelValues, setLabelValues] = useState<string[]>([]);
   const [labels, setLabels] = useState<HomeAssistantLabel[]>([]);
@@ -245,7 +251,7 @@ export function BridgeWizard({ open, onClose, onComplete }: BridgeWizardProps) {
       const includes = template.filter.include;
       if (includes.length > 0) {
         setUseWildcard(false);
-        if (template.featureFlags?.serverMode) {
+        if (isServerModeBridge(template.featureFlags)) {
           const patterns = includes.map((m) =>
             m.type === HomeAssistantMatcherType.Domain
               ? `${m.value}.*`
@@ -298,14 +304,14 @@ export function BridgeWizard({ open, onClose, onComplete }: BridgeWizardProps) {
       let includeMatchers: HomeAssistantMatcher[];
       let excludeMatchers: HomeAssistantMatcher[];
 
-      if (selectedTemplate && !currentBridge.serverMode) {
+      if (selectedTemplate && !serverModeActive) {
         // Use template filters directly
         includeMatchers = [...selectedTemplate.filter.include];
         excludeMatchers = [...selectedTemplate.filter.exclude];
       } else {
         // Server mode always filters by entity id, so it stays on pattern.
         includeMatchers = buildIncludeMatchers({
-          filterType: currentBridge.serverMode ? "pattern" : filterType,
+          filterType: serverModeActive ? "pattern" : filterType,
           useWildcard,
           entityPattern,
           labelValues,
@@ -534,10 +540,7 @@ export function BridgeWizard({ open, onClose, onComplete }: BridgeWizardProps) {
         <FormControlLabel
           control={
             <Checkbox
-              checked={
-                featureFlags.appleAdaptiveTemperature === true ||
-                currentBridge.serverMode
-              }
+              checked={serverModeActive}
               disabled={featureFlags.appleAdaptiveTemperature === true}
               onChange={(e) =>
                 setCurrentBridge((prev) => ({
@@ -551,8 +554,7 @@ export function BridgeWizard({ open, onClose, onComplete }: BridgeWizardProps) {
           sx={{ mt: 1 }}
         />
       </Tooltip>
-      {(currentBridge.serverMode ||
-        featureFlags.appleAdaptiveTemperature === true) && (
+      {serverModeActive && (
         <Alert severity="info" sx={{ mt: 1 }}>
           <Trans i18nKey="bridgeWizard.serverModeEnabledInfo" />
         </Alert>
@@ -585,7 +587,7 @@ export function BridgeWizard({ open, onClose, onComplete }: BridgeWizardProps) {
             })
           : t("bridgeWizard.entityFilterDescription")}
       </Typography>
-      {currentBridge.serverMode && (
+      {serverModeActive && (
         <Alert severity="warning" sx={{ mt: 1, mb: 1 }}>
           <Trans
             i18nKey="bridgeWizard.serverModeFilterWarning"
@@ -593,7 +595,7 @@ export function BridgeWizard({ open, onClose, onComplete }: BridgeWizardProps) {
           />
         </Alert>
       )}
-      {!selectedTemplate && !currentBridge.serverMode && (
+      {!selectedTemplate && !serverModeActive && (
         <ToggleButtonGroup
           exclusive
           size="small"
@@ -616,21 +618,18 @@ export function BridgeWizard({ open, onClose, onComplete }: BridgeWizardProps) {
           </ToggleButton>
         </ToggleButtonGroup>
       )}
-      {!selectedTemplate &&
-        (currentBridge.serverMode || filterType === "pattern") && (
-          <FormControlLabel
-            control={
-              <Switch
-                checked={useWildcard}
-                onChange={(e) => setUseWildcard(e.target.checked)}
-              />
-            }
-            label={t("bridgeWizard.includeAll")}
-          />
-        )}
-      {!selectedTemplate &&
-      !currentBridge.serverMode &&
-      filterType === "label" ? (
+      {!selectedTemplate && (serverModeActive || filterType === "pattern") && (
+        <FormControlLabel
+          control={
+            <Switch
+              checked={useWildcard}
+              onChange={(e) => setUseWildcard(e.target.checked)}
+            />
+          }
+          label={t("bridgeWizard.includeAll")}
+        />
+      )}
+      {!selectedTemplate && !serverModeActive && filterType === "label" ? (
         <LabelFilterField
           labels={labels}
           loading={labelsLoading}
@@ -642,7 +641,7 @@ export function BridgeWizard({ open, onClose, onComplete }: BridgeWizardProps) {
         <TextField
           fullWidth
           label={
-            currentBridge.serverMode
+            serverModeActive
               ? t("bridgeWizard.entityId")
               : filterType === "domain"
                 ? t("labels.domains")
@@ -653,7 +652,7 @@ export function BridgeWizard({ open, onClose, onComplete }: BridgeWizardProps) {
                     : t("bridgeWizard.entityFilters")
           }
           value={
-            selectedTemplate && !currentBridge.serverMode
+            selectedTemplate && !serverModeActive
               ? selectedTemplate.filter.include
                   .map((m) => `${m.type}:${m.value}`)
                   .join(", ")
@@ -671,7 +670,7 @@ export function BridgeWizard({ open, onClose, onComplete }: BridgeWizardProps) {
                   : "light.living_room, switch.kitchen"
           }
           helperText={
-            currentBridge.serverMode
+            serverModeActive
               ? t("bridgeWizard.serverModeEntityHint")
               : selectedTemplate
                 ? t("bridgeWizard.templatePreConfigured")
@@ -683,7 +682,7 @@ export function BridgeWizard({ open, onClose, onComplete }: BridgeWizardProps) {
                       ? t("bridgeWizard.wildcardHint")
                       : t("bridgeWizard.commaHint")
           }
-          disabled={!!selectedTemplate && !currentBridge.serverMode}
+          disabled={!!selectedTemplate && !serverModeActive}
         />
       )}
       {!selectedTemplate && (
@@ -766,8 +765,7 @@ export function BridgeWizard({ open, onClose, onComplete }: BridgeWizardProps) {
                 sx={{ mt: 1, mr: 0.5 }}
               />
             )}
-            {(currentBridge.serverMode ||
-              featureFlags.appleAdaptiveTemperature === true) && (
+            {serverModeActive && (
               <Chip
                 icon={<SmartToyIcon />}
                 label={t("bridge.serverMode")}

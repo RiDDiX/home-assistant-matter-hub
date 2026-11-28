@@ -1,6 +1,7 @@
 import {
   type BridgeDataWithMetadata,
   BridgeStatus,
+  isServerModeBridge,
 } from "@home-assistant-matter-hub/common";
 import AddIcon from "@mui/icons-material/Add";
 import DeleteIcon from "@mui/icons-material/Delete";
@@ -141,7 +142,9 @@ export function pluginsEmptyState(input: {
   if (bridges.length === 0) {
     return "no-bridges";
   }
-  const pluginCapable = bridges.filter((b) => !b.featureFlags?.serverMode);
+  const pluginCapable = bridges.filter(
+    (b) => !isServerModeBridge(b.featureFlags),
+  );
   if (pluginCapable.length === 0) {
     return "all-server-mode";
   }
@@ -437,7 +440,7 @@ export const PluginsPage = () => {
 
   const emptyState = pluginsEmptyState({ bridges, bridgePlugins, installed });
   const serverModeBridges =
-    bridges?.filter((b) => b.featureFlags?.serverMode) ?? [];
+    bridges?.filter((b) => isServerModeBridge(b.featureFlags)) ?? [];
 
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 3 }}>

@@ -6,6 +6,7 @@ import { Environment, VariableService } from "@matter/general";
 import { Endpoint } from "@matter/main";
 import { OnOffPlugInUnitDevice } from "@matter/main/devices";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createBridgeServerConfig } from "../../utils/json/create-bridge-server-config.js";
 import { ServerModeServerNode } from "./server-mode-server-node.js";
 
 const bridgeData = {
@@ -58,5 +59,42 @@ describe("ServerModeServerNode.addDevice", () => {
     expect(add).toHaveBeenCalledTimes(2);
     expect(node.deviceCount).toBe(1);
     expect(node.parts.has(retry)).toBe(true);
+  });
+});
+
+// The Aqara ids are for Apple's Adaptive Temperature allowlist only, every
+// other bridge keeps the HAMH vendor and product id.
+describe("ServerModeServerNode identity", () => {
+  it.each([
+    ["plain server mode", { serverMode: true }, 0xfff1, 0x8000],
+    ["no flags", {}, 0xfff1, 0x8000],
+    [
+      "adaptive turned off",
+      { serverMode: false, appleAdaptiveTemperature: false },
+      0xfff1,
+      0x8000,
+    ],
+    ["adaptive", { appleAdaptiveTemperature: true }, 0x115f, 0x4801],
+  ])("%s", async (_, featureFlags, vendorId, productId) => {
+    const env = new Environment("sm-node", Environment.default);
+    env.get(VariableService).set("storage.path", dir);
+    node = new ServerModeServerNode(env, { ...bridgeData, featureFlags });
+    await node.construction.ready;
+    // biome-ignore lint/suspicious/noExplicitAny: read root cluster state
+    const info = (node.state as any).basicInformation;
+    expect(info.vendorId).toBe(vendorId);
+    expect(info.productId).toBe(productId);
+    // names stay the bridge's own, only the ids change
+    expect(info.vendorName).toBe("t");
+    expect(info.productName).toBe("t");
+  });
+
+  it("keeps the HAMH ids on an aggregator bridge", () => {
+    const config = createBridgeServerConfig({
+      ...bridgeData,
+      featureFlags: { appleAdaptiveTemperature: true },
+    });
+    expect(config.basicInformation?.vendorId).toBe(0xfff1);
+    expect(config.basicInformation?.productId).toBe(0x8000);
   });
 });

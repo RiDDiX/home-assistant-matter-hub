@@ -25,4 +25,24 @@ describe("DiagnosticService", () => {
     expect(bridge.entities.map((e) => e.entityId)).toEqual(["lock.front"]);
     expect(bridge.entities[0].matterClusters).toEqual(["doorLock"]);
   });
+
+  it("reports server mode turned on by appleAdaptiveTemperature", () => {
+    const bridgeService = {
+      bridges: [
+        {
+          data: {
+            id: "b1",
+            name: "Thermostat",
+            status: "running",
+            deviceCount: 1,
+            featureFlags: { appleAdaptiveTemperature: true },
+          },
+          server: { parts: [] },
+        },
+      ],
+    } as unknown as BridgeService;
+    const [bridge] = new DiagnosticService(bridgeService).getSnapshot().bridges;
+    expect(bridge.serverMode).toBe(true);
+    expect(bridge.featureFlags).toEqual({ appleAdaptiveTemperature: true });
+  });
 });

@@ -176,6 +176,7 @@ afterEach(async () => {
 async function mountStandalone(
   appleAdaptiveTemperature: boolean,
   nodeId = `adaptive-node-${counter++}`,
+  haState = makeHaState(),
 ) {
   const bridgeData = {
     id: nodeId,
@@ -200,7 +201,7 @@ async function mountStandalone(
   const dataProvider = new BridgeDataProvider(bridgeData);
   env.set(BridgeDataProvider, dataProvider);
 
-  const reg = createBridgeRegistry(dataProvider, makeHaState());
+  const reg = createBridgeRegistry(dataProvider, haState);
 
   const endpoint = await LegacyEndpoint.create(
     reg,
@@ -1303,3 +1304,113 @@ describe(
     });
   },
 );
+
+const PRESET_ATTR_IDS = [0x0048, 0x004a, 0x004e, 0x0050];
+const HOLD_ATTR_IDS = [0x0023, 0x0024, 0x0030, 0x0031, 0x0032, 0x0052];
+const SET_ACTIVE_PRESET_REQUEST = 0x06;
+const ATOMIC_REQUEST = 0xfe;
+
+const variants = [
+  {
+    name: "heat only",
+    ha: { state: "heat", attributes: { hvac_modes: ["heat", "off"] } },
+    features: { heating: true, cooling: false, autoMode: false },
+  },
+  {
+    name: "cool only",
+    ha: { state: "cool", attributes: { hvac_modes: ["cool", "off"] } },
+    features: { heating: false, cooling: true, autoMode: false },
+  },
+  {
+    name: "heat and cool",
+    ha: { state: "heat", attributes: { hvac_modes: ["heat", "cool", "off"] } },
+    features: { heating: true, cooling: true, autoMode: false },
+  },
+  {
+    name: "auto",
+    ha: {},
+    features: { heating: true, cooling: true, autoMode: true },
+  },
+];
+
+// Non-adaptive bridges must keep the exact pre-feature Thermostat schema.
+describe("Thermostat schema per variant", { timeout: 30_000 }, () => {
+  it.each(
+    variants,
+  )("standard $name exposes no preset, hold or Apple ids", async ({
+    ha,
+    features,
+  }) => {
+    const { endpoint } = await mountStandalone(
+      false,
+      undefined,
+      makeHaState(ha),
+    );
+    const t = getThermostatState(endpoint) as ThermostatClusterState & {
+      featureMap: Record<string, boolean>;
+    };
+    expect(t.featureMap).toMatchObject({ ...features, presets: false });
+    for (const id of [...PRESET_ATTR_IDS, ...HOLD_ATTR_IDS]) {
+      expect(t.attributeList).not.toContain(id);
+    }
+    expect(t.attributeList.filter((id) => id >>> 16 === 0x1349)).toEqual([]);
+    expect(t.acceptedCommandList).not.toContain(SET_ACTIVE_PRESET_REQUEST);
+    expect(t.acceptedCommandList).not.toContain(ATOMIC_REQUEST);
+    expect(t.acceptedCommandList.filter((id) => id > 0xffff)).toEqual([]);
+  });
+
+  // matter.js 0.18.1 drops optional attributes that are never set, so the
+  // ones Apple reads must be initialised on every adaptive variant
+  it.each(
+    variants,
+  )("adaptive $name exposes presets, hold and Apple ids", async ({
+    ha,
+    features,
+  }) => {
+    const { endpoint } = await mountStandalone(
+      true,
+      undefined,
+      makeHaState(ha),
+    );
+    const t = getThermostatState(endpoint) as ThermostatClusterState & {
+      featureMap: Record<string, boolean>;
+    };
+    expect(t.featureMap).toMatchObject({ ...features, presets: true });
+    for (const id of [...PRESET_ATTR_IDS, ...HOLD_ATTR_IDS]) {
+      expect(t.attributeList).toContain(id);
+    }
+    expect(t.attributeList).toContain(0x13490011);
+    expect(t.acceptedCommandList).toContain(SET_ACTIVE_PRESET_REQUEST);
+    expect(t.acceptedCommandList).toContain(ATOMIC_REQUEST);
+    expect(t.acceptedCommandList).toContain(0x134900f9);
+  });
+});
+
+describe("Apple F9 over Matter Fabric", { timeout: 30_000 }, () => {
+  it("starts a timed hold through the adaptive thermostat", async () => {
+    const { endpoint, client } = await mountStandaloneAndCommission(true);
+    const before = Math.floor(Date.now() / 1000);
+    await remoteInvoke(
+      client,
+      endpoint.number,
+      AppleThermostatCluster,
+      "appleCmdF9",
+      TlvAny.decode(
+        TlvObject({
+          resumeOnNextEvent: TlvField(0, TlvBoolean),
+          durationMinutes: TlvField(1, TlvUInt16),
+        }).encode({ resumeOnNextEvent: false, durationMinutes: 180 }),
+      ),
+    );
+    const t = getThermostatState(endpoint);
+    expect(t.temperatureSetpointHold).toBe(
+      Thermostat.TemperatureSetpointHold.SetpointHoldOn,
+    );
+    expect(t.temperatureSetpointHoldDuration).toBe(180);
+    expect(t.setpointHoldExpiryTimestamp as number).toBeGreaterThanOrEqual(
+      before + 180 * 60 - 5,
+    );
+    expect(t.appleAttr000C).toBe(2);
+    expect(t.appleAttr000E).toBe(false);
+  });
+});

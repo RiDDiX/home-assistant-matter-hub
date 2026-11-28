@@ -1,4 +1,7 @@
-import type { BridgeData } from "@home-assistant-matter-hub/common";
+import {
+  type BridgeData,
+  isServerModeBridge,
+} from "@home-assistant-matter-hub/common";
 import type { Environment, Logger } from "@matter/general";
 import { ServerModeServerNode } from "../../matter/endpoints/server-mode-server-node.js";
 import {
@@ -144,11 +147,7 @@ export class BridgeEnvironmentFactory extends BridgeFactory {
   }
 
   async create(initialData: BridgeData): Promise<Bridge> {
-    const isServerMode =
-      initialData.featureFlags?.serverMode === true ||
-      initialData.featureFlags?.appleAdaptiveTemperature === true;
-
-    if (isServerMode) {
+    if (isServerModeBridge(initialData.featureFlags)) {
       return this.createServerModeBridge(initialData);
     }
 

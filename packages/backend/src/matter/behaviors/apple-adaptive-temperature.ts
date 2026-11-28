@@ -50,30 +50,17 @@ function formatDecodedPayload(value: unknown): string {
   );
 }
 
+// matter.js hands a command of type "any" over as the decoded TlvStream
 function decodeApplePayload(
   payload: unknown,
 ): Record<string, unknown> | undefined {
-  if (payload == null) {
+  if (!Array.isArray(payload)) {
     return undefined;
   }
   try {
-    const stream = Bytes.isBytes(payload)
-      ? TlvAny.decode(Bytes.of(payload))
-      : payload;
-    if (
-      Array.isArray(stream) ||
-      (typeof stream === "object" &&
-        stream !== null &&
-        Symbol.iterator in stream)
-    ) {
-      const decoded = TlvAny.decodeAnyTlvStream(stream as TlvStream);
-      if (decoded && typeof decoded === "object" && !Array.isArray(decoded)) {
-        return decoded as Record<string, unknown>;
-      }
-      return undefined;
-    }
-    if (typeof payload === "object") {
-      return payload as Record<string, unknown>;
+    const decoded = TlvAny.decodeAnyTlvStream(payload as TlvStream);
+    if (decoded && typeof decoded === "object" && !Array.isArray(decoded)) {
+      return decoded as Record<string, unknown>;
     }
     return undefined;
   } catch {
@@ -382,6 +369,7 @@ class AppleThermostatServerImpl extends ExtendedThermostatWithDefaults {
     const presetHandle = Bytes.isBytes(rawHandle)
       ? Bytes.of(rawHandle).slice()
       : null;
+    // field 1 is seconds, read from Apple Home captures, there is no spec
     const rawDuration = decoded["1"];
     const durationSec =
       typeof rawDuration === "number" || typeof rawDuration === "bigint"
@@ -467,6 +455,7 @@ class AppleThermostatServerImpl extends ExtendedThermostatWithDefaults {
     }
 
     const resumeOnNextEvent = decoded["0"];
+    // field 1 is minutes, read from Apple Home captures, there is no spec
     const rawDuration = decoded["1"];
     const parsedDuration =
       typeof rawDuration === "number" || typeof rawDuration === "bigint"
@@ -479,40 +468,20 @@ class AppleThermostatServerImpl extends ExtendedThermostatWithDefaults {
         ? Math.min(1440, parsedDuration)
         : null;
 
+    // the Adaptive thermostat classes in thermostat-server.ts carry the hold logic
     const selfWithHold = this as unknown as {
       applyAppleSetpointHold?: (
         resumeOnNextEvent: boolean,
         durationMinutes: number | null,
       ) => void;
     };
-    if (typeof selfWithHold.applyAppleSetpointHold === "function") {
-      selfWithHold.applyAppleSetpointHold(resumeOnNextEvent, durationMinutes);
-    } else {
-      const stateObj = this.state as unknown as Record<string, unknown>;
-      stateObj.appleAttr000C = 2;
-      stateObj.appleAttr000E = resumeOnNextEvent;
-      if (stateObj.temperatureSetpointHold !== undefined) {
-        stateObj.temperatureSetpointHold = 1;
-      }
-      if (!resumeOnNextEvent && durationMinutes !== null) {
-        const expiryUnixSec = toNullableEpochS(
-          Math.floor(Date.now() / 1000) + durationMinutes * 60,
-        );
-        if (stateObj.temperatureSetpointHoldDuration !== undefined) {
-          stateObj.temperatureSetpointHoldDuration = durationMinutes;
-        }
-        if (stateObj.setpointHoldExpiryTimestamp !== undefined) {
-          stateObj.setpointHoldExpiryTimestamp = expiryUnixSec;
-        }
-      } else {
-        if (stateObj.temperatureSetpointHoldDuration !== undefined) {
-          stateObj.temperatureSetpointHoldDuration = null;
-        }
-        if (stateObj.setpointHoldExpiryTimestamp !== undefined) {
-          stateObj.setpointHoldExpiryTimestamp = null;
-        }
-      }
+    if (!selfWithHold.applyAppleSetpointHold) {
+      logger.warn(
+        "[APPLE-MEI] Thermostat.appleCmdF9 ignored, no setpoint hold on this server",
+      );
+      return;
     }
+    selfWithHold.applyAppleSetpointHold(resumeOnNextEvent, durationMinutes);
 
     logger.debug(
       `[APPLE-MEI] Thermostat.appleCmdF9 applied resumeOnNextEvent=${resumeOnNextEvent} durationMinutes=${String(durationMinutes)}`,

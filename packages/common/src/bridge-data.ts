@@ -186,6 +186,12 @@ interface AllBridgeFeatureFlags {
 
 export type BridgeFeatureFlags = Partial<AllBridgeFeatureFlags>;
 
+// appleAdaptiveTemperature runs the bridge in server mode without storing
+// serverMode, so turning it off again leaves the user's own choice in place
+export function isServerModeBridge(flags?: BridgeFeatureFlags): boolean {
+  return flags?.serverMode === true || flags?.appleAdaptiveTemperature === true;
+}
+
 /** Matter cover percent is 100 - HA percent unless one of the cover flags is set. */
 export function isCoverPositionInverted(flags?: BridgeFeatureFlags): boolean {
   return (

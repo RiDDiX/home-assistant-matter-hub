@@ -36,6 +36,7 @@ export interface DiagnosticBridgeInfo {
   readonly status: string;
   readonly entityCount: number;
   readonly sessionCount: number;
+  readonly serverMode: boolean;
   readonly featureFlags: Record<string, boolean>;
   readonly entities: DiagnosticEntityInfo[];
 }

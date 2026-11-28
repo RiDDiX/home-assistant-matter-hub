@@ -26,13 +26,6 @@ export function FeatureFlagsField(props: FieldProps) {
 
   const handleToggle = useCallback(
     (key: string, checked: boolean) => {
-      if (key === "appleAdaptiveTemperature" && checked) {
-        onChange(
-          { ...formData, appleAdaptiveTemperature: true, serverMode: true },
-          fieldPathId.path,
-        );
-        return;
-      }
       onChange({ ...formData, [key]: checked }, fieldPathId.path);
     },
     [formData, onChange, fieldPathId],
@@ -118,6 +111,7 @@ export function FeatureFlagsField(props: FieldProps) {
             );
           }
 
+          // adaptive implies server mode without writing it into the flags
           const isServerModeLocked =
             key === "serverMode" && formData.appleAdaptiveTemperature === true;
           const isFieldDisabled = disabled || readonly || isServerModeLocked;

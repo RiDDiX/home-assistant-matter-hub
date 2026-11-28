@@ -1,7 +1,8 @@
-import type {
-  DiagnosticBridgeInfo,
-  DiagnosticEntityInfo,
-  DiagnosticSnapshot,
+import {
+  type DiagnosticBridgeInfo,
+  type DiagnosticEntityInfo,
+  type DiagnosticSnapshot,
+  isServerModeBridge,
 } from "@home-assistant-matter-hub/common";
 import { Logger } from "@matter/general";
 import type { BridgeService } from "../bridges/bridge-service.js";
@@ -101,6 +102,7 @@ export class DiagnosticService {
           status: data.status,
           entityCount: data.deviceCount,
           sessionCount: data.commissioning?.fabrics?.length ?? 0,
+          serverMode: isServerModeBridge(data.featureFlags),
           featureFlags,
           entities,
         };

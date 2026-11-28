@@ -3,6 +3,7 @@ import {
   BridgeStatus,
   classifyController,
   type EndpointData,
+  isServerModeBridge,
 } from "@home-assistant-matter-hub/common";
 import InfoOutlinedIcon from "@mui/icons-material/InfoOutlined";
 import RocketLaunchIcon from "@mui/icons-material/RocketLaunch";
@@ -185,9 +186,10 @@ const ServerModeRecommendation = ({
   const notifications = useNotifications();
   const [enabling, setEnabling] = useState(false);
 
+  const serverMode = isServerModeBridge(bridge.featureFlags);
   const shouldShow = useMemo(() => {
     if (!devices) return false;
-    if (bridge.featureFlags?.serverMode) return false;
+    if (serverMode) return false;
     if (!hasVacuumEndpoint(devices)) return false;
     const fabrics = bridge.commissioning?.fabrics ?? [];
     if (fabrics.length === 0) return true;
@@ -195,7 +197,7 @@ const ServerModeRecommendation = ({
       const controller = classifyController(f.rootVendorId);
       return controller === "apple" || controller === "alexa";
     });
-  }, [devices, bridge.featureFlags?.serverMode, bridge.commissioning?.fabrics]);
+  }, [devices, serverMode, bridge.commissioning?.fabrics]);
 
   const isSingleDevice = useMemo(() => {
     if (!devices) return false;

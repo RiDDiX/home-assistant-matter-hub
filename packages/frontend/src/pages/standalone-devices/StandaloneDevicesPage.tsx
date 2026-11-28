@@ -2,6 +2,7 @@ import {
   type BridgeDataWithMetadata,
   type CreateBridgeRequest,
   HomeAssistantMatcherType,
+  isServerModeBridge,
 } from "@home-assistant-matter-hub/common";
 import Add from "@mui/icons-material/Add";
 import DeleteOutline from "@mui/icons-material/DeleteOutline";
@@ -100,8 +101,8 @@ export const StandaloneDevicesPage = () => {
   const entityRowsValid =
     filledValues.length > 0 && entityRows.every((_, i) => !rowInvalid(i));
 
-  const devices = (bridges ?? []).filter(
-    (bridge) => bridge.featureFlags?.serverMode === true,
+  const devices = (bridges ?? []).filter((bridge) =>
+    isServerModeBridge(bridge.featureFlags),
   );
 
   const handleCreate = useCallback(async () => {

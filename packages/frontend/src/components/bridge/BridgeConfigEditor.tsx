@@ -2,6 +2,7 @@ import {
   type BridgeConfig,
   type BridgeIconType,
   bridgeConfigSchema,
+  isServerModeBridge,
 } from "@home-assistant-matter-hub/common";
 import { LibraryBooks, TextFields } from "@mui/icons-material";
 import Alert from "@mui/material/Alert";
@@ -114,13 +115,14 @@ export const BridgeConfigEditor = (props: BridgeConfigEditorProps) => {
     const cfg = config as Partial<BridgeConfig> | undefined;
     const flags = cfg?.featureFlags;
     const result: string[] = [];
-    if (flags?.serverMode || flags?.appleAdaptiveTemperature) {
+    const serverMode = isServerModeBridge(flags);
+    if (serverMode) {
       result.push("bridge.serverModeWarning");
     }
-    if (flags?.serverMode && flags?.vacuumOnOff === false) {
+    if (serverMode && flags?.vacuumOnOff === false) {
       result.push("bridge.serverModeVacuumOnOffWarning");
     }
-    if (!flags?.serverMode && flags?.vacuumOnOff) {
+    if (!serverMode && flags?.vacuumOnOff) {
       result.push("bridge.vacuumOnOffBridgeWarning");
     }
     if (flags?.autoForceSync && flags?.autoComposedDevices) {

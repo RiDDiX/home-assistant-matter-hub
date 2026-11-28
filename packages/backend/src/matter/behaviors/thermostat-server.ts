@@ -43,23 +43,15 @@ const endpointRuntimeStates = new WeakMap<
   object,
   Map<string, ThermostatRuntimeState>
 >();
-const fallbackRuntimeStates = new Map<string, ThermostatRuntimeState>();
 
 function getRuntimeState(
-  self: { endpoint?: object } | undefined,
+  self: { endpoint: object },
   entityId: string,
 ): ThermostatRuntimeState {
-  const ep = self?.endpoint;
-  let byEntity: Map<string, ThermostatRuntimeState>;
-  if (ep) {
-    let existing = endpointRuntimeStates.get(ep);
-    if (!existing) {
-      existing = new Map();
-      endpointRuntimeStates.set(ep, existing);
-    }
-    byEntity = existing;
-  } else {
-    byEntity = fallbackRuntimeStates;
+  let byEntity = endpointRuntimeStates.get(self.endpoint);
+  if (!byEntity) {
+    byEntity = new Map();
+    endpointRuntimeStates.set(self.endpoint, byEntity);
   }
   let state = byEntity.get(entityId);
   if (!state) {
@@ -2713,7 +2705,7 @@ export namespace ThermostatServerBase {
 // but advertise only the features they actually support (#136).
 // Standard classes omit Presets & Apple 0x1349 MEI so non-adaptive bridges
 // keep their exact Matter schema; Adaptive classes enable them opt-in.
-const PRESET_PROTOTYPE_METHODS = new Set([
+export const PRESET_PROTOTYPE_METHODS = new Set([
   "setActivePresetRequest",
   "persistedPresetsChanged",
   "reconcilePersistedPresets",

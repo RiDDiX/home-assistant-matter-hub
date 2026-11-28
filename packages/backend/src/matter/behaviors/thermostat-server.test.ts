@@ -12,6 +12,7 @@ import { ClimateThermostatServer } from "../endpoints/legacy/climate/behaviors/c
 import { HomeAssistantEntityBehavior } from "./home-assistant-entity-behavior.js";
 import {
   createPresetHandle,
+  PRESET_PROTOTYPE_METHODS,
   repairSetpointLimits,
   ThermostatServer,
   ThermostatServerBase,
@@ -219,6 +220,32 @@ describe("ThermostatServer feature variants", () => {
       (full.defaults as unknown as Record<string, unknown>).numberOfPresets,
     ).toBe(10);
   });
+
+  // The Standard classes must not carry any HAMH preset or hold handler, a
+  // copied one would react to attributes a non-adaptive bridge never exposes.
+  it("copies no preset method onto the standard variants", () => {
+    const featureSets = [
+      { heating: true, cooling: false },
+      { heating: false, cooling: true },
+      { heating: true, cooling: true },
+      { heating: true, cooling: true, autoMode: true },
+    ];
+    const base = ThermostatServerBase.prototype as unknown as Record<
+      string,
+      unknown
+    >;
+    for (const features of featureSets) {
+      const standard = ThermostatServer(mockConfig, {}, features)
+        .prototype as unknown as Record<string, unknown>;
+      const adaptive = ThermostatServer(mockConfig, {}, features, true)
+        .prototype as unknown as Record<string, unknown>;
+      for (const name of PRESET_PROTOTYPE_METHODS) {
+        expect(base[name]).toBeTypeOf("function");
+        expect(adaptive[name]).toBe(base[name]);
+        expect(standard[name]).not.toBe(base[name]);
+      }
+    }
+  });
 });
 
 describe("thermostatPreInitialize with Presets", () => {
@@ -399,6 +426,7 @@ describe("ThermostatServerBase.setActivePresetRequest", () => {
     const actions: unknown[] = [];
     const handle = createPresetHandle(Thermostat.PresetScenario.Occupied);
     const mockSelf = {
+      endpoint: {},
       features: { heating: true, cooling: true, autoMode: true, presets: true },
       state: {
         config: {
@@ -491,6 +519,7 @@ describe("ThermostatServerBase.setActivePresetRequest", () => {
     }[] = [];
     const handle = createPresetHandle(Thermostat.PresetScenario.Vacation);
     const mockSelf = {
+      endpoint: {},
       features: {
         heating: true,
         cooling: true,
@@ -558,6 +587,7 @@ describe("ThermostatServerBase.setActivePresetRequest", () => {
     const writeOrder: string[] = [];
     const handle = createPresetHandle(Thermostat.PresetScenario.Occupied);
     const mockSelf = {
+      endpoint: {},
       features: { heating: true, cooling: true, autoMode: true, presets: true },
       state: {
         config: {
@@ -625,6 +655,7 @@ describe("ThermostatServerBase.setActivePresetRequest", () => {
     const actions: unknown[] = [];
     const handle = createPresetHandle(Thermostat.PresetScenario.Occupied);
     const mockSelf = {
+      endpoint: {},
       features: { heating: true, cooling: true, autoMode: true, presets: true },
       state: {
         config: {
@@ -709,6 +740,7 @@ describe("ThermostatServerBase.setActivePresetRequest", () => {
     const actions: unknown[] = [];
     const handle = createPresetHandle(Thermostat.PresetScenario.Occupied);
     const mockSelf = {
+      endpoint: {},
       features: {
         heating: true,
         cooling: true,
@@ -834,6 +866,7 @@ describe("ThermostatServerBase.persistedPresetsChanged", () => {
   it("ignores offline transactions", () => {
     const actions: unknown[] = [];
     const mockSelf = {
+      endpoint: {},
       features: { heating: true, cooling: true, presets: true },
       state: { config: {} },
       agent: {
@@ -869,6 +902,7 @@ describe("ThermostatServerBase.persistedPresetsChanged", () => {
     ];
 
     const mockSelf = {
+      endpoint: {},
       features: { heating: true, cooling: true, presets: true },
       state: {
         config: {},
@@ -1013,7 +1047,7 @@ function createClimateMock(opts: {
   const haConfig = { unitSystem: { temperature: "°C" } };
   const handle = createPresetHandle(Thermostat.PresetScenario.Occupied);
   const mockSelf = {
-    endpoint: opts.endpointId ? { id: opts.endpointId } : undefined,
+    endpoint: { id: opts.endpointId },
     features: { heating: true, cooling: true, autoMode: true, presets: true },
     state: {
       config,
