@@ -102,9 +102,24 @@ export interface CleaningSession {
   /** Run mode before HA reported unavailable or unknown, so the update
    *  after the blip compares against it instead of the offline Idle. */
   modeBeforeOffline?: number;
+  /** Controller start with an empty selection, which means every area.
+   *  The robot may clean in its own order, so rooms only advance from a
+   *  sensor. */
+  wholeHome?: boolean;
 }
 
 const cleaningSessions = new WeakMap<object, CleaningSession>();
+
+/** Forget the last job's rooms, queue and baseline. */
+function resetSession(s: CleaningSession, activeAreas: number[] = []) {
+  s.activeAreas = activeAreas;
+  s.completedAreas.clear();
+  s.lastCurrentArea = null;
+  s.loggedShortCircuits.clear();
+  s.pendingDispatches = [];
+  s.cleanedAreaBaseline = null;
+  s.wholeHome = false;
+}
 
 const idleOperationalStates = new Set<number>([
   RvcOperationalState.OperationalState.Stopped,
@@ -243,12 +258,24 @@ class RvcRunModeServerBase extends Base {
           }
           s.observedCleaning = false;
           // Clear a finished job or the next HA clean stays stuck on its
-          // rooms. A mid-job recharge keeps them (#490).
+          // rooms. A mid-job recharge keeps them (#490). A whole-home job
+          // may never visit every area, so it always ends here and drops
+          // the unvisited ones from progress (#562). Without a
+          // cleaningJobEntity a mid-job recharge ends it too.
           if (s.activeAreas.every((id) => s.completedAreas.has(id))) {
-            s.activeAreas = [];
-            s.completedAreas.clear();
-            s.lastCurrentArea = null;
-            s.cleanedAreaBaseline = null;
+            resetSession(s);
+          } else if (s.wholeHome) {
+            try {
+              const serviceArea = this.agent.get(ServiceAreaBehavior);
+              const state = serviceArea.state as typeof serviceArea.state & {
+                progress?: ServiceArea.Progress[];
+              };
+              state.progress = [];
+              serviceArea.state.currentArea = null;
+            } catch {
+              // ServiceArea not available
+            }
+            resetSession(s);
           }
           this.restoreParkedAreas();
         }
@@ -257,8 +284,13 @@ class RvcRunModeServerBase extends Base {
         // Resume after mid-session idle. Set currentArea to the first
         // not-yet-completed area as a fallback; if a currentRoom sensor
         // is configured, updateCurrentRoomFromSensor() below will
-        // override this with the actual room the vacuum is in.
-        if (s.activeAreas.length > 0 && s.lastCurrentArea === null) {
+        // override this with the actual room the vacuum is in. A
+        // whole-home job has no first room to guess.
+        if (
+          s.activeAreas.length > 0 &&
+          s.lastCurrentArea === null &&
+          !s.wholeHome
+        ) {
           const firstPending = s.activeAreas.find(
             (id) => !s.completedAreas.has(id),
           );
@@ -523,8 +555,13 @@ class RvcRunModeServerBase extends Base {
     try {
       const s = getSession(this.endpoint);
       // Batch only: sequential dispatch already advances currentArea as the
-      // vacuum docks between rooms.
-      if (s.pendingDispatches.length > 0 || s.activeAreas.length === 0) {
+      // vacuum docks between rooms. A whole-home job may clean in its own
+      // order, so the sizes would only make up a room (#562).
+      if (
+        s.wholeHome ||
+        s.pendingDispatches.length > 0 ||
+        s.activeAreas.length === 0
+      ) {
         return;
       }
       const mapping = this.agent.get(HomeAssistantEntityBehavior).state.mapping;
@@ -796,13 +833,8 @@ class RvcRunModeServerBase extends Base {
     const s = getSession(this.endpoint);
     this.finalizeProgressOnStop();
     this.restoreParkedAreas();
-    s.completedAreas.clear();
-    s.lastCurrentArea = null;
-    s.activeAreas = [];
-    s.loggedShortCircuits.clear();
-    s.pendingDispatches = [];
+    resetSession(s);
     s.observedCleaning = false;
-    s.cleanedAreaBaseline = null;
     s.modeBeforeOffline = undefined;
   }
 
@@ -857,16 +889,13 @@ class RvcRunModeServerBase extends Base {
       }
       if (serviceArea && serviceArea.state.selectedAreas?.length > 0) {
         // Snapshot selected areas before the start handler clears them
-        s.activeAreas = this.orderSelectedAreas(
-          serviceArea.state.selectedAreas,
+        resetSession(
+          s,
+          this.orderSelectedAreas(serviceArea.state.selectedAreas),
         );
         // Dispatch reads selectedAreas, so write the order back in case the
         // selection was stored before the flag changed (#368).
         serviceArea.state.selectedAreas = [...s.activeAreas];
-        s.completedAreas.clear();
-        s.lastCurrentArea = null;
-        s.loggedShortCircuits.clear();
-        s.pendingDispatches = [];
         s.cleanedAreaBaseline = this.readCleanedAreaSqm();
         this.trySetCurrentArea(s.activeAreas[0]);
         homeAssistant.callAction(this.state.config.start(void 0, this.agent));
@@ -880,11 +909,7 @@ class RvcRunModeServerBase extends Base {
 
       if (this.state.config.cleanRoom) {
         const areaId = this.findAreaIdForMode(newMode);
-        s.activeAreas = areaId !== null ? [areaId] : [];
-        s.completedAreas.clear();
-        s.lastCurrentArea = null;
-        s.loggedShortCircuits.clear();
-        s.pendingDispatches = [];
+        resetSession(s, areaId !== null ? [areaId] : []);
         this.trySetCurrentArea(areaId);
         homeAssistant.callAction(
           this.state.config.cleanRoom(newMode, this.agent),
@@ -901,12 +926,7 @@ class RvcRunModeServerBase extends Base {
     switch (newMode) {
       case RvcSupportedRunMode.Cleaning: {
         // A new job, also without a selection: drop rooms and queue left over
-        s.activeAreas = [];
-        s.completedAreas.clear();
-        s.lastCurrentArea = null;
-        s.loggedShortCircuits.clear();
-        s.pendingDispatches = [];
-        s.cleanedAreaBaseline = null;
+        resetSession(s);
         // Set currentArea from selectedAreas if a controller pre-selected areas
         try {
           const serviceArea = this.agent.get(ServiceAreaBehavior);
@@ -918,6 +938,16 @@ class RvcRunModeServerBase extends Base {
             serviceArea.state.selectedAreas = [...s.activeAreas];
             s.cleanedAreaBaseline = this.readCleanedAreaSqm();
             this.trySetCurrentArea(s.activeAreas[0]);
+          } else if (serviceArea.state.supportedAreas.length > 1) {
+            // An empty selection is every area, so progress lists them all
+            // as pending (#562). A vacuum without rooms only has the default
+            // "Home" area and keeps the old empty progress.
+            s.activeAreas = serviceArea.state.supportedAreas
+              .map((a) => a.areaId)
+              .sort((a, b) => a - b);
+            s.wholeHome = true;
+            serviceArea.state.currentArea = null;
+            this.updateProgressFromTracking(serviceArea);
           }
         } catch {
           // ServiceArea not available

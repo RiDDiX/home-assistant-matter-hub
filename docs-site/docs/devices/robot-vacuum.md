@@ -349,6 +349,8 @@ When `CLEAN_AREA` mapping is detected, it takes priority over all vendor-specifi
 
 Apple Home uses the Matter 1.4 **Service Area** cluster for room selection. This is automatically enabled when your vacuum exposes room data (via Clean Area mapping, vendor attributes, or manual configuration). Requires **Server Mode**.
 
+An all-rooms clean started from a controller lists every room as pending ([#562](https://github.com/RiDDiX/home-assistant-matter-hub/issues/562)). The current room only shows when a current room sensor is mapped. The cleaned area sensor is not used to guess a room for such a job, because the robot may clean in its own order. This needs more than one room. Without a cleaning job sensor, a recharge in the middle of the job ends the room list for the rest of the run. Rooms left unvisited are cleared when the job ends. A clean started from Home Assistant or the vendor app shows no room progress.
+
 ### 3. RVC Run Mode (Google Home, Alexa, etc.)
 
 Each room is also added as a run mode named after the room, e.g. "Kitchen", "Living Room". Picking one starts a clean of that room only.

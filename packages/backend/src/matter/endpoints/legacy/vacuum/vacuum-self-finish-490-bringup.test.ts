@@ -363,7 +363,8 @@ describe("#492 clean started outside Matter after a controller job", () => {
 
     calls = [];
     await controllerClean(endpoint, []);
-    expect(getSession(endpoint).activeAreas).toEqual([]);
+    // an empty selection is a whole-home job, not the old rooms (#562)
+    expect(getSession(endpoint).wholeHome).toBe(true);
     expect(calls).toEqual([{ action: "vacuum.start" }]);
 
     await haState(endpoint, "docked");
