@@ -65,6 +65,18 @@ describe("EntityMappingDialog", { timeout: 20_000 }, () => {
     expect(save()).toBeDisabled();
   });
 
+  it("saves the suction-while-cleaning switch for a vacuum", async () => {
+    const onSave = render("vacuum", { entityId: "vacuum.robot" });
+    fireEvent.click(
+      screen.getByRole("switch", {
+        name: /change the suction while the vacuum is cleaning/,
+      }),
+    );
+    fireEvent.click(save());
+    await waitFor(() => expect(onSave).toHaveBeenCalled());
+    expect(onSave.mock.calls[0][0].vacuumDirectModeChange).toBe(true);
+  });
+
   it("keeps the fan speed tag row mounted while its option is typed", () => {
     render("vacuum", { entityId: "vacuum.robot" });
     fireEvent.click(screen.getByRole("button", { name: "Add Tag Mapping" }));

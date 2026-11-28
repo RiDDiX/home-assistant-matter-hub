@@ -897,12 +897,12 @@ export function createCleanModeConfig(
  * Intensity tags choose the representative modes Apple Home can expose.
  */
 export function createVacuumRvcCleanModeServer(
-  _attributes: VacuumDeviceAttributes,
   fanSpeedList?: string[],
   mopIntensityList?: string[],
   cleaningModeOptions?: string[],
   customFanSpeedTags?: Record<string, number>,
-): ReturnType<typeof RvcCleanModeServer> {
+  directModeChange?: boolean,
+) {
   const supportedModes = buildSupportedModes(
     fanSpeedList,
     mopIntensityList,
@@ -925,7 +925,7 @@ export function createVacuumRvcCleanModeServer(
     currentMode: MODE_VACUUM,
   };
 
-  return RvcCleanModeServer(
+  const server = RvcCleanModeServer(
     createCleanModeConfig(
       fanSpeedList,
       mopIntensityList,
@@ -934,6 +934,8 @@ export function createVacuumRvcCleanModeServer(
     ),
     initialState,
   );
+  // Opt-in (#563): only the user knows the vacuum takes a new fan speed mid-run
+  return directModeChange ? server.with("DirectModeChange") : server;
 }
 
 /**

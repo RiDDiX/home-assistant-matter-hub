@@ -235,6 +235,17 @@ Maps a vacuum with room-specific cleaning buttons and a cleaning mode selector.
 }
 ```
 
+### Vacuum with Suction Change While Cleaning
+
+For vacuums that accept a fan speed change mid-clean. Lets controllers change the suction during a run, a controller may need a re-pair to notice.
+
+```json
+{
+  "entityId": "vacuum.roborock_s7",
+  "vacuumDirectModeChange": true
+}
+```
+
 ---
 
 ## Door Lock with PIN Disabled

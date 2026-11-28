@@ -353,6 +353,14 @@ export interface EntityMappingConfig {
    */
   readonly disableCustomAreaRoomModes?: boolean;
   /**
+   * Optional: advertise the RvcCleanMode DirectModeChange feature, so
+   * controllers let the user change the clean mode (suction) while the vacuum
+   * runs. Only for vacuums that accept a fan speed change mid-clean. A
+   * controller may need the vacuum re-paired to notice the change (#563).
+   * Default: false.
+   */
+  readonly vacuumDirectModeChange?: boolean;
+  /**
    * Optional: Valetudo MQTT identifier for segment cleaning.
    * HA lowercases entity IDs, but the MQTT topic needs the exact identifier
    * shown in Valetudo under Connectivity → MQTT (e.g., "GentleFinishedSpider").
@@ -565,6 +573,7 @@ export interface EntityMappingRequest {
   readonly vacuumAscendingRoomOrder?: boolean;
   readonly vacuumRoomSwitches?: boolean;
   readonly disableCustomAreaRoomModes?: boolean;
+  readonly vacuumDirectModeChange?: boolean;
   readonly valetudoIdentifier?: string;
   readonly coverSwapOpenClose?: boolean;
   readonly coverOpenCloseAsPosition?: boolean;

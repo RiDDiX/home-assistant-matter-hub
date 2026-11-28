@@ -27,6 +27,7 @@ import { RvcCleanModeServer } from "../../../behaviors/rvc-clean-mode-server.js"
 import { AggregatorEndpoint } from "../../aggregator-endpoint.js";
 import { resolveCleaningModeOptions } from "../create-legacy-endpoint-type.js";
 import { VacuumDevice } from "./index.js";
+import { ServerModeVacuumDevice } from "./server-mode-vacuum-device.js";
 
 // "Can not use unsupported mode: 50. Allowed modes are 0, 10, 11, 12, 13":
 // the clean type the vacuum reports live was not in the cleaning mode
@@ -341,6 +342,58 @@ describe("vacuum clean mode bring-up", () => {
     expect(calls).toHaveLength(1);
     await haState(endpoint, {});
     expect(cleanMode(endpoint).current).toBe(12);
+  });
+});
+
+// #563: DirectModeChange is opt-in per vacuum
+describe("vacuum clean mode DirectModeChange", () => {
+  const directModeChange = (endpoint: Endpoint) =>
+    // biome-ignore lint/suspicious/noExplicitAny: behavior state
+    (endpoint.state as any).rvcCleanMode.featureMap.directModeChange;
+
+  it.each([
+    ["bridged", VacuumDevice],
+    ["server mode", ServerModeVacuumDevice],
+  ])("advertises it only with the mapping flag (%s)", async (_, device) => {
+    const type = (mapping: Partial<EntityMappingConfig>) => {
+      const t = device(
+        {
+          entity: vacuum(),
+          mapping: { entityId: VACUUM, ...mapping },
+        } as HomeAssistantEntityBehavior.State,
+        false,
+        [],
+      );
+      if (!t) throw new Error("no endpoint type");
+      return t;
+    };
+    expect(directModeChange(await mount(type({})))).toBe(false);
+    await server?.close();
+    expect(
+      directModeChange(await mount(type({ vacuumDirectModeChange: true }))),
+    ).toBe(true);
+  });
+
+  it("dispatches a fan speed change while cleaning", async () => {
+    const endpoint = await mount(
+      vacuumType([], {}, { vacuumDirectModeChange: true }),
+    );
+    const entity = vacuum();
+    // biome-ignore lint/suspicious/noExplicitAny: test fixture
+    (entity.state as any).state = "cleaning";
+    await endpoint.setStateOf(HomeAssistantEntityBehavior, { entity });
+
+    const response = await endpoint.act(
+      // biome-ignore lint/suspicious/noExplicitAny: drive the controller command
+      (agent) => (agent as any).rvcCleanMode.changeToMode({ newMode: 10 }),
+    );
+    expect(response.status).toBe(0);
+    expect(calls).toEqual([
+      expect.objectContaining({
+        action: "vacuum.set_fan_speed",
+        data: { fan_speed: "quiet" },
+      }),
+    ]);
   });
 });
 

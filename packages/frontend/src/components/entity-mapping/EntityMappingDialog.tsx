@@ -181,6 +181,7 @@ export function EntityMappingDialog({
   const [disableCustomAreaRoomModes, setDisableCustomAreaRoomModes] =
     useState(false);
   const [vacuumRoomSwitches, setVacuumRoomSwitches] = useState(false);
+  const [vacuumDirectModeChange, setVacuumDirectModeChange] = useState(false);
   const [customServiceAreas, setCustomServiceAreas] = useState<
     CustomServiceArea[]
   >([]);
@@ -302,6 +303,9 @@ export function EntityMappingDialog({
         currentMapping?.disableCustomAreaRoomModes || false,
       );
       setVacuumRoomSwitches(currentMapping?.vacuumRoomSwitches || false);
+      setVacuumDirectModeChange(
+        currentMapping?.vacuumDirectModeChange || false,
+      );
       setCustomServiceAreas(currentMapping?.customServiceAreas || []);
       setAreaDataDrafts(
         (currentMapping?.customServiceAreas || []).map((a) =>
@@ -477,6 +481,7 @@ export function EntityMappingDialog({
         vacuumAscendingRoomOrder: vacuumAscendingRoomOrder || undefined,
         disableCustomAreaRoomModes: disableCustomAreaRoomModes || undefined,
         vacuumRoomSwitches: vacuumRoomSwitches || undefined,
+        vacuumDirectModeChange: vacuumDirectModeChange || undefined,
         customFanSpeedTags:
           Object.keys(customFanSpeedTags).length > 0
             ? customFanSpeedTags
@@ -558,6 +563,7 @@ export function EntityMappingDialog({
     vacuumAscendingRoomOrder,
     disableCustomAreaRoomModes,
     vacuumRoomSwitches,
+    vacuumDirectModeChange,
     customServiceAreas,
     customFanSpeedTagsList,
     fanNaturalPresets,
@@ -1036,6 +1042,16 @@ export function EntityMappingDialog({
                 />
               }
               label={t("mapping.dialog.vacuumRoomSwitches")}
+              sx={{ mt: 1, display: "block" }}
+            />
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={vacuumDirectModeChange}
+                  onChange={(e) => setVacuumDirectModeChange(e.target.checked)}
+                />
+              }
+              label={t("mapping.dialog.vacuumDirectModeChange")}
               sx={{ mt: 1, display: "block" }}
             />
             {showValetudoIdentifierField && (

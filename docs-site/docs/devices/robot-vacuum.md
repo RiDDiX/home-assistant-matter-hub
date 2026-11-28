@@ -289,6 +289,12 @@ pairings require their own profile implementation.
 
 If your vacuum uses a separate `select.*` entity for suction control instead of the built-in fan speed, configure `suctionLevelEntity` in the Entity Mapping.
 
+### Changing Suction While Cleaning (vacuumDirectModeChange)
+
+By default HAMH does not advertise that the clean mode can change during a run. Apple Home was reported to grey out the suction selector while the vacuum cleans ([#563](https://github.com/RiDDiX/home-assistant-matter-hub/issues/563)). Turn on **Let controllers change the suction while the vacuum is cleaning** in the Entity Mapping (`vacuumDirectModeChange`) to advertise the Matter DirectModeChange feature, so a controller can offer it.
+
+Only enable it if your vacuum accepts a fan speed change mid-clean. The option only applies to vacuums with a fan speed list, mop intensity or cleaning mode options, otherwise it does nothing. A controller may need the vacuum removed and re-added to notice the change. Whether it then offers the selector during a clean is up to the controller.
+
 ---
 
 ## Mop Intensity (Apple Home Intensity Options)

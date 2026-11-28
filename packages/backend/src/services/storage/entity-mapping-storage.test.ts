@@ -147,6 +147,29 @@ describe("EntityMappingStorage orphan tombstone", () => {
     expect(loaded?.vacuumRoomSwitches).toBe(true);
   });
 
+  it("persists a mapping holding only vacuumDirectModeChange (#563)", async () => {
+    const storage = new EntityMappingStorage(appStorage);
+    await storage.construction;
+    await storage.setMapping({
+      bridgeId: "b",
+      entityId: "vacuum.robot",
+      vacuumDirectModeChange: true,
+    });
+    await storage.flush();
+    const reloaded = new EntityMappingStorage(appStorage);
+    await reloaded.construction;
+    expect(
+      reloaded.getMapping("b", "vacuum.robot")?.vacuumDirectModeChange,
+    ).toBe(true);
+
+    await reloaded.setMapping({
+      bridgeId: "b",
+      entityId: "vacuum.robot",
+      vacuumDirectModeChange: false,
+    });
+    expect(reloaded.getMapping("b", "vacuum.robot")).toBeUndefined();
+  });
+
   // #443: the new per-entity fan debounce field must survive the storage
   // normalizer and a flushed reload like every other mapping field.
   it("persists fanSliderDebounceMs and round-trips it through a reload", async () => {

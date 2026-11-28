@@ -126,11 +126,11 @@ export function VacuumDevice(
     );
     device = device.with(
       createVacuumRvcCleanModeServer(
-        attributes,
         fanSpeedList,
         mopIntensityList,
         cleaningModeOptions,
         homeAssistantEntity.mapping?.customFanSpeedTags,
+        homeAssistantEntity.mapping?.vacuumDirectModeChange,
       ),
     );
   } else {

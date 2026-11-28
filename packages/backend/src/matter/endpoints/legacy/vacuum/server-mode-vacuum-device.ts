@@ -120,11 +120,11 @@ export function ServerModeVacuumDevice(
   if (cleaningModeOptions || fanSpeedList || mopIntensityList) {
     device = device.with(
       createVacuumRvcCleanModeServer(
-        attributes,
         fanSpeedList,
         mopIntensityList,
         cleaningModeOptions,
         homeAssistantEntity.mapping?.customFanSpeedTags,
+        homeAssistantEntity.mapping?.vacuumDirectModeChange,
       ),
     );
   } else {

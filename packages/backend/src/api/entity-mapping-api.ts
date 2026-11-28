@@ -77,6 +77,7 @@ export function entityMappingApi(
       vacuumAscendingRoomOrder: body.vacuumAscendingRoomOrder,
       vacuumRoomSwitches: body.vacuumRoomSwitches,
       disableCustomAreaRoomModes: body.disableCustomAreaRoomModes,
+      vacuumDirectModeChange: body.vacuumDirectModeChange,
       valetudoIdentifier: body.valetudoIdentifier,
       coverSwapOpenClose: body.coverSwapOpenClose,
       coverOpenCloseAsPosition: body.coverOpenCloseAsPosition,

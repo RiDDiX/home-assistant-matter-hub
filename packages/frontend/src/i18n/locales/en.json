@@ -543,6 +543,7 @@
       "vacuumAscendingRoomOrder": "Vacuum cleans rooms in ascending area ID order, not in the order they were picked (Roborock batch cleaning). Fixes the room shown as current and the room progress when the picking order differs.",
       "disableCustomAreaRoomModes": "Don't expose rooms as per-room cleaning modes (forces Apple Home to use the multi-room area picker). Keep off for Google Home / Alexa, which rely on the modes.",
       "vacuumRoomSwitches": "Expose one momentary switch per area next to the vacuum, so platforms that can't send multi-room commands (e.g. SmartThings routines) can start cleaning a single area by turning its switch on.",
+      "vacuumDirectModeChange": "Let controllers change the suction while the vacuum is cleaning. Only for vacuums that accept a fan speed change mid-clean (a controller may need a re-pair to notice).",
       "valetudoIdentifier": "Valetudo MQTT Identifier (optional)",
       "haOption": "HA Option (e.g. Max+)",
       "humiditySensor": "Humidity Sensor (optional)",

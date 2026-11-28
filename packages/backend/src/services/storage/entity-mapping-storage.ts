@@ -272,6 +272,7 @@ export class EntityMappingStorage extends Service {
       vacuumRoomSwitches: request.vacuumRoomSwitches || undefined,
       disableCustomAreaRoomModes:
         request.disableCustomAreaRoomModes || undefined,
+      vacuumDirectModeChange: request.vacuumDirectModeChange || undefined,
       valetudoIdentifier: request.valetudoIdentifier?.trim() || undefined,
       coverSwapOpenClose: request.coverSwapOpenClose || undefined,
       coverOpenCloseAsPosition: request.coverOpenCloseAsPosition || undefined,
@@ -345,6 +346,7 @@ export class EntityMappingStorage extends Service {
       !config.vacuumAscendingRoomOrder &&
       !config.vacuumRoomSwitches &&
       !config.disableCustomAreaRoomModes &&
+      !config.vacuumDirectModeChange &&
       !config.valetudoIdentifier &&
       !config.coverSwapOpenClose &&
       !config.coverOpenCloseAsPosition &&
