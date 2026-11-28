@@ -65,6 +65,17 @@ A climate entity with a fan mode is exposed as a Matter **Room Air Conditioner**
 
 The flag only takes effect after a **full HAMH restart** (restarting just the bridge is not enough), and Aqara caches the bridge's device list, so afterwards **remove the bridge from Aqara Home and pair it again**. Skipping either step leaves the old air conditioner endpoint in place and the device stays invisible ([#318](https://github.com/RiDDiX/home-assistant-matter-hub/issues/318), [#389](https://github.com/RiDDiX/home-assistant-matter-hub/issues/389)).
 
+## Apple Adaptive Temperature (iOS 26+, opt-in)
+
+Apple Home's Adaptive Temperature (At Home, Away, Night, and Extended Away automatic presets) requires a standalone Matter **Thermostat** (`0x0301`) advertising Matter `Presets`, Apple `0x1349` MEI preset extensions, and an Apple-allowlisted thermostat Vendor/Product ID.
+
+To enable it, create a bridge using the **Apple Adaptive Thermostat** template (or enable `appleAdaptiveTemperature` in **Bridge Settings → Feature Flags**) with one thermostat per bridge:
+
+- Enabling `appleAdaptiveTemperature` implies `serverMode` and exposes the climate entity as a plain **Thermostat** (`0x0301`, disabling `FanControl` and `OnOff`), without touching non-adaptive bridges. Toggling the flag on an existing bridge requires a **full HAMH restart** and re-pairing.
+- **Default pairing name (`Aqara Thermostat Hub W200`):** Because iOS 26 gates Adaptive Temperature on an allowlisted VID/PID, HAMH advertises `0x115F / 0x4801` (Aqara Thermostat Hub W200) on the root node. Apple Home pulls `"Aqara Thermostat Hub W200"` from Apple's Matter DCL catalog during the pairing wizard instead of the bridge/HA name; rename it during setup and the custom name sticks.
+- **Setpoint latching:** Apple Home edits both heating and cooling bounds for all four states regardless of the current HVAC mode. HAMH persists all preset setpoints on disk and applies the relevant bound on demand when a preset activates, when you edit the active preset, or when you switch HVAC modes (`heat` ↔ `cool` ↔ `heat_cool`).
+- **Disable internal schedules:** If the physical thermostat runs its own timed schedule or temporary hold timer (for example, Ecobee **Hold Duration** set to *Until next scheduled activity*), a hardware-initiated setpoint change (> ±0.6°C outside the 8 s echo window) is treated as a manual override and clears the active Apple preset. Set your thermostat's hold behavior to permanent (*Until you change it*) so Apple Home owns transitions cleanly.
+
 ## Temperature Display Unit
 
 The `ThermostatUserInterfaceConfiguration` cluster exposes your HA temperature unit preference (°C or °F) to Matter controllers. Controllers may use this to display temperatures in your preferred unit.

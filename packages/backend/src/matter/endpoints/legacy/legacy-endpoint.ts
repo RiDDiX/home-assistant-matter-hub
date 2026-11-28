@@ -436,6 +436,8 @@ export class LegacyEndpoint extends EntityEndpoint {
       areaName,
       {
         vacuumOnOff: registry.isVacuumOnOffEnabled(),
+        appleAdaptiveTemperature:
+          standalone === true && registry.isAppleAdaptiveTemperatureEnabled(),
         cleaningModeOptions,
         pluginDomainMappings,
       },

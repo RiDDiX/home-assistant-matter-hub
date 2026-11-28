@@ -58,6 +58,7 @@ const ClimateDeviceType = (
   initialState: InitialThermostatState = {},
   includeBasicInformation = true,
   racOnOff = { canTurnOn: false, canTurnOff: false },
+  appleAdaptiveTemperature = false,
 ) => {
   const additionalClusters: ClusterBehavior.Type[] = [];
 
@@ -75,7 +76,11 @@ const ClimateDeviceType = (
   // see only the features the device actually supports (#136).
   // Pass initialState directly so the behavior class has correct limits
   // from the start, critical for negative temperatures (refrigerators).
-  const thermostatServer = ClimateThermostatServer(initialState, features);
+  const thermostatServer = ClimateThermostatServer(
+    initialState,
+    features,
+    appleAdaptiveTemperature,
+  );
 
   // BasicInformationServer is dropped when this type is used as a composed
   // sub-endpoint; the BridgedNode parent carries the basic info instead, the
@@ -133,6 +138,7 @@ const ventilationOnlyModes: ClimateHvacMode[] = [
 export function ClimateDevice(
   homeAssistantEntity: HomeAssistantEntityBehavior.State,
   includeBasicInformation = true,
+  appleAdaptiveTemperature = false,
 ): EndpointType {
   const attributes = homeAssistantEntity.entity.state
     .attributes as ClimateDeviceAttributes & {
@@ -183,10 +189,12 @@ export function ClimateDevice(
   const supportsHumidity =
     attributes.current_humidity != null ||
     testBit(supportedFeatures, ClimateDeviceFeature.TARGET_HUMIDITY);
-  // Per-entity opt-out: skip OnOff so room-level "off" voice commands don't
-  // turn the thermostat off alongside the lights. climateBlockOff skips it
-  // too, Apple's power button would otherwise use OnOff.off (#527).
+  // Per-entity opt-out or implied by Apple Adaptive Temperature: skip OnOff so
+  // room-level "off" voice commands don't turn the thermostat off alongside
+  // lights. climateBlockOff skips it too, Apple's power button would otherwise
+  // use OnOff.off (#527).
   const onOffDisabled =
+    appleAdaptiveTemperature ||
     homeAssistantEntity.mapping?.disableClimateOnOff === true;
   const canTurnOn =
     testBit(supportedFeatures, ClimateDeviceFeature.TURN_ON) && !onOffDisabled;
@@ -195,10 +203,12 @@ export function ClimateDevice(
     !onOffDisabled &&
     homeAssistantEntity.mapping?.climateBlockOff !== true;
   const supportsOnOff = canTurnOn && canTurnOff;
-  // Per-entity opt-out: skip FanControl + RoomAirConditionerDevice and fall
-  // back to ThermostatDevice. Workaround for controllers (e.g. Aqara) that
-  // don't recognise device type 0x0072 and drop the endpoint (#318).
+  // Per-entity opt-out or implied by Apple Adaptive Temperature: skip FanControl
+  // and RoomAirConditionerDevice and fall back to ThermostatDevice. Workaround
+  // for controllers (e.g. Aqara) that don't recognise device type 0x0072 (#318)
+  // and for Apple Home Adaptive Temperature (0x0301 required).
   const supportsFanMode =
+    !appleAdaptiveTemperature &&
     testBit(supportedFeatures, ClimateDeviceFeature.FAN_MODE) &&
     homeAssistantEntity.mapping?.disableClimateFanControl !== true;
   const supportsAutoFanMode = climateSupportsAutoFanMode(attributes.fan_modes);
@@ -305,6 +315,7 @@ export function ClimateDevice(
     initialState,
     includeBasicInformation,
     { canTurnOn, canTurnOff },
+    appleAdaptiveTemperature,
   ).set({
     homeAssistantEntity,
     thermostat: {

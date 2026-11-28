@@ -114,7 +114,7 @@ export const BridgeConfigEditor = (props: BridgeConfigEditorProps) => {
     const cfg = config as Partial<BridgeConfig> | undefined;
     const flags = cfg?.featureFlags;
     const result: string[] = [];
-    if (flags?.serverMode) {
+    if (flags?.serverMode || flags?.appleAdaptiveTemperature) {
       result.push("bridge.serverModeWarning");
     }
     if (flags?.serverMode && flags?.vacuumOnOff === false) {

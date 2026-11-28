@@ -1,7 +1,13 @@
 import type { HomeAssistantEntityInformation } from "@home-assistant-matter-hub/common";
-import { Logger } from "@matter/general";
-import { ThermostatServer as Base } from "@matter/main/behaviors";
+import { Bytes, Logger } from "@matter/general";
+import { ThermostatServer as MatterThermostatServer } from "@matter/main/behaviors";
 import { Thermostat } from "@matter/main/clusters";
+import {
+  AppleThermostatServerBase,
+  isAdaptiveTemperatureEnabled,
+  nowEpochS,
+  toNullableEpochS,
+} from "./apple-adaptive-temperature.js";
 
 const logger = Logger.get("ThermostatServer");
 
@@ -18,20 +24,509 @@ import type { ActionContext, Agent } from "@matter/main";
 import { StatusCode, StatusResponseError } from "@matter/main/types";
 import { transactionIsOffline } from "../../utils/transaction-is-offline.js";
 
-// Tracks entity IDs currently receiving a nudge write from update().
-// Prevents the nudge itself from triggering auto-resume in $Changing handlers.
-const nudgingSetpoints = new Set<string>();
+interface ThermostatRuntimeState {
+  nudgingSetpoints: boolean;
+  activatingPreset: boolean;
+  lastPresetActivation?: { handle: Bytes | null; at: number };
+  lastObservedSystemMode?: SystemMode;
+  prevPersistedPresets?: Thermostat.Preset[];
+  nudgedHeat?: number;
+  nudgedCool?: number;
+  autoResuming?: { mode: SystemMode; at: number };
+  holdTimer?: ReturnType<typeof setTimeout>;
+  holdGeneration: number;
+}
 
-// Setpoint an Off update left in place, keyed `${entityId}:heat|cool`. A
-// later update that only reads it back gets no second nudge.
-const nudgedSetpoints = new Map<string, number>();
+// Scoped per Matter endpoint object (WeakMap) so identical entityIds across
+// multiple bridges never collide and closed/deleted endpoints GC cleanly.
+const endpointRuntimeStates = new WeakMap<
+  object,
+  Map<string, ThermostatRuntimeState>
+>();
+const fallbackRuntimeStates = new Map<string, ThermostatRuntimeState>();
 
-// Entity IDs whose auto-resume already sent the mode change to HA (#519).
-// The systemMode$Changed reactor consumes the entry and skips the duplicate.
-// An entry older than AUTO_RESUME_MS is stale (no $Changed after the resume)
-// and must not swallow a later controller write of that mode.
-const autoResuming = new Map<string, { mode: SystemMode; at: number }>();
+function getRuntimeState(
+  self: { endpoint?: object } | undefined,
+  entityId: string,
+): ThermostatRuntimeState {
+  const ep = self?.endpoint;
+  let byEntity: Map<string, ThermostatRuntimeState>;
+  if (ep) {
+    let existing = endpointRuntimeStates.get(ep);
+    if (!existing) {
+      existing = new Map();
+      endpointRuntimeStates.set(ep, existing);
+    }
+    byEntity = existing;
+  } else {
+    byEntity = fallbackRuntimeStates;
+  }
+  let state = byEntity.get(entityId);
+  if (!state) {
+    state = {
+      nudgingSetpoints: false,
+      activatingPreset: false,
+      holdGeneration: 0,
+    };
+    byEntity.set(entityId, state);
+  }
+  return state;
+}
+
+function clearHoldTimer(runtime: ThermostatRuntimeState): void {
+  runtime.holdGeneration++;
+  if (runtime.holdTimer !== undefined) {
+    clearTimeout(runtime.holdTimer);
+    runtime.holdTimer = undefined;
+  }
+}
+
+function clearEndpointHoldTimers(endpoint?: object): void {
+  if (!endpoint) return;
+  const byEntity = endpointRuntimeStates.get(endpoint);
+  if (!byEntity) return;
+  for (const runtime of byEntity.values()) {
+    clearHoldTimer(runtime);
+  }
+  endpointRuntimeStates.delete(endpoint);
+}
+
+function setHoldAttr(
+  state: Record<string, unknown>,
+  tx: object | undefined,
+  attr: HoldTrackedAttr,
+  value: unknown,
+): void {
+  if (state[attr] === undefined || Object.is(state[attr], value)) {
+    return;
+  }
+  recordInternalWrite(internalHoldWritesByTx, tx, attr, value);
+  state[attr] = value;
+}
+
+function clearHoldState(
+  state: unknown,
+  runtime?: ThermostatRuntimeState,
+  options?: { clearAppleOverride?: boolean; setHoldOff?: boolean; tx?: object },
+): void {
+  if (runtime) {
+    clearHoldTimer(runtime);
+  }
+  const s = state as Record<string, unknown>;
+  const tx = options?.tx;
+  if (options?.setHoldOff !== false) {
+    setHoldAttr(
+      s,
+      tx,
+      "temperatureSetpointHold",
+      Thermostat.TemperatureSetpointHold.SetpointHoldOff,
+    );
+  }
+  setHoldAttr(s, tx, "temperatureSetpointHoldDuration", null);
+  if (s.setpointHoldExpiryTimestamp !== undefined) {
+    s.setpointHoldExpiryTimestamp = null;
+  }
+  if (options?.clearAppleOverride !== false) {
+    if (s.appleAttr000C !== undefined) {
+      s.appleAttr000C = null;
+    }
+    setHoldAttr(s, tx, "appleAttr000E", true);
+  }
+}
+
+function clearApplePresetTracking(
+  state: unknown,
+  runtime?: ThermostatRuntimeState,
+  tx?: object,
+): void {
+  clearHoldState(state, runtime, { tx });
+  const meiState = state as Record<string, unknown>;
+  if (meiState.appleAttr0009 !== undefined) {
+    meiState.appleAttr0009 = null;
+  }
+  if (meiState.appleAttr000B !== undefined) {
+    meiState.appleAttr000B = null;
+  }
+}
+
+function cloneBytes(value: Bytes): Uint8Array {
+  return Bytes.of(value).slice();
+}
+
+function enterAppleHold(
+  state: unknown,
+  runtime: ThermostatRuntimeState,
+  options: {
+    source: Thermostat.SetpointChangeSource;
+    amount?: number | null;
+    scheduledPresetHandle?: Bytes | null;
+    tx?: object;
+  },
+): void {
+  const s = state as Record<string, unknown>;
+  if (s.setpointChangeSource !== undefined) {
+    s.setpointChangeSource = options.source;
+    if (s.setpointChangeAmount !== undefined) {
+      // Matter.js nullable int16 reserves -32768 (0x8000) as null sentinel.
+      s.setpointChangeAmount =
+        typeof options.amount === "number" && Number.isFinite(options.amount)
+          ? Math.max(-32767, Math.min(32767, Math.trunc(options.amount)))
+          : null;
+    }
+    if (s.setpointChangeSourceTimestamp !== undefined) {
+      s.setpointChangeSourceTimestamp = nowEpochS();
+    }
+  }
+
+  const adaptiveEnabled = isAdaptiveTemperatureEnabled(s);
+  const scheduledHandle =
+    (s.activePresetHandle as Bytes | null | undefined) ??
+    options.scheduledPresetHandle ??
+    (s.appleAttr0009 as Bytes | null | undefined) ??
+    null;
+
+  if (
+    s.temperatureSetpointHold ===
+    Thermostat.TemperatureSetpointHold.SetpointHoldOn
+  ) {
+    if (adaptiveEnabled && s.appleAttr000C !== undefined) {
+      s.appleAttr000C = 2;
+    }
+    if (
+      adaptiveEnabled &&
+      s.appleAttr0009 !== undefined &&
+      (s.activePresetHandle != null || options.scheduledPresetHandle != null) &&
+      scheduledHandle !== null
+    ) {
+      s.appleAttr0009 = cloneBytes(scheduledHandle);
+    }
+    return;
+  }
+
+  if (!adaptiveEnabled || scheduledHandle === null) {
+    clearHoldState(s, runtime, { tx: options.tx });
+    return;
+  }
+
+  if (
+    s.appleAttr0009 !== undefined &&
+    (s.activePresetHandle != null || options.scheduledPresetHandle != null)
+  ) {
+    s.appleAttr0009 = cloneBytes(scheduledHandle);
+  }
+  clearHoldState(s, runtime, { setHoldOff: false, tx: options.tx });
+  if (s.appleAttr000C !== undefined) {
+    s.appleAttr000C = 2;
+  }
+  setHoldAttr(
+    s,
+    options.tx,
+    "temperatureSetpointHold",
+    Thermostat.TemperatureSetpointHold.SetpointHoldOn,
+  );
+}
+
+function applyHoldDuration(
+  // biome-ignore lint/suspicious/noExplicitAny: Internal helper working across feature variants
+  self: any,
+  runtime: ThermostatRuntimeState,
+  opts: {
+    durationMinutes: number | null | undefined;
+    resumeOnNextEvent?: boolean;
+    setHoldOn?: boolean;
+    updateAppleMei: boolean;
+    tx?: object;
+  },
+): void {
+  const s = self.state as Record<string, unknown>;
+  if (opts.updateAppleMei) {
+    const prevHandle = self.state.activePresetHandle as Bytes | null;
+    if (prevHandle !== null && s.appleAttr0009 !== undefined) {
+      s.appleAttr0009 = cloneBytes(prevHandle);
+    }
+    self.state.activePresetHandle = null;
+    if (s.appleAttr000C !== undefined) {
+      s.appleAttr000C = 2;
+    }
+    if (opts.resumeOnNextEvent !== undefined) {
+      setHoldAttr(s, opts.tx, "appleAttr000E", opts.resumeOnNextEvent);
+    }
+  } else if (opts.setHoldOn && self.state.activePresetHandle !== null) {
+    self.state.activePresetHandle = null;
+  }
+
+  if (opts.setHoldOn) {
+    setHoldAttr(
+      s,
+      opts.tx,
+      "temperatureSetpointHold",
+      Thermostat.TemperatureSetpointHold.SetpointHoldOn,
+    );
+  }
+
+  if (
+    opts.resumeOnNextEvent !== true &&
+    opts.durationMinutes != null &&
+    opts.durationMinutes > 0
+  ) {
+    const clampedMin = Math.min(1440, Math.trunc(opts.durationMinutes));
+    const nowMs = Date.now();
+    const expiryUnixSec = toNullableEpochS(
+      Math.floor(nowMs / 1000) + clampedMin * 60,
+    );
+    setHoldAttr(s, opts.tx, "temperatureSetpointHoldDuration", clampedMin);
+    if (s.setpointHoldExpiryTimestamp !== undefined) {
+      s.setpointHoldExpiryTimestamp = expiryUnixSec;
+    }
+    scheduleHoldExpiry(self, runtime, nowMs + clampedMin * 60_000);
+    return;
+  }
+
+  clearHoldTimer(runtime);
+  if (opts.durationMinutes === null || opts.resumeOnNextEvent === true) {
+    setHoldAttr(s, opts.tx, "temperatureSetpointHoldDuration", null);
+  }
+  if (s.setpointHoldExpiryTimestamp !== undefined) {
+    s.setpointHoldExpiryTimestamp = null;
+  }
+}
+
+function resumeScheduledPresetOrClearHold(
+  // biome-ignore lint/suspicious/noExplicitAny: Internal helper working across feature variants
+  self: any,
+  runtime: ThermostatRuntimeState,
+): void {
+  clearHoldTimer(runtime);
+  const state = self.state as Record<string, unknown>;
+  const scheduledHandle = state.appleAttr0009;
+  const persistedPresets = state.persistedPresets as
+    | Thermostat.Preset[]
+    | undefined;
+  const homeAssistant = self.agent?.get?.(HomeAssistantEntityBehavior) as
+    | { isAvailable?: boolean }
+    | undefined;
+  const hasScheduledPreset =
+    isAdaptiveTemperatureEnabled(state) &&
+    Bytes.isBytes(scheduledHandle) &&
+    (homeAssistant?.isAvailable ?? true) &&
+    persistedPresets?.some(
+      (p) =>
+        p.presetHandle !== null &&
+        Bytes.areEqual(p.presetHandle, scheduledHandle),
+    );
+
+  if (hasScheduledPreset && typeof self.setActivePresetRequest === "function") {
+    const prevScheduledExpiry =
+      typeof state.appleAttr000B === "number" &&
+      state.appleAttr000B > Math.floor(Date.now() / 1000)
+        ? state.appleAttr000B
+        : null;
+    self.setActivePresetRequest({
+      presetHandle: cloneBytes(scheduledHandle),
+    });
+    if (prevScheduledExpiry !== null && state.appleAttr000B !== undefined) {
+      state.appleAttr000B = prevScheduledExpiry;
+    }
+    return;
+  }
+
+  clearHoldState(state, runtime);
+}
+
+function scheduleHoldExpiry(
+  // biome-ignore lint/suspicious/noExplicitAny: Internal helper working across feature variants
+  self: any,
+  runtime: ThermostatRuntimeState,
+  targetMs: number,
+): void {
+  clearHoldTimer(runtime);
+  const gen = runtime.holdGeneration;
+  const endpoint = self?.endpoint;
+  const behaviorType = self?.type;
+  if (!endpoint || !behaviorType || endpoint.lifecycle?.isGone) {
+    return;
+  }
+
+  const armTimer = () => {
+    if (runtime.holdGeneration !== gen || endpoint.lifecycle?.isGone) {
+      return;
+    }
+    const delayMs = Math.max(0, Math.min(targetMs - Date.now(), 2_147_483_647));
+    runtime.holdTimer = setTimeout(() => {
+      runtime.holdTimer = undefined;
+      if (runtime.holdGeneration !== gen || endpoint.lifecycle?.isGone) {
+        return;
+      }
+      if (!endpoint.lifecycle?.isReady) {
+        if (typeof endpoint.lifecycle?.ready?.once === "function") {
+          endpoint.lifecycle.ready.once(() => {
+            if (runtime.holdGeneration === gen && !endpoint.lifecycle?.isGone) {
+              armTimer();
+            }
+          });
+        }
+        return;
+      }
+      // Handle holds >24.8 days (exceeding Node's 32-bit setTimeout cap).
+      if (targetMs - Date.now() > 1000) {
+        armTimer();
+        return;
+      }
+      void Promise.resolve(
+        endpoint.act(async (agent: Agent) => {
+          if (runtime.holdGeneration !== gen || endpoint.lifecycle?.isGone) {
+            return;
+          }
+          // biome-ignore lint/suspicious/noExplicitAny: Internal helper working across feature variants
+          const behavior = agent.get(behaviorType) as any;
+          if (typeof agent.context?.transaction?.lock === "function") {
+            await agent.context.transaction.lock(behavior);
+          }
+          if (runtime.holdGeneration !== gen || endpoint.lifecycle?.isGone) {
+            return;
+          }
+          const state = behavior.state as Record<string, unknown>;
+          if (
+            state.temperatureSetpointHold !==
+            Thermostat.TemperatureSetpointHold.SetpointHoldOn
+          ) {
+            return;
+          }
+          if (
+            typeof state.setpointHoldExpiryTimestamp === "number" &&
+            state.setpointHoldExpiryTimestamp >
+              Math.floor(Date.now() / 1000) + 1
+          ) {
+            scheduleHoldExpiry(
+              behavior,
+              runtime,
+              state.setpointHoldExpiryTimestamp * 1000,
+            );
+            return;
+          }
+          resumeScheduledPresetOrClearHold(behavior, runtime);
+        }),
+      ).catch((err: unknown) => {
+        logger.warn("[APPLE-MEI] Failed to expire setpoint hold:", err);
+      });
+    }, delayMs);
+    runtime.holdTimer.unref?.();
+  };
+
+  if (
+    !endpoint.lifecycle?.isReady &&
+    typeof endpoint.lifecycle?.ready?.once === "function"
+  ) {
+    endpoint.lifecycle.ready.once(() => {
+      if (runtime.holdGeneration === gen && !endpoint.lifecycle?.isGone) {
+        armTimer();
+      }
+    });
+    return;
+  }
+  armTimer();
+}
+
+type HoldTrackedAttr =
+  | "temperatureSetpointHold"
+  | "temperatureSetpointHoldDuration"
+  | "appleAttr000E";
+type SetpointTrackedKind = "heat" | "cool";
+
+// Per-(transaction, attribute) expected values written internally by preset/hold handlers.
+// Matter.js reuses the same Transaction object across attributes in a multi-attribute WriteRequest,
+// so consuming per attribute ensures chained internal cascades are suppressed without swallowing
+// sibling controller writes in the same packet.
+const internalHoldWritesByTx = new WeakMap<
+  object,
+  Map<HoldTrackedAttr, unknown>
+>();
+const internalSetpointWritesByTx = new WeakMap<
+  object,
+  Map<SetpointTrackedKind, number>
+>();
+
+function recordInternalWrite<K extends string, V>(
+  store: WeakMap<object, Map<K, V>>,
+  tx: object | undefined,
+  key: K,
+  value: V,
+): void {
+  if (!tx) return;
+  let map = store.get(tx);
+  if (!map) {
+    map = new Map();
+    store.set(tx, map);
+  }
+  map.set(key, value);
+}
+
+function consumeInternalWrite<K extends string, V>(
+  store: WeakMap<object, Map<K, V>>,
+  tx: object | undefined,
+  key: K,
+  value: V,
+): boolean {
+  if (!tx) return false;
+  const map = store.get(tx);
+  if (!map?.has(key)) return false;
+  const expected = map.get(key);
+  map.delete(key);
+  return Object.is(expected, value);
+}
+
+// Intended active preset handle per (transaction, endpointKey) to restore activePresetHandle
+// if Matter.js's assertOccupied*SetpointChanging resets it to null in pre-commit.
+const intendedActivePresetByTx = new WeakMap<
+  object,
+  Map<string, Bytes | null>
+>();
+
+const endpointUidMap = new WeakMap<object, number>();
+let nextEndpointUid = 1;
+
+function txKey(
+  self: { endpoint?: object } | undefined,
+  entityId: string,
+): string {
+  const ep = self?.endpoint;
+  if (!ep) return entityId;
+  let uid = endpointUidMap.get(ep);
+  if (uid === undefined) {
+    uid = nextEndpointUid++;
+    endpointUidMap.set(ep, uid);
+  }
+  return `${uid}:${entityId}`;
+}
+
+function setIntendedPresetForTx(
+  tx: object | undefined,
+  key: string,
+  handle: Bytes | null,
+): void {
+  if (!tx) return;
+  let map = intendedActivePresetByTx.get(tx);
+  if (!map) {
+    map = new Map();
+    intendedActivePresetByTx.set(tx, map);
+  }
+  map.set(key, handle);
+}
+
+function getIntendedPresetForTx(
+  tx: object | undefined,
+  key: string,
+): Bytes | null | undefined {
+  if (!tx) return undefined;
+  return intendedActivePresetByTx.get(tx)?.get(key);
+}
+
+// An auto-resume entry older than AUTO_RESUME_MS is stale and must not swallow
+// a later controller write of that mode (#519).
 const AUTO_RESUME_MS = 2000;
+// Ecobee/HomeKit bridges can take ~3s to echo mode/setpoint settles back into HA.
+const PRESET_ECHO_WINDOW_MS = 8000;
+const SETPOINT_MATCH_TOLERANCE_CENTIDEGREES = 60;
 
 /**
  * Nudge a setpoint by +1 centidegree (0.01°C) so that any controller write
@@ -75,6 +570,226 @@ const runningStateAllOff = {
   fanStage3: false,
 };
 
+const standardPresetTypes: Thermostat.PresetType[] = [
+  {
+    presetScenario: Thermostat.PresetScenario.Occupied,
+    numberOfPresets: 1,
+    presetTypeFeatures: { automatic: true, supportsNames: true },
+  },
+  {
+    presetScenario: Thermostat.PresetScenario.Unoccupied,
+    numberOfPresets: 1,
+    presetTypeFeatures: { automatic: true, supportsNames: true },
+  },
+  {
+    presetScenario: Thermostat.PresetScenario.Sleep,
+    numberOfPresets: 1,
+    presetTypeFeatures: { automatic: true, supportsNames: true },
+  },
+  {
+    presetScenario: Thermostat.PresetScenario.Vacation,
+    numberOfPresets: 1,
+    presetTypeFeatures: { automatic: true, supportsNames: true },
+  },
+  {
+    presetScenario: Thermostat.PresetScenario.GoingToSleep,
+    numberOfPresets: 1,
+    presetTypeFeatures: { automatic: true, supportsNames: true },
+  },
+  {
+    presetScenario: Thermostat.PresetScenario.UserDefined,
+    numberOfPresets: 5,
+    presetTypeFeatures: { automatic: true, supportsNames: true },
+  },
+];
+
+export function createPresetHandle(scenario: number): Uint8Array {
+  switch (scenario) {
+    case Thermostat.PresetScenario.Occupied:
+      return new Uint8Array([1]);
+    case Thermostat.PresetScenario.Unoccupied:
+      return new Uint8Array([2]);
+    case Thermostat.PresetScenario.GoingToSleep:
+      return new Uint8Array([3]);
+    case Thermostat.PresetScenario.Sleep:
+      return new Uint8Array([4]);
+    case Thermostat.PresetScenario.Vacation:
+      return new Uint8Array([5]);
+    default:
+      return new Uint8Array([scenario]);
+  }
+}
+
+function defaultHeatForScenario(scenario: number): number {
+  switch (scenario) {
+    case Thermostat.PresetScenario.Occupied:
+      return 2000;
+    case Thermostat.PresetScenario.Unoccupied:
+      return 1600;
+    case Thermostat.PresetScenario.GoingToSleep:
+      return 2000;
+    case Thermostat.PresetScenario.Sleep:
+      return 1800;
+    case Thermostat.PresetScenario.Vacation:
+      return 1000;
+    default:
+      return 2000;
+  }
+}
+
+function defaultCoolForScenario(scenario: number): number {
+  switch (scenario) {
+    case Thermostat.PresetScenario.Occupied:
+      return 2333;
+    case Thermostat.PresetScenario.Unoccupied:
+      return 2900;
+    case Thermostat.PresetScenario.GoingToSleep:
+      return 2388;
+    case Thermostat.PresetScenario.Sleep:
+      return 2500;
+    case Thermostat.PresetScenario.Vacation:
+      return 2900;
+    default:
+      return 2400;
+  }
+}
+
+export function targetModeForActiveSystemMode(
+  systemMode: SystemMode,
+  hasHeating: boolean,
+  hasCooling: boolean,
+): Thermostat.SetpointRaiseLowerMode {
+  if (
+    systemMode === SystemMode.Cool ||
+    systemMode === SystemMode.Precooling ||
+    !hasHeating
+  ) {
+    return Thermostat.SetpointRaiseLowerMode.Cool;
+  }
+  if (
+    systemMode === SystemMode.Heat ||
+    systemMode === SystemMode.EmergencyHeat ||
+    !hasCooling
+  ) {
+    return Thermostat.SetpointRaiseLowerMode.Heat;
+  }
+  return hasCooling
+    ? Thermostat.SetpointRaiseLowerMode.Cool
+    : Thermostat.SetpointRaiseLowerMode.Heat;
+}
+
+export function createStandardPresets(
+  hasHeating: boolean,
+  hasCooling: boolean,
+): Thermostat.Preset[] {
+  const definitions = [
+    {
+      scenario: Thermostat.PresetScenario.Occupied,
+      defaultHeat: 2000,
+      defaultCool: 2333,
+    },
+    {
+      scenario: Thermostat.PresetScenario.Unoccupied,
+      defaultHeat: 1600,
+      defaultCool: 2900,
+    },
+    {
+      scenario: Thermostat.PresetScenario.GoingToSleep,
+      defaultHeat: 2000,
+      defaultCool: 2388,
+    },
+    {
+      scenario: Thermostat.PresetScenario.Sleep,
+      defaultHeat: 1800,
+      defaultCool: 2500,
+    },
+    {
+      scenario: Thermostat.PresetScenario.Vacation,
+      defaultHeat: 1000,
+      defaultCool: 2900,
+    },
+  ];
+  return definitions.map((d) => ({
+    presetHandle: createPresetHandle(d.scenario),
+    presetScenario: d.scenario,
+    name: null,
+    builtIn: true,
+    ...(hasHeating ? { heatingSetpoint: d.defaultHeat } : {}),
+    ...(hasCooling ? { coolingSetpoint: d.defaultCool } : {}),
+  }));
+}
+
+export function repairPreset(
+  preset: Thermostat.Preset,
+  hasHeating: boolean,
+  hasCooling: boolean,
+  minHeat: number,
+  maxHeat: number,
+  minCool: number,
+  maxCool: number,
+): Thermostat.Preset {
+  const defaultHeat = defaultHeatForScenario(preset.presetScenario);
+  const defaultCool = defaultCoolForScenario(preset.presetScenario);
+
+  let heatingSetpoint: number | undefined;
+  if (hasHeating) {
+    const rawHeat = preset.heatingSetpoint ?? defaultHeat;
+    heatingSetpoint = Math.max(minHeat, Math.min(maxHeat, rawHeat));
+  }
+
+  let coolingSetpoint: number | undefined;
+  if (hasCooling) {
+    const rawCool = preset.coolingSetpoint ?? defaultCool;
+    coolingSetpoint = Math.max(minCool, Math.min(maxCool, rawCool));
+  }
+
+  const handle =
+    preset.presetHandle ?? createPresetHandle(preset.presetScenario);
+
+  const res: Thermostat.Preset = {
+    ...preset,
+    presetHandle: handle,
+    builtIn: preset.builtIn ?? true,
+  };
+  if (hasHeating && heatingSetpoint !== undefined) {
+    res.heatingSetpoint = heatingSetpoint;
+  } else {
+    delete res.heatingSetpoint;
+  }
+  if (hasCooling && coolingSetpoint !== undefined) {
+    res.coolingSetpoint = coolingSetpoint;
+  } else {
+    delete res.coolingSetpoint;
+  }
+  return res;
+}
+
+export function clonePresets(
+  presets: Thermostat.Preset[],
+): Thermostat.Preset[] {
+  return presets.map((p) => ({
+    ...p,
+    presetHandle: p.presetHandle
+      ? new Uint8Array(p.presetHandle as unknown as ArrayLike<number>)
+      : null,
+  }));
+}
+
+const presetDefaults = {
+  presetTypes: standardPresetTypes,
+  numberOfPresets: 10,
+  activePresetHandle: null,
+  // Apple Home (iOS 26+) requires standard Matter Setpoint Hold & Change Source
+  // attributes (matching Aqara W200 attributeList: 0x0023, 0x0024, 0x0030-0x0032,
+  // 0x0052) to render the active Adaptive preset badge ("At Home" / "Night" / etc.).
+  temperatureSetpointHold: Thermostat.TemperatureSetpointHold.SetpointHoldOff,
+  temperatureSetpointHoldDuration: null,
+  setpointHoldExpiryTimestamp: null,
+  setpointChangeSource: Thermostat.SetpointChangeSource.Manual,
+  setpointChangeAmount: null,
+  setpointChangeSourceTimestamp: 946_684_800,
+};
+
 const heatingOnlyDefaults = {
   localTemperature: 2100, // 21°C
   occupiedHeatingSetpoint: 2000, // 20°C
@@ -103,26 +818,50 @@ const fullDefaults = {
   minSetpointDeadBand: 0,
 };
 
-// Feature-specific bases for different thermostat types.
-// Controllers like Alexa use these feature flags to determine capabilities.
-// A heat-only thermostat with Cooling feature causes Alexa to expect dual setpoints
-// and refuse single-temperature commands ("not supported").
-// See: https://github.com/RiDDiX/home-assistant-matter-hub/issues/136
-const HeatingOnlyFeaturedBase = Base.with("Heating").set(heatingOnlyDefaults);
-const CoolingOnlyFeaturedBase = Base.with("Cooling").set(coolingOnlyDefaults);
-const FullFeaturedBase = Base.with("Heating", "Cooling", "AutoMode").set(
-  fullDefaults,
-);
-
 // Heating + Cooling WITHOUT AutoMode. For devices that support both heat and cool
 // but not dual setpoints (no heat_cool mode in HA). Apple Home won't show Auto.
 const heatingAndCoolingDefaults = {
   ...heatingOnlyDefaults,
   ...coolingOnlyDefaults,
 };
-const HeatingAndCoolingFeaturedBase = Base.with("Heating", "Cooling").set(
-  heatingAndCoolingDefaults,
-);
+
+// Standard (non-adaptive) bases use Matter.js's standard ThermostatServer without
+// Presets or Apple 0x1349 MEI attributes/commands so non-adaptive bridges stay untouched.
+// Adaptive bases mount AppleThermostatServerBase + Presets only when opted in.
+// Controllers like Alexa use feature flags to determine capabilities (#136).
+const StandardHeatingOnlyFeaturedBase =
+  MatterThermostatServer.with("Heating").set(heatingOnlyDefaults);
+const StandardCoolingOnlyFeaturedBase =
+  MatterThermostatServer.with("Cooling").set(coolingOnlyDefaults);
+const StandardHeatingAndCoolingFeaturedBase = MatterThermostatServer.with(
+  "Heating",
+  "Cooling",
+).set(heatingAndCoolingDefaults);
+const StandardFullFeaturedBase = MatterThermostatServer.with(
+  "Heating",
+  "Cooling",
+  "AutoMode",
+).set(fullDefaults);
+
+const AdaptiveHeatingOnlyFeaturedBase = AppleThermostatServerBase.with(
+  "Heating",
+  "Presets",
+).set({ ...heatingOnlyDefaults, ...presetDefaults });
+const AdaptiveCoolingOnlyFeaturedBase = AppleThermostatServerBase.with(
+  "Cooling",
+  "Presets",
+).set({ ...coolingOnlyDefaults, ...presetDefaults });
+const AdaptiveHeatingAndCoolingFeaturedBase = AppleThermostatServerBase.with(
+  "Heating",
+  "Cooling",
+  "Presets",
+).set({ ...heatingAndCoolingDefaults, ...presetDefaults });
+const AdaptiveFullFeaturedBase = AppleThermostatServerBase.with(
+  "Heating",
+  "Cooling",
+  "AutoMode",
+  "Presets",
+).set({ ...fullDefaults, ...presetDefaults });
 
 export interface ThermostatRunningState {
   heat: boolean;
@@ -323,6 +1062,43 @@ export function thermostatPreInitialize(self: any): void {
       : self.features.heating
         ? Thermostat.ControlSequenceOfOperation.HeatingOnly
         : Thermostat.ControlSequenceOfOperation.CoolingOnly;
+
+  if (self.features?.presets) {
+    self.state.presetTypes = self.state.presetTypes ?? standardPresetTypes;
+    self.state.numberOfPresets = self.state.numberOfPresets ?? 10;
+    self.state.activePresetHandle = self.state.activePresetHandle ?? null;
+
+    if (
+      !self.state.persistedPresets ||
+      self.state.persistedPresets.length === 0
+    ) {
+      // First boot: seed standard presets WITHOUT clamping against raw un-converted limits.
+      // update() immediately follows and clamps them against true converted limits.
+      self.state.persistedPresets = createStandardPresets(
+        self.features.heating,
+        self.features.cooling,
+      );
+    } else {
+      // Repair handles, builtIn flags, and active/inactive feature directions using
+      // full Matter temperature bounds (-273.15°C..327.67°C); limit clamping happens
+      // exclusively in update() once isAvailable is true so consecutive unavailable boots
+      // on °F (or sub-zero) thermostats cannot clamp against raw limits.
+      const matterTempMin = -27315;
+      const matterTempMax = 32767;
+      self.state.persistedPresets = self.state.persistedPresets.map(
+        (preset: Thermostat.Preset) =>
+          repairPreset(
+            preset,
+            self.features.heating,
+            self.features.cooling,
+            matterTempMin,
+            matterTempMax,
+            matterTempMin,
+            matterTempMax,
+          ),
+      );
+    }
+  }
 }
 
 /**
@@ -334,6 +1110,10 @@ export function thermostatPreInitialize(self: any): void {
 // biome-ignore lint/suspicious/noExplicitAny: Internal helper working across feature variants
 async function thermostatPostInitialize(self: any): Promise<void> {
   const homeAssistant = await self.agent.load(HomeAssistantEntityBehavior);
+  const runtime = getRuntimeState(self, homeAssistant.entityId);
+  runtime.lastPresetActivation = undefined;
+  runtime.lastObservedSystemMode = undefined;
+  runtime.prevPersistedPresets = undefined;
   self.update(homeAssistant.entity);
 
   self.reactTo(self.events.systemMode$Changing, self.systemModeChanging);
@@ -352,16 +1132,111 @@ async function thermostatPostInitialize(self: any): Promise<void> {
       self.heatingSetpointChanging,
     );
   }
+  if (self.features?.presets) {
+    self.reactTo(
+      self.events.persistedPresets$Changed,
+      self.persistedPresetsChanged,
+    );
+    self.reactTo(
+      self.events.temperatureSetpointHold$Changed,
+      self.temperatureSetpointHoldChanged,
+    );
+    self.reactTo(
+      self.events.temperatureSetpointHoldDuration$Changed,
+      self.temperatureSetpointHoldDurationChanged,
+    );
+    const attr000EEvt = self.events.appleAttr000E$Changed;
+    if (attr000EEvt) {
+      self.reactTo(attr000EEvt, self.appleAttr000EChanged);
+    }
+    if (
+      self.state.temperatureSetpointHold ===
+        Thermostat.TemperatureSetpointHold.SetpointHoldOn &&
+      typeof self.state.setpointHoldExpiryTimestamp === "number"
+    ) {
+      scheduleHoldExpiry(
+        self,
+        runtime,
+        self.state.setpointHoldExpiryTimestamp * 1000,
+      );
+    }
+    for (const attr of [
+      "appleAttr0002",
+      "appleAttr0010",
+      "appleAttr0011",
+      "appleAttr0012",
+      "appleAttr0013",
+    ]) {
+      const evt = self.events[`${attr}$Changed`];
+      if (evt) {
+        self.reactTo(evt, (value: unknown) => {
+          const formatted =
+            value && typeof value === "object"
+              ? JSON.stringify(value, (_, v) =>
+                  Bytes.isBytes(v) ? `0x${Bytes.toHex(v)}` : v,
+                )
+              : String(value);
+          logger.debug(`[APPLE-MEI] Write Thermostat.${attr} = ${formatted}`);
+        });
+      }
+    }
+  }
   self.reactTo(homeAssistant.onChange, self.update, { lock: true });
 }
 
-export class ThermostatServerBase extends FullFeaturedBase {
+export function applyPresetSetpointsToState(
+  // biome-ignore lint/suspicious/noExplicitAny: Internal helper working across feature variants and test mocks
+  self: any,
+  newHeat: number | undefined,
+  newCool: number | undefined,
+  tx?: object,
+): void {
+  const oldCool = self.state.occupiedCoolingSetpoint ?? 2400;
+  const writeSetpoint = (kind: SetpointTrackedKind, nextVal: number) => {
+    const attr =
+      kind === "heat" ? "occupiedHeatingSetpoint" : "occupiedCoolingSetpoint";
+    if (Object.is(self.state[attr], nextVal)) {
+      return;
+    }
+    recordInternalWrite(internalSetpointWritesByTx, tx, kind, nextVal);
+    self.state[attr] = nextVal;
+  };
+
+  if (
+    self.features.heating &&
+    self.features.cooling &&
+    self.features.autoMode
+  ) {
+    if (newHeat !== undefined && newCool !== undefined) {
+      if (newHeat > oldCool) {
+        writeSetpoint("cool", newCool);
+        writeSetpoint("heat", newHeat);
+      } else {
+        writeSetpoint("heat", newHeat);
+        writeSetpoint("cool", newCool);
+      }
+    } else if (newHeat !== undefined) {
+      writeSetpoint("heat", newHeat);
+    } else if (newCool !== undefined) {
+      writeSetpoint("cool", newCool);
+    }
+  } else {
+    if (self.features.heating && newHeat !== undefined) {
+      writeSetpoint("heat", newHeat);
+    }
+    if (self.features.cooling && newCool !== undefined) {
+      writeSetpoint("cool", newCool);
+    }
+  }
+}
+
+export class ThermostatServerBase extends AdaptiveFullFeaturedBase {
   declare state: ThermostatServerBase.State;
 
   // State class only declares the config property type.
   // ALL defaults are set via .set() in the ThermostatServer function below
   // so matter.js's internal cluster data store picks them up before init.
-  static override State = class State extends FullFeaturedBase.State {
+  static override State = class State extends AdaptiveFullFeaturedBase.State {
     config!: ThermostatServerConfig;
   };
 
@@ -371,13 +1246,18 @@ export class ThermostatServerBase extends FullFeaturedBase {
     await thermostatPostInitialize(this);
   }
 
+  override async [Symbol.asyncDispose]() {
+    clearEndpointHoldTimers(this.endpoint);
+    await super[Symbol.asyncDispose]();
+  }
+
   // biome-ignore lint/correctness/noUnusedPrivateClassMembers: Called via thermostatPostInitialize + prototype copy
   private update(entity: HomeAssistantEntityInformation) {
     if (!entity.state || !entity.state.attributes) {
       return;
     }
     const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);
-    const entityId = homeAssistant.entityId;
+    const runtime = getRuntimeState(this, homeAssistant.entityId);
     const config = this.state.config;
 
     // When unavailable, keep last known values but report offline via BasicInformation.reachable
@@ -421,6 +1301,7 @@ export class ThermostatServerBase extends FullFeaturedBase {
     const systemMode = isAvailable
       ? this.getSystemMode(entity)
       : (this.state.systemMode ?? Thermostat.SystemMode.Off);
+    const prevSystemMode = runtime.lastObservedSystemMode;
     const runningMode = isAvailable
       ? config.getRunningMode(entity.state, this.agent)
       : Thermostat.ThermostatRunningMode.Off;
@@ -537,11 +1418,30 @@ export class ThermostatServerBase extends FullFeaturedBase {
         : {}),
     });
 
+    // 2. Clamp persistedPresets SECOND (after limits are updated on this.state,
+    // and only once HA reports an available state so raw °F bounds don't corrupt defaults).
+    if (isAvailable && this.features.presets && this.state.persistedPresets) {
+      this.reconcilePersistedPresets(
+        minHeatLimit ?? WIDE_MIN,
+        maxHeatLimit ?? WIDE_MAX,
+        minCoolLimit ?? WIDE_MIN,
+        maxCoolLimit ?? WIDE_MAX,
+        runtime,
+      );
+    }
+
+    // 3. Capture activePresetHandle before setpoint write.
+    // Reconcile sets intendedActivePresetByTx for this transaction so pre-commit
+    // $Changing handlers restore activePresetHandle after Matter.js's internal reset.
+    const savedPresetHandle = this.features.presets
+      ? this.state.activePresetHandle
+      : null;
+
     // Setpoints are applied in a separate patch wrapped with the nudgingSetpoints
     // guard. When Off, setpoints are nudged by +1 centidegree (0.01°C) so any
     // controller write, even the "same" temperature, triggers $Changing for
     // auto-resume (#176). The guard prevents the nudge itself from auto-resuming.
-    nudgingSetpoints.add(entityId);
+    runtime.nudgingSetpoints = true;
     try {
       applyPatchState(this.state, {
         ...(this.features.heating
@@ -550,7 +1450,7 @@ export class ThermostatServerBase extends FullFeaturedBase {
                 systemMode === Thermostat.SystemMode.Off &&
                 (haHeatingTemperature != null ||
                   (!wasOff &&
-                    nudgedSetpoints.get(`${entityId}:heat`) !==
+                    runtime.nudgedHeat !==
                       this.state.occupiedHeatingSetpoint) ||
                   clampedHeatingSetpoint !== this.state.occupiedHeatingSetpoint)
                   ? nudgeSetpoint(
@@ -566,7 +1466,7 @@ export class ThermostatServerBase extends FullFeaturedBase {
                 systemMode === Thermostat.SystemMode.Off &&
                 (haCoolingTemperature != null ||
                   (!wasOff &&
-                    nudgedSetpoints.get(`${entityId}:cool`) !==
+                    runtime.nudgedCool !==
                       this.state.occupiedCoolingSetpoint) ||
                   clampedCoolingSetpoint !== this.state.occupiedCoolingSetpoint)
                   ? nudgeSetpoint(
@@ -578,11 +1478,29 @@ export class ThermostatServerBase extends FullFeaturedBase {
           : {}),
       });
     } finally {
-      nudgingSetpoints.delete(entityId);
+      runtime.nudgingSetpoints = false;
     }
+
+    // 4. Reconcile activePresetHandle across HVAC mode switches & manual drift.
+    if (this.features.presets && savedPresetHandle !== null) {
+      this.reconcileActivePresetOnUpdate(savedPresetHandle, runtime, {
+        entity,
+        isAvailable,
+        systemMode,
+        prevSystemMode,
+        haHeatingTemperature,
+        haCoolingTemperature,
+        minHeatLimit: minHeatLimit ?? WIDE_MIN,
+        maxHeatLimit: maxHeatLimit ?? WIDE_MAX,
+        minCoolLimit: minCoolLimit ?? WIDE_MIN,
+        maxCoolLimit: maxCoolLimit ?? WIDE_MAX,
+      });
+    }
+    runtime.lastObservedSystemMode = systemMode;
     if (this.features.heating) {
       this.trackNudge(
-        `${entityId}:heat`,
+        runtime,
+        "heat",
         systemMode,
         haHeatingTemperature,
         this.state.occupiedHeatingSetpoint,
@@ -590,7 +1508,8 @@ export class ThermostatServerBase extends FullFeaturedBase {
     }
     if (this.features.cooling) {
       this.trackNudge(
-        `${entityId}:cool`,
+        runtime,
+        "cool",
         systemMode,
         haCoolingTemperature,
         this.state.occupiedCoolingSetpoint,
@@ -598,17 +1517,673 @@ export class ThermostatServerBase extends FullFeaturedBase {
     }
   }
 
+  private reconcilePersistedPresets(
+    minHeat: number,
+    maxHeat: number,
+    minCool: number,
+    maxCool: number,
+    runtime: ThermostatRuntimeState,
+  ): void {
+    const presets = this.state.persistedPresets ?? [];
+    let presetsChanged = false;
+    const updatedPresets = presets.map((preset) => {
+      let heat = preset.heatingSetpoint;
+      let cool = preset.coolingSetpoint;
+      let changed = false;
+
+      if (this.features.heating && heat !== undefined) {
+        const clampedHeat = Math.max(minHeat, Math.min(maxHeat, heat));
+        if (clampedHeat !== heat) {
+          heat = clampedHeat;
+          changed = true;
+        }
+      }
+      if (this.features.cooling && cool !== undefined) {
+        const clampedCool = Math.max(minCool, Math.min(maxCool, cool));
+        if (clampedCool !== cool) {
+          cool = clampedCool;
+          changed = true;
+        }
+      }
+
+      if (changed) {
+        presetsChanged = true;
+        const updated: Thermostat.Preset = { ...preset };
+        if (this.features.heating && heat !== undefined) {
+          updated.heatingSetpoint = heat;
+        }
+        if (this.features.cooling && cool !== undefined) {
+          updated.coolingSetpoint = cool;
+        }
+        return updated;
+      }
+      return preset;
+    });
+
+    if (presetsChanged) {
+      this.agent.asLocalActor(() => {
+        this.state.persistedPresets = updatedPresets;
+      });
+      runtime.prevPersistedPresets = clonePresets(updatedPresets);
+    } else if (!runtime.prevPersistedPresets) {
+      runtime.prevPersistedPresets = clonePresets(presets);
+    }
+  }
+
+  private reconcileActivePresetOnUpdate(
+    savedPresetHandle: Bytes,
+    runtime: ThermostatRuntimeState,
+    ctx: {
+      entity: HomeAssistantEntityInformation;
+      isAvailable: boolean;
+      systemMode: SystemMode;
+      prevSystemMode: SystemMode | undefined;
+      haHeatingTemperature: number | undefined;
+      haCoolingTemperature: number | undefined;
+      minHeatLimit: number;
+      maxHeatLimit: number;
+      minCoolLimit: number;
+      maxCoolLimit: number;
+    },
+  ): void {
+    const config = this.state.config;
+    const activePreset = this.state.persistedPresets?.find(
+      (p) =>
+        p.presetHandle !== null &&
+        Bytes.areEqual(p.presetHandle, savedPresetHandle),
+    );
+    const supportsRange = config.supportsTemperatureRange(
+      ctx.entity.state,
+      this.agent,
+    );
+    // HA `auto` and `heat_cool`-only zones without Matter AutoMode compute
+    // SystemMode dynamically from hvac_action; Heat<->Cool display flips there
+    // are not user HVAC mode switches.
+    const isDynamicActionMode =
+      !this.features.autoMode &&
+      (ctx.entity.state.state === "auto" ||
+        ctx.entity.state.state === "heat_cool");
+    const isTemperatureControlledMode =
+      ctx.systemMode === Thermostat.SystemMode.Heat ||
+      ctx.systemMode === Thermostat.SystemMode.EmergencyHeat ||
+      ctx.systemMode === Thermostat.SystemMode.Cool ||
+      ctx.systemMode === Thermostat.SystemMode.Precooling ||
+      ctx.systemMode === Thermostat.SystemMode.Auto;
+    const modeSwitchedToActive =
+      ctx.isAvailable &&
+      !isDynamicActionMode &&
+      isTemperatureControlledMode &&
+      activePreset != null &&
+      ctx.prevSystemMode !== undefined &&
+      ctx.prevSystemMode !== Thermostat.SystemMode.Off &&
+      ctx.prevSystemMode !== ctx.systemMode;
+
+    const key = txKey(this, ctx.entity.entity_id);
+    if (modeSwitchedToActive && activePreset) {
+      const newHeat =
+        this.features.heating && activePreset.heatingSetpoint !== undefined
+          ? Math.max(
+              ctx.minHeatLimit,
+              Math.min(ctx.maxHeatLimit, activePreset.heatingSetpoint),
+            )
+          : undefined;
+      const newCool =
+        this.features.cooling && activePreset.coolingSetpoint !== undefined
+          ? Math.max(
+              ctx.minCoolLimit,
+              Math.min(ctx.maxCoolLimit, activePreset.coolingSetpoint),
+            )
+          : undefined;
+      runtime.activatingPreset = true;
+      try {
+        applyPresetSetpointsToState(this, newHeat, newCool);
+      } finally {
+        runtime.activatingPreset = false;
+      }
+      logger.debug(
+        `[APPLE-MEI] Mode switch ${ctx.prevSystemMode}->${ctx.systemMode} with active preset 0x${Bytes.toHex(savedPresetHandle)}: applying heat=${newHeat}, cool=${newCool}`,
+      );
+      runtime.lastPresetActivation = {
+        handle: savedPresetHandle,
+        at: Date.now(),
+      };
+      setIntendedPresetForTx(this.context?.transaction, key, savedPresetHandle);
+      this.state.activePresetHandle = savedPresetHandle;
+      this.agent.asLocalActor(() => {
+        const heatTemp = Temperature.celsius(
+          (this.state.occupiedHeatingSetpoint ?? 2000) / 100,
+        )!;
+        const coolTemp = Temperature.celsius(
+          (this.state.occupiedCoolingSetpoint ?? 2400) / 100,
+        )!;
+        const mode = targetModeForActiveSystemMode(
+          ctx.systemMode,
+          this.features.heating,
+          this.features.cooling,
+        );
+        this.setTemperature(heatTemp, coolTemp, mode);
+      });
+      return;
+    }
+
+    const lastActivation = runtime.lastPresetActivation;
+    const isWithinEchoWindow =
+      lastActivation?.handle != null &&
+      Date.now() - lastActivation.at <= PRESET_ECHO_WINDOW_MS;
+
+    // Preserve activePresetHandle when Off, inside the echo window, or while
+    // active-mode setpoints still match the latched preset within ±0.6°C.
+    let setpointsMatchWithinTolerance = false;
+    if (activePreset != null) {
+      let heatMatches = true;
+      let coolMatches = true;
+      if (this.features.heating && activePreset.heatingSetpoint !== undefined) {
+        const currentHeat =
+          ctx.haHeatingTemperature ?? this.state.occupiedHeatingSetpoint;
+        heatMatches =
+          Math.abs(currentHeat - activePreset.heatingSetpoint) <=
+          SETPOINT_MATCH_TOLERANCE_CENTIDEGREES;
+      }
+      if (this.features.cooling && activePreset.coolingSetpoint !== undefined) {
+        const currentCool =
+          ctx.haCoolingTemperature ?? this.state.occupiedCoolingSetpoint;
+        coolMatches =
+          Math.abs(currentCool - activePreset.coolingSetpoint) <=
+          SETPOINT_MATCH_TOLERANCE_CENTIDEGREES;
+      }
+
+      const requiresHeat =
+        supportsRange ||
+        ctx.systemMode === Thermostat.SystemMode.Heat ||
+        ctx.systemMode === Thermostat.SystemMode.EmergencyHeat ||
+        !this.features.cooling;
+      const requiresCool =
+        supportsRange ||
+        ctx.systemMode === Thermostat.SystemMode.Cool ||
+        ctx.systemMode === Thermostat.SystemMode.Precooling ||
+        !this.features.heating;
+
+      setpointsMatchWithinTolerance =
+        (!requiresHeat || heatMatches) && (!requiresCool || coolMatches);
+    }
+
+    const keepActive =
+      isWithinEchoWindow ||
+      setpointsMatchWithinTolerance ||
+      ctx.systemMode === Thermostat.SystemMode.Off;
+
+    const finalHandle = keepActive ? savedPresetHandle : null;
+    setIntendedPresetForTx(this.context?.transaction, key, finalHandle);
+    if (!keepActive) {
+      logger.debug(
+        `[APPLE-MEI] Entering Apple hold from active preset 0x${Bytes.toHex(savedPresetHandle)} -> null (systemMode=${ctx.systemMode}, heat=${ctx.haHeatingTemperature}, cool=${ctx.haCoolingTemperature})`,
+      );
+      enterAppleHold(this.state, runtime, {
+        source: Thermostat.SetpointChangeSource.Manual,
+        amount: null,
+        scheduledPresetHandle: savedPresetHandle,
+      });
+    }
+    this.state.activePresetHandle = finalHandle;
+  }
+
   private trackNudge(
-    key: string,
+    runtime: ThermostatRuntimeState,
+    kind: "heat" | "cool",
     systemMode: SystemMode,
     haTemperature: number | undefined,
     setpoint: number,
   ) {
     if (systemMode === SystemMode.Off) {
-      nudgedSetpoints.set(key, setpoint);
+      if (kind === "heat") runtime.nudgedHeat = setpoint;
+      else runtime.nudgedCool = setpoint;
     } else if (haTemperature != null) {
-      nudgedSetpoints.delete(key);
+      if (kind === "heat") runtime.nudgedHeat = undefined;
+      else runtime.nudgedCool = undefined;
     }
+  }
+
+  override setActivePresetRequest(request: Thermostat.SetActivePresetRequest) {
+    const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);
+    const runtime = getRuntimeState(this, homeAssistant.entityId);
+    const config = this.state.config;
+    const tx = this.context?.transaction;
+
+    if (!tx) {
+      runtime.activatingPreset = true;
+    }
+    try {
+      const wasOff = this.state.systemMode === Thermostat.SystemMode.Off;
+      const preset = (
+        this as unknown as {
+          handleSetActivePresetRequest(
+            req: Thermostat.SetActivePresetRequest,
+          ): Thermostat.Preset | undefined;
+        }
+      ).handleSetActivePresetRequest(request);
+
+      if (request.presetHandle === null) {
+        runtime.lastPresetActivation = { handle: null, at: Date.now() };
+        if (tx) {
+          setIntendedPresetForTx(tx, txKey(this, homeAssistant.entityId), null);
+        }
+        this.state.activePresetHandle = null;
+        clearApplePresetTracking(this.state, runtime, tx);
+        return;
+      }
+
+      if (!preset) {
+        return;
+      }
+
+      homeAssistant.assertAvailable?.();
+
+      const minHeat = this.state.minHeatSetpointLimit ?? 0;
+      const maxHeat = this.state.maxHeatSetpointLimit ?? 5000;
+      const minCool = this.state.minCoolSetpointLimit ?? 0;
+      const maxCool = this.state.maxCoolSetpointLimit ?? 5000;
+
+      const newHeat =
+        preset.heatingSetpoint !== undefined
+          ? Math.max(minHeat, Math.min(maxHeat, preset.heatingSetpoint))
+          : undefined;
+      const newCool =
+        preset.coolingSetpoint !== undefined
+          ? Math.max(minCool, Math.min(maxCool, preset.coolingSetpoint))
+          : undefined;
+
+      if (tx) {
+        setIntendedPresetForTx(
+          tx,
+          txKey(this, homeAssistant.entityId),
+          request.presetHandle,
+        );
+      }
+      applyPresetSetpointsToState(this, newHeat, newCool, tx);
+
+      this.state.activePresetHandle = request.presetHandle;
+      const meiState = this.state as unknown as Record<string, unknown>;
+      if (meiState.appleAttr0009 !== undefined) {
+        meiState.appleAttr0009 = cloneBytes(request.presetHandle);
+      }
+      if (meiState.appleAttr000B !== undefined) {
+        meiState.appleAttr000B = null;
+      }
+      clearHoldState(this.state, runtime, { tx });
+      if (meiState.appleAttr000F !== undefined) {
+        meiState.appleAttr000F = preset.presetScenario;
+      }
+      if (this.state.setpointChangeSource !== undefined) {
+        this.state.setpointChangeSource =
+          Thermostat.SetpointChangeSource.External;
+        this.state.setpointChangeAmount = null;
+        this.state.setpointChangeSourceTimestamp = nowEpochS();
+      }
+      runtime.lastPresetActivation = {
+        handle: request.presetHandle,
+        at: Date.now(),
+      };
+
+      this.agent.asLocalActor(() => {
+        let resumed: Thermostat.SystemMode | undefined;
+        const supportsRange = config.supportsTemperatureRange(
+          homeAssistant.entity.state,
+          this.agent,
+        );
+        if (wasOff && !supportsRange) {
+          const localTemp = this.state.localTemperature;
+          const preferred = !this.features.heating
+            ? Thermostat.SystemMode.Cool
+            : this.features.cooling &&
+                newCool !== undefined &&
+                typeof localTemp === "number" &&
+                localTemp > newCool
+              ? Thermostat.SystemMode.Cool
+              : Thermostat.SystemMode.Heat;
+          resumed = this.autoResumeFromOff(preferred, "setActivePresetRequest");
+        }
+
+        const heatTemp = Temperature.celsius(
+          (this.state.occupiedHeatingSetpoint ?? 2000) / 100,
+        )!;
+        const coolTemp = Temperature.celsius(
+          (this.state.occupiedCoolingSetpoint ?? 2400) / 100,
+        )!;
+        const effectiveSystemMode = resumed ?? this.state.systemMode;
+        const mode = targetModeForActiveSystemMode(
+          effectiveSystemMode,
+          this.features.heating,
+          this.features.cooling,
+        );
+        this.setTemperature(heatTemp, coolTemp, mode, resumed);
+      });
+    } finally {
+      if (!tx) {
+        runtime.activatingPreset = false;
+      }
+    }
+  }
+
+  // biome-ignore lint/correctness/noUnusedPrivateClassMembers: Called via thermostatPostInitialize + prototype copy
+  private persistedPresetsChanged(
+    newPresets: Thermostat.Preset[],
+    oldPresets: Thermostat.Preset[],
+    context?: ActionContext,
+  ) {
+    if (transactionIsOffline(context)) {
+      return;
+    }
+    logger.debug(
+      `[APPLE-MEI] Presets committed via AtomicRequest: ${JSON.stringify(
+        newPresets.map((p) => ({
+          handle: p.presetHandle ? `0x${Bytes.toHex(p.presetHandle)}` : null,
+          scenario: p.presetScenario,
+          heat: p.heatingSetpoint,
+          cool: p.coolingSetpoint,
+        })),
+      )}`,
+    );
+    this.agent.asLocalActor(() => {
+      const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);
+      const runtime = getRuntimeState(this, homeAssistant.entityId);
+      const config = this.state.config;
+
+      const prev = runtime.prevPersistedPresets ?? oldPresets;
+      runtime.prevPersistedPresets = clonePresets(newPresets);
+
+      const activeHandle = this.state.activePresetHandle;
+      if (activeHandle !== null) {
+        const activePreset = newPresets.find(
+          (p) =>
+            p.presetHandle !== null &&
+            Bytes.areEqual(p.presetHandle, activeHandle),
+        );
+        const prevPreset = prev?.find(
+          (p) =>
+            p.presetHandle !== null &&
+            Bytes.areEqual(p.presetHandle, activeHandle),
+        );
+        if (activePreset) {
+          const heatChanged =
+            this.features.heating &&
+            activePreset.heatingSetpoint !== undefined &&
+            activePreset.heatingSetpoint !== prevPreset?.heatingSetpoint;
+          const coolChanged =
+            this.features.cooling &&
+            activePreset.coolingSetpoint !== undefined &&
+            activePreset.coolingSetpoint !== prevPreset?.coolingSetpoint;
+          if (heatChanged || coolChanged) {
+            const savedHandle = this.state.activePresetHandle;
+            const key = txKey(this, homeAssistant.entityId);
+            const tx = this.context?.transaction;
+            if (tx) {
+              setIntendedPresetForTx(tx, key, savedHandle);
+            }
+            applyPresetSetpointsToState(
+              this,
+              this.features.heating ? activePreset.heatingSetpoint : undefined,
+              this.features.cooling ? activePreset.coolingSetpoint : undefined,
+              tx,
+            );
+            this.state.activePresetHandle = savedHandle;
+            runtime.lastPresetActivation = {
+              handle: savedHandle,
+              at: Date.now(),
+            };
+
+            const supportsRange =
+              config.supportsTemperatureRange?.(
+                homeAssistant.entity.state,
+                this.agent,
+              ) ?? false;
+            const sysMode = this.state.systemMode;
+            const activeDirectionChanged =
+              sysMode === Thermostat.SystemMode.Off
+                ? false
+                : supportsRange ||
+                    sysMode == null ||
+                    sysMode === Thermostat.SystemMode.Auto
+                  ? heatChanged || coolChanged
+                  : sysMode === Thermostat.SystemMode.Dry ||
+                      sysMode === Thermostat.SystemMode.FanOnly
+                    ? this.features.cooling
+                      ? coolChanged
+                      : heatChanged
+                    : sysMode === Thermostat.SystemMode.Heat ||
+                        sysMode === Thermostat.SystemMode.EmergencyHeat
+                      ? heatChanged
+                      : sysMode === Thermostat.SystemMode.Cool ||
+                          sysMode === Thermostat.SystemMode.Precooling
+                        ? coolChanged
+                        : heatChanged || coolChanged;
+
+            if (activeDirectionChanged) {
+              const heatTemp = Temperature.celsius(
+                (this.state.occupiedHeatingSetpoint ?? 2000) / 100,
+              )!;
+              const coolTemp = Temperature.celsius(
+                (this.state.occupiedCoolingSetpoint ?? 2400) / 100,
+              )!;
+              const mode = targetModeForActiveSystemMode(
+                this.state.systemMode,
+                this.features.heating,
+                this.features.cooling,
+              );
+              this.setTemperature(heatTemp, coolTemp, mode);
+            }
+          }
+        }
+      }
+    });
+  }
+
+  // biome-ignore lint/correctness/noUnusedPrivateClassMembers: Called via thermostatPostInitialize + prototype copy
+  private temperatureSetpointHoldChanged(
+    value: Thermostat.TemperatureSetpointHold,
+    _oldValue: Thermostat.TemperatureSetpointHold,
+    context?: ActionContext,
+  ) {
+    const tx = context?.transaction ?? this.context?.transaction;
+    if (
+      transactionIsOffline(context) ||
+      consumeInternalWrite(
+        internalHoldWritesByTx,
+        tx,
+        "temperatureSetpointHold",
+        value,
+      )
+    ) {
+      return;
+    }
+    logger.debug(
+      `[APPLE-MEI] Write Thermostat.temperatureSetpointHold = ${value}`,
+    );
+    this.agent.asLocalActor(() => {
+      const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);
+      const runtime = getRuntimeState(this, homeAssistant.entityId);
+      const meiState = this.state as unknown as Record<string, unknown>;
+
+      if (value === Thermostat.TemperatureSetpointHold.SetpointHoldOff) {
+        clearHoldState(this.state, runtime, { tx });
+        if (
+          !isAdaptiveTemperatureEnabled(this.state) ||
+          !Bytes.isBytes(meiState.appleAttr0009)
+        ) {
+          return;
+        }
+        const expectedGen = runtime.holdGeneration;
+        const endpoint = this.endpoint;
+        const behaviorType = (
+          this as unknown as { type?: Parameters<Agent["get"]>[0] }
+        ).type;
+        if (endpoint && typeof endpoint.act === "function" && behaviorType) {
+          runtime.holdTimer = setTimeout(() => {
+            runtime.holdTimer = undefined;
+            if (
+              runtime.holdGeneration !== expectedGen ||
+              !endpoint.lifecycle?.isReady ||
+              endpoint.lifecycle?.isGone
+            ) {
+              return;
+            }
+            void Promise.resolve(
+              endpoint.act(async (agent) => {
+                if (
+                  runtime.holdGeneration !== expectedGen ||
+                  endpoint.lifecycle?.isGone
+                ) {
+                  return;
+                }
+                // biome-ignore lint/suspicious/noExplicitAny: Internal helper working across feature variants
+                const behavior = agent.get(behaviorType) as any;
+                if (typeof agent.context?.transaction?.lock === "function") {
+                  await agent.context.transaction.lock(behavior);
+                }
+                if (
+                  runtime.holdGeneration !== expectedGen ||
+                  endpoint.lifecycle?.isGone
+                ) {
+                  return;
+                }
+                if (
+                  behavior.state.temperatureSetpointHold !==
+                    Thermostat.TemperatureSetpointHold.SetpointHoldOff ||
+                  behavior.state.activePresetHandle !== null
+                ) {
+                  return;
+                }
+                resumeScheduledPresetOrClearHold(behavior, runtime);
+              }),
+            ).catch((err: unknown) => {
+              logger.warn(
+                "[APPLE-MEI] Failed to resume preset after End Hold:",
+                err,
+              );
+            });
+          }, 0);
+          runtime.holdTimer.unref?.();
+        } else {
+          resumeScheduledPresetOrClearHold(this, runtime);
+        }
+        return;
+      }
+
+      if (value === Thermostat.TemperatureSetpointHold.SetpointHoldOn) {
+        const durationMinutes =
+          this.state.temperatureSetpointHoldDuration &&
+          this.state.temperatureSetpointHoldDuration > 0
+            ? this.state.temperatureSetpointHoldDuration
+            : undefined;
+        const adaptiveEnabled = isAdaptiveTemperatureEnabled(this.state);
+        applyHoldDuration(this, runtime, {
+          durationMinutes,
+          resumeOnNextEvent:
+            adaptiveEnabled && durationMinutes !== undefined
+              ? false
+              : undefined,
+          updateAppleMei: adaptiveEnabled,
+          tx,
+        });
+      }
+    });
+  }
+
+  // biome-ignore lint/correctness/noUnusedPrivateClassMembers: Called via thermostatPostInitialize + prototype copy
+  private temperatureSetpointHoldDurationChanged(
+    value: number | null,
+    _oldValue: number | null,
+    context?: ActionContext,
+  ) {
+    const tx = context?.transaction ?? this.context?.transaction;
+    if (
+      transactionIsOffline(context) ||
+      consumeInternalWrite(
+        internalHoldWritesByTx,
+        tx,
+        "temperatureSetpointHoldDuration",
+        value,
+      )
+    ) {
+      return;
+    }
+    logger.debug(
+      `[APPLE-MEI] Write Thermostat.temperatureSetpointHoldDuration = ${value}`,
+    );
+    this.agent.asLocalActor(() => {
+      const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);
+      const runtime = getRuntimeState(this, homeAssistant.entityId);
+      const adaptiveEnabled = isAdaptiveTemperatureEnabled(this.state);
+
+      if (value != null && value > 0) {
+        applyHoldDuration(this, runtime, {
+          durationMinutes: value,
+          resumeOnNextEvent: adaptiveEnabled ? false : undefined,
+          setHoldOn: true,
+          updateAppleMei: adaptiveEnabled,
+          tx,
+        });
+      } else if (
+        this.state.temperatureSetpointHold ===
+        Thermostat.TemperatureSetpointHold.SetpointHoldOn
+      ) {
+        clearHoldTimer(runtime);
+        if (this.state.setpointHoldExpiryTimestamp !== undefined) {
+          this.state.setpointHoldExpiryTimestamp = null;
+        }
+      }
+    });
+  }
+
+  // biome-ignore lint/correctness/noUnusedPrivateClassMembers: Called via thermostatPostInitialize + prototype copy
+  private appleAttr000EChanged(
+    value: boolean,
+    _oldValue: boolean,
+    context?: ActionContext,
+  ) {
+    const tx = context?.transaction ?? this.context?.transaction;
+    if (
+      transactionIsOffline(context) ||
+      consumeInternalWrite(internalHoldWritesByTx, tx, "appleAttr000E", value)
+    ) {
+      return;
+    }
+    logger.debug(`[APPLE-MEI] Write Thermostat.appleAttr000E = ${value}`);
+    if (
+      value === true &&
+      this.state.temperatureSetpointHold ===
+        Thermostat.TemperatureSetpointHold.SetpointHoldOn
+    ) {
+      this.agent.asLocalActor(() => {
+        const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);
+        const runtime = getRuntimeState(this, homeAssistant.entityId);
+        clearHoldState(this.state, runtime, {
+          clearAppleOverride: false,
+          setHoldOff: false,
+          tx,
+        });
+      });
+    }
+  }
+
+  applyAppleSetpointHold(
+    resumeOnNextEvent: boolean,
+    durationMinutes: number | null,
+  ): void {
+    if (!this.features.presets || !isAdaptiveTemperatureEnabled(this.state)) {
+      return;
+    }
+    const tx = this.context?.transaction;
+    this.agent.asLocalActor(() => {
+      const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);
+      const runtime = getRuntimeState(this, homeAssistant.entityId);
+      applyHoldDuration(this, runtime, {
+        durationMinutes: resumeOnNextEvent ? null : durationMinutes,
+        resumeOnNextEvent,
+        setHoldOn: true,
+        updateAppleMei: true,
+        tx,
+      });
+    });
   }
 
   override setpointRaiseLower(request: Thermostat.SetpointRaiseLowerRequest) {
@@ -622,6 +2197,7 @@ export class ThermostatServerBase extends FullFeaturedBase {
     if (!heat && !cool) {
       return;
     }
+    homeAssistant.assertAvailable();
     // HA can sit outside the limits the controller saw (4 vs min 10).
     heat = this.clampToLimits(
       (heat ?? cool)!,
@@ -636,13 +2212,25 @@ export class ThermostatServerBase extends FullFeaturedBase {
       "cool",
     );
 
+    if (this.features.presets) {
+      const tx = this.context?.transaction;
+      this.agent.asLocalActor(() => {
+        const runtime = getRuntimeState(this, homeAssistant.entityId);
+        runtime.lastPresetActivation = { handle: null, at: Date.now() };
+        enterAppleHold(this.state, runtime, {
+          source: Thermostat.SetpointChangeSource.External,
+          amount: request.amount * 10,
+          tx,
+        });
+        this.state.activePresetHandle = null;
+      });
+    }
+
     let resumed: SystemMode | undefined;
     if (
       this.state.systemMode === SystemMode.Off &&
       !config.supportsTemperatureRange(state, this.agent)
     ) {
-      // Fail before the resume, not after its mode call went out.
-      homeAssistant.assertAvailable();
       this.agent.asLocalActor(() => {
         resumed = this.autoResumeFromOff(
           request.mode === Thermostat.SetpointRaiseLowerMode.Cool
@@ -695,6 +2283,16 @@ export class ThermostatServerBase extends FullFeaturedBase {
     )!;
   }
 
+  private restoreIntendedPreset(context?: ActionContext) {
+    const tx = context?.transaction;
+    const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);
+    const key = txKey(this, homeAssistant.entityId);
+    const intended = getIntendedPresetForTx(tx, key);
+    if (intended !== undefined) {
+      this.state.activePresetHandle = intended;
+    }
+  }
+
   // Pre-commit handlers: $Changing instead of $Changed keeps write permission
   // for the Home Assistant action.
   // biome-ignore lint/correctness/noUnusedPrivateClassMembers: Called via thermostatPostInitialize + prototype copy
@@ -726,13 +2324,30 @@ export class ThermostatServerBase extends FullFeaturedBase {
     logger.debug(
       `${source}: value=${value}, oldValue=${oldValue}, isOffline=${transactionIsOffline(context)}`,
     );
-    if (transactionIsOffline(context)) {
+    const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);
+    const runtime = getRuntimeState(this, homeAssistant.entityId);
+    const tx = context?.transaction;
+    const internalPresetWrite = consumeInternalWrite(
+      internalSetpointWritesByTx,
+      tx ?? this.context?.transaction,
+      kind,
+      value,
+    );
+    if (
+      transactionIsOffline(context) ||
+      internalPresetWrite ||
+      runtime.activatingPreset
+    ) {
+      if (this.features.presets) {
+        this.restoreIntendedPreset(context);
+      }
       return;
     }
     const next = Temperature.celsius(value / 100);
     if (!next) {
       return;
     }
+    const amount = value - oldValue;
     // Use asLocalActor to avoid access control issues when accessing HomeAssistantEntityBehavior
     this.agent.asLocalActor(() => {
       const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);
@@ -767,7 +2382,7 @@ export class ThermostatServerBase extends FullFeaturedBase {
           // #519: cooling writes on heat+cool devices used to be dropped.
           // The nudge in update() ensures $Changing fires even for same-value writes.
           // Skip if this $Changing was caused by the nudge itself (not a controller write).
-          if (nudgingSetpoints.has(homeAssistant.entityId)) {
+          if (runtime.nudgingSetpoints) {
             logger.debug(
               `${source}: skipping auto-resume - nudge write in progress`,
             );
@@ -784,8 +2399,28 @@ export class ThermostatServerBase extends FullFeaturedBase {
           logger.debug(
             `${source}: skipping - not in own/auto mode (mode=${currentMode}, haMode=${haHvacMode})`,
           );
+          if (this.features.presets) {
+            runtime.lastPresetActivation = { handle: null, at: Date.now() };
+            enterAppleHold(this.state, runtime, {
+              source: Thermostat.SetpointChangeSource.External,
+              amount,
+              tx: tx ?? this.context?.transaction,
+            });
+            if (this.state.activePresetHandle !== null) {
+              this.state.activePresetHandle = null;
+            }
+          }
           return;
         }
+      }
+
+      if (this.features.presets) {
+        runtime.lastPresetActivation = { handle: null, at: Date.now() };
+        enterAppleHold(this.state, runtime, {
+          source: Thermostat.SetpointChangeSource.External,
+          amount,
+          tx: tx ?? this.context?.transaction,
+        });
       }
 
       if (heat) {
@@ -846,16 +2481,17 @@ export class ThermostatServerBase extends FullFeaturedBase {
   // Off, so first-wins is the pinned rule, asserted in the #519 bringup test).
   private autoResumeFromOff(preferred: SystemMode, source: string): SystemMode {
     const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);
+    const runtime = getRuntimeState(this, homeAssistant.entityId);
     const resumeMode = this.resumeModeFor(preferred);
     logger.info(
       `${source}: auto-resume - switching to ${SystemMode[resumeMode]} (was Off)`,
     );
     // State write first: if it throws, no HA side effect happened yet.
     this.state.systemMode = resumeMode;
-    autoResuming.set(homeAssistant.entityId, {
+    runtime.autoResuming = {
       mode: resumeMode,
       at: Date.now(),
-    });
+    };
     homeAssistant.callAction(
       this.state.config.setSystemMode(resumeMode, this.agent),
     );
@@ -922,8 +2558,9 @@ export class ThermostatServerBase extends FullFeaturedBase {
       const homeAssistant = this.agent.get(HomeAssistantEntityBehavior);
       // Always consume a pending auto-resume entry; skip only on a match so a
       // stale entry can never swallow a different mode change (#519).
-      const expected = autoResuming.get(homeAssistant.entityId);
-      autoResuming.delete(homeAssistant.entityId);
+      const runtime = getRuntimeState(this, homeAssistant.entityId);
+      const expected = runtime.autoResuming;
+      runtime.autoResuming = undefined;
       if (
         expected?.mode === systemMode &&
         Date.now() - expected.at < AUTO_RESUME_MS
@@ -1073,63 +2710,32 @@ export namespace ThermostatServerBase {
 }
 
 // Feature-specific thermostat variants that share the same implementation
-// but advertise only the features they actually support.
-// This is critical for controllers like Alexa that use feature flags to
-// determine thermostat capabilities (single vs dual setpoint).
-// See: https://github.com/RiDDiX/home-assistant-matter-hub/issues/136
-// biome-ignore lint/correctness/noUnusedVariables: Used via copyPrototypeMethods and in ThermostatServer factory
-class HeatingOnlyThermostatServerBase extends HeatingOnlyFeaturedBase {
-  declare state: HeatingOnlyThermostatServerBase.State;
-  static override State = class extends HeatingOnlyFeaturedBase.State {
-    config!: ThermostatServerConfig;
-  };
+// but advertise only the features they actually support (#136).
+// Standard classes omit Presets & Apple 0x1349 MEI so non-adaptive bridges
+// keep their exact Matter schema; Adaptive classes enable them opt-in.
+const PRESET_PROTOTYPE_METHODS = new Set([
+  "setActivePresetRequest",
+  "persistedPresetsChanged",
+  "reconcilePersistedPresets",
+  "reconcileActivePresetOnUpdate",
+  "restoreIntendedPreset",
+  "temperatureSetpointHoldChanged",
+  "temperatureSetpointHoldDurationChanged",
+  "appleAttr000EChanged",
+  "applyAppleSetpointHold",
+]);
 
-  // Each variant MUST define its own initialize() so that super.initialize()
-  // resolves to the correct parent class (HeatingOnlyFeaturedBase here).
-  // Copying initialize() via prototype manipulation would bind super to
-  // FullFeaturedBase due to JavaScript's [[HomeObject]] semantics.
-  override async initialize() {
-    thermostatPreInitialize(this);
-    await super.initialize();
-    await thermostatPostInitialize(this);
-  }
-}
-namespace HeatingOnlyThermostatServerBase {
-  export type State = InstanceType<
-    typeof HeatingOnlyThermostatServerBase.State
-  >;
-}
-
-// biome-ignore lint/correctness/noUnusedVariables: Used via copyPrototypeMethods and in ThermostatServer factory
-class CoolingOnlyThermostatServerBase extends CoolingOnlyFeaturedBase {
-  declare state: CoolingOnlyThermostatServerBase.State;
-  static override State = class extends CoolingOnlyFeaturedBase.State {
-    config!: ThermostatServerConfig;
-  };
-
-  // Each variant MUST define its own initialize(), see HeatingOnly comment above.
-  override async initialize() {
-    thermostatPreInitialize(this);
-    await super.initialize();
-    await thermostatPostInitialize(this);
-  }
-}
-namespace CoolingOnlyThermostatServerBase {
-  export type State = InstanceType<
-    typeof CoolingOnlyThermostatServerBase.State
-  >;
-}
-
-// Share implementation from ThermostatServerBase to feature-specific variants.
-// IMPORTANT: initialize() is EXCLUDED because JavaScript's [[HomeObject]] semantics
-// bind super to the class where the method was originally defined. Copying initialize()
-// would make super.initialize() always call FullFeaturedBase instead of the variant's
-// actual parent. Each variant defines its own initialize() above.
-// All other methods are safe to copy because they don't use super.
-// biome-ignore lint/suspicious/noExplicitAny: Prototype manipulation requires any
-function copyPrototypeMethods(source: any, target: any) {
+function copyPrototypeMethods(
+  source: { prototype: object },
+  target: { prototype: object },
+  excludePresets = false,
+) {
   for (const name of Object.getOwnPropertyNames(source.prototype)) {
-    if (name === "constructor" || name === "initialize") {
+    if (
+      name === "constructor" ||
+      name === "initialize" ||
+      (excludePresets && PRESET_PROTOTYPE_METHODS.has(name))
+    ) {
       continue;
     }
     const descriptor = Object.getOwnPropertyDescriptor(source.prototype, name);
@@ -1138,31 +2744,188 @@ function copyPrototypeMethods(source: any, target: any) {
     }
   }
 }
-// biome-ignore lint/correctness/noUnusedVariables: Used via copyPrototypeMethods and in ThermostatServer factory
-class HeatingAndCoolingThermostatServerBase extends HeatingAndCoolingFeaturedBase {
-  declare state: HeatingAndCoolingThermostatServerBase.State;
-  static override State = class extends HeatingAndCoolingFeaturedBase.State {
+
+// biome-ignore lint/correctness/noUnusedVariables: Instantiated by prototype copy and ThermostatServer factory
+class AdaptiveHeatingOnlyThermostatServerBase extends AdaptiveHeatingOnlyFeaturedBase {
+  declare state: AdaptiveHeatingOnlyThermostatServerBase.State;
+  static override State = class extends AdaptiveHeatingOnlyFeaturedBase.State {
     config!: ThermostatServerConfig;
   };
 
-  // Each variant MUST define its own initialize(), see HeatingOnly comment above.
+  override async initialize() {
+    thermostatPreInitialize(this);
+    await super.initialize();
+    await thermostatPostInitialize(this);
+  }
+
+  override async [Symbol.asyncDispose]() {
+    clearEndpointHoldTimers(this.endpoint);
+    await super[Symbol.asyncDispose]();
+  }
+}
+namespace AdaptiveHeatingOnlyThermostatServerBase {
+  export type State = InstanceType<
+    typeof AdaptiveHeatingOnlyThermostatServerBase.State
+  >;
+}
+
+// biome-ignore lint/correctness/noUnusedVariables: Instantiated by prototype copy and ThermostatServer factory
+class AdaptiveCoolingOnlyThermostatServerBase extends AdaptiveCoolingOnlyFeaturedBase {
+  declare state: AdaptiveCoolingOnlyThermostatServerBase.State;
+  static override State = class extends AdaptiveCoolingOnlyFeaturedBase.State {
+    config!: ThermostatServerConfig;
+  };
+
+  override async initialize() {
+    thermostatPreInitialize(this);
+    await super.initialize();
+    await thermostatPostInitialize(this);
+  }
+
+  override async [Symbol.asyncDispose]() {
+    clearEndpointHoldTimers(this.endpoint);
+    await super[Symbol.asyncDispose]();
+  }
+}
+namespace AdaptiveCoolingOnlyThermostatServerBase {
+  export type State = InstanceType<
+    typeof AdaptiveCoolingOnlyThermostatServerBase.State
+  >;
+}
+
+// biome-ignore lint/correctness/noUnusedVariables: Instantiated by prototype copy and ThermostatServer factory
+class AdaptiveHeatingAndCoolingThermostatServerBase extends AdaptiveHeatingAndCoolingFeaturedBase {
+  declare state: AdaptiveHeatingAndCoolingThermostatServerBase.State;
+  static override State =
+    class extends AdaptiveHeatingAndCoolingFeaturedBase.State {
+      config!: ThermostatServerConfig;
+    };
+
+  override async initialize() {
+    thermostatPreInitialize(this);
+    await super.initialize();
+    await thermostatPostInitialize(this);
+  }
+
+  override async [Symbol.asyncDispose]() {
+    clearEndpointHoldTimers(this.endpoint);
+    await super[Symbol.asyncDispose]();
+  }
+}
+namespace AdaptiveHeatingAndCoolingThermostatServerBase {
+  export type State = InstanceType<
+    typeof AdaptiveHeatingAndCoolingThermostatServerBase.State
+  >;
+}
+
+// biome-ignore lint/correctness/noUnusedVariables: Instantiated by prototype copy and ThermostatServer factory
+class StandardFullThermostatServerBase extends StandardFullFeaturedBase {
+  declare state: StandardFullThermostatServerBase.State;
+  static override State = class extends StandardFullFeaturedBase.State {
+    config!: ThermostatServerConfig;
+  };
+
   override async initialize() {
     thermostatPreInitialize(this);
     await super.initialize();
     await thermostatPostInitialize(this);
   }
 }
-namespace HeatingAndCoolingThermostatServerBase {
+namespace StandardFullThermostatServerBase {
   export type State = InstanceType<
-    typeof HeatingAndCoolingThermostatServerBase.State
+    typeof StandardFullThermostatServerBase.State
   >;
 }
 
-copyPrototypeMethods(ThermostatServerBase, HeatingOnlyThermostatServerBase);
-copyPrototypeMethods(ThermostatServerBase, CoolingOnlyThermostatServerBase);
+// biome-ignore lint/correctness/noUnusedVariables: Instantiated by prototype copy and ThermostatServer factory
+class StandardHeatingOnlyThermostatServerBase extends StandardHeatingOnlyFeaturedBase {
+  declare state: StandardHeatingOnlyThermostatServerBase.State;
+  static override State = class extends StandardHeatingOnlyFeaturedBase.State {
+    config!: ThermostatServerConfig;
+  };
+
+  override async initialize() {
+    thermostatPreInitialize(this);
+    await super.initialize();
+    await thermostatPostInitialize(this);
+  }
+}
+namespace StandardHeatingOnlyThermostatServerBase {
+  export type State = InstanceType<
+    typeof StandardHeatingOnlyThermostatServerBase.State
+  >;
+}
+
+// biome-ignore lint/correctness/noUnusedVariables: Instantiated by prototype copy and ThermostatServer factory
+class StandardCoolingOnlyThermostatServerBase extends StandardCoolingOnlyFeaturedBase {
+  declare state: StandardCoolingOnlyThermostatServerBase.State;
+  static override State = class extends StandardCoolingOnlyFeaturedBase.State {
+    config!: ThermostatServerConfig;
+  };
+
+  override async initialize() {
+    thermostatPreInitialize(this);
+    await super.initialize();
+    await thermostatPostInitialize(this);
+  }
+}
+namespace StandardCoolingOnlyThermostatServerBase {
+  export type State = InstanceType<
+    typeof StandardCoolingOnlyThermostatServerBase.State
+  >;
+}
+
+// biome-ignore lint/correctness/noUnusedVariables: Instantiated by prototype copy and ThermostatServer factory
+class StandardHeatingAndCoolingThermostatServerBase extends StandardHeatingAndCoolingFeaturedBase {
+  declare state: StandardHeatingAndCoolingThermostatServerBase.State;
+  static override State =
+    class extends StandardHeatingAndCoolingFeaturedBase.State {
+      config!: ThermostatServerConfig;
+    };
+
+  override async initialize() {
+    thermostatPreInitialize(this);
+    await super.initialize();
+    await thermostatPostInitialize(this);
+  }
+}
+namespace StandardHeatingAndCoolingThermostatServerBase {
+  export type State = InstanceType<
+    typeof StandardHeatingAndCoolingThermostatServerBase.State
+  >;
+}
+
 copyPrototypeMethods(
   ThermostatServerBase,
-  HeatingAndCoolingThermostatServerBase,
+  AdaptiveHeatingOnlyThermostatServerBase,
+);
+copyPrototypeMethods(
+  ThermostatServerBase,
+  AdaptiveCoolingOnlyThermostatServerBase,
+);
+copyPrototypeMethods(
+  ThermostatServerBase,
+  AdaptiveHeatingAndCoolingThermostatServerBase,
+);
+copyPrototypeMethods(
+  ThermostatServerBase,
+  StandardFullThermostatServerBase,
+  true,
+);
+copyPrototypeMethods(
+  ThermostatServerBase,
+  StandardHeatingOnlyThermostatServerBase,
+  true,
+);
+copyPrototypeMethods(
+  ThermostatServerBase,
+  StandardCoolingOnlyThermostatServerBase,
+  true,
+);
+copyPrototypeMethods(
+  ThermostatServerBase,
+  StandardHeatingAndCoolingThermostatServerBase,
+  true,
 );
 
 export interface ThermostatServerFeatures {
@@ -1215,16 +2978,20 @@ export function ThermostatServer(
   config: ThermostatServerConfig,
   initialState: ThermostatServerInitialState = {},
   features: ThermostatServerFeatures = { heating: true, cooling: true },
+  appleAdaptiveTemperature = false,
 ) {
   const supportsHeating = features.heating;
   const supportsCooling = features.cooling;
 
   if (supportsHeating && supportsCooling) {
     if (features.autoMode) {
+      const FullBase = appleAdaptiveTemperature
+        ? ThermostatServerBase
+        : (StandardFullThermostatServerBase as unknown as typeof ThermostatServerBase);
       // Full features (heating + cooling + auto mode) for heat_cool devices
       // IMPORTANT: abs limits → regular limits → setpoints to prevent
       // validation failures for negative temperatures (e.g. refrigerators).
-      return ThermostatServerBase.set({
+      return FullBase.set({
         config,
         absMinHeatSetpointLimit: initialState.minHeatSetpointLimit ?? 0,
         absMaxHeatSetpointLimit: initialState.maxHeatSetpointLimit ?? 5000,
@@ -1241,9 +3008,12 @@ export function ThermostatServer(
       });
     }
 
+    const HeatAndCoolBase = appleAdaptiveTemperature
+      ? AdaptiveHeatingAndCoolingThermostatServerBase
+      : StandardHeatingAndCoolingThermostatServerBase;
     // Heating + Cooling without AutoMode (for ACs with heat+cool but no heat_cool)
     // Apple Home won't show Auto option, preventing mode flipping issues.
-    return HeatingAndCoolingThermostatServerBase.set({
+    return HeatAndCoolBase.set({
       config,
       absMinHeatSetpointLimit: initialState.minHeatSetpointLimit ?? 0,
       absMaxHeatSetpointLimit: initialState.maxHeatSetpointLimit ?? 5000,
@@ -1260,8 +3030,11 @@ export function ThermostatServer(
   }
 
   if (supportsCooling) {
+    const CoolBase = appleAdaptiveTemperature
+      ? AdaptiveCoolingOnlyThermostatServerBase
+      : StandardCoolingOnlyThermostatServerBase;
     // Cooling only - no Heating or AutoMode features
-    return CoolingOnlyThermostatServerBase.set({
+    return CoolBase.set({
       config,
       absMinCoolSetpointLimit: initialState.minCoolSetpointLimit ?? 0,
       absMaxCoolSetpointLimit: initialState.maxCoolSetpointLimit ?? 5000,
@@ -1272,8 +3045,11 @@ export function ThermostatServer(
     });
   }
 
+  const HeatBase = appleAdaptiveTemperature
+    ? AdaptiveHeatingOnlyThermostatServerBase
+    : StandardHeatingOnlyThermostatServerBase;
   // Heating only (default) - no Cooling or AutoMode features
-  return HeatingOnlyThermostatServerBase.set({
+  return HeatBase.set({
     config,
     absMinHeatSetpointLimit: initialState.minHeatSetpointLimit ?? 0,
     absMaxHeatSetpointLimit: initialState.maxHeatSetpointLimit ?? 5000,

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { isCoverPositionInverted } from "./bridge-data.js";
+import { bridgeTemplates } from "./bridge-templates.js";
 
 describe("isCoverPositionInverted", () => {
   it("inverts without flags", () => {
@@ -25,5 +26,13 @@ describe("isCoverPositionInverted", () => {
         coverSwapOpenClose: swap,
       }),
     ).toBe(inverted);
+  });
+});
+
+describe("bridgeTemplates", () => {
+  it("keeps every template name within bridgeConfigSchema name.maxLength (32)", () => {
+    for (const template of bridgeTemplates) {
+      expect(template.name.length).toBeLessThanOrEqual(32);
+    }
   });
 });

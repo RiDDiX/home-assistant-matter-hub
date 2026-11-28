@@ -534,7 +534,11 @@ export function BridgeWizard({ open, onClose, onComplete }: BridgeWizardProps) {
         <FormControlLabel
           control={
             <Checkbox
-              checked={currentBridge.serverMode}
+              checked={
+                featureFlags.appleAdaptiveTemperature === true ||
+                currentBridge.serverMode
+              }
+              disabled={featureFlags.appleAdaptiveTemperature === true}
               onChange={(e) =>
                 setCurrentBridge((prev) => ({
                   ...prev,
@@ -547,7 +551,8 @@ export function BridgeWizard({ open, onClose, onComplete }: BridgeWizardProps) {
           sx={{ mt: 1 }}
         />
       </Tooltip>
-      {currentBridge.serverMode && (
+      {(currentBridge.serverMode ||
+        featureFlags.appleAdaptiveTemperature === true) && (
         <Alert severity="info" sx={{ mt: 1 }}>
           <Trans i18nKey="bridgeWizard.serverModeEnabledInfo" />
         </Alert>
@@ -761,7 +766,8 @@ export function BridgeWizard({ open, onClose, onComplete }: BridgeWizardProps) {
                 sx={{ mt: 1, mr: 0.5 }}
               />
             )}
-            {currentBridge.serverMode && (
+            {(currentBridge.serverMode ||
+              featureFlags.appleAdaptiveTemperature === true) && (
               <Chip
                 icon={<SmartToyIcon />}
                 label={t("bridge.serverMode")}

@@ -197,6 +197,19 @@ const featureFlagSchema: JSONSchema7 = {
       default: false,
     },
 
+    appleAdaptiveTemperature: {
+      title: "Apple Adaptive Temperature (Server Mode)",
+      description:
+        "Enable Apple Home Adaptive Temperature (iOS 26+) for thermostats on this bridge. " +
+        "Implies Server Mode, plain Thermostat device type (disables FanControl and OnOff), " +
+        "and Apple 0x1349 MEI preset extensions. " +
+        "Advertises Aqara Thermostat Hub W200 Vendor/Product IDs (0x115F / 0x4801) required by Apple's allowlist, " +
+        "so Apple Home pre-fills 'Aqara Thermostat Hub W200' as the default pairing name (rename during setup). " +
+        "Requires a full HAMH restart and re-pairing if toggled on an existing bridge; best with one thermostat per bridge.",
+      type: "boolean",
+      default: false,
+    },
+
     autoBatteryMapping: {
       title: "Auto Battery Mapping",
       description:

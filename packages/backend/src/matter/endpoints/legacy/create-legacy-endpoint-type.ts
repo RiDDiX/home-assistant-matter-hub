@@ -102,6 +102,7 @@ const legacyLogger = Logger.get("LegacyEndpointType");
  */
 export interface LegacyEndpointOptions {
   vacuumOnOff?: boolean;
+  appleAdaptiveTemperature?: boolean;
   cleaningModeOptions?: string[];
   /** Domain mappings registered by plugins (domain → MatterDeviceType key) */
   pluginDomainMappings?: Map<string, string>;
@@ -164,6 +165,8 @@ export function createLegacyEndpointType(
         options?.vacuumOnOff,
         options?.cleaningModeOptions,
       );
+    } else if (domain === "climate") {
+      type = ClimateDevice(ha, true, options?.appleAdaptiveTemperature);
     } else {
       const factory = deviceCtrs[domain];
       if (factory) {
@@ -374,8 +377,8 @@ const matterDeviceTypeFactories: Partial<
     MountedOnOffControlType.set({ homeAssistantEntity: ha }),
   door_lock: LockDevice,
   window_covering: CoverDevice,
-  // the second ClimateDevice parameter is includeBasicInformation, not options
-  thermostat: (ha) => ClimateDevice(ha),
+  thermostat: (ha, options) =>
+    ClimateDevice(ha, true, options?.appleAdaptiveTemperature),
   fan: FanDevice,
   air_purifier: AirPurifierEndpoint,
   robot_vacuum_cleaner: (ha, options) =>

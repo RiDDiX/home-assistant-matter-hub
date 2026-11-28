@@ -39,6 +39,18 @@ export class ServerModeServerNode extends ServerNode {
   private readonly serialNumberSuffix?: string;
 
   constructor(env: Environment, bridgeData: BridgeData) {
+    // Apple Home (iOS 26+) gates Adaptive Temperature on an internal allowlist
+    // of Matter VID/PIDs. When opted in, advertise Aqara Thermostat Hub W200
+    // (0x115F / 0x4801) on Endpoint 0 BasicInformation.
+    const adaptiveTemp =
+      bridgeData.featureFlags?.appleAdaptiveTemperature === true;
+    const effectiveVendorId = adaptiveTemp
+      ? 0x115f
+      : bridgeData.basicInformation.vendorId;
+    const effectiveProductId = adaptiveTemp
+      ? 0x4801
+      : bridgeData.basicInformation.productId;
+
     super({
       type: rootEndpointType(bridgeData.featureFlags),
       id: bridgeData.id,
@@ -61,9 +73,9 @@ export class ServerModeServerNode extends ServerNode {
         ...legacySpecBasicInformation(bridgeData.featureFlags),
         uniqueId: bridgeData.id,
         nodeLabel: trimToLength(bridgeData.name, 32, "..."),
-        vendorId: VendorId(bridgeData.basicInformation.vendorId),
+        vendorId: VendorId(effectiveVendorId),
         vendorName: bridgeData.basicInformation.vendorName,
-        productId: bridgeData.basicInformation.productId,
+        productId: effectiveProductId,
         productName: bridgeData.basicInformation.productName,
         productLabel: bridgeData.basicInformation.productLabel,
         serialNumber: `server-${bridgeData.id}`.substring(0, 32),
@@ -82,6 +94,11 @@ export class ServerModeServerNode extends ServerNode {
     });
     this.featureFlags = bridgeData.featureFlags;
     this.serialNumberSuffix = bridgeData.serialNumberSuffix;
+    if (adaptiveTemp) {
+      logger.info(
+        `[${bridgeData.id}] Apple Adaptive Temperature identity active: vendorId=0x${effectiveVendorId.toString(16)} (${effectiveVendorId}), productId=0x${effectiveProductId.toString(16)} (${effectiveProductId})`,
+      );
+    }
   }
 
   /** Number of device endpoints currently attached. */

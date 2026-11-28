@@ -144,7 +144,9 @@ export class BridgeEnvironmentFactory extends BridgeFactory {
   }
 
   async create(initialData: BridgeData): Promise<Bridge> {
-    const isServerMode = initialData.featureFlags?.serverMode === true;
+    const isServerMode =
+      initialData.featureFlags?.serverMode === true ||
+      initialData.featureFlags?.appleAdaptiveTemperature === true;
 
     if (isServerMode) {
       return this.createServerModeBridge(initialData);
